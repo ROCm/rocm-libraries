@@ -50,14 +50,18 @@ bool profile_gemm_add_relu_impl(int do_verification,
         {
             auto desc = HostTensorDescriptor({row, col}, {static_cast<std::size_t>(stride), 1_uz});
             if(stride <= 0)
+            {
                 stride = desc.GetStrides()[0];
+            }
             return desc;
         }
         else
         {
             auto desc = HostTensorDescriptor({row, col}, {1_uz, static_cast<std::size_t>(stride)});
             if(stride <= 0)
+            {
                 stride = desc.GetStrides()[1];
+            }
             return desc;
         }
     };

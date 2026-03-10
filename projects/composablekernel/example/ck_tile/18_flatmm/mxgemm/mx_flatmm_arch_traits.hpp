@@ -116,9 +116,13 @@ struct MXFlatmmArchTraits
                                    n1 * MNXdlPack * KXdlPack + k2 * MNXdlPack + n2;
 
                 if constexpr(KLast)
+                {
                     shuffled(outputIndex) = n < MN ? src(n, k) : dtype{};
+                }
                 else
+                {
                     shuffled(outputIndex) = n < MN ? src(k, n) : dtype{};
+                }
             }
         }
         return shuffled;

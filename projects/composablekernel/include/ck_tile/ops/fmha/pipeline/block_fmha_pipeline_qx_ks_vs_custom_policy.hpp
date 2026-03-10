@@ -109,9 +109,13 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                                                  decltype(warp_gemm)>;
 
         if constexpr(1 < Problem::kNumGemm0Warps)
+        {
             return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+        }
         else
+        {
             return BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
+        }
     }
 };
 
@@ -287,10 +291,14 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
             return transform_sequences(
                 [&](auto i) {
                     if(i < k_loops_)
+                    {
                         return i % num_lds_buffers_;
+                    }
                     else
+                    {
                         return ((num_lds_buffers_ - 1) + (i - k_loops_ + ceil_ - (v_loops_ - 1))) %
                                num_lds_buffers_;
+                    }
                 },
                 typename arithmetic_sequence_gen<0, k_loops_ + v_loops_, 1>::type{});
         };

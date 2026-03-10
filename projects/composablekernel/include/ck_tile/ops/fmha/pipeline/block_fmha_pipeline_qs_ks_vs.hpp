@@ -69,9 +69,13 @@ struct BlockFmhaPipelineQSKSVS
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return kPadHeadDimV ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
 
     static constexpr index_t kAlignmentO =
@@ -83,7 +87,9 @@ struct BlockFmhaPipelineQSKSVS
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kQKHeaddim <= 32)
@@ -97,9 +103,13 @@ struct BlockFmhaPipelineQSKSVS
             else if constexpr(kQKHeaddim <= 128)
             {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -656,7 +666,9 @@ struct BlockFmhaPipelineQSKSVS
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

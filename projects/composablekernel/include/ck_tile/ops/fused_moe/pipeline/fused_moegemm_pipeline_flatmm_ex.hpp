@@ -58,7 +58,9 @@ struct FusedMoeGemmPipeline_FlatmmEx
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             // minimize occupancy
@@ -446,11 +448,17 @@ struct FusedMoeGemmPipeline_FlatmmEx
                 constexpr index_t slot = sr.at(i_issue);
 
                 if constexpr(slot & SLD_A)
+                {
                     sld_a(as[I1], a_sld_win1, number<NEXT_SCI(c_sld_a_0, i_issue)>{});
+                }
                 if constexpr(slot & GLD_A)
+                {
                     gld_a(a_sst_win0, number<NEXT_SCI(c_gld_a_0, i_issue)>{});
+                }
                 if constexpr(slot & GLD_B)
+                {
                     gld_g(gs[I0], number<NEXT_SCI(c_gld_b_0, i_issue)>{});
+                }
             });
             move_g();
             move_a();
@@ -467,11 +475,17 @@ struct FusedMoeGemmPipeline_FlatmmEx
                 constexpr index_t slot = sr.at(i_issue);
 
                 if constexpr(slot & SLD_A)
+                {
                     sld_a(as[I0], a_sld_win0, number<NEXT_SCI(c_sld_a_1, i_issue)>{});
+                }
                 if constexpr(slot & GLD_A)
+                {
                     gld_a(a_sst_win1, number<NEXT_SCI(c_gld_a_1, i_issue)>{});
+                }
                 if constexpr(slot & GLD_B)
+                {
                     gld_g(gs[I1], number<NEXT_SCI(c_gld_b_1, i_issue)>{});
+                }
             });
             move_g();
             move_a();
@@ -492,7 +506,9 @@ struct FusedMoeGemmPipeline_FlatmmEx
                 constexpr index_t slot = sr.at(i_issue);
 
                 if constexpr(slot & GLD_B)
+                {
                     gld_g(gs[I1], number<NEXT_SCI(c_gld_b_0, i_issue)>{});
+                }
             });
 
             block_sync_load_raw(issues_g);
@@ -502,9 +518,13 @@ struct FusedMoeGemmPipeline_FlatmmEx
             static_for<0, total_loops, 1>{}([&](auto i_issue) {
                 constexpr auto last_nop = [&]() {
                     if constexpr(i_issue == (total_loops - 1))
+                    {
                         return True;
+                    }
                     else
+                    {
                         return False;
+                    }
                 }();
                 gemm_0(acc_0, as[I1], gs[I1], i_issue, last_nop); // last gemm has nop
             });
@@ -538,7 +558,9 @@ struct FusedMoeGemmPipeline_FlatmmEx
                 gemm_1(acc_1s[I1], y, ds[I1], i_issue);
                 constexpr index_t slot = sr.at(i_issue);
                 if constexpr(slot & GLD_B)
+                {
                     gld_d(ds[I0], number<NEXT_SCI(c_gld_b_0, i_issue)>{});
+                }
 
                 if constexpr(slot & GST_O)
                 {
@@ -554,7 +576,9 @@ struct FusedMoeGemmPipeline_FlatmmEx
                 gemm_1(acc_1s[I0], y, ds[I0], i_issue);
                 constexpr index_t slot = sr.at(i_issue);
                 if constexpr(slot & GLD_B)
+                {
                     gld_d(ds[I1], number<NEXT_SCI(c_gld_b_1, i_issue)>{});
+                }
 
                 if constexpr(slot & GST_O)
                 {
@@ -577,7 +601,9 @@ struct FusedMoeGemmPipeline_FlatmmEx
                 gemm_1(acc_1s[I0], y, ds[I0], i_issue);
                 constexpr index_t slot = sr.at(i_issue);
                 if constexpr(slot & GLD_B)
+                {
                     gld_d(ds[I1], number<NEXT_SCI(c_gld_b_0, i_issue)>{});
+                }
             });
             move_d();
         };

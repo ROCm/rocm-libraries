@@ -34,9 +34,13 @@ struct AddRmsnorm2dRdquantFwdPipelineOnePass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_op"; // block per row
+        }
         else
+        {
             return "wpr_op"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -95,7 +99,9 @@ struct AddRmsnorm2dRdquantFwdPipelineOnePass
             b);
 
         if constexpr(kSaveX)
+        {
             store_tile(x_window, cast_tile<XDataType>(x));
+        }
 
         // compute mean square, each-thread->cross-lane->cross-warp
         auto square_sum = block_reduce2d(

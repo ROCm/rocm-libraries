@@ -64,9 +64,13 @@ CK_TILE_DEVICE void transpose_tile2d_impl_in_thread(OutTensor& out_tensor,
     constexpr auto scalars_per_access_arr = generate_array(
         [&](auto i) {
             if constexpr(vec_length_in == 1)
+            {
                 return 1;
+            }
             else
+            {
                 return (i == y_dim_vec_in || i == y_dim_vec_out) ? y_lengths[i] : 1;
+            }
         },
         number<NDimY>{});
 

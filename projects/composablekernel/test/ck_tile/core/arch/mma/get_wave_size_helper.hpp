@@ -17,7 +17,9 @@ __global__ void getWaveSizeForSelectedOp(uint32_t* waveSize)
     using CompilerTarget = decltype(ck_tile::core::arch::get_compiler_target());
 
     if(waveSize)
+    {
         *waveSize = static_cast<uint32_t>(CompilerTarget::WAVE_SIZE_ID);
+    }
 }
 
 static __host__ uint32_t getDeviceWaveSize()

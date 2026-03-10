@@ -62,7 +62,9 @@ float add_rmsnorm2d_rdquant_fwd_(const S& s, A a)
 
     auto kargs = Kernel::MakeKargs(a);
     if(s.log_level_ > 0)
+    {
         std::cout << ", " << Kernel::GetName() << std::flush;
+    }
 
     return ck_tile::launch_kernel(
         s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));

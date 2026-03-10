@@ -245,15 +245,25 @@ template <bf16_rounding_mode rounding>
 CK_TILE_HOST_DEVICE constexpr uint16_t float_to_bf16_raw(float f, constant<rounding>)
 {
     if constexpr(rounding == bf16_rounding_mode::standard)
+    {
         return float_to_bf16_rtn_raw(f);
+    }
     else if constexpr(rounding == bf16_rounding_mode::standard_asm)
+    {
         return float_to_bf16_rtn_asm(f);
+    }
     else if constexpr(rounding == bf16_rounding_mode::truncate_with_nan)
+    {
         return float_to_bf16_truc_nan_raw(f);
+    }
     else if constexpr(rounding == bf16_rounding_mode::rta_asm)
+    {
         return float_to_bf16_rta_asm(f);
+    }
     else
+    {
         return float_to_bf16_truc_raw(f);
+    }
 }
 
 template <bf16_rounding_mode rounding>

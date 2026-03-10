@@ -63,14 +63,18 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
         const index_t group_id = block_id / grid_size_grp;
 
         if(group_id >= group_count)
+        {
             return;
+        }
 
         const index_t M = gemm_desc_ptr[group_id].M;
         const index_t N = gemm_desc_ptr[group_id].N;
         const index_t K = gemm_desc_ptr[group_id].K;
 
         if(M == 0 || N == 0 || K == 0)
+        {
             return;
+        }
 
         const auto StrideA  = gemm_desc_ptr[group_id].StrideA;
         const auto StrideB  = gemm_desc_ptr[group_id].StrideB;
@@ -959,8 +963,10 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             arg_ptr->grouped_gemm_kernel_args_dev = kernel_args;
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Xdl_Fixed_NK::Argument structure!");
+        }
     }
 
     size_t GetWorkSpaceSize(const BaseArgument* p_arg) const override
@@ -971,8 +977,10 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             return arg_ptr->group_count_ * arg_ptr->barrier_size_grp_ * sizeof(uint32_t);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Xdl_Fixed_NK::Argument structure!");
+        }
     }
 
     size_t GetDeviceKernelArgSize(const BaseArgument* p_arg) const override
@@ -983,8 +991,10 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             return arg_ptr->group_count_ * sizeof(GroupedGemmKernelArgument<NumDTensor>);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Xdl_Fixed_NK::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(BaseArgument* p_arg,
@@ -997,8 +1007,10 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             arg_ptr->p_workspace_ = p_workspace;
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Xdl_Fixed_NK::Argument structure!");
+        }
 
         hip_check_error(
             hipMemsetAsync(p_workspace, 0, GetWorkSpaceSize(arg_ptr), stream_config.stream_id_));
@@ -1015,8 +1027,10 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             arg_ptr->UpdateKBatch(k_batch);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Xdl_Fixed_NK::Argument structure!");
+        }
     }
 
     void SetKBatchSize(BaseArgument* p_arg, index_t kbatch) const override
@@ -1027,8 +1041,10 @@ struct DeviceGroupedGemm_Xdl_Fixed_NK : public DeviceGroupedGemmFixedNK<ALayout,
             arg_ptr->UpdateKBatch(kbatch);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Xdl_Fixed_NK::Argument structure!");
+        }
     }
 };
 

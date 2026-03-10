@@ -367,10 +367,14 @@ struct FmhaFwdVSAKernel
             q_dram,
             [&]() {
                 if constexpr(FmhaPipeline::kQLoadOnce)
+                {
                     return make_tuple(number<FmhaPipeline::kM0>{},
                                       number<FmhaPipeline::kSubQKHeaddim>{});
+                }
                 else
+                {
                     return make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kK0>{});
+                }
             }(),
             {i_m0, 0});
 
@@ -384,14 +388,18 @@ struct FmhaFwdVSAKernel
 
         FmhaMask mask = [&]() {
             if constexpr(kHasMask)
+            {
                 return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                     kargs.window_size_left,
                     kargs.window_size_right,
                     kargs.seqlen_q,
                     kargs.seqlen_k,
                     kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+            }
             else
+            {
                 return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+            }
         }();
 
         AttentionVariant variant;

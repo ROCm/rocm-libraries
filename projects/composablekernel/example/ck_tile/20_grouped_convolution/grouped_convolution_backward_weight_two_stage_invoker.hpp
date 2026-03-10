@@ -149,7 +149,9 @@ struct GroupedConvolutionBackwardWeightTwoStageInvoker
             static_cast<ck_tile::index_t>(args.C_ * spatial_lengths_accum)};
 
         for(auto d : shape)
+        {
             total_elements *= d;
+        }
 
         const ck_tile::index_t kBlockSize = ElementwiseKernel::BlockSize();
 
@@ -181,11 +183,13 @@ struct GroupedConvolutionBackwardWeightTwoStageInvoker
 
         auto preprocess = [&]() {
             if(args.k_batch > 1)
+            {
                 ck_tile::hip_check_error(
                     hipMemsetAsync(ws_args.wei_ptr,
                                    0,
                                    shape[0] * shape[1] * sizeof(WorkspaceDataType),
                                    s.stream_id_));
+            }
         };
 
         float ave_time = ck_tile::launch_kernel_time_mask(

@@ -61,12 +61,16 @@ struct ReferenceMaxPoolBwd : public device::BaseOperator
                         buf[index] = ck::type_convert<ConputeDataType>(buf_val);
                     }
                     else
+                    {
                         buf[index] += ck::type_convert<ConputeDataType>(arg.dout_.mData[i]);
+                    }
                 }
             }
 
             for(int i = 0; i < din_length; ++i)
+            {
                 arg.din_.mData[i] = ck::type_convert<DInDataType>(buf[i]);
+            }
             return 0;
         }
 

@@ -117,7 +117,9 @@ class Stack
             stackEnd_ = 0;
         }
         else
+        {
             Resize(GetSize());
+        }
     }
 
     // Optimization note: try to minimize the size of this function for force inline.
@@ -128,7 +130,9 @@ class Stack
         // Expand the stack if needed
         if(RAPIDJSON_UNLIKELY(static_cast<std::ptrdiff_t>(sizeof(T) * count) >
                               (stackEnd_ - stackTop_)))
+        {
             Expand<T>(count);
+        }
     }
 
     template <typename T>
@@ -216,7 +220,9 @@ class Stack
         if(stack_ == 0)
         {
             if(!allocator_)
+            {
                 ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator)();
+            }
             newCapacity = initialCapacity_;
         }
         else
@@ -226,7 +232,9 @@ class Stack
         }
         size_t newSize = GetSize() + sizeof(T) * count;
         if(newCapacity < newSize)
+        {
             newCapacity = newSize;
+        }
 
         Resize(newCapacity);
     }

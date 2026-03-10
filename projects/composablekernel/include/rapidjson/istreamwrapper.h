@@ -122,7 +122,9 @@ class BasicIStreamWrapper
     void Read()
     {
         if(current_ < bufferLast_)
+        {
             ++current_;
+        }
         else if(!eof_)
         {
             count_ += readCount_;

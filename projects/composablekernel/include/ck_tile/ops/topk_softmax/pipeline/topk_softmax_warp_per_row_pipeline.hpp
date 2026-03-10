@@ -122,7 +122,9 @@ struct TopkSoftmaxWarpPerRowPipeline
             {
                 block_row_id += grid_rows_per_loop;
                 if(block_row_id >= rows)
+                {
                     break;
+                }
             }
 
             move_tile_window(inp_win, {grid_rows_per_loop, number<0>{}});

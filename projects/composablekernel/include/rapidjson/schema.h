@@ -236,13 +236,21 @@ struct Specification
     Specification(OpenApiVersion o) : oapi(o)
     {
         if(oapi == kVersion20)
+        {
             draft = kDraft04;
+        }
         else if(oapi == kVersion30)
+        {
             draft = kDraft05;
+        }
         else if(oapi == kVersion31)
+        {
             draft = kDraft2020_12;
+        }
         else
+        {
             draft = kDraft04;
+        }
     }
     ~Specification() {}
     bool IsSupported() const
@@ -404,9 +412,13 @@ class Hasher
     {
         Number n;
         if(d < 0)
+        {
             n.u.i = static_cast<int64_t>(d);
+        }
         else
+        {
             n.u.u = static_cast<uint64_t>(d);
+        }
         n.d = d;
         return WriteNumber(n);
     }
@@ -430,10 +442,12 @@ class Hasher
         uint64_t h   = Hash(0, kObjectType);
         uint64_t* kv = stack_.template Pop<uint64_t>(memberCount * 2);
         for(SizeType i = 0; i < memberCount; i++)
+        {
             // Issue #2205
             // Hasing the key to avoid key=value cases with bug-prone zero-value hash
             h ^= Hash(Hash(0, kv[i * 2]),
                       kv[i * 2 + 1]); // Use xor to achieve member order insensitive
+        }
         *stack_.template Push<uint64_t>() = h;
         return true;
     }
@@ -444,7 +458,9 @@ class Hasher
         uint64_t h  = Hash(0, kArrayType);
         uint64_t* e = stack_.template Pop<uint64_t>(elementCount);
         for(SizeType i = 0; i < elementCount; i++)
+        {
             h = Hash(h, e[i]); // Use hash to achieve element order sensitive
+        }
         *stack_.template Push<uint64_t>() = h;
         return true;
     }
@@ -479,7 +495,9 @@ class Hasher
         uint64_t h             = Hash(RAPIDJSON_UINT64_C2(0xcbf29ce4, 0x84222325), type);
         const unsigned char* d = static_cast<const unsigned char*>(data);
         for(size_t i = 0; i < len; i++)
+        {
             h = Hash(h, d[i]);
+        }
         *stack_.template Push<uint64_t>() = h;
         return true;
     }
@@ -544,7 +562,9 @@ struct SchemaValidationContext
     ~SchemaValidationContext()
     {
         if(hasher)
+        {
             factory.DestroryHasher(hasher);
+        }
         if(validators)
         {
             for(SizeType i = 0; i < validatorCount; i++)
@@ -568,9 +588,13 @@ struct SchemaValidationContext
             factory.FreeState(patternPropertiesValidators);
         }
         if(patternPropertiesSchemas)
+        {
             factory.FreeState(patternPropertiesSchemas);
+        }
         if(propertyExist)
+        {
             factory.FreeState(propertyExist);
+        }
     }
 
     SchemaValidatorFactoryType& factory;
@@ -683,11 +707,14 @@ class Schema
         }
 
         if(!value.IsObject())
+        {
             return;
+        }
 
         // If we have an id property, resolve it with the in-scope id
         // Not supported for open api 2.0 or 3.0
         if(spec_.oapi != kVersion20 && spec_.oapi != kVersion30)
+        {
             if(const ValueType* v = GetMember(value, GetIdString()))
             {
                 if(v->IsString())
@@ -698,15 +725,22 @@ class Schema
                         SchemaIds, id.GetString(), v->GetString(), id_.GetString());
                 }
             }
+        }
 
         if(const ValueType* v = GetMember(value, GetTypeString()))
         {
             type_ = 0;
             if(v->IsString())
+            {
                 AddType(*v);
+            }
             else if(v->IsArray())
+            {
                 for(ConstValueIterator itr = v->Begin(); itr != v->End(); ++itr)
+                {
                     AddType(*itr);
+                }
+            }
         }
 
         if(const ValueType* v = GetMember(value, GetEnumString()))
@@ -727,7 +761,9 @@ class Schema
         }
 
         if(schemaDocument)
+        {
             AssignIfExist(allOf_, *schemaDocument, p, value, GetAllOfString(), document);
+        }
 
         // AnyOf, OneOf, Not not supported for open api 2.0
         if(schemaDocument && spec_.oapi != kVersion20)
@@ -754,30 +790,50 @@ class Schema
             SValue allProperties(kArrayType);
 
             if(properties && properties->IsObject())
+            {
                 for(ConstMemberIterator itr = properties->MemberBegin();
                     itr != properties->MemberEnd();
                     ++itr)
+                {
                     AddUniqueElement(allProperties, itr->name);
+                }
+            }
 
             if(required && required->IsArray())
+            {
                 for(ConstValueIterator itr = required->Begin(); itr != required->End(); ++itr)
+                {
                     if(itr->IsString())
+                    {
                         AddUniqueElement(allProperties, *itr);
+                    }
+                }
+            }
 
             // Dependencies not supported for open api 2.0 and 3.0
             if(spec_.oapi != kVersion20 && spec_.oapi != kVersion30)
+            {
                 if(dependencies && dependencies->IsObject())
+                {
                     for(ConstMemberIterator itr = dependencies->MemberBegin();
                         itr != dependencies->MemberEnd();
                         ++itr)
                     {
                         AddUniqueElement(allProperties, itr->name);
                         if(itr->value.IsArray())
+                        {
                             for(ConstValueIterator i = itr->value.Begin(); i != itr->value.End();
                                 ++i)
+                            {
                                 if(i->IsString())
+                                {
                                     AddUniqueElement(allProperties, *i);
+                                }
+                            }
+                        }
                     }
+                }
+            }
 
             if(allProperties.Size() > 0)
             {
@@ -801,16 +857,19 @@ class Schema
             {
                 SizeType index;
                 if(FindPropertyIndex(itr->name, &index))
+                {
                     schemaDocument->CreateSchema(&properties_[index].schema,
                                                  q.Append(itr->name, allocator_),
                                                  itr->value,
                                                  document,
                                                  id_);
+                }
             }
         }
 
         // PatternProperties not supported for open api 2.0 and 3.0
         if(spec_.oapi != kVersion20 && spec_.oapi != kVersion30)
+        {
             if(const ValueType* v = GetMember(value, GetPatternPropertiesString()))
             {
                 PointerType q      = p.Append(GetPatternPropertiesString(), allocator_);
@@ -832,9 +891,12 @@ class Schema
                     patternPropertyCount_++;
                 }
             }
+        }
 
         if(required && required->IsArray())
+        {
             for(ConstValueIterator itr = required->Begin(); itr != required->End(); ++itr)
+            {
                 if(itr->IsString())
                 {
                     SizeType index;
@@ -844,9 +906,12 @@ class Schema
                         hasRequired_                = true;
                     }
                 }
+            }
+        }
 
         // Dependencies not supported for open api 2.0 and 3.0
         if(spec_.oapi != kVersion20 && spec_.oapi != kVersion30)
+        {
             if(dependencies && dependencies->IsObject())
             {
                 PointerType q    = p.Append(GetDependenciesString(), allocator_);
@@ -871,7 +936,9 @@ class Schema
                             {
                                 SizeType targetIndex;
                                 if(FindPropertyIndex(*targetItr, &targetIndex))
+                                {
                                     properties_[sourceIndex].dependencies[targetIndex] = true;
+                                }
                             }
                         }
                         else if(itr->value.IsObject())
@@ -889,17 +956,22 @@ class Schema
                     }
                 }
             }
+        }
 
         if(const ValueType* v = GetMember(value, GetAdditionalPropertiesString()))
         {
             if(v->IsBool())
+            {
                 additionalProperties_ = v->GetBool();
+            }
             else if(v->IsObject())
+            {
                 schemaDocument->CreateSchema(&additionalPropertiesSchema_,
                                              p.Append(GetAdditionalPropertiesString(), allocator_),
                                              *v,
                                              document,
                                              id_);
+            }
         }
 
         AssignIfExist(minProperties_, value, GetMinPropertiesString());
@@ -910,18 +982,22 @@ class Schema
         {
             PointerType q = p.Append(GetItemsString(), allocator_);
             if(v->IsObject()) // List validation
+            {
                 schemaDocument->CreateSchema(&itemsList_, q, *v, document, id_);
+            }
             else if(v->IsArray())
             { // Tuple validation
                 itemsTuple_ = static_cast<const Schema**>(
                     allocator_->Malloc(sizeof(const Schema*) * v->Size()));
                 SizeType index = 0;
                 for(ConstValueIterator itr = v->Begin(); itr != v->End(); ++itr, index++)
+                {
                     schemaDocument->CreateSchema(&itemsTuple_[itemsTupleCount_++],
                                                  q.Append(index, allocator_),
                                                  *itr,
                                                  document,
                                                  id_);
+                }
             }
         }
 
@@ -930,17 +1006,23 @@ class Schema
 
         // AdditionalItems not supported for openapi 2.0 and 3.0
         if(spec_.oapi != kVersion20 && spec_.oapi != kVersion30)
+        {
             if(const ValueType* v = GetMember(value, GetAdditionalItemsString()))
             {
                 if(v->IsBool())
+                {
                     additionalItems_ = v->GetBool();
+                }
                 else if(v->IsObject())
+                {
                     schemaDocument->CreateSchema(&additionalItemsSchema_,
                                                  p.Append(GetAdditionalItemsString(), allocator_),
                                                  *v,
                                                  document,
                                                  id_);
+                }
             }
+        }
 
         AssignIfExist(uniqueItems_, value, GetUniqueItemsString());
 
@@ -949,38 +1031,62 @@ class Schema
         AssignIfExist(maxLength_, value, GetMaxLengthString());
 
         if(const ValueType* v = GetMember(value, GetPatternString()))
+        {
             pattern_ = CreatePattern(*v, schemaDocument, p.Append(GetPatternString(), allocator_));
+        }
 
         // Number
         if(const ValueType* v = GetMember(value, GetMinimumString()))
+        {
             if(v->IsNumber())
+            {
                 minimum_.CopyFrom(*v, *allocator_);
+            }
+        }
 
         if(const ValueType* v = GetMember(value, GetMaximumString()))
+        {
             if(v->IsNumber())
+            {
                 maximum_.CopyFrom(*v, *allocator_);
+            }
+        }
 
         AssignIfExist(exclusiveMinimum_, value, GetExclusiveMinimumString());
         AssignIfExist(exclusiveMaximum_, value, GetExclusiveMaximumString());
 
         if(const ValueType* v = GetMember(value, GetMultipleOfString()))
+        {
             if(v->IsNumber() && v->GetDouble() > 0.0)
+            {
                 multipleOf_.CopyFrom(*v, *allocator_);
+            }
+        }
 
         // Default
         if(const ValueType* v = GetMember(value, GetDefaultValueString()))
+        {
             if(v->IsString())
+            {
                 defaultValueLength_ = v->GetStringLength();
+            }
+        }
 
         // ReadOnly - open api only (until draft 7 supported)
         // WriteOnly - open api 3 only (until draft 7 supported)
         // Both can't be true
         if(spec_.oapi != kVersionNone)
+        {
             AssignIfExist(readOnly_, value, GetReadOnlyString());
+        }
         if(spec_.oapi >= kVersion30)
+        {
             AssignIfExist(writeOnly_, value, GetWriteOnlyString());
+        }
         if(readOnly_ && writeOnly_)
+        {
             schemaDocument->SchemaError(kSchemaErrorReadOnlyAndWriteOnly, p);
+        }
 
         // Nullable - open api 3 only
         // If true add 'null' as allowable type
@@ -988,7 +1094,9 @@ class Schema
         {
             AssignIfExist(nullable_, value, GetNullableString());
             if(nullable_)
+            {
                 AddType(GetNullString());
+            }
         }
     }
 
@@ -998,13 +1106,17 @@ class Schema
         if(properties_)
         {
             for(SizeType i = 0; i < propertyCount_; i++)
+            {
                 properties_[i].~Property();
+            }
             AllocatorType::Free(properties_);
         }
         if(patternProperties_)
         {
             for(SizeType i = 0; i < patternPropertyCount_; i++)
+            {
                 patternProperties_[i].~PatternProperty();
+            }
             AllocatorType::Free(patternProperties_);
         }
         AllocatorType::Free(itemsTuple_);
@@ -1031,18 +1143,28 @@ class Schema
         if(context.inArray)
         {
             if(uniqueItems_)
+            {
                 context.valueUniqueness = true;
+            }
 
             if(itemsList_)
+            {
                 context.valueSchema = itemsList_;
+            }
             else if(itemsTuple_)
             {
                 if(context.arrayElementIndex < itemsTupleCount_)
+                {
                     context.valueSchema = itemsTuple_[context.arrayElementIndex];
+                }
                 else if(additionalItemsSchema_)
+                {
                     context.valueSchema = additionalItemsSchema_;
+                }
                 else if(additionalItems_)
+                {
                     context.valueSchema = typeless_;
+                }
                 else
                 {
                     context.error_handler.DisallowedItem(context.arrayElementIndex);
@@ -1055,7 +1177,9 @@ class Schema
                 }
             }
             else
+            {
                 context.valueSchema = typeless_;
+            }
 
             context.arrayElementIndex++;
         }
@@ -1071,15 +1195,19 @@ class Schema
             bool otherValid = false;
             SizeType count  = context.patternPropertiesValidatorCount;
             if(context.objectPatternValidatorType != Context::kPatternValidatorOnly)
+            {
                 otherValid = context.patternPropertiesValidators[--count]->IsValid();
+            }
 
             bool patternValid = true;
             for(SizeType i = 0; i < count; i++)
+            {
                 if(!context.patternPropertiesValidators[i]->IsValid())
                 {
                     patternValid = false;
                     break;
                 }
+            }
 
             if(context.objectPatternValidatorType == Context::kPatternValidatorOnly)
             {
@@ -1112,8 +1240,12 @@ class Schema
         {
             const uint64_t h = context.factory.GetHashCode(context.hasher);
             for(SizeType i = 0; i < enumCount_; i++)
+            {
                 if(enum_[i] == h)
+                {
                     goto foundEnum;
+                }
+            }
             context.error_handler.DisallowedValue(kValidateErrorEnum);
             RAPIDJSON_INVALID_KEYWORD_RETURN(kValidateErrorEnum);
         foundEnum:;
@@ -1123,19 +1255,27 @@ class Schema
         if(context.validatorCount > 0)
         {
             if(allOf_.schemas)
+            {
                 for(SizeType i = allOf_.begin; i < allOf_.begin + allOf_.count; i++)
+                {
                     if(!context.validators[i]->IsValid())
                     {
                         context.error_handler.NotAllOf(&context.validators[allOf_.begin],
                                                        allOf_.count);
                         RAPIDJSON_INVALID_KEYWORD_RETURN(kValidateErrorAllOf);
                     }
+                }
+            }
 
             if(anyOf_.schemas)
             {
                 for(SizeType i = anyOf_.begin; i < anyOf_.begin + anyOf_.count; i++)
+                {
                     if(context.validators[i]->IsValid())
+                    {
                         goto foundAny;
+                    }
+                }
                 context.error_handler.NoneOf(&context.validators[anyOf_.begin], anyOf_.count);
                 RAPIDJSON_INVALID_KEYWORD_RETURN(kValidateErrorAnyOf);
             foundAny:;
@@ -1146,6 +1286,7 @@ class Schema
                 bool oneValid       = false;
                 SizeType firstMatch = 0;
                 for(SizeType i = oneOf_.begin; i < oneOf_.begin + oneOf_.count; i++)
+                {
                     if(context.validators[i]->IsValid())
                     {
                         if(oneValid)
@@ -1159,6 +1300,7 @@ class Schema
                             firstMatch = i - oneOf_.begin;
                         }
                     }
+                }
                 if(!oneValid)
                 {
                     context.error_handler.NotOneOf(&context.validators[oneOf_.begin], oneOf_.count);
@@ -1191,7 +1333,9 @@ class Schema
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "Schema::Bool", b);
         if(!CheckBool(context, b))
+        {
             return false;
+        }
         return CreateParallelValidator(context);
     }
 
@@ -1199,7 +1343,9 @@ class Schema
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "Schema::Int", (int64_t)i);
         if(!CheckInt(context, i))
+        {
             return false;
+        }
         return CreateParallelValidator(context);
     }
 
@@ -1207,7 +1353,9 @@ class Schema
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "Schema::Uint", (uint64_t)u);
         if(!CheckUint(context, u))
+        {
             return false;
+        }
         return CreateParallelValidator(context);
     }
 
@@ -1215,7 +1363,9 @@ class Schema
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "Schema::Int64", i);
         if(!CheckInt(context, i))
+        {
             return false;
+        }
         return CreateParallelValidator(context);
     }
 
@@ -1223,7 +1373,9 @@ class Schema
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "Schema::Uint64", u);
         if(!CheckUint(context, u))
+        {
             return false;
+        }
         return CreateParallelValidator(context);
     }
 
@@ -1237,13 +1389,19 @@ class Schema
         }
 
         if(!minimum_.IsNull() && !CheckDoubleMinimum(context, d))
+        {
             return false;
+        }
 
         if(!maximum_.IsNull() && !CheckDoubleMaximum(context, d))
+        {
             return false;
+        }
 
         if(!multipleOf_.IsNull() && !CheckDoubleMultipleOf(context, d))
+        {
             return false;
+        }
 
         return CreateParallelValidator(context);
     }
@@ -1320,6 +1478,7 @@ class Schema
         {
             context.patternPropertiesSchemaCount = 0;
             for(SizeType i = 0; i < patternPropertyCount_; i++)
+            {
                 if(patternProperties_[i].pattern &&
                    IsPatternMatch(patternProperties_[i].pattern, str, len))
                 {
@@ -1327,6 +1486,7 @@ class Schema
                         patternProperties_[i].schema;
                     context.valueSchema = typeless_;
                 }
+            }
         }
 
         SizeType index = 0;
@@ -1340,10 +1500,14 @@ class Schema
                 context.valuePatternValidatorType = Context::kPatternValidatorWithProperty;
             }
             else
+            {
                 context.valueSchema = properties_[index].schema;
+            }
 
             if(context.propertyExist)
+            {
                 context.propertyExist[index] = true;
+            }
 
             return true;
         }
@@ -1359,7 +1523,9 @@ class Schema
                     Context::kPatternValidatorWithAdditionalProperty;
             }
             else
+            {
                 context.valueSchema = additionalPropertiesSchema_;
+            }
             return true;
         }
         else if(additionalProperties_)
@@ -1387,11 +1553,19 @@ class Schema
         {
             context.error_handler.StartMissingProperties();
             for(SizeType index = 0; index < propertyCount_; index++)
+            {
                 if(properties_[index].required && !context.propertyExist[index])
+                {
                     if(properties_[index].schema->defaultValueLength_ == 0)
+                    {
                         context.error_handler.AddMissingProperty(properties_[index].name);
+                    }
+                }
+            }
             if(context.error_handler.EndMissingProperties())
+            {
                 RAPIDJSON_INVALID_KEYWORD_RETURN(kValidateErrorRequired);
+            }
         }
 
         if(memberCount < minProperties_)
@@ -1418,10 +1592,14 @@ class Schema
                     {
                         context.error_handler.StartMissingDependentProperties();
                         for(SizeType targetIndex = 0; targetIndex < propertyCount_; targetIndex++)
+                        {
                             if(source.dependencies[targetIndex] &&
                                !context.propertyExist[targetIndex])
+                            {
                                 context.error_handler.AddMissingDependentProperty(
                                     properties_[targetIndex].name);
+                            }
+                        }
                         context.error_handler.EndMissingDependentProperties(source.name);
                     }
                     else if(source.dependenciesSchema)
@@ -1429,13 +1607,17 @@ class Schema
                         ISchemaValidator* dependenciesValidator =
                             context.validators[source.dependenciesValidatorIndex];
                         if(!dependenciesValidator->IsValid())
+                        {
                             context.error_handler.AddDependencySchemaError(source.name,
                                                                            dependenciesValidator);
+                        }
                     }
                 }
             }
             if(context.error_handler.EndDependencyErrors())
+            {
                 RAPIDJSON_INVALID_KEYWORD_RETURN(kValidateErrorDependencies);
+            }
         }
 
         return true;
@@ -1678,8 +1860,12 @@ class Schema
     void AddUniqueElement(V1& a, const V2& v)
     {
         for(typename V1::ConstValueIterator itr = a.Begin(); itr != a.End(); ++itr)
+        {
             if(*itr == v)
+            {
                 return;
+            }
+        }
         V1 c(v, *allocator_);
         a.PushBack(c, *allocator_);
     }
@@ -1693,15 +1879,23 @@ class Schema
     static void AssignIfExist(bool& out, const ValueType& value, const ValueType& name)
     {
         if(const ValueType* v = GetMember(value, name))
+        {
             if(v->IsBool())
+            {
                 out = v->GetBool();
+            }
+        }
     }
 
     static void AssignIfExist(SizeType& out, const ValueType& value, const ValueType& name)
     {
         if(const ValueType* v = GetMember(value, name))
+        {
             if(v->IsUint64() && v->GetUint64() <= SizeType(~0))
+            {
                 out = static_cast<SizeType>(v->GetUint64());
+            }
+        }
     }
 
     void AssignIfExist(SchemaArray& out,
@@ -1721,8 +1915,10 @@ class Schema
                     allocator_->Malloc(out.count * sizeof(const Schema*)));
                 memset(out.schemas, 0, sizeof(Schema*) * out.count);
                 for(SizeType i = 0; i < out.count; i++)
+                {
                     schemaDocument.CreateSchema(
                         &out.schemas[i], q.Append(i, allocator_), (*v)[i], document, id_);
+                }
                 out.begin = validatorCount_;
                 validatorCount_ += out.count;
             }
@@ -1796,19 +1992,33 @@ class Schema
     void AddType(const ValueType& type)
     {
         if(type == GetNullString())
+        {
             type_ |= 1 << kNullSchemaType;
+        }
         else if(type == GetBooleanString())
+        {
             type_ |= 1 << kBooleanSchemaType;
+        }
         else if(type == GetObjectString())
+        {
             type_ |= 1 << kObjectSchemaType;
+        }
         else if(type == GetArrayString())
+        {
             type_ |= 1 << kArraySchemaType;
+        }
         else if(type == GetStringString())
+        {
             type_ |= 1 << kStringSchemaType;
+        }
         else if(type == GetIntegerString())
+        {
             type_ |= 1 << kIntegerSchemaType;
+        }
         else if(type == GetNumberString())
+        {
             type_ |= (1 << kNumberSchemaType) | (1 << kIntegerSchemaType);
+        }
     }
 
     // Creates parallel validators for allOf, anyOf, oneOf, not and schema dependencies, if
@@ -1817,7 +2027,9 @@ class Schema
     bool CreateParallelValidator(Context& context) const
     {
         if(enum_ || context.arrayUniqueness)
+        {
             context.hasher = context.factory.CreateHasher();
+        }
 
         if(validatorCount_)
         {
@@ -1829,25 +2041,37 @@ class Schema
 
             // Always return after first failure for these sub-validators
             if(allOf_.schemas)
+            {
                 CreateSchemaValidators(context, allOf_, false);
+            }
 
             if(anyOf_.schemas)
+            {
                 CreateSchemaValidators(context, anyOf_, false);
+            }
 
             if(oneOf_.schemas)
+            {
                 CreateSchemaValidators(context, oneOf_, false);
+            }
 
             if(not_)
+            {
                 context.validators[notValidatorIndex_] =
                     context.factory.CreateSchemaValidator(*not_, false);
+            }
 
             if(hasSchemaDependencies_)
             {
                 for(SizeType i = 0; i < propertyCount_; i++)
+                {
                     if(properties_[i].dependenciesSchema)
+                    {
                         context.validators[properties_[i].dependenciesValidatorIndex] =
                             context.factory.CreateSchemaValidator(
                                 *properties_[i].dependenciesSchema, false);
+                    }
+                }
             }
         }
 
@@ -1871,8 +2095,10 @@ class Schema
                                 const bool inheritContinueOnErrors) const
     {
         for(SizeType i = 0; i < schemas.count; i++)
+        {
             context.validators[schemas.begin + i] =
                 context.factory.CreateSchemaValidator(*schemas.schemas[i], inheritContinueOnErrors);
+        }
     }
 
     // O(n)
@@ -1881,12 +2107,14 @@ class Schema
         SizeType len  = name.GetStringLength();
         const Ch* str = name.GetString();
         for(SizeType index = 0; index < propertyCount_; index++)
+        {
             if(properties_[index].name.GetStringLength() == len &&
                (std::memcmp(properties_[index].name.GetString(), str, sizeof(Ch) * len) == 0))
             {
                 *outIndex = index;
                 return true;
             }
+        }
         return false;
     }
 
@@ -1928,7 +2156,9 @@ class Schema
                         : kValidateErrorMinimum); // i <= max(int64_t) < minimum.GetUint64()
             }
             else if(!CheckDoubleMinimum(context, static_cast<double>(i)))
+            {
                 return false;
+            }
         }
 
         if(!maximum_.IsNull())
@@ -1945,7 +2175,9 @@ class Schema
             else if(maximum_.IsUint64()) {}
             /* do nothing */ // i <= max(int64_t) < maximum_.GetUint64()
             else if(!CheckDoubleMaximum(context, static_cast<double>(i)))
+            {
                 return false;
+            }
         }
 
         if(!multipleOf_.IsNull())
@@ -1959,7 +2191,9 @@ class Schema
                 }
             }
             else if(!CheckDoubleMultipleOf(context, static_cast<double>(i)))
+            {
                 return false;
+            }
         }
 
         return true;
@@ -1987,7 +2221,9 @@ class Schema
             else if(minimum_.IsInt64())
                 /* do nothing */; // i >= 0 > minimum.Getint64()
             else if(!CheckDoubleMinimum(context, static_cast<double>(i)))
+            {
                 return false;
+            }
         }
 
         if(!maximum_.IsNull())
@@ -2009,7 +2245,9 @@ class Schema
                                                      : kValidateErrorMaximum); // i >= 0 > maximum_
             }
             else if(!CheckDoubleMaximum(context, static_cast<double>(i)))
+            {
                 return false;
+            }
         }
 
         if(!multipleOf_.IsNull())
@@ -2023,7 +2261,9 @@ class Schema
                 }
             }
             else if(!CheckDoubleMultipleOf(context, static_cast<double>(i)))
+            {
                 return false;
+            }
         }
 
         return true;
@@ -2074,20 +2314,34 @@ class Schema
         eh.StartDisallowedType();
 
         if(type_ & (1 << kNullSchemaType))
+        {
             eh.AddExpectedType(GetNullString());
+        }
         if(type_ & (1 << kBooleanSchemaType))
+        {
             eh.AddExpectedType(GetBooleanString());
+        }
         if(type_ & (1 << kObjectSchemaType))
+        {
             eh.AddExpectedType(GetObjectString());
+        }
         if(type_ & (1 << kArraySchemaType))
+        {
             eh.AddExpectedType(GetArrayString());
+        }
         if(type_ & (1 << kStringSchemaType))
+        {
             eh.AddExpectedType(GetStringString());
+        }
 
         if(type_ & (1 << kNumberSchemaType))
+        {
             eh.AddExpectedType(GetNumberString());
+        }
         else if(type_ & (1 << kIntegerSchemaType))
+        {
             eh.AddExpectedType(GetIntegerString());
+        }
 
         eh.EndDisallowedType(actualType);
     }
@@ -2190,7 +2444,9 @@ struct TokenHelper
         size_t length = static_cast<size_t>(
             (sizeof(SizeType) == 4 ? u32toa(index, buffer) : u64toa(index, buffer)) - buffer);
         for(size_t i = 0; i < length; i++)
+        {
             *documentStack.template Push<Ch>() = static_cast<Ch>(buffer[i]);
+        }
     }
 };
 
@@ -2307,7 +2563,9 @@ class GenericSchemaDocument
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaDocument::GenericSchemaDocument");
         if(!allocator_)
+        {
             ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator)();
+        }
 
         Ch noUri[1] = {0};
         uri_.SetString(uri ? uri : noUri, uriLength, *allocator_);
@@ -2379,7 +2637,9 @@ class GenericSchemaDocument
     ~GenericSchemaDocument()
     {
         while(!schemaMap_.Empty())
+        {
             schemaMap_.template Pop<SchemaEntry>(1)->~SchemaEntry();
+        }
 
         if(typeless_)
         {
@@ -2406,12 +2666,16 @@ class GenericSchemaDocument
     {
         SchemaDraft draft = GetSchemaDraft(document);
         if(draft != kDraftNone)
+        {
             return Specification(draft);
+        }
         else
         {
             OpenApiVersion oapi = GetOpenApiVersion(document);
             if(oapi != kVersionNone)
+            {
                 return Specification(oapi);
+            }
         }
         return Specification(kDraftNone);
     }
@@ -2519,7 +2783,9 @@ class GenericSchemaDocument
     {
         typename GValue::MemberIterator member = error_.FindMember(keyword);
         if(member == error_.MemberEnd())
+        {
             error_.AddMember(keyword, error, *allocator_);
+        }
         else
         {
             if(member->value.IsObject())
@@ -2687,23 +2953,39 @@ class GenericSchemaDocument
         if(itr != document.MemberEnd())
         {
             if(!itr->value.IsString())
+            {
                 return kDraftUnknown;
+            }
             const UriType draftUri(itr->value);
             // Check base uri for match
             if(draftUri.Match(UriType(kDraft04String), false))
+            {
                 return kDraft04;
+            }
             if(draftUri.Match(UriType(kDraft05String), false))
+            {
                 return kDraft05;
+            }
             if(draftUri.Match(UriType(kDraft06String), false))
+            {
                 return kDraft06;
+            }
             if(draftUri.Match(UriType(kDraft07String), false))
+            {
                 return kDraft07;
+            }
             if(draftUri.Match(UriType(kDraft03String), false))
+            {
                 return kDraft03;
+            }
             if(draftUri.Match(UriType(kDraft2019_09String), false))
+            {
                 return kDraft2019_09;
+            }
             if(draftUri.Match(UriType(kDraft2020_12String), false))
+            {
                 return kDraft2020_12;
+            }
             return kDraftUnknown;
         }
         // $schema not found
@@ -2727,22 +3009,32 @@ class GenericSchemaDocument
         typename ValueType::ConstMemberIterator itr =
             document.FindMember(SchemaType::GetSwaggerString());
         if(itr == document.MemberEnd())
+        {
             itr = document.FindMember(SchemaType::GetOpenApiString());
+        }
         if(itr != document.MemberEnd())
         {
             if(!itr->value.IsString())
+            {
                 return kVersionUnknown;
+            }
             const ValueType kVersion20Value(kVersion20String);
             if(kVersion20Value == itr->value)
+            {
                 return kVersion20; // must match 2.0 exactly
+            }
             const ValueType kVersion30Value(kVersion30String);
             if(itr->value.GetStringLength() > len &&
                kVersion30Value == ValueType(itr->value.GetString(), len))
+            {
                 return kVersion30; // must match 3.0.x
+            }
             const ValueType kVersion31Value(kVersion31String);
             if(itr->value.GetStringLength() > len &&
                kVersion31Value == ValueType(itr->value.GetString(), len))
+            {
                 return kVersion31; // must match 3.1.x
+            }
             return kVersionUnknown;
         }
         // swagger or openapi not found
@@ -2759,17 +3051,27 @@ class GenericSchemaDocument
         OpenApiVersion docOapi = GetOpenApiVersion(document);
         // Error if both in document
         if(docDraft != kDraftNone && docOapi != kVersionNone)
+        {
             SchemaError(kSchemaErrorSpecIllegal, PointerType());
+        }
         // Use document draft or open api version if present or use spec from constructor
         if(docDraft != kDraftNone)
+        {
             spec_ = Specification(docDraft);
+        }
         else if(docOapi != kVersionNone)
+        {
             spec_ = Specification(docOapi);
+        }
         // Error if draft or version unknown
         if(spec_.draft == kDraftUnknown || spec_.oapi == kVersionUnknown)
+        {
             SchemaError(kSchemaErrorSpecUnknown, PointerType());
+        }
         else if(!spec_.IsSupported())
+        {
             SchemaError(kSchemaErrorSpecUnsupported, PointerType());
+        }
     }
 
     // Changed by PR #1393
@@ -2785,12 +3087,18 @@ class GenericSchemaDocument
 
             for(typename ValueType::ConstMemberIterator itr = v.MemberBegin(); itr != v.MemberEnd();
                 ++itr)
+            {
                 CreateSchemaRecursive(
                     0, pointer.Append(itr->name, allocator_), itr->value, document, newid);
+            }
         }
         else if(v.GetType() == kArrayType)
+        {
             for(SizeType i = 0; i < v.Size(); i++)
+            {
                 CreateSchemaRecursive(0, pointer.Append(i, allocator_), v[i], document, id);
+            }
+        }
     }
 
     // Changed by PR #1393
@@ -2810,7 +3118,9 @@ class GenericSchemaDocument
             if(const SchemaType* sc = GetSchema(pointer))
             {
                 if(schema)
+                {
                     *schema = sc;
+                }
                 AddSchemaRefs(const_cast<SchemaType*>(sc));
             }
             else if(!HandleRefSchema(pointer, schema, v, document, id))
@@ -2819,14 +3129,18 @@ class GenericSchemaDocument
                 SchemaType* s = new(allocator_->Malloc(sizeof(SchemaType)))
                     SchemaType(this, pointer, v, document, allocator_, id);
                 if(schema)
+                {
                     *schema = s;
+                }
                 return s->GetId();
             }
         }
         else
         {
             if(schema)
+            {
                 *schema = typeless_;
+            }
             AddSchemaRefs(typeless_);
         }
         return id;
@@ -2842,7 +3156,9 @@ class GenericSchemaDocument
     {
         typename ValueType::ConstMemberIterator itr = v.FindMember(SchemaType::GetRefString());
         if(itr == v.MemberEnd())
+        {
             return false;
+        }
 
         GenericStringBuffer<EncodingType> sb;
         source.StringifyUriFragment(sb);
@@ -2855,7 +3171,9 @@ class GenericSchemaDocument
         {
             SizeType len = itr->value.GetStringLength();
             if(len == 0)
+            {
                 SchemaError(kSchemaErrorRefInvalid, source);
+            }
             else
             {
                 // First resolve $ref against the in-scope id
@@ -2872,7 +3190,9 @@ class GenericSchemaDocument
                 {
                     // Remote reference - call the remote document provider
                     if(!remoteProvider_)
+                    {
                         SchemaError(kSchemaErrorRefNoRemoteProvider, source);
+                    }
                     else
                     {
                         if(const GenericSchemaDocument* remoteDocument =
@@ -2885,34 +3205,44 @@ class GenericSchemaDocument
                                 // JSON pointer fragment, absolute in the remote schema
                                 const PointerType pointer(s, len, allocator_);
                                 if(!pointer.IsValid())
+                                {
                                     SchemaErrorPointer(
                                         kSchemaErrorRefPointerInvalid, source, s, len, pointer);
+                                }
                                 else
                                 {
                                     // Get the subschema
                                     if(const SchemaType* sc = remoteDocument->GetSchema(pointer))
                                     {
                                         if(schema)
+                                        {
                                             *schema = sc;
+                                        }
                                         AddSchemaRefs(const_cast<SchemaType*>(sc));
                                         return true;
                                     }
                                     else
+                                    {
                                         SchemaErrorValue(kSchemaErrorRefUnknown,
                                                          source,
                                                          ref.GetString(),
                                                          ref.GetStringLength());
+                                    }
                                 }
                             }
                             else
+                            {
                                 // Plain name fragment, not allowed in remote schema
                                 SchemaErrorValue(kSchemaErrorRefPlainName, source, s, len);
+                            }
                         }
                         else
+                        {
                             SchemaErrorValue(kSchemaErrorRefNoRemoteSchema,
                                              source,
                                              ref.GetString(),
                                              ref.GetStringLength());
+                        }
                     }
                 }
                 else
@@ -2924,8 +3254,10 @@ class GenericSchemaDocument
                         // JSON pointer fragment, relative to the resolved URI
                         const PointerType relPointer(s, len, allocator_);
                         if(!relPointer.IsValid())
+                        {
                             SchemaErrorPointer(
                                 kSchemaErrorRefPointerInvalid, source, s, len, relPointer);
+                        }
                         else
                         {
                             // Get the subschema
@@ -2934,12 +3266,16 @@ class GenericSchemaDocument
                                 // Now get the absolute JSON pointer by adding relative to base
                                 PointerType pointer(basePointer, allocator_);
                                 for(SizeType i = 0; i < relPointer.GetTokenCount(); i++)
+                                {
                                     pointer = pointer.Append(relPointer.GetTokens()[i], allocator_);
+                                }
                                 if(IsCyclicRef(pointer))
+                                {
                                     SchemaErrorValue(kSchemaErrorRefCyclical,
                                                      source,
                                                      ref.GetString(),
                                                      ref.GetStringLength());
+                                }
                                 else
                                 {
                                     // Call CreateSchema recursively, but first compute the in-scope
@@ -2953,10 +3289,12 @@ class GenericSchemaDocument
                                 }
                             }
                             else
+                            {
                                 SchemaErrorValue(kSchemaErrorRefUnknown,
                                                  source,
                                                  ref.GetString(),
                                                  ref.GetStringLength());
+                            }
                         }
                     }
                     else
@@ -2965,7 +3303,9 @@ class GenericSchemaDocument
                         // Not supported in open api 2.0 and 3.0
                         PointerType pointer(allocator_);
                         if(spec_.oapi == kVersion20 || spec_.oapi == kVersion30)
+                        {
                             SchemaErrorValue(kSchemaErrorRefPlainName, source, s, len);
+                        }
                         // See if the fragment matches an id in this document.
                         // Search from the base we just established. Returns the subschema in the
                         // document and its absolute JSON pointer.
@@ -2979,10 +3319,12 @@ class GenericSchemaDocument
                                                              basePointer))
                         {
                             if(IsCyclicRef(pointer))
+                            {
                                 SchemaErrorValue(kSchemaErrorRefCyclical,
                                                  source,
                                                  ref.GetString(),
                                                  ref.GetStringLength());
+                            }
                             else
                             {
                                 // Call CreateSchema recursively, but first compute the in-scope id
@@ -2996,10 +3338,12 @@ class GenericSchemaDocument
                             }
                         }
                         else
+                        {
                             SchemaErrorValue(kSchemaErrorRefUnknown,
                                              source,
                                              ref.GetString(),
                                              ref.GetStringLength());
+                        }
                     }
                 }
             }
@@ -3007,7 +3351,9 @@ class GenericSchemaDocument
 
         // Invalid/Unknown $ref
         if(schema)
+        {
             *schema = typeless_;
+        }
         AddSchemaRefs(typeless_);
         return true;
     }
@@ -3059,7 +3405,9 @@ class GenericSchemaDocument
                         here.Append(m->name.GetString(), m->name.GetStringLength(), allocator_));
                 }
                 if(resval)
+                {
                     break;
+                }
             }
         }
         else if(doc.GetType() == kArrayType)
@@ -3073,7 +3421,9 @@ class GenericSchemaDocument
                         FindId(*v, finduri, resptr, localuri, full, here.Append(i, allocator_));
                 }
                 if(resval)
+                {
                     break;
+                }
                 i++;
             }
         }
@@ -3098,8 +3448,12 @@ class GenericSchemaDocument
         for(const SchemaRefPtr* ref = schemaRef_.template Bottom<SchemaRefPtr>();
             ref != schemaRef_.template End<SchemaRefPtr>();
             ++ref)
+        {
             if(pointer == **ref)
+            {
                 return true;
+            }
+        }
         return false;
     }
 
@@ -3108,8 +3462,12 @@ class GenericSchemaDocument
         for(const SchemaEntry* target = schemaMap_.template Bottom<SchemaEntry>();
             target != schemaMap_.template End<SchemaEntry>();
             ++target)
+        {
             if(pointer == target->pointer)
+            {
                 return target->schema;
+            }
+        }
         return 0;
     }
 
@@ -3118,8 +3476,12 @@ class GenericSchemaDocument
         for(const SchemaEntry* target = schemaMap_.template Bottom<SchemaEntry>();
             target != schemaMap_.template End<SchemaEntry>();
             ++target)
+        {
             if(schema == target->schema)
+            {
                 return target->pointer;
+            }
+        }
         return PointerType();
     }
 
@@ -3249,7 +3611,9 @@ class GenericSchemaValidator
     void Reset()
     {
         while(!schemaStack_.Empty())
+        {
             PopSchema();
+        }
         documentStack_.Clear();
         ResetError();
     }
@@ -3270,9 +3634,13 @@ class GenericSchemaValidator
     virtual bool IsValid() const
     {
         if(!valid_)
+        {
             return false;
+        }
         if(GetContinueOnErrors() && !error_.ObjectEmpty())
+        {
             return false;
+        }
         return true;
     }
     //! End of Implementation of ISchemaValidator
@@ -3293,9 +3661,13 @@ class GenericSchemaValidator
     const Ch* GetInvalidSchemaKeyword() const
     {
         if(!schemaStack_.Empty())
+        {
             return CurrentContext().invalidKeyword;
+        }
         if(GetContinueOnErrors() && !error_.ObjectEmpty())
+        {
             return static_cast<const Ch*>(GetErrorsString());
+        }
         return 0;
     }
 
@@ -3304,9 +3676,13 @@ class GenericSchemaValidator
     ValidateErrorCode GetInvalidSchemaCode() const
     {
         if(!schemaStack_.Empty())
+        {
             return CurrentContext().invalidCode;
+        }
         if(GetContinueOnErrors() && !error_.ObjectEmpty())
+        {
             return kValidateErrors;
+        }
         return kValidateErrorNone;
     }
 
@@ -3448,7 +3824,9 @@ class GenericSchemaValidator
     bool EndMissingProperties()
     {
         if(currentError_.Empty())
+        {
             return false;
+        }
         ValueType error(kObjectType);
         error.AddMember(GetMissingString(), currentError_, GetStateAllocator());
         currentError_ = error;
@@ -3458,7 +3836,9 @@ class GenericSchemaValidator
     void PropertyViolations(ISchemaValidator** subvalidators, SizeType count)
     {
         for(SizeType i = 0; i < count; ++i)
+        {
             MergeError(static_cast<GenericSchemaValidator*>(subvalidators[i])->GetError());
+        }
     }
     void DisallowedProperty(const Ch* name, SizeType length)
     {
@@ -3512,7 +3892,9 @@ class GenericSchemaValidator
     bool EndDependencyErrors()
     {
         if(currentError_.ObjectEmpty())
+        {
             return false;
+        }
         ValueType error(kObjectType);
         error.AddMember(GetErrorsString(), currentError_, GetStateAllocator());
         currentError_ = error;
@@ -3675,7 +4057,9 @@ class GenericSchemaValidator
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::Key", str);
         if(!valid_)
+        {
             return false;
+        }
         AppendToken(str, len);
         if(!CurrentSchema().Key(CurrentContext(), str, len, copy) && !GetContinueOnErrors())
         {
@@ -3691,7 +4075,9 @@ class GenericSchemaValidator
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::EndObject");
         if(!valid_)
+        {
             return false;
+        }
         RAPIDJSON_SCHEMA_HANDLE_PARALLEL_(EndObject, (memberCount));
         if(!CurrentSchema().EndObject(CurrentContext(), memberCount) && !GetContinueOnErrors())
         {
@@ -3714,7 +4100,9 @@ class GenericSchemaValidator
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::EndArray");
         if(!valid_)
+        {
             return false;
+        }
         RAPIDJSON_SCHEMA_HANDLE_PARALLEL_(EndArray, (elementCount));
         if(!CurrentSchema().EndArray(CurrentContext(), elementCount) && !GetContinueOnErrors())
         {
@@ -3808,13 +4196,17 @@ class GenericSchemaValidator
                                "GenericSchemaValidator::GenericSchemaValidator (internal)",
                                basePath && basePathSize ? basePath : "");
         if(basePath && basePathSize)
+        {
             memcpy(documentStack_.template Push<char>(basePathSize), basePath, basePathSize);
+        }
     }
 
     StateAllocator& GetStateAllocator()
     {
         if(!stateAllocator_)
+        {
             stateAllocator_ = ownStateAllocator_ = RAPIDJSON_NEW(StateAllocator)();
+        }
         return *stateAllocator_;
     }
 
@@ -3824,15 +4216,21 @@ class GenericSchemaValidator
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::BeginValue");
         if(schemaStack_.Empty())
+        {
             PushSchema(root_);
+        }
         else
         {
             if(CurrentContext().inArray)
+            {
                 internal::TokenHelper<internal::Stack<StateAllocator>, Ch>::AppendIndexToken(
                     documentStack_, CurrentContext().arrayElementIndex);
+            }
 
             if(!CurrentSchema().BeginValue(CurrentContext()) && !GetContinueOnErrors())
+            {
                 return false;
+            }
 
             SizeType count        = CurrentContext().patternPropertiesSchemaCount;
             const SchemaType** sa = CurrentContext().patternPropertiesSchemas;
@@ -3851,8 +4249,10 @@ class GenericSchemaValidator
                     static_cast<ISchemaValidator**>(MallocState(sizeof(ISchemaValidator*) * count));
                 std::memset(va, 0, sizeof(ISchemaValidator*) * count);
                 for(SizeType i = 0; i < count; i++)
+                {
                     va[validatorCount++] =
                         CreateSchemaValidator(*sa[i], true); // Inherit continueOnError
+                }
             }
 
             CurrentContext().arrayUniqueness = valueUniqueness;
@@ -3864,7 +4264,9 @@ class GenericSchemaValidator
     {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::EndValue");
         if(!CurrentSchema().EndValue(CurrentContext()) && !GetContinueOnErrors())
+        {
             return false;
+        }
 
         GenericStringBuffer<EncodingType> sb;
         schemaDocument_->GetPointer(&CurrentSchema()).StringifyUriFragment(sb);
@@ -3887,11 +4289,14 @@ class GenericSchemaValidator
             {
                 HashCodeArray* a = static_cast<HashCodeArray*>(context.arrayElementHashCodes);
                 if(!a)
+                {
                     CurrentContext().arrayElementHashCodes = a =
                         new(GetStateAllocator().Malloc(sizeof(HashCodeArray)))
                             HashCodeArray(kArrayType);
+                }
                 for(typename HashCodeArray::ConstValueIterator itr = a->Begin(); itr != a->End();
                     ++itr)
+                {
                     if(itr->GetUint64() == h)
                     {
                         DuplicateItems(static_cast<SizeType>(itr - a->Begin()), a->Size());
@@ -3905,6 +4310,7 @@ class GenericSchemaValidator
                         }
                         RAPIDJSON_INVALID_KEYWORD_RETURN(kValidateErrorUniqueItems);
                     }
+                }
                 a->PushBack(h, GetStateAllocator());
             }
         }
@@ -3934,7 +4340,9 @@ class GenericSchemaValidator
                 *documentStack_.template PushUnsafe<Ch>() = '1';
             }
             else
+            {
                 *documentStack_.template PushUnsafe<Ch>() = str[i];
+            }
         }
     }
 
@@ -3972,11 +4380,17 @@ class GenericSchemaValidator
         GenericStringBuffer<EncodingType> sb;
         SizeType len = CurrentSchema().GetURI().GetStringLength();
         if(len)
+        {
             memcpy(sb.Push(len), CurrentSchema().GetURI().GetString(), len * sizeof(Ch));
+        }
         if(schema.GetTokenCount())
+        {
             schema.StringifyUriFragment(sb);
+        }
         else
+        {
             GetInvalidSchemaPointer().StringifyUriFragment(sb);
+        }
         ValueType schemaRef(
             sb.GetString(), static_cast<SizeType>(sb.GetSize() / sizeof(Ch)), GetStateAllocator());
         result.AddMember(GetSchemaRefString(), schemaRef, GetStateAllocator());
@@ -3991,7 +4405,9 @@ class GenericSchemaValidator
     {
         typename ValueType::MemberIterator member = error_.FindMember(keyword);
         if(member == error_.MemberEnd())
+        {
             error_.AddMember(keyword, error, GetStateAllocator());
+        }
         else
         {
             if(member->value.IsObject())
@@ -4035,8 +4451,10 @@ class GenericSchemaValidator
                                 ValueType(expected, GetStateAllocator()).Move(),
                                 GetStateAllocator());
         if(exclusive)
+        {
             currentError_.AddMember(
                 ValueType(exclusive(), GetStateAllocator()).Move(), true, GetStateAllocator());
+        }
         AddCurrentError(code);
     }
 
@@ -4045,8 +4463,10 @@ class GenericSchemaValidator
     {
         ValueType errors(kArrayType);
         for(SizeType i = 0; i < count; ++i)
+        {
             errors.PushBack(static_cast<GenericSchemaValidator*>(subvalidators[i])->GetError(),
                             GetStateAllocator());
+        }
         currentError_.SetObject();
         currentError_.AddMember(GetErrorsString(), errors, GetStateAllocator());
         AddCurrentError(code);

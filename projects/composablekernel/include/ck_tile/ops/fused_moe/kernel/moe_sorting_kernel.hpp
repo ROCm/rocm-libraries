@@ -590,7 +590,9 @@ struct MoeSortingKernel
         // heuristic
         {
             if(tid < num_experts)
+            {
                 tokens_cnts[calc_index(num_experts + 1, 0, tid)] = 0;
+            }
             for(int i = 0; i < num_experts; i += 8)
             {
                 index_t local_c[8];
@@ -813,9 +815,13 @@ struct MoeSortingKernel
                     int eid = topk_id[i_t * topk + curr_topk_id];
 
                     if constexpr(Problem::SubTokenOneShot)
+                    {
                         smem_tokens(curr_token_id, eid) = curr_topk_id + 1;
+                    }
                     else
+                    {
                         smem_tokens(curr_token_id, eid)++;
+                    }
                 }
                 s_waitcnt<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, 0>();
             }
@@ -859,7 +865,9 @@ struct MoeSortingKernel
                     }
                 }
                 if(lane_group_os == 0)
+                {
                     smem_cumsum(i_e + 1) = cnt;
+                }
             }
         }
 
@@ -890,15 +898,23 @@ struct MoeSortingKernel
 
                     int pre_cumsum_masking = [&]() {
                         if constexpr(Problem::LocalExpertMasking)
+                        {
                             return smem_cumdup(lid == 0 ? i_e_ : 0);
+                        }
                         else
+                        {
                             return 0; // not used
+                        }
                     }();
                     int local_masking = [&]() {
                         if constexpr(Problem::LocalExpertMasking)
+                        {
                             return smem_cumdup(i_e_ + lid + 1);
+                        }
                         else
+                        {
                             return 0; // not used
+                        }
                     }();
                     int padded_tokens_per_expert = [&]() {
                         int x_ = [&]() {
@@ -918,7 +934,9 @@ struct MoeSortingKernel
                             return local_masking ? x_ : 0;
                         }
                         else
+                        {
                             return x_;
+                        }
                     }();
 
                     local_cumsum_ = padded_tokens_per_expert;
@@ -929,14 +947,18 @@ struct MoeSortingKernel
                     wave_cumsum<int, get_warp_size()>(local_cumsum_);
 
                     if((i_e_ + lid) < num_experts)
+                    {
                         smem_cumsum(i_e_ + lid + 1) = local_cumsum_;
+                    }
 
                     if constexpr(Problem::LocalExpertMasking)
                     {
                         local_masking += pre_cumsum_masking;
                         wave_cumsum<int, get_warp_size()>(local_masking);
                         if((i_e_ + lid) < num_experts)
+                        {
                             smem_cumdup(i_e_ + lid + 1) = local_masking;
+                        }
                     }
 
                     // NOTE: this waitcnt is a must, compiler will not generate waitcnt lgkmcnt()
@@ -965,20 +987,26 @@ struct MoeSortingKernel
                     return smem_cumdup(i_e);
                 }
                 else
+                {
                     return i_e;
+                }
             }();
 
             smem_cumdup(i_e) = e_start; // duplicate cumsum for later use
             if constexpr(Problem::SkipExpertsWithZeroTokens)
             {
                 if(e_start == e_end) // skip zero token expert
+                {
                     continue;
+                }
             }
 
             if constexpr(Problem::LocalExpertMasking)
             {
                 if(local_expert_mask[i_e] == 0)
+                {
                     continue;
+                }
             }
 
             for(int i = e_start; i < e_end; i += unit_size_mdiv.divisor)
@@ -1031,7 +1059,9 @@ struct MoeSortingKernel
                     if constexpr(Problem::LocalExpertMasking)
                     {
                         if(local_expert_mask[eid] == 0)
+                        {
                             continue;
+                        }
                     }
                     int position = smem_cumsum(eid);
                     for(int i_sub_token = lane_group_os; i_sub_token < sub_tokens;
@@ -1074,7 +1104,9 @@ struct MoeSortingKernel
             if constexpr(Problem::SkipExpertsWithZeroTokens)
             {
                 if(e_start == e_end) // skip zero token expert
+                {
                     continue;
+                }
             }
             while(e_start < e_end)
             {
@@ -1171,13 +1203,19 @@ CK_TILE_HOST index_t moe_sorting_mesh_byte_size(index_t tokens_,
 {
     // small token case, let's run mesh with dword score board
     if(tokens_ < 512)
+    {
         return 4;
+    }
     else
     {
         if(topk_ >= 255)
+        {
             return 2; // 16bit mesh
+        }
         else
+        {
             return 1; // 8bit mesh if small enough
+        }
     }
 }
 
@@ -1658,7 +1696,9 @@ struct MoeSortingMultiPhaseKernel_P0_v1
                        Problem::SubTokenTile;
             }
             else
+            {
                 return tokens;
+            }
         }();
         index_t mesh_stride = [&]() {
             if constexpr(Problem::LocalToken)
@@ -1686,12 +1726,16 @@ struct MoeSortingMultiPhaseKernel_P0_v1
                     if constexpr(Problem::LocalToken)
                     {
                         if(static_cast<index_t>(curr_token_id) < tokens)
+                        {
                             p_expert_mesh[eid * mesh_stride + curr_token_id] =
                                 (curr_topk_id + 1) & 0xffff;
+                        }
                     }
                     else
+                    {
                         p_expert_mesh[eid * mesh_stride + curr_token_id] =
                             (curr_topk_id + 1) & 0xffff;
+                    }
                 }
             });
         }
@@ -1795,7 +1839,9 @@ struct MoeSortingMultiPhaseKernel_P0_v2
                 return (tokens + index_pack - 1) / index_pack * index_pack;
             }
             else
+            {
                 return tokens;
+            }
         }();
         index_t mesh_stride = [&]() {
             if constexpr(Problem::LocalToken)
@@ -1836,10 +1882,14 @@ struct MoeSortingMultiPhaseKernel_P0_v2
                     if constexpr(Problem::LocalToken)
                     {
                         if(static_cast<index_t>(curr_token_id) < tokens)
+                        {
                             p_expert_mesh[curr_token_id] = (curr_topk_id + 1) & 0xffff;
+                        }
                     }
                     else
+                    {
                         p_expert_mesh[curr_token_id] = (curr_topk_id + 1) & 0xffff;
+                    }
                 }
             });
         }
@@ -1854,14 +1904,18 @@ struct MoeSortingMultiPhaseKernel_P0_v2
             int loops = (mesh_stride / index_pack + kBlockSize - 1) / kBlockSize;
 
             if(Problem::LocalToken && mask == 0)
-                return;      // skip
+            {
+                return; // skip
+            }
             index_t cnt = 0; // per-wave cnt
             for(int i = 0; i < loops; i++)
             {
                 int position = i * kBlockSize + threadIdx.x;
                 r_t v{0};
                 if(position < (mesh_stride / index_pack))
+                {
                     v = p_expert_mesh_r[position];
+                }
                 index_t local_sum = 0;
                 static_for<0, index_pack, 1>{}(
                     [&](auto i_vec) { local_sum += v[i_vec.value] != 0 ? 1 : 0; });
@@ -1983,7 +2037,9 @@ struct MoeSortingMultiPhaseKernel_P1
         {
             IndexType mask = p_local_expert_mask[eid];
             if(mask == 0)
+            {
                 return; // skip
+            }
         }
 
         index_t cnt = 0; // per-wave cnt
@@ -1992,7 +2048,9 @@ struct MoeSortingMultiPhaseKernel_P1
             int position = i * kBlockSize + threadIdx.x;
             r_t v{0};
             if(position < (mesh_stride / index_pack))
+            {
                 v = p_expert_mesh[position];
+            }
             index_t local_sum = 0;
             static_for<0, index_pack, 1>{}(
                 [&](auto i_vec) { local_sum += v[i_vec.value] != 0 ? 1 : 0; });
@@ -2136,7 +2194,9 @@ struct MoeSortingMultiPhaseKernel_P01
                        Problem::SubTokenTile;
             }
             else
+            {
                 return tokens;
+            }
         }();
         index_t wg_count = [&]() {
             if constexpr(Problem::LocalToken)
@@ -2174,12 +2234,16 @@ struct MoeSortingMultiPhaseKernel_P01
                     if constexpr(Problem::LocalToken)
                     {
                         if(static_cast<index_t>(curr_token_id) < tokens)
+                        {
                             p_expert_mesh[eid * kargs.mesh_stride + curr_token_id] =
                                 (curr_topk_id + 1) & 0xffff;
+                        }
                     }
                     else
+                    {
                         p_expert_mesh[eid * kargs.mesh_stride + curr_token_id] =
                             (curr_topk_id + 1) & 0xffff;
+                    }
                 });
             }
             if(static_cast<index_t>(blockIdx.x) < wg_count)
@@ -2194,7 +2258,9 @@ struct MoeSortingMultiPhaseKernel_P01
 
             // early exist in case of extra atomic wait
             if(eid >= kargs.num_experts)
+            {
                 return;
+            }
 
             wb.wait_lt(wg_count);
 
@@ -2223,7 +2289,9 @@ struct MoeSortingMultiPhaseKernel_P01
                 {
                     IndexType mask = p_local_expert_mask[eid];
                     if(mask == 0)
+                    {
                         continue; // skip
+                    }
                 }
 
                 index_t cnt = 0; // per-wave cnt
@@ -2232,7 +2300,9 @@ struct MoeSortingMultiPhaseKernel_P01
                     int position = i * kBlockSize + threadIdx.x;
                     r_t v{0};
                     if(position < (kargs.mesh_stride / index_pack))
+                    {
                         v = p_expert_mesh[position];
+                    }
                     index_t local_sum = 0;
                     static_for<0, index_pack, 1>{}(
                         [&](auto i_vec) { local_sum += v[i_vec.value] != 0 ? 1 : 0; });
@@ -2404,7 +2474,9 @@ struct MoeSortingMultiPhaseKernel_P2
             {
                 a_ = p_expert_cumsum[position];
                 if constexpr(Problem::LocalExpertMasking)
+                {
                     b_ = p_local_expert_mask[position];
+                }
             }
 
             int blocks_pers_expert =
@@ -2428,7 +2500,9 @@ struct MoeSortingMultiPhaseKernel_P2
                     return b_ ? x_ : 0;
                 }
                 else
+                {
                     return x_;
+                }
             }();
 
             IndexType cumsum_a = padded_blocks_per_expert;
@@ -2601,14 +2675,18 @@ struct MoeSortingMultiPhaseKernel_P3
         if constexpr(Problem::SkipExpertsWithZeroTokens)
         {
             if(e_start == e_end)
+            {
                 return;
+            }
         }
 
         if constexpr(Problem::LocalExpertMasking)
         {
             int e_mask = p_local_expert_mask[eid];
             if(e_mask == 0)
+            {
                 return; // skip empty expert
+            }
         }
 
         // cumsum one by one
@@ -2861,7 +2939,9 @@ struct MoeSortingMultiPhaseKernel_P23
                 {
                     a_ = p_expert_cumsum[position];
                     if constexpr(Problem::LocalExpertMasking)
+                    {
                         b_ = p_local_expert_mask[position];
+                    }
                 }
 
                 int blocks_pers_expert =
@@ -2885,7 +2965,9 @@ struct MoeSortingMultiPhaseKernel_P23
                         return b_ ? x_ : 0;
                     }
                     else
+                    {
                         return x_;
+                    }
                 }();
 
                 IndexType cumsum_a = padded_blocks_per_expert;
@@ -2991,14 +3073,18 @@ struct MoeSortingMultiPhaseKernel_P23
             if constexpr(Problem::SkipExpertsWithZeroTokens)
             {
                 if(e_start == e_end)
+                {
                     return;
+                }
             }
 
             if constexpr(Problem::LocalExpertMasking)
             {
                 int e_mask = p_local_expert_mask[eid];
                 if(e_mask == 0)
+                {
                     return; // skip empty expert
+                }
             }
 
             index_t mesh_stride = [&]() {

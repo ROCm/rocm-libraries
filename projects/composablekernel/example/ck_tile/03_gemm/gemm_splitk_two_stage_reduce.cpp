@@ -242,8 +242,10 @@ float gemm_stage1(const GemmSplitKHostArgs& args, const ck_tile::stream_config& 
             rotating_mem.Next();
             // clear c mem
             if(args.k_batch > 1)
+            {
                 hipGetErrorString(hipMemsetAsync(
                     args.e_ptr, 0, args.M * args.N * sizeof(CDataType), s.stream_id_));
+            }
         };
         return ck_tile::launch_kernel_time_mask(
             s,
@@ -943,7 +945,9 @@ int main(int argc, char* argv[])
     auto result     = arg_parser.parse(argc, argv);
 
     if(!result)
+    {
         return -1;
+    }
 
     try
     {

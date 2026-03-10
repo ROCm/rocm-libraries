@@ -222,7 +222,9 @@ struct lhs_expression
     {
         std::string op = Operator::as_string();
         if(not op.empty())
+        {
             s << Operator::as_string() << " ";
+        }
         s << self.lhs;
         return s;
     }
@@ -277,7 +279,9 @@ auto make_predicate(const std::string& msg, F f)
 inline std::string as_string(bool x)
 {
     if(x)
+    {
         return "true";
+    }
     return "false";
 }
 
@@ -343,7 +347,9 @@ inline std::ostream& operator<<(std::ostream& os, const color& c)
 #ifndef _WIN32
     static const bool use_color = isatty(STDOUT_FILENO) != 0;
     if(use_color)
+    {
         return os << "\033[" << static_cast<std::size_t>(c) << "m";
+    }
 #else
     (void)c;
 #endif
@@ -428,26 +434,38 @@ bool glob_match(Iterator1 start, Iterator1 last, Iterator2 pattern_start, Iterat
     std::tie(start, pattern_start) =
         std::mismatch(start, last, pattern_start, pattern_last, [](auto c, auto m) {
             if(m == '?')
+            {
                 return true;
+            }
             // We need a loop for star, so bail and handle the loop below
             if(m == '*')
+            {
                 return false;
+            }
             return c == m;
         });
     // If there is no more pattern then return true if there is no more string to match
     if(pattern_start == pattern_last)
+    {
         return start == last;
+    }
     // If the pattern is not a star then its a mismatch
     if(*pattern_start != '*')
+    {
         return false;
+    }
     // Multiple stars are the same as a single star so skip over multiple stars
     pattern_start = std::find_if(pattern_start, pattern_last, [](auto c) { return c != '*'; });
     // If the star is at the end then return true
     if(pattern_start == pattern_last)
+    {
         return true;
+    }
     // star-loop: match the rest of the pattern and text
     while(not glob_match(start, last, pattern_start, pattern_last) and start != last)
+    {
         start++;
+    }
     // If the string is empty then it means a match was never found
     return start != last;
 }
@@ -551,7 +569,9 @@ struct driver
             line += word + " ";
         } while(iss);
         if(not line.empty())
+        {
             os << line << std::endl;
+        }
     }
 
     void show_help(const std::string& exe) const
@@ -600,7 +620,9 @@ struct driver
         static null_buffer buffer;
         static std::ostream null_stream(&buffer);
         if(quiet)
+        {
             return null_stream;
+        }
         return std::cout;
     }
 
@@ -614,14 +636,20 @@ struct driver
             {
                 keys[flag] = {arg.flags.front()};
                 if(arg.nargs == 0)
+                {
                     keys[flag].push_back("");
+                }
             }
         }
         auto result = generic_parse(args, [&](auto&& s) -> std::vector<std::string> {
             if(keys.count(s) > 0)
+            {
                 return keys[s];
+            }
             else
+            {
                 return {};
+            }
         });
         result["__exe__"].push_back(argv[0]);
         return result;
@@ -634,17 +662,25 @@ struct driver
         if(args.count("") > 0)
         {
             for(auto&& arg : args.at(""))
+            {
                 ss << " \"" << arg << "\"";
+            }
         }
         for(auto&& p : args)
         {
             if(p.first == "__exe__")
+            {
                 continue;
+            }
             if(p.first.empty())
+            {
                 continue;
+            }
             ss << " " << p.first;
             for(auto&& arg : p.second)
+            {
                 ss << " \"" << arg << "\"";
+            }
         }
         return ss.str();
     }
@@ -658,7 +694,9 @@ struct driver
         auto cmd = create_command(args);
         auto r   = std::system(cmd.c_str()); // NOLINT
         if(r != 0)
+        {
             msg = "Exited with " + std::to_string(r);
+        }
         return msg;
     }
 
@@ -705,9 +743,13 @@ struct driver
         if(msg.empty() and failures() != 0)
         {
             if(failures() == 1)
+            {
                 msg = "Test failure";
+            }
             else
+            {
                 msg = std::to_string(failures()) + " test failures";
+            }
         }
         if(msg.empty())
         {
@@ -721,7 +763,9 @@ struct driver
         out() << color::bold << name << color::reset;
         out() << color::fg_blue << " (" << elapsed_ms << "ms)" << color::reset;
         if(not msg.empty())
+        {
             out() << ": " << color::fg_yellow << msg << color::reset;
+        }
         out() << std::endl;
     }
 
@@ -736,18 +780,24 @@ struct driver
         if(args.count("--list") > 0)
         {
             for(auto&& tc : get_test_cases())
+            {
                 out() << tc.first << std::endl;
+            }
             return;
         }
 
         if(args.count("--quiet") > 0)
+        {
             quiet = true;
+        }
 
         auto cases = args[""];
         if(cases.empty())
         {
             for(auto&& tc : get_test_cases())
+            {
                 run_test_case(tc.first, tc.second, args);
+            }
         }
         else
         {
@@ -776,7 +826,9 @@ struct driver
                     failed.push_back(iname);
                 }
                 for(auto&& p : found_cases)
+                {
                     run_test_case(p.first, p.second, args);
+                }
             }
         }
         out() << color::fg_green << "[==========] " << color::fg_yellow << ran << " tests ran"
@@ -786,8 +838,10 @@ struct driver
             out() << color::fg_red << "[  FAILED  ] " << color::fg_yellow << failed.size()
                   << " tests failed" << color::reset << std::endl;
             for(auto&& name : failed)
+            {
                 out() << color::fg_red << "[  FAILED  ] " << color::fg_yellow << name
                       << color::reset << std::endl;
+            }
             std::exit(1);
         }
     }

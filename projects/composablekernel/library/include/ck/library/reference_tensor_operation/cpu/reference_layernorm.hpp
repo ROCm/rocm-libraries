@@ -136,13 +136,17 @@ struct ReferenceLayernorm : public device::BaseOperator
                 var(n)  = 0;
 
                 for(int h = 0; h < H; ++h)
+                {
                     for(int w = 0; w < W; ++w)
+                    {
                         for(int c = 0; c < C; ++c)
                         {
                             auto x_val = ck::type_convert<ComputeDataType>(arg.x_m_n_(n, h, w, c));
                             mean(n) += x_val;
                             var(n) += x_val * x_val;
                         }
+                    }
+                }
 
                 mean(n) = mean(n) / reduce_length;
                 var(n)  = (var(n) / reduce_length) - (mean(n) * mean(n));
@@ -154,7 +158,9 @@ struct ReferenceLayernorm : public device::BaseOperator
                     static_cast<ComputeDataType>(1) / ck::math::sqrt(var(n) + arg.epsilon_);
 
                 for(int h = 0; h < H; ++h)
+                {
                     for(int w = 0; w < W; ++w)
+                    {
                         for(int c = 0; c < C; ++c)
                         {
                             auto x_val = ck::type_convert<ComputeDataType>(arg.x_m_n_(n, h, w, c));
@@ -166,6 +172,8 @@ struct ReferenceLayernorm : public device::BaseOperator
                             arg.y_elementwise_op_(y_val, y_val);
                             arg.y_m_n_(n, h, w, c) = ck::type_convert<YDataType>(y_val);
                         }
+                    }
+                }
                 arg.save_mean_m_(n)    = ck::type_convert<SaveMeanInvStdDataType>(mean(n));
                 arg.save_inv_std_m_(n) = ck::type_convert<SaveMeanInvStdDataType>(divisor);
             }
@@ -176,9 +184,13 @@ struct ReferenceLayernorm : public device::BaseOperator
         float Run(const Argument& arg)
         {
             if(arg.lengths_.size() == 2)
+            {
                 return Run2D(arg);
+            }
             else if(arg.lengths_.size() == 4)
+            {
                 return Run4D(arg);
+            }
 
             return 0;
         }
@@ -202,12 +214,16 @@ struct ReferenceLayernorm : public device::BaseOperator
 
         if(p_arg_->lengths_.size() == 2 && p_arg_->reduceDims_.size() == 1 &&
            p_arg_->reduceDims_[0] == 1)
+        {
             return true;
+        }
 
         else if(p_arg_->lengths_.size() == 4 && p_arg_->reduceDims_.size() == 3 &&
                 p_arg_->reduceDims_[0] == 1 && p_arg_->reduceDims_[1] == 2 &&
                 p_arg_->reduceDims_[2] == 3)
+        {
             return true;
+        }
 
         return false;
     }

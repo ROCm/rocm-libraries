@@ -98,7 +98,9 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
                 }
             }
             else
+            {
                 return static_cast<std::size_t>(stride);
+            }
         };
 
     ck::index_t Scale_Stride_BN = (K + Scale_Block_K - 1) / Scale_Block_K;
@@ -304,9 +306,13 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
                 ck::pk_i4_t i4x2 = b_k_n(k, n).data;
                 int8_t i4        = 0;
                 if(k % 2 == 1)
+                {
                     i4 = (i4x2.data >> 0) & 0xf;
+                }
                 else
+                {
                     i4 = (i4x2.data >> 4) & 0xf;
+                }
                 i4  = i4 - 8;
                 v_b = ck::type_convert<float>(i4);
 

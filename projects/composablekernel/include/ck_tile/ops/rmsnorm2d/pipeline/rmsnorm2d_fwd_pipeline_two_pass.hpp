@@ -36,9 +36,13 @@ struct Rmsnorm2dFwdPipelineTwoPass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_tp"; // block per row
+        }
         else
+        {
             return "wpr_tp"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -132,7 +136,9 @@ struct Rmsnorm2dFwdPipelineTwoPass
             square_sum);
 
         if constexpr(kSaveInvRms)
+        {
             store_tile(inv_rms_window, cast_tile<InvRmsDataType>(inv_rms));
+        }
 
         // reverse read x to reuse cache
         ck_tile::index_t stride_to_right_most_window =

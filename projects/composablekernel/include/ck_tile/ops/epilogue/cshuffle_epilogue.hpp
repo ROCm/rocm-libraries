@@ -273,9 +273,13 @@ struct CShuffleEpilogue
         constexpr index_t m_val = MPerXdl * MWave * NumMXdlPerWavePerShuffle;
         constexpr index_t n_val = NPerXdl * NWave * NumNXdlPerWavePerShuffle;
         if constexpr(kMPerBlock % m_val != 0 || kNPerBlock % n_val != 0)
+        {
             return std::make_tuple(MPerXdl * MWave, NPerXdl * NWave);
+        }
         else
+        {
             return std::make_tuple(m_val, n_val);
+        }
     }();
     static constexpr index_t MPerIterationShuffle = std::get<0>(MNPerIterationShuffle);
     static constexpr index_t NPerIterationShuffle = std::get<1>(MNPerIterationShuffle);

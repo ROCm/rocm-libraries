@@ -295,9 +295,13 @@ struct GroupedConvolutionForwardInvoker
             // Calculate grid: use total_blocks for split-image, or normal GridSize for regular
             const dim3 grids = [&]() {
                 if constexpr(EnableSplitImage)
+                {
                     return dim3(total_blocks, kargs.GemmBatch, kargs.n_splits);
+                }
                 else
+                {
                     return Kernel::GridSize(kargs);
+                }
             }();
             const dim3 blocks = Kernel::BlockSize();
 

@@ -78,7 +78,9 @@ struct array
     CK_TILE_HOST_DEVICE explicit constexpr array(Y c)
     {
         for(auto i = 0; i < size(); i++)
+        {
             data[i] = static_cast<value_type>(c);
+        }
     }
 
     // template <typename Y>
@@ -186,7 +188,9 @@ CK_TILE_HOST_DEVICE static void print(const array<T, N>& a)
     for(index_t i = 0; i < N; ++i)
     {
         if(i > 0)
+        {
             printf(", ");
+        }
         print(a[i]);
     }
     printf("]}");

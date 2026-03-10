@@ -758,7 +758,9 @@ struct FmhaFwdPagedKVKernel
                 {
                     std::cout << "{";
                     for(int i_batch = 0; i_batch < num_batches; i_batch++)
+                    {
                         std::cout << kargs.seqlen_k_ptr[i_batch] << ",";
+                    }
                     std::cout << "}";
                 }
             }
@@ -823,7 +825,9 @@ struct FmhaFwdPagedKVKernel
         bool has_padded_seqlen_k = false;
 
         if constexpr(kIsGroupMode)
+        {
             has_padded_seqlen_k = (kargs.seqlen_k_ptr != nullptr);
+        }
 
         if(has_padded_seqlen_k)
         {
@@ -1137,10 +1141,14 @@ struct FmhaFwdPagedKVKernel
             q_dram,
             [&]() {
                 if constexpr(FmhaPipeline::kQLoadOnce)
+                {
                     return make_tuple(number<FmhaPipeline::kM0>{},
                                       number<FmhaPipeline::kSubQKHeaddim>{});
+                }
                 else
+                {
                     return make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kK0>{});
+                }
             }(),
             {i_m0, 0});
 
@@ -1275,6 +1283,7 @@ struct FmhaFwdPagedKVKernel
 
         FmhaMask mask = [&]() {
             if constexpr(kHasMask)
+            {
                 return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                     kargs.window_size_left,
                     kargs.window_size_right,
@@ -1282,8 +1291,11 @@ struct FmhaFwdPagedKVKernel
                     kargs.seqlen_q,
                     kargs.seqlen_k,
                     kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+            }
             else
+            {
                 return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+            }
         }();
 
         // WA i_batch capture structure binding before c++20

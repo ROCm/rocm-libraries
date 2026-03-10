@@ -34,9 +34,13 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_tp"; // block per row
+        }
         else
+        {
             return "wpr_tp"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -66,10 +70,14 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
             make_tile_window(b_window_, Policy::template MakeABXBlockTileDistribution<Problem>());
         auto x_window = [&]() {
             if constexpr(kSaveX)
+            {
                 return make_tile_window(x_window_,
                                         Policy::template MakeABXBlockTileDistribution<Problem>());
+            }
             else
+            {
                 return x_window_;
+            }
         }();
         auto gamma_window = make_tile_window(
             gamma_window_, Policy::template MakeGammaBlockTileDistribution<Problem>());
@@ -111,7 +119,9 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
                 b);
 
             if constexpr(kSaveX)
+            {
                 store_tile(x_window, cast_tile<XDataType>(x));
+            }
 
             block_reduce2d(x, square_sum, reduce_square_sum_func);
             move_tile_window(x_window, {0, Block_N});
@@ -133,7 +143,9 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
             row_size % Block_N == 0 ? row_size - Block_N : row_size - row_size % Block_N;
 
         if constexpr(kSaveX)
+        {
             move_tile_window(x_window, {0, -Block_N});
+        }
         else
         {
             move_tile_window(a_window, {0, -Block_N});
@@ -147,7 +159,9 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
 
         // rmsnorm computation + absmax(threadwise reduce)
         if constexpr(kSaveX)
+        {
             __syncthreads();
+        }
 
         for(int iN = amd_wave_read_first_lane(0); iN < num_n_tile_iteration; ++iN)
         {
@@ -189,12 +203,18 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
                 x.get_tile_distribution().get_ys_to_d_descriptor().get_lengths().at(number<1>{});
             if constexpr(UseMax3 && std::is_same_v<ComputeDataType, float> &&
                          x_size_per_row % 2 == 0)
+            {
                 block_reduce2d(y, absmax, reduce_absmax3_func, sequence<1, 2>{});
+            }
             else
+            {
                 block_reduce2d(y, absmax, reduce_absmax_func);
+            }
 
             if constexpr(kSaveX)
+            {
                 move_tile_window(x_window, {0, -Block_N});
+            }
             else
             {
                 move_tile_window(a_window, {0, -Block_N});
@@ -218,7 +238,9 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
         // quantize y to qy
         // recompute rmsnorm, try to save y in the future
         if constexpr(kSaveX)
+        {
             move_tile_window(x_window, {0, Block_N});
+        }
         else
         {
             move_tile_window(a_window, {0, Block_N});
@@ -266,7 +288,9 @@ struct AddRmsnorm2dRdquantFwdPipelineThreePass
             store_tile(qy_window, qy);
 
             if constexpr(kSaveX)
+            {
                 move_tile_window(x_window, {0, Block_N});
+            }
             else
             {
                 move_tile_window(a_window, {0, Block_N});

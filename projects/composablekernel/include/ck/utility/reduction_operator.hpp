@@ -200,7 +200,9 @@ struct Max
                       "The data type is not supported by the Max accumulator!");
 
         if(a < b)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(bhalf_t& a, bhalf_t b) const
@@ -209,7 +211,9 @@ struct Max
         float b_ = type_convert<float>(b);
 
         if(a_ < b_)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(half_t& a, half_t b) const
@@ -218,7 +222,9 @@ struct Max
         float b_ = type_convert<float>(b);
 
         if(a_ < b_)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(f8_t& a, f8_t b) const
@@ -227,7 +233,9 @@ struct Max
         float b_ = type_convert<float>(b);
 
         if(a_ < b_)
+        {
             a = b;
+        }
     }
 
     template <typename T>
@@ -323,7 +331,9 @@ struct Min
                       "The data type is not supported by the Min accumulator!");
 
         if(a > b)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(bhalf_t& a, bhalf_t b) const
@@ -332,7 +342,9 @@ struct Min
         float b_ = type_convert<float>(b);
 
         if(a_ > b_)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(half_t& a, half_t b) const
@@ -341,7 +353,9 @@ struct Min
         float b_ = type_convert<float>(b);
 
         if(a_ > b_)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(f8_t& a, f8_t b) const
@@ -350,7 +364,9 @@ struct Min
         float b_ = type_convert<float>(b);
 
         if(a_ > b_)
+        {
             a = b;
+        }
     }
 
     template <typename T>
@@ -429,7 +445,9 @@ struct AMax
                       "The data type is not supported by the AMax accumulator!");
 
         if(a < b)
+        {
             a = b;
+        }
     }
 
     __host__ __device__ inline constexpr void operator()(f8_t& a, f8_t b) const
@@ -438,7 +456,9 @@ struct AMax
         float b_ = type_convert<float>(b);
 
         if(a_ < b_)
+        {
             a = b;
+        }
     }
 
     template <typename T>
@@ -475,7 +495,9 @@ constexpr T GetIdentityValueForInMemoryDataOperation(InMemoryDataOperationEnum o
     T result = ck::type_convert<T>(0.0f);
 
     if(operation == InMemoryDataOperationEnum::AtomicMax)
+    {
         result = ck::NumericLimits<T>::Lowest();
+    }
 
     return (result);
 };

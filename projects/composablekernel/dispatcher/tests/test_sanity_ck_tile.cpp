@@ -200,7 +200,9 @@ int test_non_zero_results()
     for(int i = 0; i < M * N; i++)
     {
         if(float(C[i]) != 0.0f)
+        {
             non_zero++;
+        }
         if(std::abs(float(C[i]) - expected) < 10.0f)
         {
             correct++;

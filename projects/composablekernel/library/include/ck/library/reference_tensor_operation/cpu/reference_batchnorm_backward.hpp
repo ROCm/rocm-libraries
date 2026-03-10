@@ -82,10 +82,13 @@ struct ReferenceBatchNormBwd : public device::DeviceBatchNormBwd<XDataType,
 
             if(std::any_of(
                    reduceDims.begin(), reduceDims.end(), [](int d) { return d < 0 || d >= Rank; }))
+            {
                 throw std::runtime_error("Invalid reduce dimensions!");
+            }
 
             // get invariant_dims[] and invariant_lengths[]
             for(int dim = 0, i = 0; dim < Rank; dim++)
+            {
                 if(std::none_of(
                        reduceDims.begin(), reduceDims.end(), [&](int d) { return d == dim; }))
                 {
@@ -93,6 +96,7 @@ struct ReferenceBatchNormBwd : public device::DeviceBatchNormBwd<XDataType,
                     invariant_lengths_[i] = xyLengths[dim];
                     i++;
                 };
+            }
 
             // get reduce_lengths_[]
             for(int j = 0, i = 0; j < NumBatchNormReduceDim; j++)
@@ -102,8 +106,12 @@ struct ReferenceBatchNormBwd : public device::DeviceBatchNormBwd<XDataType,
             };
 
             for(int i = 0; i < NumInvariantDim; i++)
+            {
                 if(invariant_lengths_[i] != bnScaleBiasMeanVarLengths_[i])
+                {
                     throw std::runtime_error("Invalid lengths parameters!");
+                }
+            }
 
             for(int j = 0, i = 0; j < NumInvariantDim; j++)
             {

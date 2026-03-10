@@ -53,7 +53,9 @@ bool profile_batchnorm_forward_impl(int do_verification,
         std::accumulate(inOutLengths.begin(), inOutLengths.end(), 1, std::multiplies<size_t>{});
 
     if(std::any_of(reduceDims.begin(), reduceDims.end(), [](int d) { return d < 0 || d >= Rank; }))
+    {
         throw std::runtime_error("Invalid reduce dimensions!");
+    }
 
     for(int dim = 0; dim < Rank; dim++)
     {
@@ -106,9 +108,13 @@ bool profile_batchnorm_forward_impl(int do_verification,
     else
     {
         if constexpr(ck::is_same_v<XDataType, int8_t>)
+        {
             x.GenerateTensorValue(GeneratorTensor_2<XDataType>{-5, 5}, num_thread);
+        }
         else
+        {
             x.GenerateTensorValue(GeneratorTensor_3<XDataType>{-1.0f, 1.0f}, num_thread);
+        }
     };
 
     if(do_verification)
@@ -330,8 +336,10 @@ bool profile_batchnorm_forward_impl(int do_verification,
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -348,9 +356,13 @@ bool profile_batchnorm_forward_impl(int do_verification,
             y_dev.FromDevice(y.mData.data());
 
             if constexpr(ck::is_same_v<YDataType, ck::bhalf_t>)
+            {
                 single_pass = check_err(y.mData, y_ref.mData, "y results", 1e-2, 1e-2);
+            }
             else
+            {
                 single_pass = check_err(y.mData, y_ref.mData, "y results", 4e-3, 4e-3);
+            }
 
             if(updateMovingAverage)
             {

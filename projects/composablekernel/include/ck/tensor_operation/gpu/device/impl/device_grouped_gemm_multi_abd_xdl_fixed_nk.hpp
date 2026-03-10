@@ -60,14 +60,18 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
         const index_t group_id = block_id / grid_size_grp;
 
         if(group_id >= group_count)
+        {
             return;
+        }
 
         const index_t M = gemm_desc_ptr[group_id].M;
         const index_t N = gemm_desc_ptr[group_id].N;
         const index_t K = gemm_desc_ptr[group_id].K;
 
         if(M == 0 || N == 0 || K == 0)
+        {
             return;
+        }
 
         const auto StrideAs = gemm_desc_ptr[group_id].StrideAs;
         const auto StrideBs = gemm_desc_ptr[group_id].StrideBs;

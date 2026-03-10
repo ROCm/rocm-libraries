@@ -82,9 +82,13 @@ struct ReferenceGemm : public device::BaseOperator
                         uint8_t i4x2 = arg.a_m_k_(m, k).data;
                         int8_t i4    = 0;
                         if(k % 2 == 1)
+                        {
                             i4 = (i4x2 >> 0) & 0xf;
+                        }
                         else
+                        {
                             i4 = (i4x2 >> 4) & 0xf;
+                        }
                         i4  = i4 - 8;
                         v_a = type_convert<ElementDataTypeA>(i4);
                     }
@@ -92,11 +96,15 @@ struct ReferenceGemm : public device::BaseOperator
                     {
                         // TODO: add support for ColMajor layout as well
                         if(k % 2 == 1)
+                        {
                             v_a = type_convert<ElementDataTypeA>(
                                 f4_t(arg.a_m_k_(m, k).template unpack<>(Number<1>{})));
+                        }
                         else
+                        {
                             v_a = type_convert<ElementDataTypeA>(
                                 f4_t(arg.a_m_k_(m, k).template unpack<>(Number<0>{})));
+                        }
                     }
                     else if constexpr(is_same_v<ADataType, f6x16_pk_t> ||
                                       is_same_v<ADataType, bf6x16_pk_t> ||
@@ -116,9 +124,13 @@ struct ReferenceGemm : public device::BaseOperator
                         uint8_t i4x2 = arg.b_k_n_(k, n).data;
                         int8_t i4    = 0;
                         if(k % 2 == 1)
+                        {
                             i4 = (i4x2 >> 0) & 0xf;
+                        }
                         else
+                        {
                             i4 = (i4x2 >> 4) & 0xf;
+                        }
                         i4  = i4 - 8;
                         v_b = type_convert<ElementDataTypeB>(i4);
                     }
@@ -126,11 +138,15 @@ struct ReferenceGemm : public device::BaseOperator
                     {
                         // TODO: add support for RowMajor layout as well
                         if(k % 2 == 1)
+                        {
                             v_b = type_convert<ElementDataTypeB>(
                                 f4_t(arg.b_k_n_(k, n).template unpack<>(Number<1>{})));
+                        }
                         else
+                        {
                             v_b = type_convert<ElementDataTypeB>(
                                 f4_t(arg.b_k_n_(k, n).template unpack<>(Number<0>{})));
+                        }
                     }
                     else if constexpr(is_same_v<BDataType, f6x16_pk_t> ||
                                       is_same_v<BDataType, bf6x16_pk_t> ||

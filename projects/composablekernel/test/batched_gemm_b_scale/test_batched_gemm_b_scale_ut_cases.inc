@@ -16,7 +16,9 @@ TYPED_TEST(TestBatchedGemmBScale_MK_NK, SmallM)
     constexpr int NBatches = 10;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC, NBatches);
+    }
 }
 
 TYPED_TEST(TestBatchedGemmBScale_MK_NK, MidLargeM)
@@ -32,7 +34,9 @@ TYPED_TEST(TestBatchedGemmBScale_MK_NK, MidLargeM)
     constexpr int NBatches = 7;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC, NBatches);
+    }
 }
 
 TYPED_TEST(TestBatchedGemmBScale_MK_NK, Regular)
@@ -48,5 +52,7 @@ TYPED_TEST(TestBatchedGemmBScale_MK_NK, Regular)
     constexpr int NBatches = 3;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC, NBatches);
+    }
 }

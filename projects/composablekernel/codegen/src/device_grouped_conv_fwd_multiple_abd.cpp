@@ -26,7 +26,9 @@ std::vector<Solution> Problem_Conv_Fwd::GetSolutions(const std::string& arch,
                                                      const std::string& epilogue) const
 {
     if(get_xdlop_archs().count(arch) == 0)
+    {
         return {};
+    }
     auto ops = ck::host::conv::Operation_Conv_Fwd_Xdl_Cshuffle::CreateOperations(
         *this, prologue, epilogue);
     std::vector<Solution> result;

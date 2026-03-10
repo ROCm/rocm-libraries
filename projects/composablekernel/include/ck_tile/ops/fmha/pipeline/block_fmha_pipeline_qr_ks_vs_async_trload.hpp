@@ -82,9 +82,13 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
 
     static constexpr index_t kAlignmentOacc = Policy::template GetAlignmentO<Problem>();
@@ -96,7 +100,9 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kQKHeaddim <= 32)
@@ -110,9 +116,13 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             else if constexpr(kQKHeaddim <= 128)
             {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kM0 >= 256)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -199,9 +209,13 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
                 set_tile(m, sink_v * C_LOG2E * scale_s);
+            }
             else
+            {
                 set_tile(m, sink_v * C_LOG2E);
+            }
 #else
             set_tile(m, sink_v);
 #endif
@@ -637,7 +651,9 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -719,9 +735,13 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
                 set_tile(m, sink_v * C_LOG2E * scale_s);
+            }
             else
+            {
                 set_tile(m, sink_v * C_LOG2E);
+            }
 #else
             set_tile(m, sink_v);
 #endif
@@ -1195,7 +1215,9 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

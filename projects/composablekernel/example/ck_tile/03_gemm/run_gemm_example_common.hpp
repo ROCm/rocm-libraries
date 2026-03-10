@@ -31,9 +31,13 @@ int run_gemm_example_prec_type(std::string a_layout,
 
     auto string_to_layout = [](const std::string& layout) -> LayoutVariant {
         if(layout == "R")
+        {
             return Row{};
+        }
         if(layout == "C")
+        {
             return Col{};
+        }
         throw std::runtime_error("Unsupported layout: " + layout);
     };
 

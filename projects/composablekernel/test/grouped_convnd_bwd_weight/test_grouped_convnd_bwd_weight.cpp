@@ -83,7 +83,9 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
                             instance_index);
                     pass = pass && success;
                     if(!success)
+                    {
                         std::cout << "Case " << param << " failed!" << std::endl;
+                    }
                 }
             }
         }

@@ -104,7 +104,9 @@ inline void PutN(Stream& stream, Ch c, size_t n)
 {
     PutReserve(stream, n);
     for(size_t i = 0; i < n; i++)
+    {
         PutUnsafe(stream, c);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

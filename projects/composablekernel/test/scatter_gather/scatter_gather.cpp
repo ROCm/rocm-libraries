@@ -255,7 +255,9 @@ int main()
             if(!is_ok)
             {
                 if(i_c == 0)
+                {
                     printf("(%d)pixel: %dx%d -> %d\n", i_r, p.r, p.c, dst_idx[i_r]);
+                }
                 err_cnt++;
             }
         }

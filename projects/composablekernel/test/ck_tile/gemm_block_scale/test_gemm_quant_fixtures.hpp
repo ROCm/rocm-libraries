@@ -838,6 +838,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
 
         // Run reference BQuant implementation
         if constexpr(std::is_same_v<QDataType, ck_tile::e8m0_t>)
+        {
             ck_tile::reference_mx_gemm_bquant<ADataType,
                                               QDataType,
                                               BDataType,
@@ -846,7 +847,9 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                               QuantGroupSize,
                                               BLayout,
                                               false>(a_m_k, bq_bqk_bqn, b_k_n, c_m_n_host_ref);
+        }
         else
+        {
             ck_tile::reference_gemm_quant<ADataType,
                                           QDataType,
                                           BDataType,
@@ -854,6 +857,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                           CDataType,
                                           QuantGroupSize,
                                           false>(a_m_k, bq_bqk_bqn, b_k_n, c_m_n_host_ref);
+        }
 
         // Get device result
         ck_tile::HostTensor<CDataType> c_m_n_dev_result(
@@ -1238,13 +1242,21 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
 
         constexpr auto base_gemm_pipeline = []() {
             if constexpr(eight_warps)
+            {
                 return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+            }
             else if constexpr(PreshuffleB)
+            {
                 return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
+            }
             else if constexpr(IS_FP8BLOCKSCALE)
+            {
                 return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+            }
             else
+            {
                 return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+            }
         }();
         using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
 

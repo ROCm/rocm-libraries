@@ -283,22 +283,34 @@ struct CK_PRINT_X_<str_literal<PREFIXChars...>, str_literal<SUFFIXChars...>>
                 sequence_any_of(TopDimensionHiddenIds{}, [](auto t) { return t == I; });
             constexpr auto d = make_str_literal("%d");
             if constexpr(is_bottom && is_top)
+            {
                 return make_str_literal("_^") + d;
+            }
             else if constexpr(is_bottom)
+            {
                 return make_str_literal("_") + d;
+            }
             else if constexpr(is_top)
+            {
                 return make_str_literal("^") + d;
+            }
             else
+            {
                 return d;
+            }
         }
         template <index_t N = NDimHidden>
         CK_TILE_HOST_DEVICE static constexpr auto get_hidden_format()
         {
             constexpr auto sep = make_str_literal(" ");
             if constexpr(N == 0)
+            {
                 return str_literal<>{};
+            }
             else
+            {
                 return get_hidden_format<N - 1>() + sep + get_hidden_format_i<N - 1>();
+            }
         }
         CK_TILE_HOST_DEVICE static constexpr auto get_format()
         {
@@ -327,17 +339,25 @@ struct CK_PRINT_X_<str_literal<PREFIXChars...>, str_literal<SUFFIXChars...>>
     {
         constexpr auto fmt_tid = make_str_literal("tid %03d: ");
         if constexpr(sizeof...(PREFIXChars) == 0)
+        {
             return fmt_tid;
+        }
         else
+        {
             return fmt_tid + make_str_literal(" ") + str_literal<PREFIXChars...>{};
+        }
     }
     CK_TILE_HOST_DEVICE static constexpr auto get_suffix()
     {
         constexpr auto lf = make_str_literal("\n");
         if constexpr(sizeof...(SUFFIXChars) == 0)
+        {
             return lf;
+        }
         else
+        {
             return str_literal<SUFFIXChars...>{} + lf;
+        }
     }
 
     template <char... FMTChars, typename TArgs, index_t... Is, typename... Args>

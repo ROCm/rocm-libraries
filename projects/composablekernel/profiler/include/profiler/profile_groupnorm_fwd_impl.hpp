@@ -35,7 +35,9 @@ bool profile_groupnorm_impl(int do_verification,
     using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
     if(length.size() != 5)
+    {
         return false;
+    }
 
     index_t N = length[0];
     index_t G = length[3];
@@ -131,6 +133,7 @@ bool profile_groupnorm_impl(int do_verification,
 
     auto f_get_argument = [&](auto& inst_ptr) {
         if constexpr(SaveMeanInvStd)
+        {
             return inst_ptr->MakeArgumentPointer(
                 length,
                 std::vector<ck::index_t>{x.mDesc.GetStrides().begin(), x.mDesc.GetStrides().end()},
@@ -150,7 +153,9 @@ bool profile_groupnorm_impl(int do_verification,
                 save_mean_dev.GetDeviceBuffer(),
                 save_inv_std_dev.GetDeviceBuffer(),
                 PassThrough{});
+        }
         else
+        {
             return inst_ptr->MakeArgumentPointer(
                 length,
                 std::vector<ck::index_t>{x.mDesc.GetStrides().begin(), x.mDesc.GetStrides().end()},
@@ -170,6 +175,7 @@ bool profile_groupnorm_impl(int do_verification,
                 nullptr,
                 nullptr,
                 PassThrough{});
+        }
     };
 
     for(auto& inst_ptr : instance_ptrs)
@@ -204,14 +210,18 @@ bool profile_groupnorm_impl(int do_verification,
                                 y.mDesc.GetElementSize() * sizeof(YDataType);
 
         if constexpr(SaveMeanInvStd)
+        {
             num_bytes += save_mean.mDesc.GetElementSpaceSize() * sizeof(SaveMeanInvStdDataType) +
                          save_inv_std.mDesc.GetElementSpaceSize() * sizeof(SaveMeanInvStdDataType);
+        }
 
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -255,7 +265,9 @@ bool profile_groupnorm_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

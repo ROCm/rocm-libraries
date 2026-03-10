@@ -683,7 +683,9 @@ struct DeviceConv2dBwdDataXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K
                 }
             }
             if(!valid)
+            {
                 return false;
+            }
         }
         return true;
     }

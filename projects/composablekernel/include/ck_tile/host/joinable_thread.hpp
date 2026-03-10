@@ -24,7 +24,9 @@ struct joinable_thread : std::thread
     ~joinable_thread()
     {
         if(this->joinable())
+        {
             this->join();
+        }
     }
 };
 
@@ -36,7 +38,9 @@ inline unsigned int get_available_cpu_cores()
     {
         unsigned int cpu_count = CPU_COUNT(&cpu_set);
         if(cpu_count > 0)
+        {
             return cpu_count;
+        }
     }
 #endif
     // Fallback if sched_getaffinity unavailable or fails

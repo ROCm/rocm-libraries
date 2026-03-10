@@ -383,7 +383,9 @@ struct DeviceNormalizationFwdSplitKImpl : public DeviceNormalizationFwd<XDataTyp
 
                 // we want the kGridSize_ be not more than 128
                 if(testKGridSize <= 128)
+                {
                     break;
+                }
 
                 ++numBlockTileIteration_;
             };
@@ -425,9 +427,13 @@ struct DeviceNormalizationFwdSplitKImpl : public DeviceNormalizationFwd<XDataTyp
                                                  K_MeanVarCountBlockTileSize>(MRaw_, kGridSize_);
 
             if constexpr(NumInvariantDim == 0)
+            {
                 invariant_lowest_length_ = 1;
+            }
             else
+            {
                 invariant_lowest_length_ = Lengths_[NumInvariantDim - 1];
+            }
         }
 
         ComputeDataType epsilon_;
@@ -480,7 +486,9 @@ struct DeviceNormalizationFwdSplitKImpl : public DeviceNormalizationFwd<XDataTyp
         {
             if(arg.p_workspace_mean_ == nullptr || arg.p_workspace_var_ == nullptr ||
                arg.p_workspace_count_ == nullptr)
+            {
                 throw std::runtime_error("wrong! WorkSpace pointer has not been set");
+            }
 
             auto kernel1 = kernel_normalizationSplitK1st<GridwiseWelford,
                                                          XDataType,
@@ -617,68 +625,100 @@ struct DeviceNormalizationFwdSplitKImpl : public DeviceNormalizationFwd<XDataTyp
             else
             {
                 if(p_arg_->xStrides_[NumInvariantDim - 1] != 1)
+                {
                     return false;
+                }
 
                 if(p_arg_->invariant_lowest_length_ % XSrcVectorSize != 0)
+                {
                     return false;
+                }
 
                 if(p_arg_->invariant_lowest_length_ % YDstVectorSize != 0)
+                {
                     return false;
+                }
             };
         }
         else
         {
             if(p_arg_->xStrides_[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % XSrcVectorSize != 0)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % YDstVectorSize != 0)
+            {
                 return false;
+            }
         };
 
         // if fastest dim is not reduced
         if constexpr(GammaSrcVectorDim == 0)
         {
             if(p_arg_->gammaStrides_[NumInvariantDim - 1] != 1)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % GammaSrcVectorSize != 0)
+            {
                 return false;
+            }
         }
         else // if fastest dim is reduced
         {
             if(p_arg_->gammaStrides_[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % GammaSrcVectorSize != 0)
+            {
                 return false;
+            }
         }
 
         // if fastest dim is not reduced
         if constexpr(BetaSrcVectorDim == 0)
         {
             if(p_arg_->betaStrides_[NumInvariantDim - 1] != 1)
+            {
                 return false;
+            }
 
             if(p_arg_->invariant_lowest_length_ % BetaSrcVectorSize != 0)
+            {
                 return false;
+            }
         }
         else // if fastest dim is reduced
         {
             if(p_arg_->betaStrides_[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % BetaSrcVectorSize != 0)
+            {
                 return false;
+            }
         }
 
         if(p_arg_->kGridSize_ <= 1)
+        {
             return false;
+        }
 
         if(p_arg_->invariant_lowest_length_ % SaveMeanInvStdDstVectorSize != 0)
+        {
             return false;
+        }
 
         return true;
     };
@@ -704,7 +744,9 @@ struct DeviceNormalizationFwdSplitKImpl : public DeviceNormalizationFwd<XDataTyp
         if(lengths.size() != Rank || xStrides.size() != Rank || gammaStrides.size() != Rank ||
            betaStrides.size() != Rank || yStrides.size() != Rank ||
            saveMeanStrides.size() != NumInvariantDim || saveInvStdStrides.size() != NumInvariantDim)
+        {
             throw std::runtime_error("dimension is incorrect");
+        }
 
         return std::make_unique<Argument>(lengths,
                                           xStrides,

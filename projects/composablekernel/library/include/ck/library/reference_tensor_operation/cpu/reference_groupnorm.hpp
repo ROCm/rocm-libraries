@@ -168,7 +168,9 @@ struct ReferenceGroupnorm : public device::BaseOperator
     {
         const Argument* p_arg_ = dynamic_cast<const Argument*>(p_arg);
         if(p_arg_->lengths_.size() != 5)
+        {
             return false;
+        }
 
         return true;
     }

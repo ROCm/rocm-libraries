@@ -56,7 +56,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     ck_tile::index_t n      = arg_parser.get_int("n");
     ck_tile::index_t stride = arg_parser.get_int("stride");
     if(stride < 0)
+    {
         stride = n;
+    }
     float epsilon         = arg_parser.get_float("e");
     std::string data_type = arg_parser.get_str("prec");
     int do_validation     = arg_parser.get_int("v");
@@ -268,7 +270,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     const std::string data_type = arg_parser.get_str("prec");
     if(data_type == "fp16")

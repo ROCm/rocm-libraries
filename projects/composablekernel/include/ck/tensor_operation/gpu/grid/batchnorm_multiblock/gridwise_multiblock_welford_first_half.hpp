@@ -228,7 +228,9 @@ struct GridwiseMultiblockWelfordFirstHalf
 
         static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
             if constexpr(I > 0)
+            {
                 block_sync_lds();
+            }
 
             welford_count_thread_buf(I) = threadwise_welford.cur_count_;
             BlockwiseWelford::Run(

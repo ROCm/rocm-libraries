@@ -356,27 +356,39 @@ struct DeviceNormalizationBwdDataImpl : public DeviceNormalizationBwdData<DYData
                               const std::vector<index_t>& strides)
     {
         if constexpr(SrcVectorSize == 1)
+        {
             return true;
+        }
 
         // Fastest dimension is not reduced
         if constexpr(SrcVectorDim == 0)
         {
             if constexpr(NumInvariantDim == 0)
+            {
                 return false;
+            }
 
             if(strides[NumInvariantDim - 1] != 1)
+            {
                 return false;
+            }
 
             if(lengths[NumInvariantDim - 1] % SrcVectorSize != 0)
+            {
                 return false;
+            }
         }
         else // Fastest dimension is reduced
         {
             if(strides[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(lengths[Rank - 1] % SrcVectorSize != 0)
+            {
                 return false;
+            }
         };
 
         return true;
@@ -421,7 +433,9 @@ struct DeviceNormalizationBwdDataImpl : public DeviceNormalizationBwdData<DYData
         if(lengths.size() != Rank || dyStrides.size() != Rank || xStrides.size() != Rank ||
            gammaStrides.size() != Rank || meanStrides.size() != Rank ||
            invStdStrides.size() != Rank || dxStrides.size() != Rank)
+        {
             throw std::runtime_error("dimension is incorrect");
+        }
 
         return std::make_unique<Argument>(lengths,
                                           dyStrides,

@@ -56,9 +56,13 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
 
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr auto SrcScalarPerVector = Number<SrcScalarPerVector_ / PackedSize>{};
@@ -181,19 +185,25 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
                 if constexpr(is_detected<is_pack8_invocable_t, decltype(src_element_op_)>::value)
                 {
                     if constexpr(decltype(src_element_op_)::is_pack8_invocable)
+                    {
                         return math::min(8, SrcScalarPerVector);
+                    }
                 }
                 else if constexpr(is_detected<is_pack4_invocable_t,
                                               decltype(src_element_op_)>::value)
                 {
                     if constexpr(decltype(src_element_op_)::is_pack4_invocable)
+                    {
                         return math::min(4, SrcScalarPerVector);
+                    }
                 }
                 else if constexpr(is_detected<is_pack2_invocable_t,
                                               decltype(src_element_op_)>::value)
                 {
                     if constexpr(decltype(src_element_op_)::is_pack2_invocable)
+                    {
                         return math::min(2, SrcScalarPerVector);
+                    }
                 }
                 else
                 {

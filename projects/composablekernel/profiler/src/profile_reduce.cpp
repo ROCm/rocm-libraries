@@ -43,7 +43,9 @@ static void check_reduce_dims(const int rank, const std::vector<int>& reduceDims
     for(auto dim : reduceDims)
     {
         if(dim < 0 || dim >= rank)
+        {
             throw std::runtime_error("Invalid dimension index specified for Reducing");
+        }
     };
 
     unsigned int flag = 0;
@@ -51,7 +53,9 @@ static void check_reduce_dims(const int rank, const std::vector<int>& reduceDims
     for(auto dim : reduceDims)
     {
         if(flag & (0x1 << dim))
+        {
             throw std::runtime_error("All toReduce dimensions should be different!");
+        }
         flag = flag | (0x1 << dim);
     };
 };
@@ -138,83 +142,115 @@ class ReduceProfilerArgs
         {
             ch = getopt_long(argc, argv, "D:R:O:C:W:N:I:S:v:o:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inLengths = getTypeValuesFromString<size_t>(optarg);
                 break;
             case 'R':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 reduceDims = getTypeValuesFromString<int>(optarg);
                 break;
             case 'O':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 reduceOp = static_cast<ReduceTensorOp>(std::atoi(optarg));
                 break;
             case 'C':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 compTypeId        = static_cast<ck::DataTypeEnum>(std::atoi(optarg));
                 compType_assigned = true;
                 break;
             case 'W':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 outTypeId        = static_cast<ck::DataTypeEnum>(std::atoi(optarg));
                 outType_assigned = true;
                 break;
             case 'N':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 nanOpt = std::atoi(optarg);
                 break;
             case 'I':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 indicesOpt = std::atoi(optarg);
                 break;
             case 'S':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 scales = getTypeValuesFromString<float>(optarg);
 
                 if(scales.size() != 2)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
             case 'o':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_dumpout = static_cast<bool>(std::atoi(optarg));
                 break;
             case '?':
                 if(std::string(long_options[option_index].name) == "half")
+                {
                     use_half = true;
+                }
                 else if(std::string(long_options[option_index].name) == "double")
+                {
                     use_double = true;
+                }
                 else if(std::string(long_options[option_index].name) == "int8")
+                {
                     use_int8 = true;
+                }
                 else if(std::string(long_options[option_index].name) == "bf16")
+                {
                     use_bf16 = true;
+                }
                 else if(std::string(long_options[option_index].name) == "help")
                 {
                     show_usage(argv[0]);
@@ -230,7 +266,9 @@ class ReduceProfilerArgs
         };
 
         if(optind + 2 > argc)
+        {
             throw std::runtime_error("Invalid cmd-line arguments, more argumetns are needed!");
+        }
 
         init_method = std::atoi(argv[optind++]);
         time_kernel = static_cast<bool>(std::atoi(argv[optind]));
@@ -263,26 +301,36 @@ int profile_reduce(int argc, char* argv[])
     ReduceProfilerArgs args;
 
     if(args.processArgs(argc, argv) < 0)
+    {
         return (-1);
+    }
 
     int rank = args.inLengths.size();
 
     check_reduce_dims(rank, args.reduceDims);
 
     if(args.reduceOp == ReduceTensorOp::MUL || args.reduceOp == ReduceTensorOp::NORM1)
+    {
         throw std::runtime_error("MUL and NORM1 are not supported by composable kernel!");
+    }
 
     if(args.use_half)
     {
         if(!args.compType_assigned)
+        {
             args.compTypeId = DataTypeEnum::Half;
+        }
 
         if(args.outType_assigned &&
            (args.outTypeId != DataTypeEnum::Half && args.outTypeId != DataTypeEnum::Float))
+        {
             args.outTypeId = DataTypeEnum::Float;
+        }
 
         if(!args.outType_assigned)
+        {
             args.outTypeId = DataTypeEnum::Half;
+        }
 
         if(args.compTypeId == DataTypeEnum::Half)
         {
@@ -314,7 +362,9 @@ int profile_reduce(int argc, char* argv[])
                                                                args.scales[1]);
         }
         else
+        {
             throw std::runtime_error("Invalid compType assignment!");
+        }
     }
     else if(args.use_double)
     {
@@ -333,14 +383,20 @@ int profile_reduce(int argc, char* argv[])
     else if(args.use_int8)
     {
         if(!args.compType_assigned)
+        {
             args.compTypeId = DataTypeEnum::Int8;
+        }
 
         if(args.outType_assigned &&
            (args.outTypeId != DataTypeEnum::Int8 && args.outTypeId != DataTypeEnum::Int32))
+        {
             args.outTypeId = DataTypeEnum::Int32;
+        }
 
         if(!args.outType_assigned)
+        {
             args.outTypeId = DataTypeEnum::Int8;
+        }
 
         if(args.compTypeId == DataTypeEnum::Int8)
         {
@@ -371,16 +427,22 @@ int profile_reduce(int argc, char* argv[])
                                                          args.scales[1]);
         }
         else
+        {
             throw std::runtime_error("Invalid compType assignment!");
+        }
     }
     else if(args.use_bf16)
     {
         if(args.outType_assigned &&
            (args.outTypeId != DataTypeEnum::BFloat16 && args.outTypeId != DataTypeEnum::Float))
+        {
             args.outTypeId = DataTypeEnum::Float;
+        }
 
         if(!args.outType_assigned)
+        {
             args.outTypeId = DataTypeEnum::BFloat16;
+        }
 
         profile_reduce_impl<ck::bhalf_t, float, ck::bhalf_t>(args.do_verification,
                                                              args.init_method,
@@ -425,7 +487,9 @@ int profile_reduce(int argc, char* argv[])
                                                       args.scales[1]);
         }
         else
+        {
             throw std::runtime_error("Invalid compType assignment!");
+        }
     };
 
     return (0);

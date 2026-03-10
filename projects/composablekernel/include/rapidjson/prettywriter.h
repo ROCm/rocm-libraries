@@ -215,7 +215,9 @@ class PrettyWriter
         (void)ret;
         RAPIDJSON_ASSERT(ret == true);
         if(Base::level_stack_.Empty()) // end of json text
+        {
             Base::Flush();
+        }
         return true;
     }
 
@@ -242,7 +244,9 @@ class PrettyWriter
         (void)ret;
         RAPIDJSON_ASSERT(ret == true);
         if(Base::level_stack_.Empty()) // end of json text
+        {
             Base::Flush();
+        }
         return true;
     }
 
@@ -286,7 +290,9 @@ class PrettyWriter
                 {
                     Base::os_->Put(','); // add comma if it is not the first element in array
                     if(formatOptions_ & kFormatSingleLineArray)
+                    {
                         Base::os_->Put(' ');
+                    }
                 }
 
                 if(!(formatOptions_ & kFormatSingleLineArray))
@@ -311,14 +317,20 @@ class PrettyWriter
                     }
                 }
                 else
+                {
                     Base::os_->Put('\n');
+                }
 
                 if(level->valueCount % 2 == 0)
+                {
                     WriteIndent();
+                }
             }
             if(!level->inArray && level->valueCount % 2 == 0)
+            {
                 RAPIDJSON_ASSERT(
                     type == kStringType); // if it's in object, then even number should be a name
+            }
             level->valueCount++;
         }
         else

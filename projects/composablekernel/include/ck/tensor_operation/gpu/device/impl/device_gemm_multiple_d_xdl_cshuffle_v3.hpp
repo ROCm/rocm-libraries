@@ -211,10 +211,12 @@ struct DeviceGemmMultiD_Xdl_CShuffle_V3 : public DeviceGemmMultipleDSplitK<ALayo
                         rotating_mem.Next();
                         // clear c mem
                         if(arg_.KBatch > 1)
+                        {
                             hipGetErrorString(hipMemsetAsync(arg_.p_c_grid,
                                                              0,
                                                              arg_.M * arg_.N * sizeof(CDataType),
                                                              stream_config.stream_id_));
+                        }
                     };
 
                     ave_time = ck::utility::launch_and_time_kernel_with_preprocess<false>(
@@ -229,10 +231,12 @@ struct DeviceGemmMultiD_Xdl_CShuffle_V3 : public DeviceGemmMultipleDSplitK<ALayo
                 else
                 {
                     if(arg.KBatch > 1)
+                    {
                         hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
                                                          0,
                                                          arg.M * arg.N * sizeof(CDataType),
                                                          stream_config.stream_id_));
+                    }
 
                     ave_time = launch_and_time_kernel(
                         stream_config, kernel, dim3(gdx, gdy, gdz), dim3(BlockSize), 0, arg);

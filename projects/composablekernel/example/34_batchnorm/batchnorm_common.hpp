@@ -58,11 +58,13 @@ get_invariant_dims(const std::array<int, NumReduceDim>& reduceDims)
     // collect invariant dimensions
     int dim = 0;
     for(int i = 0; i < Rank; i++)
+    {
         if((reduceFlag & (1 << i)) == 0)
         {
             invariantDims[dim] = i;
             dim++;
         };
+    }
 
     return invariantDims;
 };

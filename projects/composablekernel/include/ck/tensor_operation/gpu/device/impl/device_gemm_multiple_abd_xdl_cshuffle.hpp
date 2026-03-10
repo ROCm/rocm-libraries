@@ -175,10 +175,12 @@ struct DeviceGemmMultipleABD_Xdl_CShuffle : public DeviceGemmMultipleABD<AsLayou
 
             const auto Run = [&](const auto& kernel) {
                 if(arg.KBatch > 1)
+                {
                     hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
                                                      0,
                                                      arg.M * arg.N * sizeof(CDataType),
                                                      stream_config.stream_id_));
+                }
 
                 ave_time = launch_and_time_kernel(
                     stream_config, kernel, dim3(gdx, gdy, gdz), dim3(BlockSize), 0, arg);

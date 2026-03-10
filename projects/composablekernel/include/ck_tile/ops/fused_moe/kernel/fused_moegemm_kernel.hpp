@@ -253,7 +253,9 @@ struct FusedMoeGemmKernel
             //     static_cast<int>(blockIdx.y), num_sorted_tiles, sorted_tile_id, sorted_tile_id >=
             //     num_sorted_tiles? 1 : 0, intermediate_tile_id);
             if(sorted_tile_id >= num_sorted_tiles)
+            {
                 return;
+            }
 
             Pipeline{}(kargs, smem, sorted_tile_id, intermediate_tile_id);
         }
@@ -280,7 +282,9 @@ struct FusedMoeGemmKernel
             const auto [sorted_tile_id, intermediate_tile_id] =
                 Partitioner{}(num_sorted_tiles, kargs.intermediate_size);
             if(sorted_tile_id >= num_sorted_tiles)
+            {
                 return;
+            }
 
             const IndexDataType expert_id =
                 amd_wave_read_first_lane(reinterpret_cast<const IndexDataType*>(

@@ -70,6 +70,7 @@ class TestSoftmax : public ::testing::Test
         if constexpr(Rank == 3)
         {
             if(reduce_dims.size() == 1)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 1>(
                         verify_,
@@ -82,7 +83,9 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
             else if(reduce_dims.size() == 2)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 2>(
                         verify_,
@@ -95,7 +98,9 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
             else if(reduce_dims.size() == 3)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 3>(
                         verify_,
@@ -108,10 +113,12 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
         }
         else if constexpr(Rank == 4)
         {
             if(reduce_dims.size() == 1)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 1>(
                         verify_,
@@ -124,7 +131,9 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
             else if(reduce_dims.size() == 2)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 2>(
                         verify_,
@@ -137,7 +146,9 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
             else if(reduce_dims.size() == 3)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 3>(
                         verify_,
@@ -150,7 +161,9 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
             else if(reduce_dims.size() == 4)
+            {
                 pass = ck::profiler::
                     profile_softmax_impl<InDataType, AccDataType, OutDataType, Rank, 4>(
                         verify_,
@@ -163,6 +176,7 @@ class TestSoftmax : public ::testing::Test
                         alpha,
                         beta,
                         instance_index);
+            }
         };
 
         EXPECT_TRUE(pass);

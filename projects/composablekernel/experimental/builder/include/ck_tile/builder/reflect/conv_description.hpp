@@ -85,11 +85,17 @@ class ConvDescription : public Description
                  "×",
                  traits_.tile_dims.k);
         if(traits_.gemm_padding)
+        {
             algo.add("Gemm padding: ", *traits_.gemm_padding);
+        }
         if(traits_.do_pad_gemm_m)
+        {
             algo.add("Do Pad Gemm M: ", *traits_.do_pad_gemm_m);
+        }
         if(traits_.do_pad_gemm_n)
+        {
             algo.add("Do Pad Gemm N: ", *traits_.do_pad_gemm_n);
+        }
         algo.add("Convolution specialization: ", traits_.conv_specialization);
         // Pipeline section
         algo.add("Pipeline version: ", traits_.pipeline_version);
@@ -192,15 +198,23 @@ class ConvDescription : public Description
         cTile.add("Vector access (GMEM write) instruction size: ",
                   traits_.c_tile_transfer.scalar_per_vector);
         if(traits_.num_gemm_k_prefetch_stage)
+        {
             algo.add("Num gemm k prefetch stage: ", *traits_.num_gemm_k_prefetch_stage);
+        }
         if(traits_.max_transpose_transfer_src_scalar_per_vector)
+        {
             algo.add("Max Transpose transfer src scalar per vector: ",
                      *traits_.max_transpose_transfer_src_scalar_per_vector);
+        }
         if(traits_.max_transpose_transfer_dst_scalar_per_vector)
+        {
             algo.add("Max Transpose dst scalar per vector: ",
                      *traits_.max_transpose_transfer_dst_scalar_per_vector);
+        }
         if(traits_.num_groups_to_merge)
+        {
             algo.add("Num groups to merge: ", *traits_.num_groups_to_merge);
+        }
 
         return root.getString();
     }

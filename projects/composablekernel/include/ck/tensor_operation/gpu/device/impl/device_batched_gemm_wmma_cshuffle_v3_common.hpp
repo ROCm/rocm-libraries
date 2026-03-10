@@ -275,6 +275,7 @@ struct DeviceBatchedGemm_Wmma_CShuffleV3_Common
                         rotating_mem.Next();
                         // clear c mem
                         if(arg_.KBatch > 1)
+                        {
                             // Note: we multiply by batch since we want to clear the C matrix for
                             // the whole batch. Untested since we don't have k batching ATM.
                             // Note: This seems incorrect for non-contiguous memory layouts for C
@@ -284,6 +285,7 @@ struct DeviceBatchedGemm_Wmma_CShuffleV3_Common
                                                0,
                                                arg_.Batch * arg_.M * arg_.N * sizeof(CDataType),
                                                stream_config.stream_id_));
+                        }
                     };
 
                     ave_time = ck::utility::launch_and_time_kernel_with_preprocess<false>(
@@ -301,6 +303,7 @@ struct DeviceBatchedGemm_Wmma_CShuffleV3_Common
                     auto clear_workspace = [&]() {
                         // clear c mem
                         if(arg.KBatch > 1)
+                        {
                             // Note: we multiply by batch since we want to clear the C matrix for
                             // the whole batch. Untested since we don't have k batching ATM.
                             // Note: This seems incorrect for non-contiguous memory layouts for C
@@ -310,6 +313,7 @@ struct DeviceBatchedGemm_Wmma_CShuffleV3_Common
                                                0,
                                                arg.Batch * arg.M * arg.N * sizeof(CDataType),
                                                stream_config.stream_id_));
+                        }
                     };
 
                     ave_time = ck::utility::launch_and_time_kernel_with_preprocess<false>(

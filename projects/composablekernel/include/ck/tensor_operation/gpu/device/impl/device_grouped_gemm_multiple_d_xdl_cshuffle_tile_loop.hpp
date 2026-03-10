@@ -116,7 +116,9 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                 group_id++;
 
                 if(group_id >= group_count)
+                {
                     return;
+                }
 
                 M = gemm_desc_ptr[group_id].M;
                 N = gemm_desc_ptr[group_id].N;

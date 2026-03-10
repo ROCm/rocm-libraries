@@ -240,11 +240,17 @@ constexpr builder::ConvDirection conv_direction()
     using InstTraits = InstanceTraits<Instance>;
 
     if constexpr(requires { &InstTraits::kConvForwardSpecialization; })
+    {
         return builder::ConvDirection::FORWARD;
+    }
     else if constexpr(requires { &InstTraits::kConvBwdDataSpecialization; })
+    {
         return builder::ConvDirection::BACKWARD_DATA;
+    }
     else if constexpr(requires { &InstTraits::kConvBwdWeightSpecialization; })
+    {
         return builder::ConvDirection::BACKWARD_WEIGHT;
+    }
     else
     {
         report_unsupported_conv_direction_error<Instance>();
@@ -378,41 +384,73 @@ constexpr auto conv_layout()
     {
     case 1:
         if constexpr(layouts_are<A, B, E, ctl::GNWC, ctl::GKXC, ctl::GNWK>)
+        {
             return layouts(GNWC, GKXC, GNWK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::G_NW_C, ctl::G_K_X_C, ctl::G_NW_K>)
+        {
             return layouts(GNWC, GKXC, GNWK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NWGC, ctl::GKXC, ctl::NWGK>)
+        {
             return layouts(NWGC, GKXC, NWGK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NGCW, ctl::GKXC, ctl::NGKW>)
+        {
             return layouts(NGCW, GKXC, NGKW);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NGCW, ctl::GKCX, ctl::NGKW>)
+        {
             return layouts(NGCW, GKCX, NGKW);
+        }
         break;
     case 2:
         if constexpr(layouts_are<A, B, E, ctl::GNHWC, ctl::GKYXC, ctl::GNHWK>)
+        {
             return layouts(GNHWC, GKYXC, GNHWK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::G_NHW_C, ctl::G_K_YX_C, ctl::G_NHW_K>)
+        {
             return layouts(GNHWC, GKYXC, GNHWK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NHWGC, ctl::GKYXC, ctl::NHWGK>)
+        {
             return layouts(NHWGC, GKYXC, NHWGK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NHWGC, ctl::KYXGC, ctl::NHWGK>)
+        {
             return layouts(NHWGC, GKYXC, NHWGK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NGCHW, ctl::GKYXC, ctl::NGKHW>)
+        {
             return layouts(NGCHW, GKYXC, NGKHW);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NGCHW, ctl::GKCYX, ctl::NGKHW>)
+        {
             return layouts(NGCHW, GKCYX, NGKHW);
+        }
         break;
     case 3:
         if constexpr(layouts_are<A, B, E, ctl::GNDHWC, ctl::GKZYXC, ctl::GNDHWK>)
+        {
             return layouts(GNDHWC, GKZYXC, GNDHWK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::G_NDHW_C, ctl::G_K_ZYX_C, ctl::G_NDHW_K>)
+        {
             return layouts(GNDHWC, GKZYXC, GNDHWK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NDHWGC, ctl::GKZYXC, ctl::NDHWGK>)
+        {
             return layouts(NDHWGC, GKZYXC, NDHWGK);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NGCDHW, ctl::GKZYXC, ctl::NGKDHW>)
+        {
             return layouts(NGCDHW, GKZYXC, NGKDHW);
+        }
         if constexpr(layouts_are<A, B, E, ctl::NGCDHW, ctl::GKCZYX, ctl::NGKDHW>)
+        {
             return layouts(NGCDHW, GKCZYX, NGKDHW);
+        }
         break;
     }
 
@@ -487,31 +525,57 @@ constexpr builder::DataType conv_data_type()
     using enum builder::DataType;
 
     if constexpr(std::is_same_v<DataTypeFromInstance, ck::half_t>)
+    {
         return FP16;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::Tuple<ck::half_t, ck::half_t>>)
+    {
         return FP16_FP16;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::bhalf_t>)
+    {
         return BF16;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::Tuple<ck::bhalf_t, ck::bhalf_t>>)
+    {
         return BF16_BF16;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, float>)
+    {
         return FP32;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::Tuple<float, float>>)
+    {
         return FP32_FP32;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, double>)
+    {
         return FP64;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::f8_t>)
+    {
         return FP8;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::bf8_fnuz_t>)
+    {
         return BF8;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::bf8_ocp_t>)
+    {
         return BF8;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, int8_t>)
+    {
         return I8;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, ck::Tuple<int8_t, int8_t>>)
+    {
         return I8_I8;
+    }
     else if constexpr(std::is_same_v<DataTypeFromInstance, uint8_t>)
+    {
         return U8;
+    }
     else
     {
         report_unsupported_data_type_error<DataTypeFromInstance>();
@@ -561,77 +625,149 @@ constexpr builder::ElementwiseOperation elementwise_op()
     constexpr std::string_view name = detail::elementwise_op_name<ElementwiseOp>();
 
     if constexpr(detail::case_insensitive_equal(name, "AddClamp"))
+    {
         return ADD_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "AddReluAdd"))
+    {
         return ADD_RELU_ADD;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "BiasBnormClamp"))
+    {
         return BIAS_BNORM_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Bilinear"))
+    {
         return BILINEAR;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "BiasNormalizeInInferClamp"))
+    {
         return BIAS_BNORM_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Clamp"))
+    {
         return CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ConvInvscale"))
+    {
         return CONV_INVSCALE;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ConvScale"))
+    {
         return CONV_SCALE;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ConvScaleAdd"))
+    {
         return CONV_SCALE_ADD;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ConvScaleRelu"))
+    {
         return CONV_SCALE_RELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Scale"))
+    {
         return SCALE;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ScaleAdd"))
+    {
         return SCALE_ADD;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "PassThrough"))
+    {
         return PASS_THROUGH;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ScaleAddScaleAddRelu"))
+    {
         return SCALEADD_SCALEADD_RELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "DynamicUnaryOp"))
+    {
         return DYNAMIC_UNARY_OP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "UnaryCombinedOp"))
+    {
         return UNARY_COMBINED_OP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Activation_Mul2_Clamp"))
+    {
         return ACTIVATION_MUL2_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Activation_Mul_Clamp"))
+    {
         return ACTIVATION_MUL_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Add_Activation_Mul_Clamp"))
+    {
         return ADD_ACTIVATION_MUL_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Add_Activation_Mul2_Clamp"))
+    {
         return ADD_ACTIVATION_MUL2_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Add_Mul_Activation_Mul_Clamp"))
+    {
         return ADD_MUL_ACTIVATION_MUL_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Add_Mul2_Activation_Mul_Clamp"))
+    {
         return ADD_MUL2_ACTIVATION_MUL_CLAMP;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "UnaryConvert"))
+    {
         return UNARY_CONVERT;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Logistic"))
+    {
         return LOGISTIC;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "ClippedRelu"))
+    {
         return CLIPPED_RELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Swish"))
+    {
         return SWISH;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Elu"))
+    {
         return ELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Power"))
+    {
         return POWER;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "LeakyRelu"))
+    {
         return LEAKY_RELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "UnaryAbs"))
+    {
         return UNARY_ABS;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Relu"))
+    {
         return RELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "SoftRelu"))
+    {
         return SOFT_RELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Sigmoid"))
+    {
         return SIGMOID;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "TanH"))
+    {
         return TANH;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Gelu"))
+    {
         return GELU;
+    }
     else if constexpr(detail::case_insensitive_equal(name, "Silu"))
+    {
         return SILU;
+    }
     else
     {
         report_unsupported_elementwise_op_error<ElementwiseOp>();

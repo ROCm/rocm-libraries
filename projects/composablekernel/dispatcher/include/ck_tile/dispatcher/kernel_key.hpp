@@ -224,23 +224,41 @@ inline std::string to_string(DataType dtype)
 inline DataType string_to_dtype(const std::string& str)
 {
     if(str == "fp16")
+    {
         return DataType::FP16;
+    }
     if(str == "bf16")
+    {
         return DataType::BF16;
+    }
     if(str == "fp32")
+    {
         return DataType::FP32;
+    }
     if(str == "fp64")
+    {
         return DataType::FP64;
+    }
     if(str == "fp8")
+    {
         return DataType::FP8;
+    }
     if(str == "bf8")
+    {
         return DataType::BF8;
+    }
     if(str == "int8")
+    {
         return DataType::INT8;
+    }
     if(str == "int4")
+    {
         return DataType::INT4;
+    }
     if(str == "int32")
+    {
         return DataType::INT32;
+    }
     return DataType::UNKNOWN;
 }
 
@@ -260,11 +278,17 @@ inline std::string to_string(LayoutTag layout)
 inline LayoutTag string_to_layout(const std::string& str)
 {
     if(str == "r" || str == "row" || str == "RowMajor")
+    {
         return LayoutTag::RowMajor;
+    }
     if(str == "c" || str == "col" || str == "ColMajor")
+    {
         return LayoutTag::ColMajor;
+    }
     if(str == "p" || str == "packed")
+    {
         return LayoutTag::PackedExternal;
+    }
     return LayoutTag::RowMajor; // Default
 }
 
@@ -289,21 +313,37 @@ inline std::string to_string(Pipeline pipeline)
 inline Pipeline string_to_pipeline(const std::string& str)
 {
     if(str == "mem")
+    {
         return Pipeline::Mem;
+    }
     if(str == "compv1")
+    {
         return Pipeline::CompV1;
+    }
     if(str == "compv2")
+    {
         return Pipeline::CompV2;
+    }
     if(str == "compv3")
+    {
         return Pipeline::CompV3;
+    }
     if(str == "compv4")
+    {
         return Pipeline::CompV4;
+    }
     if(str == "compv5")
+    {
         return Pipeline::CompV5;
+    }
     if(str == "preshufflev1")
+    {
         return Pipeline::PreShuffleV1;
+    }
     if(str == "preshufflev2")
+    {
         return Pipeline::PreShuffleV2;
+    }
     return Pipeline::Mem; // Default
 }
 
@@ -326,17 +366,29 @@ inline std::string to_string(Epilogue epilogue)
 inline Epilogue string_to_epilogue(const std::string& str)
 {
     if(str == "none")
+    {
         return Epilogue::None;
+    }
     if(str == "default")
+    {
         return Epilogue::Default;
+    }
     if(str == "cshuffle")
+    {
         return Epilogue::CShuffle;
+    }
     if(str == "bias")
+    {
         return Epilogue::Bias;
+    }
     if(str == "activation")
+    {
         return Epilogue::Activation;
+    }
     if(str == "bias_activation")
+    {
         return Epilogue::BiasActivation;
+    }
     return Epilogue::Default; // Default
 }
 
@@ -356,11 +408,17 @@ inline std::string to_string(Scheduler scheduler)
 inline Scheduler string_to_scheduler(const std::string& str)
 {
     if(str == "auto")
+    {
         return Scheduler::Auto;
+    }
     if(str == "intrawave")
+    {
         return Scheduler::Intrawave;
+    }
     if(str == "interwave")
+    {
         return Scheduler::Interwave;
+    }
     return Scheduler::Intrawave; // Default
 }
 
@@ -411,15 +469,25 @@ inline std::string KernelKey::encode_identifier() const
     oss << "_" << (algorithm.persistent ? "persist" : "nopers");
 
     if(signature.split_k > 1)
+    {
         oss << "_splitk" << unsigned(signature.split_k);
+    }
     if(!signature.elementwise_op.empty() && signature.elementwise_op != "PassThrough")
+    {
         oss << "_" << signature.elementwise_op;
+    }
     if(signature.num_d_tensors > 0)
+    {
         oss << "_d" << unsigned(signature.num_d_tensors);
+    }
     if(signature.structured_sparsity)
+    {
         oss << "_sparse";
+    }
     if(algorithm.preshuffle)
+    {
         oss << "_preshuffle";
+    }
 
     return oss.str();
 }

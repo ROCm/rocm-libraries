@@ -282,17 +282,27 @@ class JSONValidityTest : public ::testing::Test
             if(!in_string)
             {
                 if(c == '{')
+                {
                     braces++;
+                }
                 else if(c == '}')
+                {
                     braces--;
+                }
                 else if(c == '[')
+                {
                     brackets++;
+                }
                 else if(c == ']')
+                {
                     brackets--;
+                }
             }
 
             if(braces < 0 || brackets < 0)
+            {
                 return false;
+            }
             prev = c;
         }
 

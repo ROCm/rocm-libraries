@@ -85,10 +85,14 @@ bool description_match(const DescriptionType& description,
 {
     if(description.Rank_ != Rank || description.ReduceOpId_ != ReduceOpId ||
        description.PropagateNan_ != PropagateNan || description.UseIndex_ != UseIndex)
+    {
         return (false);
+    }
 
     if(DescriptionType::NumReduceDim_ != reduceDims.size())
+    {
         return (false);
+    }
 
     bool result = true;
 
@@ -120,11 +124,13 @@ get_invariant_dims(const std::array<int, NumReduceDim>& reduceDims)
     // collect invariant dimensions
     int dim = 0;
     for(int i = 0; i < Rank; i++)
+    {
         if((reduceFlag & (1 << i)) == 0)
         {
             invariantDims[dim] = i;
             dim++;
         };
+    }
 
     return invariantDims;
 };
@@ -208,10 +214,16 @@ bool profile_reduce_impl_impl(bool do_verification,
         const auto invariantDims = get_invariant_dims<Rank, NumReduceDim>(reduceDims);
 
         if(reduceDims.size() == Rank)
+        {
             outLengths.push_back(1);
+        }
         else
+        {
             for(auto dim : invariantDims)
+            {
                 outLengths.push_back(inLengths[dim]);
+            }
+        }
 
         Tensor<OutDataType> out_ref(outLengths);
         Tensor<OutDataType> out(outLengths);
@@ -234,23 +246,33 @@ bool profile_reduce_impl_impl(bool do_verification,
             case 1:
                 in.GenerateTensorValue(GeneratorTensor_1<InDataType>{1}, num_thread);
                 if(beta != 0.0f)
+                {
                     out_ref.GenerateTensorValue(GeneratorTensor_1<InDataType>{1}, num_thread);
+                }
                 break;
             case 2:
                 in.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5}, num_thread);
                 if(beta != 0.0f)
+                {
                     out_ref.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5}, num_thread);
+                }
                 break;
             default:
                 in.GenerateTensorValue(GeneratorTensor_3<InDataType>{-5.0, 5.0}, num_thread);
                 if(beta != 0.0f)
+                {
                     out_ref.GenerateTensorValue(GeneratorTensor_3<InDataType>{-5.0, 5.0},
                                                 num_thread);
+                }
             }
 
             if(beta != 0.0f)
+            {
                 for(size_t i = 0; i < out_ref.mDesc.GetElementSpaceSize(); i++)
+                {
                     out.mData[i] = out_ref.mData[i];
+                }
+            }
         };
 
         // these buffers are usually provided by the user application
@@ -260,7 +282,9 @@ bool profile_reduce_impl_impl(bool do_verification,
         in_dev.ToDevice(in.mData.data());
 
         if(beta != 0.0f)
+        {
             out_dev.ToDevice(out.mData.data());
+        }
 
         size_t indicesSizeInBytes = OutputIndex ? out.mDesc.GetElementSize() * sizeof(int) : 0;
 
@@ -372,7 +396,9 @@ bool profile_reduce_impl_impl(bool do_verification,
                                                                 acc_elementwise_op);
 
             if(!reduce_ptr->IsSupportedArgument(argument_ptr.get()))
+            {
                 continue;
+            }
             else
             {
                 num_kernel++;
@@ -397,8 +423,10 @@ bool profile_reduce_impl_impl(bool do_verification,
             float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
             if(time_kernel)
+            {
                 std::cout << "Perf: " << avg_time << " ms, " << gb_per_sec << " GB/s, "
                           << reduce_name << std::endl;
+            }
 
             if(gb_per_sec > best_gb_per_sec)
             {
@@ -446,8 +474,10 @@ bool profile_reduce_impl_impl(bool do_verification,
         };
 
         if(time_kernel && num_kernel > 0)
+        {
             std::cout << "Best Perf: " << best_avg_time << " ms, " << best_gb_per_sec << " GB/s"
                       << std::endl;
+        }
     }
     else
     {
@@ -490,13 +520,17 @@ bool profile_reduce_impl(bool do_verification,
 
     static_for<0, std::tuple_size<tuple_of_description_instances>::value, 1>{}([&](auto i) {
         if(matched)
+        {
             return;
+        }
 
         using descType = std::tuple_element_t<i.value, tuple_of_description_instances>;
 
         if(!description_match(
                descType{}, inLengths.size(), reduceDims, ReduceOpId, PropagateNan, UseIndex))
+        {
             return;
+        }
 
         std::array<ck::index_t, descType::NumReduceDim_> arrReduceDims;
 

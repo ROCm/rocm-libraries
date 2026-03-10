@@ -81,7 +81,9 @@ struct DiyFp
         uint64_t h;
         uint64_t l = _umul128(f, rhs.f, &h);
         if(l & (uint64_t(1) << 63)) // rounding
+        {
             h++;
+        }
         return DiyFp(h, e + rhs.e + 64);
 #elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)) && \
     defined(__x86_64__)
@@ -90,7 +92,9 @@ struct DiyFp
         uint64_t h = static_cast<uint64_t>(p >> 64);
         uint64_t l = static_cast<uint64_t>(p);
         if(l & (uint64_t(1) << 63)) // rounding
+        {
             h++;
+        }
         return DiyFp(h, e + rhs.e + 64);
 #else
         const uint64_t M32 = 0xFFFFFFFF;
@@ -244,7 +248,9 @@ inline DiyFp GetCachedPower(int e, int* K)
         (-61 - e) * 0.30102999566398114 + 347; // dk must be positive, so can do ceiling in positive
     int k = static_cast<int>(dk);
     if(dk - k > 0.0)
+    {
         k++;
+    }
 
     unsigned index = static_cast<unsigned>((k >> 3) + 1);
     *K = -(-348 + static_cast<int>(index << 3)); // decimal exponent no need lookup table

@@ -188,16 +188,24 @@ struct GemmPipelineAGmemBGmemCRegAsyncV1 : public BaseGemmPipelineAGmemBGmemCReg
             // set up LDS tile shapes
             constexpr auto a_lds_shape = []() {
                 if constexpr(is_a_load_tr_v)
+                {
                     return make_tuple(number<kKPerBlock>{}, number<kMPerBlock>{});
+                }
                 else
+                {
                     return make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{});
+                }
             }();
 
             constexpr auto b_lds_shape = []() {
                 if constexpr(is_b_load_tr_v)
+                {
                     return make_tuple(number<kKPerBlock>{}, number<kNPerBlock>{});
+                }
                 else
+                {
                     return make_tuple(number<kNPerBlock>{}, number<kKPerBlock>{});
+                }
             }();
 
             // LDS tile windows for storing, one per LDS buffer
@@ -233,21 +241,29 @@ struct GemmPipelineAGmemBGmemCRegAsyncV1 : public BaseGemmPipelineAGmemBGmemCReg
 
             constexpr auto a_lds_input_tile_distr = [ALdsTileDistr]() {
                 if constexpr(is_a_load_tr_v)
+                {
                     return make_static_tile_distribution(
                         typename InputTileDistributionTraits<
                             typename decltype(ALdsTileDistr)::DstrEncode,
                             typename Problem::ADataType>::TransposedDstrEncode{});
+                }
                 else
+                {
                     return ALdsTileDistr;
+                }
             }();
             constexpr auto b_lds_input_tile_distr = [BLdsTileDistr]() {
                 if constexpr(is_b_load_tr_v)
+                {
                     return make_static_tile_distribution(
                         typename InputTileDistributionTraits<
                             typename decltype(BLdsTileDistr)::DstrEncode,
                             typename Problem::BDataType>::TransposedDstrEncode{});
+                }
                 else
+                {
                     return BLdsTileDistr;
+                }
             }();
 
             // LDS tile windows for reading;

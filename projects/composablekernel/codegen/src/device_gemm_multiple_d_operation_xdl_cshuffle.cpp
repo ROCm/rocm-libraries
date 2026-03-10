@@ -21,13 +21,21 @@ static std::string GetGemmSpec(const std::size_t m,
 {
     std::string spec = "";
     if(integer_divide_ceil(m, m_per_block) * m_per_block - m != 0)
+    {
         spec += "M";
+    }
     if(integer_divide_ceil(n, n_per_block) * n_per_block - n != 0)
+    {
         spec += "N";
+    }
     if(integer_divide_ceil(k, k_per_block) * k_per_block - k != 0)
+    {
         spec += "K";
+    }
     if(spec == "")
+    {
         return "ck::tensor_operation::device::GemmSpecialization::Default";
+    }
 
     return "ck::tensor_operation::device::GemmSpecialization::" + spec + "Padding";
 }
@@ -267,6 +275,7 @@ Operation_Xdl_CShuffle::CreateOperations(const std::string& prologue, const std:
 {
     std::vector<Problem> problems;
     for(bool TransA : {true, false})
+    {
         for(bool TransB : {true, false})
         {
             Problem prob;
@@ -274,6 +283,7 @@ Operation_Xdl_CShuffle::CreateOperations(const std::string& prologue, const std:
             prob.TransB = TransB;
             problems.push_back(prob);
         }
+    }
     return Transform(problems,
                      [&](const Problem& p) { return CreateOperations(p, prologue, epilogue); });
 }

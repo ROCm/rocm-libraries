@@ -50,14 +50,22 @@ struct UniversalGemmBasePolicy
         // Max K warp tile for transpose load based on data type size
         constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
         if constexpr(std::is_same_v<ADataType, float>)
+        {
             return false;
+        }
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        {
             return false;
+        }
         else if constexpr(kKWarpTile > kMaxKWarpTile)
+        {
             return false;
+        }
         else
+        {
             return std::is_same_v<remove_cvref_t<typename Problem::ALayout>,
                                   tensor_layout::gemm::ColumnMajor>;
+        }
     }();
 
     template <typename Problem>
@@ -68,14 +76,22 @@ struct UniversalGemmBasePolicy
         // Max K warp tile for transpose load based on data type size
         constexpr index_t kMaxKWarpTile = (sizeof(BDataType) == 1) ? 64 : 32;
         if constexpr(std::is_same_v<BDataType, float>)
+        {
             return false;
+        }
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        {
             return false;
+        }
         else if constexpr(kKWarpTile > kMaxKWarpTile)
+        {
             return false;
+        }
         else
+        {
             return std::is_same_v<remove_cvref_t<typename Problem::BLayout>,
                                   tensor_layout::gemm::RowMajor>;
+        }
     }();
 #else
     template <typename Problem>
@@ -110,17 +126,25 @@ struct UniversalGemmBasePolicy
     static constexpr auto getATileAccessPattern()
     {
         if constexpr(has_a_tile_access_pattern<Derived>::value)
+        {
             return Derived::ATileAccessPattern;
+        }
         else
+        {
             return DefaultATileAccessPattern;
+        }
     }
 
     static constexpr auto getBTileAccessPattern()
     {
         if constexpr(has_b_tile_access_pattern<Derived>::value)
+        {
             return Derived::BTileAccessPattern;
+        }
         else
+        {
             return DefaultBTileAccessPattern;
+        }
     }
 
     template <typename Problem,

@@ -307,7 +307,9 @@ struct GridwiseSparseEmbeddingsForwardLayernorm
             // blockwise welford
             static_for<0, mean_var_buf_size, 1>{}([&](auto I) {
                 if constexpr(I > 0)
+                {
                     block_sync_lds();
+                }
                 BlockwiseWelford::Run(
                     mean_thread_buf(I), var_thread_buf(I), threadwise_welford.cur_count_);
             });

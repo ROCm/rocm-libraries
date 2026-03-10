@@ -137,7 +137,9 @@ int run_batched_contraction_example_with_layouts(
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     std::vector<ck_tile::index_t> G_dims = parse_dimensions(arg_parser.get_str("g_dims"));
     std::vector<ck_tile::index_t> M_dims = parse_dimensions(arg_parser.get_str("m_dims"));
@@ -499,7 +501,9 @@ int run_batched_contraction_example(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     // Get NumDTensor to dispatch at runtime
     const int num_d = arg_parser.get_int("num_d");

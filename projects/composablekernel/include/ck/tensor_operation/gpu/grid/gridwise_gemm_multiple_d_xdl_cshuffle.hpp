@@ -302,13 +302,17 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         {
             if(!(A_vector_dim_size == KRaw &&
                  A_vector_dim_size % ABlockTransferSrcScalarPerVector == 0))
+            {
                 return false;
+            }
         }
         else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, ALayout>)
         {
             if(!(A_vector_dim_size == MRaw &&
                  A_vector_dim_size % ABlockTransferSrcScalarPerVector == 0))
+            {
                 return false;
+            }
         }
         else
         {
@@ -319,13 +323,17 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         {
             if(!(B_vector_dim_size == NRaw &&
                  B_vector_dim_size % BBlockTransferSrcScalarPerVector == 0))
+            {
                 return false;
+            }
         }
         else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
         {
             if(!(B_vector_dim_size == KRaw &&
                  B_vector_dim_size % BBlockTransferSrcScalarPerVector == 0))
+            {
                 return false;
+            }
         }
         else
         {
@@ -336,13 +344,17 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         {
             if(!(E_vector_dim_size == NRaw &&
                  E_vector_dim_size % CDEShuffleBlockTransferScalarPerVector_NPerBlock == 0))
+            {
                 return false;
+            }
         }
         else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, ELayout>)
         {
             if(!(E_vector_dim_size == NRaw &&
                  CDEShuffleBlockTransferScalarPerVector_NPerBlock == 1))
+            {
                 return false;
+            }
         }
         else
         {

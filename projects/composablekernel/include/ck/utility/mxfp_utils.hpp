@@ -77,9 +77,13 @@ __host__ __device__ float convert_to_float(T data, int scale_exp)
 
     float d_exp;
     if(is_subnormal<T>(data))
+    {
         d_exp = std::pow(2, 1 - static_cast<int>(NumericUtils<T>::bias));
+    }
     else
+    {
         d_exp = std::pow(2, get_exponent_value<T>(data) - static_cast<int>(NumericUtils<T>::bias));
+    }
     float d_mant = get_mantissa_value<T>(data);
 
     float data_value  = d_sign * d_exp * d_mant;
@@ -213,15 +217,23 @@ __host__ __device__ inline T convert_to_type(float value)
     {
         // closer to 0
         if(std::abs(value) <= std::abs(min_subnorm - value))
+        {
             return sign << (NumericUtils<T>::exp + NumericUtils<T>::mant);
+        }
         else
+        {
             return 1 | (sign << (NumericUtils<T>::exp + NumericUtils<T>::mant));
+        }
     }
 
     if(exponent_diff > 0)
+    {
         mantissa >>= exponent_diff;
+    }
     else if(exponent_diff == -1)
+    {
         mantissa <<= -exponent_diff;
+    }
     bool implicit_one = mantissa & (1 << mfmt);
     out_exponent      = (act_exponent + exponent_diff) + mini_bias - (implicit_one ? 0 : 1);
 
@@ -302,9 +314,11 @@ __host__ __device__ inline T convert_to_type_sr(float value, uint32_t seed)
             double thresh = UINT_MAX * d_prob;
 
             if(!get_data_has_inf<T>() || d_seed <= thresh)
+            {
                 // return static_cast<T>(satConvertToType(getDataMax<DTYPE>())); //round down time
                 return sign == 0 ? NumericUtils<f4_t>::data_max_positive_normal_mask
                                  : NumericUtils<f4_t>::data_max_negative_normal_mask;
+            }
             else
             {
                 exp++;
@@ -315,7 +329,9 @@ __host__ __device__ inline T convert_to_type_sr(float value, uint32_t seed)
         else
         {
             if(!get_data_has_inf<T>())
+            {
                 return (1 << (NumericUtils<T>::mant + NumericUtils<T>::exp)) - 1;
+            }
             else
             {
                 exp++;
@@ -340,7 +356,9 @@ __host__ __device__ inline T convert_to_type_sr(float value, uint32_t seed)
     bool subnorm = false;
 
     if(f32 == 0)
+    {
         return 0b0;
+    }
 
     if(exp >= NumericUtils<T>::unbiased_exp_min)
     {
@@ -374,13 +392,17 @@ __host__ __device__ inline T convert_to_type_sr(float value, uint32_t seed)
 
     // Increment exponent when mantissa overflows due to rounding
     if(mant >= static_cast<uint32_t>(1) << NumericUtils<float>::mant)
+    {
         ++exp;
+    }
     mant >>= (NumericUtils<float>::mant - NumericUtils<T>::mant);
     mant &= ((1 << NumericUtils<T>::mant) - 1);
 
     auto biased_exp = static_cast<uint32_t>(exp);
     if(!subnorm)
+    {
         biased_exp = static_cast<uint32_t>(exp + NumericUtils<T>::bias);
+    }
     biased_exp &= ((1 << NumericUtils<T>::exp) - 1);
     auto val = sign | biased_exp << NumericUtils<T>::mant | mant;
     return val;

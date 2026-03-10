@@ -122,10 +122,16 @@ int reduce_threadwise_multi_d_impl(bool do_verification,
     auto invariantDims = get_invariant_dims<Rank, NumReduceDim>(reduceDims);
 
     if(invariantDims.empty())
+    {
         outLengths.push_back(1);
+    }
     else
+    {
         for(auto dim : invariantDims)
+        {
             outLengths.push_back(inLengths[dim]);
+        }
+    }
 
     Tensor<InOutDataType> out_ref(outLengths);
     Tensor<InOutDataType> out(outLengths);
@@ -152,25 +158,35 @@ int reduce_threadwise_multi_d_impl(bool do_verification,
             in.GenerateTensorValue(GeneratorTensor_1<InOutDataType>{1}, num_thread);
             d0.GenerateTensorValue(GeneratorTensor_1<InOutDataType>{1}, num_thread);
             if(beta != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_1<InOutDataType>{1}, num_thread);
+            }
             break;
         case 2:
             in.GenerateTensorValue(GeneratorTensor_2<InOutDataType>{-5, 5}, num_thread);
             d0.GenerateTensorValue(GeneratorTensor_2<InOutDataType>{-5, 5}, num_thread);
             if(beta != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_2<InOutDataType>{-5, 5}, num_thread);
+            }
             break;
         default:
             in.GenerateTensorValue(GeneratorTensor_3<InOutDataType>{-5.0, 5.0}, num_thread);
             d0.GenerateTensorValue(GeneratorTensor_3<InOutDataType>{-5.0, 5.0}, num_thread);
             if(beta != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_3<InOutDataType>{-5.0, 5.0},
                                             num_thread);
+            }
         }
 
         if(beta != 0.0f)
+        {
             for(size_t i = 0; i < out_ref.mDesc.GetElementSpaceSize(); i++)
+            {
                 out.mData[i] = out_ref.mData[i];
+            }
+        }
     };
 
     // these buffers are usually provided by the user application
@@ -247,7 +263,9 @@ int reduce_threadwise_multi_d_impl(bool do_verification,
         invoker_ptr_ref->Run(argument_ptr_ref.get());
 
         for(std::size_t i = 0; i < out_ref.GetElementSize(); i++)
+        {
             out_elementwise_op(out_ref.mData[i], out_ref.mData[i], d0.mData[i]);
+        }
     };
 
     auto reduce = DeviceReduceInstance{};

@@ -750,9 +750,13 @@ struct GridwiseGemm_xdl_cshuffle_v2
         const index_t num_loop = K / KPerBlock;
 
         if(num_loop % 2 == 1)
+        {
             return 3;
+        }
         else
+        {
             return 2;
+        }
     }
 
     template <typename CGridDesc>

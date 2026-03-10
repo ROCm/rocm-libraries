@@ -44,9 +44,13 @@ class TestCkTileSmoothquant : public ::testing::Test
              ck_tile::index_t y_stride = -1)
     {
         if(x_stride < 0)
+        {
             x_stride = n;
+        }
         if(y_stride < 0)
+        {
             y_stride = n;
+        }
 
         assert(x_stride >= n);
 

@@ -572,18 +572,22 @@ struct tile_scatter_gather
 
                 // read from bottom tensor
                 if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
+                {
                     this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                         smem,
                         mixed_bottom_thread_coord,
                         number<0>{},
                         bool_constant<oob_conditional_check>{});
+                }
                 else
+                {
                     this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                         smem,
                         mixed_bottom_thread_coord,
                         number<0>{},
                         valids_[idx_gather],
                         bool_constant<oob_conditional_check>{});
+                }
 
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
@@ -670,9 +674,13 @@ struct tile_scatter_gather
                 constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
                 constexpr auto pre_nop_ = [&]() {
                     if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
+                    {
                         return bool_constant<true>{};
+                    }
                     else
+                    {
                         return bool_constant<false>{};
+                    }
                 }();
 
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -770,7 +778,9 @@ struct tile_scatter_gather
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 // Use precomputed window origin & tensor descriptor
@@ -792,7 +802,9 @@ struct tile_scatter_gather
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -834,14 +846,18 @@ struct tile_scatter_gather
                         forward_step_scatter);
 
                     if constexpr(!static_move_ys)
+                    {
                         move_window_adaptor_and_bottom_tensor_thread_coordinate(
                             window_adaptor_thread_coord,
                             bottom_tensor_thread_coord,
                             idx_diff_ps_ys);
+                    }
 
                     if constexpr(!static_move_ys)
+                    {
                         move_window_adaptor_and_bottom_tensor_thread_coordinate(
                             window_adaptor_warp_coord, bottom_tensor_warp_coord, idx_diff_ps_ys);
+                    }
                 }
             });
         });

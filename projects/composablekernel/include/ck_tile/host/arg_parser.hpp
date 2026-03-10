@@ -174,9 +174,13 @@ class ArgParser
     {
         auto v = input_map.at(name).value;
         if(v.compare("t") == 0 || v.compare("true") == 0)
+        {
             return true;
+        }
         if(v.compare("f") == 0 || v.compare("false") == 0)
+        {
             return false;
+        }
         int value = atoi(v.c_str());
         return value == 0 ? false : true;
     }

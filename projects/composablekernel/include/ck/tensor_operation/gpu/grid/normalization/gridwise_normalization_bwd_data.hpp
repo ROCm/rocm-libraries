@@ -357,7 +357,9 @@ struct GridwiseNormalizationBwdData_mk_to_mk
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
                 if constexpr(I > 0)
+                {
                     block_sync_lds();
+                }
 
                 BlockwiseSumReduce::Reduce(reduce_work_buf, ds_thread_buf(I));
                 block_sync_lds();
@@ -449,7 +451,9 @@ struct GridwiseNormalizationBwdData_mk_to_mk
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
                 if constexpr(I > 0)
+                {
                     block_sync_lds();
+                }
 
                 BlockwiseSumReduce::Reduce(reduce_work_buf, ds_thread_buf(I));
                 block_sync_lds();

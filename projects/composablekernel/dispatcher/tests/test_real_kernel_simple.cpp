@@ -128,9 +128,13 @@ int main()
 
     // Simple test: A=1, B=1, C should be K
     for(int i = 0; i < M * K; i++)
+    {
         A_host[i] = ADataType(1.0f);
+    }
     for(int i = 0; i < K * N; i++)
+    {
         B_host[i] = BDataType(1.0f);
+    }
 
     // Allocate GPU memory
     ADataType *A_dev, *B_dev;

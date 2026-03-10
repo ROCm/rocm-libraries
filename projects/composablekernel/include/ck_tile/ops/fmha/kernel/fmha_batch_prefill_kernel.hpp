@@ -796,9 +796,13 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                 const int32_t num_page_blocks = page_end - page_start;
                 const int32_t last_page_len   = [&]() {
                     if constexpr(kPageBlockSize == 1)
+                    {
                         return static_cast<int32_t>(kPageBlockSize);
+                    }
                     else
+                    {
                         return kargs.page_table.kv_last_page_lens[i_batch];
+                    }
                 }();
                 return num_page_blocks > 0
                            ? static_cast<index_t>((num_page_blocks - 1) * kargs.page_block_size +
@@ -808,9 +812,13 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             else // BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D
             {
                 if(kargs.page_table.seqlen_k_ptr != nullptr)
+                {
                     return static_cast<index_t>(kargs.page_table.seqlen_k_ptr[i_batch]);
+                }
                 else
+                {
                     return kargs.seqlen_k;
+                }
             }
         }();
         const int32_t* page_idx = [&]() {
@@ -1055,10 +1063,14 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             q_dram,
             [&]() {
                 if constexpr(FmhaPipeline::kQLoadOnce)
+                {
                     return make_tuple(number<FmhaPipeline::kM0>{},
                                       number<FmhaPipeline::kSubQKHeaddim>{});
+                }
                 else
+                {
                     return make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kK0>{});
+                }
             }(),
             {i_m0, 0});
 
@@ -1185,6 +1197,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
 
         FmhaMask mask = [&]() {
             if constexpr(kHasMask)
+            {
                 return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                     kargs.window_size_left,
                     kargs.window_size_right,
@@ -1192,8 +1205,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     kargs.seqlen_q,
                     kargs.seqlen_k,
                     kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+            }
             else
+            {
                 return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+            }
         }();
 
         // WA i_batch capture structure binding before c++20
@@ -1288,10 +1304,14 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
 
                 auto o_acc_element_func = [&]() {
                     if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
+                    {
                         return make_composes(saturates<ck_tile::fp8_t>{},
                                              scales<remove_cvref_t<decltype(scale_o)>>{scale_o});
+                    }
                     else
+                    {
                         return scales<remove_cvref_t<decltype(scale_o)>>{scale_o};
+                    }
                 }();
 
                 return FmhaPipeline{}(

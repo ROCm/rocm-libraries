@@ -22,7 +22,9 @@ std::vector<Solution> Problem::GetSolutions(const std::string& arch,
                                             const std::string& epilogue) const
 {
     if(get_xdlop_archs().count(arch) == 0)
+    {
         return {};
+    }
     auto ops = ck::host::device_batched_gemm_softmax_gemm::Operation_Xdl_CShuffle::CreateOperations(
         *this, prologue, epilogue); // obtains vector of instances
     std::vector<Solution> result;

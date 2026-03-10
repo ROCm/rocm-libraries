@@ -193,7 +193,9 @@ CK_TILE_HOST std::vector<DataType> get_alibi_slopes(ck_tile::index_t nheads)
             for(ck_tile::index_t i = 0; i < static_cast<ck_tile::index_t>(vec.size()); i++)
             {
                 if(i % 2 == 0)
+                {
                     sliced.push_back(vec[i]);
+                }
             }
             std::vector<DataType> sliced_2(sliced.begin(), sliced.begin() + rem);
             return sliced_2;

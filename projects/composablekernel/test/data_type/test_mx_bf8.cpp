@@ -203,7 +203,9 @@ TEST(MXBF8, HostScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(auto bf8_spec_id : bf8_spec_ids)
         {
             auto idx = exp_id * 256 + bf8_spec_id;
@@ -229,11 +231,15 @@ TEST(MXBF8, HostScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
         {
             if(bf8_spec_ids.find(bf8_id) != bf8_spec_ids.end())
+            {
                 continue;
+            }
 
             uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
             auto idx        = exp_id * 256 + bf8_uid;
@@ -325,7 +331,9 @@ TEST(MXBF8, DeviceScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(auto bf8_spec_id : bf8_spec_ids)
         {
             auto idx = exp_id * 256 + bf8_spec_id;
@@ -350,11 +358,15 @@ TEST(MXBF8, DeviceScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
         {
             if(bf8_spec_ids.find(bf8_id) != bf8_spec_ids.end())
+            {
                 continue;
+            }
 
             uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
             auto idx        = exp_id * 256 + bf8_uid;

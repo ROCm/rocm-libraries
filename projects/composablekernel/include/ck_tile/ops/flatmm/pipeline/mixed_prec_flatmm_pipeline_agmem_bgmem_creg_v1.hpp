@@ -235,11 +235,17 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
             if(j == 0)
                 ;
             else if(j == 1)
+            {
                 inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+            }
             else if(j == 2)
+            {
                 inst_idx = mfma_perM_perK - 1;
+            }
             else
+            {
                 inst_idx = mfma_perM_perK - j;
+            }
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -391,7 +397,9 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
         }
         // Add Aload when Aload data > needed
         if(Aload_num_perK == 0)
+        {
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+        }
         __builtin_amdgcn_sched_barrier(0);
     }
 
@@ -433,7 +441,9 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
+                {
                     dsread_perM = dsread_per_wg;
+                }
 
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }
@@ -626,7 +636,9 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
             [&]([[maybe_unused]] auto lds_tile_a, auto dram_tile_a, auto prefill_location) {
                 // global -> lds
                 if constexpr(prefill_location & PrefillAfterGemm)
+                {
                     async_load_tile(lds_tile_a, dram_tile_a);
+                }
             };
         auto prefill_lds_a_stage2 = [&](auto lds_tile_a) {
             // async_load_fence();
@@ -640,7 +652,9 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
             [&]([[maybe_unused]] auto lds_tile_a, auto dram_tile_a, auto prefill_location) {
                 // global -> vgpr
                 if constexpr(prefill_location & PrefillBeforeGemm)
+                {
                     a_block_tile = load_tile(dram_tile_a);
+                }
             };
         auto prefill_lds_a_stage2 = [&]([[maybe_unused]] auto lds_tile_a) {
             // vgpr -> lds
@@ -847,12 +861,14 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         if constexpr(mIter == 0)
+                        {
                             dequant_mxfp4(
                                 b_warp_tensor_ping(nIter)(kIter / number<XDL_PerWeightK>{}),
                                 scale_b_warp_tensor_ping(nIter / number<XDL_PerScaleN>{})(
                                     kIter / number<XDL_PerScaleK>{}),
                                 nIter,
                                 kIter);
+                        }
 
                         // warp GEMM
                         WG{}(c_warp_tensor, a_warp_tensor(number<AwarpIter>{}), dequant_B_n[nIter]);
@@ -954,12 +970,14 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         if constexpr(mIter == 0)
+                        {
                             dequant_mxfp4(
                                 b_warp_tensor_pong(nIter)(kIter / number<XDL_PerWeightK>{}),
                                 scale_b_warp_tensor_pong(nIter / number<XDL_PerScaleN>{})(
                                     kIter / number<XDL_PerScaleK>{}),
                                 nIter,
                                 kIter);
+                        }
 
                         // warp GEMM
                         WG{}(c_warp_tensor, a_warp_tensor(number<AwarpIter>{}), dequant_B_n[nIter]);
@@ -1070,12 +1088,14 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         if constexpr(mIter == 0)
+                        {
                             dequant_mxfp4(
                                 b_warp_tensor_ping(nIter)(kIter / number<XDL_PerWeightK>{}),
                                 scale_b_warp_tensor_ping(nIter / number<XDL_PerScaleN>{})(
                                     kIter / number<XDL_PerScaleK>{}),
                                 nIter,
                                 kIter);
+                        }
 
                         // warp GEMM
                         WG{}(c_warp_tensor, a_warp_tensor(number<AwarpIter>{}), dequant_B_n[nIter]);
@@ -1131,12 +1151,14 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                                     merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                             if constexpr(mIter == 0)
+                            {
                                 dequant_mxfp4(
                                     b_warp_tensor_pong(nIter)(kIter / number<XDL_PerWeightK>{}),
                                     scale_b_warp_tensor_pong(nIter / number<XDL_PerScaleN>{})(
                                         kIter / number<XDL_PerScaleK>{}),
                                     nIter,
                                     kIter);
+                            }
 
                             // warp GEMM
                             WG{}(c_warp_tensor,
@@ -1182,12 +1204,14 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         if constexpr(mIter == 0)
+                        {
                             dequant_mxfp4(
                                 b_warp_tensor_ping(nIter)(kIter / number<XDL_PerWeightK>{}),
                                 scale_b_warp_tensor_ping(nIter / number<XDL_PerScaleN>{})(
                                     kIter / number<XDL_PerScaleK>{}),
                                 nIter,
                                 kIter);
+                        }
                         // warp GEMM
                         WG{}(c_warp_tensor, a_warp_tensor(number<AwarpIter>{}), dequant_B_n[nIter]);
 
@@ -1469,11 +1493,17 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
             if(j == 0)
                 ;
             else if(j == 1)
+            {
                 inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+            }
             else if(j == 2)
+            {
                 inst_idx = mfma_perM_perK - 1;
+            }
             else
+            {
                 inst_idx = mfma_perM_perK - j;
+            }
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -1625,7 +1655,9 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -1652,7 +1684,9 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
         }
         // Add Aload when Aload data > needed
         if(Aload_num_perK == 0)
+        {
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+        }
         __builtin_amdgcn_sched_barrier(0);
     }
 
@@ -1692,7 +1726,9 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -1720,7 +1756,9 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
+                {
                     dsread_perM = dsread_per_wg;
+                }
 
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }
@@ -1962,8 +2000,10 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                     b_warp_tensor_pong(nIter)(kIter) = load_tile_with_offset(
                         b_flat_dram_windows(nIter), number<kIter * KFlatPerBlockPerIter>{});
                     if constexpr(kIter == KIterPerWarp - 1)
+                    {
                         move_tile_window(b_flat_dram_windows(nIter),
                                          {0, BlockGemmShape::flatKPerBlock});
+                    }
                 });
             });
 
@@ -2077,8 +2117,10 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                     b_warp_tensor_ping(nIter)(kIter) = load_tile_with_offset(
                         b_flat_dram_windows(nIter), number<kIter * KFlatPerBlockPerIter>{});
                     if constexpr(kIter == KIterPerWarp - 1)
+                    {
                         move_tile_window(b_flat_dram_windows(nIter),
                                          {0, BlockGemmShape::flatKPerBlock});
+                    }
                 });
             });
 

@@ -216,11 +216,17 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             if(j == 0)
                 ;
             else if(j == 1)
+            {
                 inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+            }
             else if(j == 2)
+            {
                 inst_idx = mfma_perM_perK - 1;
+            }
             else
+            {
                 inst_idx = mfma_perM_perK - j;
+            }
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -372,7 +378,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -399,7 +407,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         }
         // Add Aload when Aload data > needed
         if(Aload_num_perK == 0)
+        {
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+        }
         __builtin_amdgcn_sched_barrier(0);
     }
 
@@ -439,7 +449,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -467,7 +479,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
+                {
                     dsread_perM = dsread_per_wg;
+                }
 
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }
@@ -706,8 +720,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
                     // move B window to next flat K
                     if constexpr(kIter == KIterPerWarp - 1)
+                    {
                         b_flat_dram_offsets(nIter) += b_flat_dram_window.get_load_offset(
                             tuple<number<0>, number<KIterPerWarp * KFlatBytesPerBlockPerIter>>{});
+                    }
                 });
             });
 
@@ -796,8 +812,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
                     // move B window to next flat K
                     if constexpr(kIter == KIterPerWarp - 1)
+                    {
                         b_flat_dram_offsets(nIter) += b_flat_dram_window.get_load_offset(
                             tuple<number<0>, number<KIterPerWarp * KFlatBytesPerBlockPerIter>>{});
+                    }
                 });
             });
 

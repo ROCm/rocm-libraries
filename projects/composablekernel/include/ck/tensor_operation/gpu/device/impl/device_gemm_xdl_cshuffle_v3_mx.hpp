@@ -337,10 +337,12 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
                         rotating_mem.Next();
                         // clear c mem
                         if(arg_.KBatch > 1)
+                        {
                             hipGetErrorString(hipMemsetAsync(arg_.p_c_grid,
                                                              0,
                                                              arg_.M * arg_.N * sizeof(CDataType),
                                                              stream_config.stream_id_));
+                        }
                     };
 
                     ave_time = ck::utility::launch_and_time_kernel_with_preprocess<false>(
@@ -355,10 +357,12 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
                 else
                 {
                     if(arg.KBatch > 1)
+                    {
                         hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
                                                          0,
                                                          arg.M * arg.N * sizeof(CDataType),
                                                          stream_config.stream_id_));
+                    }
 
                     ave_time = launch_and_time_kernel(
                         stream_config, kernel, dim3(gdx, gdy, gdz), dim3(BlockSize), 0, arg);
@@ -376,19 +380,31 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
 
             constexpr auto TailNumChoices = []() {
                 if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+                {
                     return Tuple<constant<TailNumber::Full>>{};
+                }
                 else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
+                {
                     return Tuple<constant<TailNumber::Even>, constant<TailNumber::Odd>>{};
+                }
                 else
+                {
                     static_assert(false, "Unexpected BlkGemmPipelineVer!");
+                }
             }();
             constexpr bool Use2LDS = []() {
                 if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+                {
                     return false;
+                }
                 else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
+                {
                     return true;
+                }
                 else
+                {
                     static_assert(false, "Unexpected BlkGemmPipelineVer!");
+                }
             }();
             const TailNumber tail_num = GridwiseGemm::CalculateKBlockLoopTailNum(K_split);
             using BoolChoices         = Tuple<ck::true_type, ck::false_type>;

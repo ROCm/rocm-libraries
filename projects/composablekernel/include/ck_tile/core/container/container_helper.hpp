@@ -449,7 +449,9 @@ constexpr index_t container_find(sequence<Is...> seq, index_t value)
     for(auto i = 0; i < seq.size(); i++)
     {
         if(seq[i] == value)
+        {
             return i;
+        }
     }
 
     return seq.size();

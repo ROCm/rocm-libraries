@@ -20,18 +20,26 @@ struct GetReduceCountPerThreadForBlockwiseWelford
     __device__ index_t operator()(index_t thread_k_cluster_id) const
     {
         if(count_in_last_tile_ == 0)
+        {
             return (KThreadSliceSize * numBlockTileIteration_);
+        }
         else
         {
             index_t num_complete_slice  = count_in_last_tile_ / KThreadSliceSize;
             index_t count_in_last_slice = count_in_last_tile_ % KThreadSliceSize;
 
             if(thread_k_cluster_id < num_complete_slice)
+            {
                 return (KThreadSliceSize * numBlockTileIteration_);
+            }
             else if(thread_k_cluster_id == num_complete_slice)
+            {
                 return (KThreadSliceSize * (numBlockTileIteration_ - 1) + count_in_last_slice);
+            }
             else
+            {
                 return (KThreadSliceSize * (numBlockTileIteration_ - 1));
+            }
         };
     };
 
@@ -57,23 +65,33 @@ struct GetReduceCountPerThreadForMultiblockWelford
     {
         if(last_block_reduce_length_ == K_BlockTileSize * numBlockTileIteration_ ||
            block_local_id < blkGroupSize_ - 1)
+        {
             return (KThreadSliceSize * numBlockTileIteration_);
+        }
 
         index_t count_in_last_tile = last_block_reduce_length_ % K_BlockTileSize;
 
         if(count_in_last_tile == 0)
+        {
             return (KThreadSliceSize * numBlockTileIterationByLastBlock_);
+        }
         else
         {
             index_t num_complete_slice = count_in_last_tile / KThreadSliceSize;
 
             if(thread_k_cluster_id < num_complete_slice)
+            {
                 return (KThreadSliceSize * numBlockTileIterationByLastBlock_);
+            }
             else if(thread_k_cluster_id == num_complete_slice)
+            {
                 return (KThreadSliceSize * (numBlockTileIterationByLastBlock_ - 1) +
                         count_in_last_tile);
+            }
             else
+            {
                 return (KThreadSliceSize * (numBlockTileIterationByLastBlock_ - 1));
+            }
         };
     };
 

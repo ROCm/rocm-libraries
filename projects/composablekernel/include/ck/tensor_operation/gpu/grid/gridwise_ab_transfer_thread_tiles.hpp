@@ -42,9 +42,13 @@ struct ABTransferThreadTiles
 
     static constexpr index_t ABPackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<LDSTypeAB>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;

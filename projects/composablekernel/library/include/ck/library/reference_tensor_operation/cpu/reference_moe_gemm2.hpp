@@ -108,9 +108,13 @@ struct ReferenceMoeGemm2 : public device::BaseOperator
                             uint8_t i4x2 = arg.a_t_k_(t, topk_id, k).data;
                             uint8_t i4   = 0;
                             if(k % 2 == 1)
+                            {
                                 i4 = (i4x2 >> 0) & 0xf;
+                            }
                             else
+                            {
                                 i4 = (i4x2 >> 4) & 0xf;
+                            }
 #if CK_USE_PK4_LAYOUT_SHUFFLE
                             v_a = i4_to_f32_gfx9(i4);
 #else
@@ -167,7 +171,9 @@ struct ReferenceMoeGemm2 : public device::BaseOperator
             make_ParallelTensorFunctor(
                 [&](auto n) {
                     for(std::size_t m = 0; m < max_token_id; ++m)
+                    {
                         f_mk_kn_mn(m, n);
+                    }
                 },
                 arg.c_t_n_.mDesc.GetLengths()[1])(std::thread::hardware_concurrency());
 

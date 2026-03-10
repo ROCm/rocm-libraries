@@ -1857,7 +1857,9 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         });
 
         if(!valid)
+        {
             return false;
+        }
 
         if constexpr(NeedTransposeKernel)
         {
@@ -2322,9 +2324,11 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             return arg->GetWorkspaceSizeBytes();
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(BaseArgument* p_arg,
@@ -2337,9 +2341,11 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             p_arg_->p_workspace_ = p_workspace;
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle::Argument structure!");
+        }
     }
 };
 

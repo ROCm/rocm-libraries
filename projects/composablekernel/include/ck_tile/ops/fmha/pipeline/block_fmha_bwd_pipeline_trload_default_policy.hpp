@@ -628,9 +628,13 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
         constexpr auto top_dims = []() {
             if constexpr(Transposed)
+            {
                 return make_tuple(sequence<1>{}, sequence<0>{});
+            }
             else
+            {
                 return make_tuple(sequence<0>{}, sequence<1>{});
+            }
         }();
         return transform_tensor_descriptor(
             desc_2,
@@ -1035,10 +1039,14 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeBias()
     {
         if constexpr(Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+        {
             return sizeof(typename Problem::BiasDataType) *
                    MakeBiasLdsBlockDescriptor<Problem>().get_element_space_size();
+        }
         else
+        {
             return 0;
+        }
     }
 
     template <typename Problem>
@@ -1152,11 +1160,17 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             constexpr index_t lcm_inst = lcm(VMEM_READ_INST, MFMA_INST, LDS_READ_INST);
             static_for<0, lcm_inst, 1>{}([&](auto i) {
                 if constexpr(i % (lcm_inst / VMEM_READ_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                }
                 if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                }
                 if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                }
             });
         }
 
@@ -1170,9 +1184,13 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             constexpr index_t lcm_inst = lcm(MFMA_INST, LDS_READ_INST);
             static_for<0, lcm_inst, 1>{}([&](auto i) {
                 if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                }
                 if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // VMEM read
+                }
             });
         }
 
@@ -1189,13 +1207,19 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
             static_for<0, lcm_inst, 1>{}([&](auto i) {
                 if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                }
                 if constexpr(i % (lcm_inst / lds_rw_inst) == 0)
                 {
                     if constexpr(i / (lcm_inst / lds_rw_inst) < LDS_WRITE_INST)
+                    {
                         __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS Write
+                    }
                     else
+                    {
                         __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS Read
+                    }
                 }
             });
         }
@@ -1210,9 +1234,13 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             constexpr index_t lcm_inst = lcm(MFMA_INST, LDS_READ_INST);
             static_for<0, lcm_inst, 1>{}([&](auto i) {
                 if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                }
                 if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+                {
                     __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                }
             });
         }
     };

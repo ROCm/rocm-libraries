@@ -86,7 +86,9 @@ CK_TILE_HOST void reference_moe_sorting(const HostTensor<IndexType>& topk_ids,
         if(local_expert_masking)
         {
             if(local_expert_mask(e) == 0)
+            {
                 continue;
+            }
         }
         if(skip_experts_with_zero_token)
         {

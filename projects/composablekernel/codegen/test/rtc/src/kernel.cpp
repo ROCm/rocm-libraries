@@ -54,7 +54,9 @@ hip_module_ptr load_module(const char* image)
     auto status = hipModuleLoadData(&raw_m, image);
     hip_module_ptr m{raw_m};
     if(status != hipSuccess)
+    {
         throw std::runtime_error("Failed to load module: " + hip_error(status));
+    }
     return m;
 }
 
@@ -63,7 +65,9 @@ kernel::kernel(const char* image, const std::string& name) : impl(std::make_shar
     impl->module = load_module(image);
     auto status  = hipModuleGetFunction(&impl->fun, impl->module.get(), name.c_str());
     if(hipSuccess != status)
+    {
         throw std::runtime_error("Failed to get function: " + name + ": " + hip_error(status));
+    }
 }
 
 void launch_kernel(hipFunction_t fun,
@@ -95,7 +99,9 @@ void launch_kernel(hipFunction_t fun,
                                            nullptr,
                                            nullptr);
     if(status != hipSuccess)
+    {
         throw std::runtime_error("Failed to launch kernel: " + hip_error(status));
+    }
 }
 
 void kernel::launch(hipStream_t stream,

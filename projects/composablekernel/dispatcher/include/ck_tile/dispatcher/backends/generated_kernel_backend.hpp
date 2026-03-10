@@ -68,11 +68,17 @@ class GeneratedKernelInstance : public KernelInstance
         constexpr int tile_k = SelectedKernel::TileK;
 
         if(!pad_m && problem.M % tile_m != 0)
+        {
             return false;
+        }
         if(!pad_n && problem.N % tile_n != 0)
+        {
             return false;
+        }
         if(!pad_k && problem.K % tile_k != 0)
+        {
             return false;
+        }
 
         return true;
     }

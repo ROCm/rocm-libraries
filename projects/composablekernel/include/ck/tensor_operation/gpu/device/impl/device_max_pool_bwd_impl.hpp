@@ -210,7 +210,9 @@ struct DeviceMaxPoolBwdImpl : public DeviceMaxPoolBwd<DOutDataType, IndexDataTyp
                 if(arg.windowOverlap_)
                 {
                     if(arg.p_workspace_ == nullptr)
+                    {
                         throw std::runtime_error("wrong! WorkSpace pointer has not been set");
+                    }
 
                     hip_check_error(
                         hipMemsetAsync(arg.p_workspace_,
@@ -317,9 +319,13 @@ struct DeviceMaxPoolBwdImpl : public DeviceMaxPoolBwd<DOutDataType, IndexDataTyp
                         !(is_same_v<DInDataType, float> || is_same_v<DInDataType, double>);
 
         if(!needCast)
+        {
             return 0;
+        }
         else
+        {
             return pArg_->din_length_raw_ * sizeof(DInDataType_AutomicAddPreCast);
+        }
     };
 
     bool IsSupportedArgument(const BaseArgument* p_arg) override

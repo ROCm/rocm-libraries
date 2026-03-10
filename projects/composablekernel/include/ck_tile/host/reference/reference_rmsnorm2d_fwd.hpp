@@ -64,7 +64,9 @@ void reference_rmsnorm2d_fwd(const HostTensor<XDataType>& x_m_n,
         divisor = ck_tile::type_convert<ComputeDataType>(1) / ck_tile::sqrt(mean_square + epsilon);
 
         if constexpr(!std::is_same_v<InvRmsDataType, ck_tile::null_type>)
+        {
             invRms_m(m) = ck_tile::type_convert<InvRmsDataType>(divisor);
+        }
 
         HostTensor<ComputeDataType> acc(x_m_n.get_lengths(), x_m_n.get_strides());
         for(int n = 0; n < N; ++n)

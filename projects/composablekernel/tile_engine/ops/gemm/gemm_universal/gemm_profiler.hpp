@@ -209,7 +209,9 @@ class GemmProfiler
     KernelInstance select_best_instance(Metric metric)
     {
         if(kernel_instances_.empty())
+        {
             throw std::runtime_error("Empty instances");
+        }
 
         auto kernel_instance = *std::max_element(kernel_instances_.begin(),
                                                  kernel_instances_.end(),

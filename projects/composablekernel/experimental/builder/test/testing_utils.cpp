@@ -160,9 +160,13 @@ std::string inlineDiff(const std::string& actual, const std::string& expected, b
             in_diff = true;
             // Accumulate characters for the diff section
             if(exp_char != '\0')
+            {
                 expected_diff += exp_char; // Add to expected side
+            }
             if(act_char != '\0')
+            {
                 actual_diff += act_char; // Add to actual side
+            }
         }
     }
 
@@ -343,7 +347,9 @@ bool RunResultMatcher::MatchAndExplain(builder::test::RunResult actual,
                                        ::testing::MatchResultListener* listener) const
 {
     if(actual.error.has_value() && listener)
+    {
         *listener << "run failed: " << actual.error.value();
+    }
 
     return actual.is_supported();
 }

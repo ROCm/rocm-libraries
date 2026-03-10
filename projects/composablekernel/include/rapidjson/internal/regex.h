@@ -53,7 +53,9 @@ class DecodedStream
     {
         unsigned c = codepoint_;
         if(c) // No further decoding when '\0'
+        {
             Decode();
+        }
         return c;
     }
 
@@ -61,7 +63,9 @@ class DecodedStream
     void Decode()
     {
         if(!Encoding::Decode(ss_, &codepoint_))
+        {
             codepoint_ = 0;
+        }
     }
 
     SourceStream& ss_;
@@ -222,8 +226,12 @@ class GenericRegex
             case '|':
                 while(!operatorStack.Empty() &&
                       *operatorStack.template Top<Operator>() < kAlternation)
+                {
                     if(!Eval(operandStack, *operatorStack.template Pop<Operator>(1)))
+                    {
                         return;
+                    }
+                }
                 *operatorStack.template Push<Operator>() = kAlternation;
                 *atomCountStack.template Top<unsigned>() = 0;
                 break;
@@ -236,10 +244,16 @@ class GenericRegex
             case ')':
                 while(!operatorStack.Empty() &&
                       *operatorStack.template Top<Operator>() != kLeftParenthesis)
+                {
                     if(!Eval(operandStack, *operatorStack.template Pop<Operator>(1)))
+                    {
                         return;
+                    }
+                }
                 if(operatorStack.Empty())
+                {
                     return;
+                }
                 operatorStack.template Pop<Operator>(1);
                 atomCountStack.template Pop<unsigned>(1);
                 ImplicitConcatenation(atomCountStack, operatorStack);
@@ -247,37 +261,53 @@ class GenericRegex
 
             case '?':
                 if(!Eval(operandStack, kZeroOrOne))
+                {
                     return;
+                }
                 break;
 
             case '*':
                 if(!Eval(operandStack, kZeroOrMore))
+                {
                     return;
+                }
                 break;
 
             case '+':
                 if(!Eval(operandStack, kOneOrMore))
+                {
                     return;
+                }
                 break;
 
             case '{': {
                 unsigned n, m;
                 if(!ParseUnsigned(ds, &n))
+                {
                     return;
+                }
 
                 if(ds.Peek() == ',')
                 {
                     ds.Take();
                     if(ds.Peek() == '}')
+                    {
                         m = kInfinityQuantifier;
+                    }
                     else if(!ParseUnsigned(ds, &m) || m < n)
+                    {
                         return;
+                    }
                 }
                 else
+                {
                     m = n;
+                }
 
                 if(!EvalQuantifier(operandStack, n, m) || ds.Peek() != '}')
+                {
                     return;
+                }
                 ds.Take();
             }
             break;
@@ -290,7 +320,9 @@ class GenericRegex
             case '[': {
                 SizeType range;
                 if(!ParseRange(ds, &range))
+                {
                     return;
+                }
                 SizeType s = NewState(kRegexInvalidState, kRegexInvalidState, kRangeCharacterClass);
                 GetState(s).rangeStart              = range;
                 *operandStack.template Push<Frag>() = Frag(s, s, s);
@@ -300,7 +332,9 @@ class GenericRegex
 
             case '\\': // Escape character
                 if(!CharacterEscape(ds, &codepoint))
+                {
                     return; // Unsupported escape character
+                }
                 // fall through to default
                 RAPIDJSON_DELIBERATE_FALLTHROUGH;
 
@@ -311,8 +345,12 @@ class GenericRegex
         }
 
         while(!operatorStack.Empty())
+        {
             if(!Eval(operandStack, *operatorStack.template Pop<Operator>(1)))
+            {
                 return;
+            }
+        }
 
         // Link the operand to matching state.
         if(operandStack.GetSize() == sizeof(Frag))
@@ -352,7 +390,9 @@ class GenericRegex
     void ImplicitConcatenation(Stack<Allocator>& atomCountStack, Stack<Allocator>& operatorStack)
     {
         if(*atomCountStack.template Top<unsigned>())
+        {
             *operatorStack.template Push<Operator>() = kConcatenation;
+        }
         (*atomCountStack.template Top<unsigned>())++;
     }
 
@@ -360,7 +400,9 @@ class GenericRegex
     {
         SizeType old = l1;
         while(GetState(l1).out != kRegexInvalidState)
+        {
             l1 = GetState(l1).out;
+        }
         GetState(l1).out = l2;
         return old;
     }
@@ -447,37 +489,55 @@ class GenericRegex
         if(n == 0)
         {
             if(m == 0) // a{0} not support
+            {
                 return false;
+            }
             else if(m == kInfinityQuantifier)
+            {
                 Eval(operandStack, kZeroOrMore); // a{0,} -> a*
+            }
             else
             {
                 Eval(operandStack, kZeroOrOne); // a{0,5} -> a?
                 for(unsigned i = 0; i < m - 1; i++)
+                {
                     CloneTopOperand(operandStack); // a{0,5} -> a? a? a? a? a?
+                }
                 for(unsigned i = 0; i < m - 1; i++)
+                {
                     Eval(operandStack, kConcatenation); // a{0,5} -> a?a?a?a?a?
+                }
             }
             return true;
         }
 
         for(unsigned i = 0; i < n - 1; i++) // a{3} -> a a a
+        {
             CloneTopOperand(operandStack);
+        }
 
         if(m == kInfinityQuantifier)
+        {
             Eval(operandStack, kOneOrMore); // a{3,} -> a a a+
+        }
         else if(m > n)
         {
             CloneTopOperand(operandStack);  // a{3,5} -> a a a a
             Eval(operandStack, kZeroOrOne); // a{3,5} -> a a a a?
             for(unsigned i = n; i < m - 1; i++)
+            {
                 CloneTopOperand(operandStack); // a{3,5} -> a a a a? a?
+            }
             for(unsigned i = n; i < m; i++)
+            {
                 Eval(operandStack, kConcatenation); // a{3,5} -> a a aa?a?
+            }
         }
 
         for(unsigned i = 0; i < n - 1; i++)
+        {
             Eval(operandStack, kConcatenation); // a{3} -> aaa, a{3,} -> aaa+, a{3.5} -> aaaa?a?
+        }
 
         return true;
     }
@@ -496,9 +556,13 @@ class GenericRegex
         for(SizeType j = 0; j < count; j++)
         {
             if(s[j].out != kRegexInvalidState)
+            {
                 s[j].out += count;
+            }
             if(s[j].out1 != kRegexInvalidState)
+            {
                 s[j].out1 += count;
+            }
         }
         *operandStack.template Push<Frag>() =
             Frag(src.start + count, src.out + count, src.minIndex + count);
@@ -510,11 +574,15 @@ class GenericRegex
     {
         unsigned r = 0;
         if(ds.Peek() < '0' || ds.Peek() > '9')
+        {
             return false;
+        }
         while(ds.Peek() >= '0' && ds.Peek() <= '9')
         {
             if(r >= 429496729 && ds.Peek() > '5') // 2^32 - 1 = 4294967295
-                return false;                     // overflow
+            {
+                return false; // overflow
+            }
             r = r * 10 + (ds.Take() - '0');
         }
         *u = r;
@@ -546,7 +614,9 @@ class GenericRegex
             {
             case ']':
                 if(start == kRegexInvalidRange)
+                {
                     return false; // Error: nothing inside []
+                }
                 if(step == 2)
                 { // Add trailing '-'
                     SizeType r = NewRange('-');
@@ -554,7 +624,9 @@ class GenericRegex
                     GetRange(current).next = r;
                 }
                 if(negate)
+                {
                     GetRange(start).start |= kRangeNegationFlag;
+                }
                 *range = start;
                 return true;
 
@@ -565,7 +637,9 @@ class GenericRegex
                     codepoint = 0x0008; // Escape backspace character
                 }
                 else if(!CharacterEscape(ds, &codepoint))
+                {
                     return false;
+                }
                 // fall through to default
                 RAPIDJSON_DELIBERATE_FALLTHROUGH;
 
@@ -584,9 +658,13 @@ class GenericRegex
                 case 0: {
                     SizeType r = NewRange(codepoint);
                     if(current != kRegexInvalidRange)
+                    {
                         GetRange(current).next = r;
+                    }
                     if(start == kRegexInvalidRange)
+                    {
                         start = r;
+                    }
                     current = r;
                 }
                     step = 1;
@@ -671,7 +749,9 @@ class GenericRegexSearch
     {
         RAPIDJSON_ASSERT(regex_.IsValid());
         if(!allocator_)
+        {
             ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator)();
+        }
         stateSet_ = static_cast<uint32_t*>(allocator_->Malloc(GetStateSetSize()));
         state0_.template Reserve<SizeType>(regex_.stateCount_);
         state1_.template Reserve<SizeType>(regex_.stateCount_);
@@ -739,10 +819,14 @@ class GenericRegexSearch
                 {
                     matched = AddState(*next, sr.out) || matched;
                     if(!anchorEnd && matched)
+                    {
                         return true;
+                    }
                 }
                 if(!anchorBegin)
+                {
                     AddState(*next, regex_.root_);
+                }
             }
             internal::Swap(current, next);
         }
@@ -779,7 +863,9 @@ class GenericRegexSearch
         {
             const Range& r = regex_.GetRange(rangeIndex);
             if(codepoint >= (r.start & ~RegexType::kRangeNegationFlag) && codepoint <= r.end)
+            {
                 return yes;
+            }
             rangeIndex = r.next;
         }
         return !yes;

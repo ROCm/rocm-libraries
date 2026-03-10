@@ -70,10 +70,14 @@ void reference_layernorm2d_fwd(const HostTensor<XDataType>& x_m_n,
         divisor  = ck_tile::type_convert<ComputeDataType>(1) / ck_tile::sqrt(variance + epsilon);
 
         if constexpr(!std::is_same_v<MeanDataType, ck_tile::null_type>)
+        {
             mean_m(m) = ck_tile::type_convert<MeanDataType>(mean);
+        }
 
         if constexpr(!std::is_same_v<InvStdDataType, ck_tile::null_type>)
+        {
             invStd_m(m) = ck_tile::type_convert<InvStdDataType>(divisor);
+        }
 
         HostTensor<ComputeDataType> acc(x_m_n.get_lengths(), x_m_n.get_strides());
         for(int n = 0; n < N; ++n)

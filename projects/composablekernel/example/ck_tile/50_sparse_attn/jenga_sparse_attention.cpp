@@ -38,9 +38,13 @@ jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     }
 
     if(max_seqlen_q == 0)
+    {
         max_seqlen_q = seqlen_q;
+    }
     if(max_seqlen_k == 0)
+    {
         max_seqlen_k = seqlen_k;
+    }
     bool is_v_rowmajor  = true;
     float scale_s       = 1.0 / ck_tile::sqrt(static_cast<float>(hdim_q));
     std::string msk_str = "0";
@@ -74,9 +78,13 @@ jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         const ck_tile::index_t stride_k = (i_perm ? hdim_q : nhead_k * hdim_q);
         const ck_tile::index_t stride_v = [&]() {
             if(is_v_rowmajor)
+            {
                 return i_perm ? hdim_v : nhead_k * hdim_v;
+            }
             else
+            {
                 return (i_perm ? shape_seqlen_k : nhead_k * shape_seqlen_k);
+            }
         }();
         const ck_tile::index_t stride_o = (o_perm ? hdim_v : nhead * hdim_v);
         // setup nhead_stride_* arguments
@@ -84,9 +92,13 @@ jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         const ck_tile::index_t nhead_stride_k = i_perm ? shape_seqlen_k * hdim_q : hdim_q;
         const ck_tile::index_t nhead_stride_v = [&]() {
             if(is_v_rowmajor)
+            {
                 return i_perm ? shape_seqlen_k * hdim_v : hdim_v;
+            }
             else
+            {
                 return i_perm ? hdim_v * shape_seqlen_k : shape_seqlen_k;
+            }
         }();
         const ck_tile::index_t nhead_stride_o = (o_perm ? shape_seqlen_q * hdim_v : hdim_v);
         // setup batch_stride_* arguments

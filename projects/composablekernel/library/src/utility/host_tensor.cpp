@@ -22,7 +22,9 @@ std::size_t HostTensorDescriptor::GetElementSpaceSize() const
     for(std::size_t i = 0; i < mLens.size(); ++i)
     {
         if(mLens[i] == 0)
+        {
             continue;
+        }
 
         space += (mLens[i] - 1) * mStrides[i];
     }

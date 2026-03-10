@@ -401,7 +401,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     const std::string data_type = arg_parser.get_str("prec");
     if(data_type == "fp8")

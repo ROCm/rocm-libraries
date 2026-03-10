@@ -141,7 +141,9 @@ struct tile_window_linear
                     }
                     cumulative_len_ *= current_len_;
                     if(!is_linear_dim)
+                    {
                         cumulative_non_linear_len_ *= current_len_;
+                    }
                 });
                 return m_;
             }();
@@ -444,9 +446,13 @@ struct tile_window_linear
                 if constexpr(pre_nop && i_access_ == 0 &&
                              Base::BottomTensorView::buffer_view::get_address_space() ==
                                  address_space_enum::global)
+                {
                     return bool_constant<true>{};
+                }
                 else
+                {
                     return bool_constant<false>{};
+                }
             }();
 
             constexpr auto non_linear_id    = number<AccessMap_NonLinear{}[IAccess]>{};
@@ -529,9 +535,13 @@ struct tile_window_linear
             constexpr auto IAccess  = number<i_access_>{};
             constexpr auto pre_nop_ = [&]() {
                 if constexpr(pre_nop && i_access_ == 0)
+                {
                     return bool_constant<true>{};
+                }
                 else
+                {
                     return bool_constant<false>{};
+                }
             }();
 
             constexpr auto non_linear_id    = number<AccessMap_NonLinear{}[IAccess]>{};

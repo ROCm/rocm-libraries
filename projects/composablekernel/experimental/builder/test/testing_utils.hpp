@@ -203,7 +203,9 @@ struct ReferenceOutputMatcher
                 *listener << "\n    - " << e.tensor_name << ": ";
 
                 if(e.is_all_zero())
+                {
                     *listener << "all elements in actual and expected tensors are zero";
+                }
                 else
                 {
                     // Round to 2 digits

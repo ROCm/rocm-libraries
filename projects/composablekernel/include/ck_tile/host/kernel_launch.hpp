@@ -87,9 +87,13 @@ make_kernel(KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_byt
 {
     const auto kernel = []() {
         if constexpr(std::is_void_v<Attr>)
+        {
             return kentry<MinBlockPerCu, KernelImpl, Args...>;
+        }
         else
+        {
             return kentry<Attr, MinBlockPerCu, KernelImpl, Args...>;
+        }
     }();
     return [=](const stream_config& s) {
         kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
@@ -160,7 +164,9 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
     timer.stop(s.stream_id_);
 
     if(!i)
+    {
         return 0.;
+    }
     return (timer.duration() / s.nrepeat_) - preprocess_time;
 }
 

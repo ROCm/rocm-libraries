@@ -195,7 +195,9 @@ TEST(MXFP4, HostScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(ck::index_t fp4_id = 0; fp4_id < 16; fp4_id++)
         {
             uint8_t fp4_uid = static_cast<uint8_t>(fp4_id);
@@ -279,7 +281,9 @@ TEST(MXFP4, DeviceScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(ck::index_t fp4_id = 0; fp4_id < 16; fp4_id++)
         {
             uint8_t fp4_uid = static_cast<uint8_t>(fp4_id);

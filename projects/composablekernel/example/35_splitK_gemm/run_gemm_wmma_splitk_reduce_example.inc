@@ -43,7 +43,9 @@ bool run_wmma_gemm(const ProblemType& problem_size, const ExecutionConfig& confi
                 }
             }
             else
+            {
                 return stride;
+            }
         };
 
     StrideA = f_get_default_stride(M, K, StrideA, ALayout{});

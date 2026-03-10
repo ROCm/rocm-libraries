@@ -92,7 +92,9 @@ int main(int argc, char* argv[])
     args.add_flag("--list-verbose", "List kernels with full configuration details");
 
     if(!args.parse(argc, argv))
+    {
         return 0;
+    }
 
     int max_size         = args.get_int("--max-size", 4096);
     std::string gfx_arch = args.get("--arch", "gfx942");
@@ -166,7 +168,9 @@ int main(int argc, char* argv[])
     for(const auto& [M, N, K] : all_sizes)
     {
         if(std::max({M, N, K}) <= max_size)
+        {
             sizes.push_back({M, N, K});
+        }
     }
 
     using DataType  = ck_tile::fp16_t;
@@ -201,10 +205,14 @@ int main(int argc, char* argv[])
         for(int i = 0; i < M * N; ++i)
         {
             if(std::abs(static_cast<float>(c_host[i]) - expected) > 0.01f * expected + 1.0f)
+            {
                 ++errors;
+            }
         }
         if(errors > 0)
+        {
             all_passed = false;
+        }
     }
 
     print_separator();

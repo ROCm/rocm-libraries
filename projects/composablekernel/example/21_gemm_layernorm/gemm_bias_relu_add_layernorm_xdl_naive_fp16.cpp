@@ -164,11 +164,13 @@ void host_gemm_layernorm(Tensor<LayerNormOutDataType>& out_m_n,
 
     // c = activation(c + bias) + c1_functor(c1)
     for(int m = 0; m < M; ++m)
+    {
         for(int n = 0; n < N; ++n)
         {
             auto acc = ck::type_convert<GemmAccDataType>(e_m_n(m, n));
             cde_element_op(e_m_n(m, n), acc, bias_n(n), d1_m_n(m, n));
         }
+    }
 
     // reduce_mean and reduce_square_mean
     auto r0Op = R0ThreadReduceOp{};

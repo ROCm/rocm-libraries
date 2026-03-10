@@ -40,10 +40,14 @@ template <>
 __host__ __device__ inline float to_float<f4_t>(e8m0_bexp_t const scale, f4_t const data)
 {
     if(is_nan<f4_t>(scale, data))
+    {
         return NumericLimits<float>::QuietNaN();
+    }
 
     if(is_zero<f4_t>(scale, data))
+    {
         return 0.0f;
+    }
 
     f4_t prepared_data = data & 0b00001111;
 
@@ -67,15 +71,19 @@ __host__ __device__ inline f4_t sat_convert_to_type<f4_t>(float value)
     }
 
     if(std::abs(value) > NumericLimits<f4_t>::DataMaxNorm()) // covers inf case as well
+    {
         return sign ? NumericUtils<f4_t>::data_max_negative_normal_mask
                     : NumericUtils<f4_t>::data_max_positive_normal_mask;
+    }
 
     f4_t res = convert_to_type<f4_t>(value);
 
     if(std::abs(to_float<f4_t>(NumericLimits<e8m0_bexp_t>::Binary_1(), res)) <
        NumericLimits<f4_t>::DataMinSubnorm())
+    {
         return sign ? NumericUtils<f4_t>::negative_zero_mask
                     : NumericUtils<f4_t>::positive_zero_mask;
+    }
 
     return res;
 }
@@ -88,19 +96,25 @@ __host__ __device__ inline f4_t sat_convert_to_type_sr<f4_t>(float value, uint32
     uint32_t sign = t.value_bitwise >> 31;
 
     if(std::isnan(value))
+    {
         return sign ? NumericUtils<f4_t>::data_max_negative_normal_mask
                     : NumericUtils<f4_t>::data_max_positive_normal_mask;
+    }
 
     if(std::abs(value) > NumericLimits<f4_t>::DataMaxNorm()) // covers inf case as well
+    {
         return sign ? NumericUtils<f4_t>::data_max_negative_normal_mask
                     : NumericUtils<f4_t>::data_max_positive_normal_mask;
+    }
 
     f4_t res = convert_to_type_sr<f4_t>(value, seed);
 
     if(std::abs(to_float<f4_t>(NumericLimits<e8m0_bexp_t>::Binary_1(), res)) <
        NumericLimits<f4_t>::DataMinSubnorm())
+    {
         return sign ? NumericUtils<f4_t>::negative_zero_mask
                     : NumericUtils<f4_t>::positive_zero_mask;
+    }
 
     return res;
 }

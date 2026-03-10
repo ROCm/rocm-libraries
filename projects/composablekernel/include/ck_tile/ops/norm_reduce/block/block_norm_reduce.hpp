@@ -281,7 +281,9 @@ struct BlockNormReduceCrossWarpSync
 
         // skip if nonthing to do
         if constexpr(num_reduce_warps == 1)
+        {
             return;
+        }
 
         // store into smem only for lane-0 within one warp
         if(lane_id == 0)
@@ -348,7 +350,9 @@ struct BlockNormReduceCrossWarpSync
             mean_tensor.get_thread_buffer()(i_0) = v_local_mean;
             var_tensor.get_thread_buffer()(i_0)  = v_local_var;
             if(kWelford)
+            {
                 count = v_local_count;
+            }
         });
     }
 };

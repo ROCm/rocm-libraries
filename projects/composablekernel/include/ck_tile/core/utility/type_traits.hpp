@@ -78,9 +78,13 @@ struct is_static_impl
 {
     static constexpr bool value = []() {
         if constexpr(is_detected<has_is_static, T>{})
+        {
             return T::is_static();
+        }
         else
+        {
             return std::is_arithmetic<T>::value;
+        }
     }();
 };
 } // namespace impl

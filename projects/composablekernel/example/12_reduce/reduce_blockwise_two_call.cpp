@@ -175,23 +175,33 @@ int main(int argc, char* argv[])
         case 1:
             in_1.GenerateTensorValue(GeneratorTensor_1<InOutDataType>{1}, num_thread);
             if(beta_ != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_1<InOutDataType>{1}, num_thread);
+            }
             break;
         case 2:
             in_1.GenerateTensorValue(GeneratorTensor_2<InOutDataType>{-5, 5}, num_thread);
             if(beta_ != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_2<InOutDataType>{-5, 5}, num_thread);
+            }
             break;
         default:
             in_1.GenerateTensorValue(GeneratorTensor_3<InOutDataType>{-5.0, 5.0}, num_thread);
             if(beta_ != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_3<InOutDataType>{-5.0, 5.0},
                                             num_thread);
+            }
         }
 
         if(beta_ != 0.0f)
+        {
             for(size_t i = 0; i < out_ref.mDesc.GetElementSpaceSize(); i++)
+            {
                 out.mData[i] = out_ref.mData[i];
+            }
+        }
     };
 
     DeviceMem in_1_dev(sizeof(InOutDataType) * in_1.mDesc.GetElementSpaceSize());
@@ -201,7 +211,9 @@ int main(int argc, char* argv[])
     in_1_dev.ToDevice(in_1.mData.data());
 
     if(beta_ != 0.0f)
+    {
         out_dev.ToDevice(out.mData.data());
+    }
 
     InElementwiseOperation in_elementwise_op;
     AccElementwiseOperation acc_elementwise_op;

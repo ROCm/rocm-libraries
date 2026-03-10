@@ -417,15 +417,25 @@ TEST(Debug, PrintTensorSpecialFloats)
     auto a = ckt::alloc_tensor_buffer(desc);
     ckt::fill_tensor_buffer(desc, a.get(), [](size_t i) {
         if(i % 8 == 1)
+        {
             return 0.f / 0.f;
+        }
         else if(i % 7 == 1)
+        {
             return std::sqrt(-1.f);
+        }
         else if(i % 6 == 1)
+        {
             return 1.f / 0.f;
+        }
         else if(i % 5 == 1)
+        {
             return -1.f / 0.f;
+        }
         else
+        {
             return static_cast<float>(i);
+        }
     });
 
     std::stringstream ss;

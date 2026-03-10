@@ -42,7 +42,9 @@ struct ReferenceBatchedGemm : public device::BaseOperator
               k_batch_(k_batch)
         {
             if(k_batch < 1)
+            {
                 throw std::invalid_argument("Batch size must be at least 1");
+            }
         }
 
         const Tensor<ADataType>& a_g_m_k_;
@@ -76,7 +78,9 @@ struct ReferenceBatchedGemm : public device::BaseOperator
                     int batchEnd   = batchSize * (batchIdx + 1);
                     // add any extra round-off to last batch
                     if(batchIdx == arg.k_batch_ - 1)
+                    {
                         batchEnd = K;
+                    }
 
                     AccDataType v_acc = 0;
                     for(int k = batchStart; k < batchEnd; ++k)

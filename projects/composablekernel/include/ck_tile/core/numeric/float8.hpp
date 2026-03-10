@@ -415,9 +415,13 @@ CK_TILE_HOST_DEVICE DstT run_cast_to_f8(SrcT src, unsigned int rng = 0)
   */
 
     if(exponent_diff > 0)
+    {
         mantissa >>= exponent_diff;
+    }
     else if(exponent_diff == -1)
+    {
         mantissa <<= -exponent_diff;
+    }
     bool implicit_one = mantissa & (1u << SrcT_mant);
     // if there is no implicit 1, it  means the f8 is denormal and need to adjust
     // to denorm exponent
@@ -467,7 +471,9 @@ CK_TILE_HOST_DEVICE DstT run_cast_to_f8(SrcT src, unsigned int rng = 0)
     }
 
     if(f8_exponent == 0 && mantissa == 0)
+    {
         return is_fnuz ? 0 : (sign << (DstT_exp + DstT_mant));
+    }
     mantissa &= (1 << DstT_mant) - 1;
     return (sign << (DstT_exp + DstT_mant)) | (f8_exponent << DstT_mant) | mantissa;
 }

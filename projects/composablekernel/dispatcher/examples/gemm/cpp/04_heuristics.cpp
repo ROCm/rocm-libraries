@@ -81,7 +81,9 @@ int main(int argc, char* argv[])
     args.add_option("--arch", "gfx942", "GPU architecture");
 
     if(!args.parse(argc, argv))
+    {
         return 0;
+    }
 
     print_header("Example 04: Custom Heuristics");
 
@@ -153,12 +155,16 @@ int main(int argc, char* argv[])
         {
             float actual = static_cast<float>(c_host[i]);
             if(std::abs(actual - expected) > 0.01f * expected + 1.0f)
+            {
                 ++errors;
+            }
         }
         bool pass = (errors == 0);
         std::cout << "  Verify: " << (pass ? "PASS" : "FAIL") << "\n";
         if(!pass)
+        {
             all_passed = false;
+        }
         print_separator();
     }
 

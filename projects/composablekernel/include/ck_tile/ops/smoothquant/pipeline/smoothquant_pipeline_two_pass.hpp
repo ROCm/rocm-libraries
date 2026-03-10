@@ -29,9 +29,13 @@ struct SmoothquantPipelineTwoPass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_tp"; // block per row
+        }
         else
+        {
             return "wpr_tp"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -92,9 +96,13 @@ struct SmoothquantPipelineTwoPass
                 x.get_tile_distribution().get_ys_to_d_descriptor().get_lengths().at(number<1>{});
             if constexpr(UseMax3 && std::is_same_v<ComputeDataType, float> &&
                          x_size_per_row % 2 == 0)
+            {
                 block_reduce2d(y, absmax, reduce_absmax3_func, sequence<1, 2>{});
+            }
             else
+            {
                 block_reduce2d(y, absmax, reduce_absmax_func);
+            }
 
             move_tile_window(x_window, {0, Block_N});
             move_tile_window(smscale_window, {Block_N});

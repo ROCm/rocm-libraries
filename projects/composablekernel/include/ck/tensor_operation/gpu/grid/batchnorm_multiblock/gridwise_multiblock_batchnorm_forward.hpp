@@ -202,7 +202,9 @@ struct GridwiseMultiblockBatchNormForward
         const index_t block_local_id  = block_global_id % blkgroup_size;
 
         if(block_local_id == 0)
+        {
             gms_init(BlockSize / WarpSize * blkgroup_size, &p_control[blkgroup_id * 2]);
+        }
 
         const auto thread_cluster_idx =
             thread_cluster_desc.CalculateBottomIndex(make_multi_index(thread_local_id));
@@ -281,7 +283,9 @@ struct GridwiseMultiblockBatchNormForward
 
         static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
             if constexpr(I > 0)
+            {
                 block_sync_lds();
+            }
 
             count_thread_buf(I) = threadwise_welford_1.cur_count_;
             BlockwiseWelford1::Run(mean_thread_buf(I), var_thread_buf(I), count_thread_buf(I));
@@ -363,7 +367,9 @@ struct GridwiseMultiblockBatchNormForward
         gms_barrier(&p_control[blkgroup_id * 2]);
 
         if(block_local_id == 0)
+        {
             gms_reset(&p_control[blkgroup_id * 2]);
+        }
 
         // Step 3: each workgroup reads welford results from workspace memory and does final welford
         // reduction
@@ -446,7 +452,9 @@ struct GridwiseMultiblockBatchNormForward
 
         static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
             if constexpr(I > 0)
+            {
                 block_sync_lds();
+            }
 
             BlockwiseWelford2::Run(mean_thread_buf(I), var_thread_buf(I), count_thread_buf(I));
         });

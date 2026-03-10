@@ -393,11 +393,17 @@ void naive_conv_fwd_multi_abd(
     // Calculate total elements for buffer allocation
     long_index_t in_total = 1, wei_total = 1, out_total = 1;
     for(auto l : in_lengths)
+    {
         in_total *= l;
+    }
     for(auto l : wei_lengths)
+    {
         wei_total *= l;
+    }
     for(auto l : out_lengths)
+    {
         out_total *= l;
+    }
 
     // Allocate packed buffers for all A and B tensors
     // Use separate allocations to avoid copy assignment issues with RAII wrapper

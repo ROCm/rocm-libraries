@@ -82,12 +82,16 @@ int bnorm_infer(
     int32_t reduceLength = 1;
 
     for(auto dim : reduceDims)
+    {
         reduceLength *= xyLengths[dim];
+    }
 
     int32_t invariantLength = 1;
 
     for(auto dim : invariantDims)
+    {
         invariantLength *= xyLengths[dim];
+    }
 
     size_t total_length = static_cast<size_t>(invariantLength) * reduceLength;
 

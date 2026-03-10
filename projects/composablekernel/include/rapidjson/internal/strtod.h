@@ -28,11 +28,17 @@ namespace internal {
 inline double FastPath(double significand, int exp)
 {
     if(exp < -308)
+    {
         return 0.0;
+    }
     else if(exp >= 0)
+    {
         return significand * internal::Pow10(exp);
+    }
     else
+    {
         return significand / internal::Pow10(-exp);
+    }
 }
 
 inline double StrtodNormalPrecision(double d, int p)
@@ -44,7 +50,9 @@ inline double StrtodNormalPrecision(double d, int p)
         d = FastPath(d, p + 308);
     }
     else
+    {
         d = FastPath(d, p);
+    }
     return d;
 }
 
@@ -53,9 +61,13 @@ inline T Min3(T a, T b, T c)
 {
     T m = a;
     if(m > b)
+    {
         m = b;
+    }
     if(m > c)
+    {
         m = c;
+    }
     return m;
 }
 
@@ -84,7 +96,9 @@ inline int CheckWithinHalfULP(double b, const BigInteger& d, int dExp)
 
     // Adjust for binary exponent
     if(bExp >= 0)
+    {
         bS_Exp2 += bExp;
+    }
     else
     {
         dS_Exp2 -= bExp;
@@ -93,7 +107,9 @@ inline int CheckWithinHalfULP(double b, const BigInteger& d, int dExp)
 
     // Adjust for half ulp exponent
     if(hExp >= 0)
+    {
         hS_Exp2 += hExp;
+    }
     else
     {
         dS_Exp2 -= hExp;
@@ -138,7 +154,9 @@ inline bool StrtodFast(double d, int p, double* result)
         return true;
     }
     else
+    {
         return false;
+    }
 }
 
 // Compute an approximation and see if it is within 1/2 ULP
@@ -151,12 +169,16 @@ inline bool StrtodDiyFp(const Ch* decimals, int dLen, int dExp, double* result)
     {
         if(significand > RAPIDJSON_UINT64_C2(0x19999999, 0x99999999) ||
            (significand == RAPIDJSON_UINT64_C2(0x19999999, 0x99999999) && decimals[i] >= Ch('5')))
+        {
             break;
+        }
         significand = significand * 10u + static_cast<unsigned>(decimals[i] - Ch('0'));
     }
 
     if(i < dLen && decimals[i] >= Ch('5')) // Rounding
+    {
         significand++;
+    }
 
     int remaining       = dLen - i;
     const int kUlpShift = 3;
@@ -186,7 +208,9 @@ inline bool StrtodDiyFp(const Ch* decimals, int dLen, int dExp, double* result)
         RAPIDJSON_ASSERT(adjustment >= 1 && adjustment < 8);
         v = v * kPow10[adjustment - 1];
         if(dLen + adjustment > 19) // has more digits than decimal digits in 64-bit
+        {
             error += kUlp / 2;
+        }
     }
 
     v = v * cachedPower;
@@ -235,17 +259,25 @@ inline double StrtodBigInteger(double approx, const Ch* decimals, int dLen, int 
     Double a(approx);
     int cmp = CheckWithinHalfULP(a.Value(), dInt, dExp);
     if(cmp < 0)
+    {
         return a.Value(); // within half ULP
+    }
     else if(cmp == 0)
     {
         // Round towards even
         if(a.Significand() & 1)
+        {
             return a.NextPositiveDouble();
+        }
         else
+        {
             return a.Value();
+        }
     }
     else // adjustment
+    {
         return a.NextPositiveDouble();
+    }
 }
 
 template <typename Ch>
@@ -257,7 +289,9 @@ inline double StrtodFullPrecision(
 
     double result = 0.0;
     if(StrtodFast(d, p, &result))
+    {
         return result;
+    }
 
     RAPIDJSON_ASSERT(length <= INT_MAX);
     int dLen = static_cast<int>(length);
@@ -302,15 +336,21 @@ inline double StrtodFullPrecision(
     // If too small, underflow to zero.
     // Any x <= 10^-324 is interpreted as zero.
     if(dLen + dExp <= -324)
+    {
         return 0.0;
+    }
 
     // If too large, overflow to infinity.
     // Any x >= 10^309 is interpreted as +infinity.
     if(dLen + dExp > 309)
+    {
         return std::numeric_limits<double>::infinity();
+    }
 
     if(StrtodDiyFp(decimals, dLen, dExp, &result))
+    {
         return result;
+    }
 
     // Use approximation from StrtodDiyFp and make adjustment with BigInteger comparison
     return StrtodBigInteger(result, decimals, dLen, dExp);

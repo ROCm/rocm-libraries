@@ -344,7 +344,9 @@ struct DeviceElementwiseNormalizationImpl
                 x_lds_size_        = block_TileSize * sizeof(XDataType);
             }
             else
+            {
                 x_lds_size_ = 0;
+            }
         }
 
         AccDataType epsilon_;
@@ -452,15 +454,21 @@ struct DeviceElementwiseNormalizationImpl
                 for(int i = 0; i < NumInput; i++)
                 {
                     if(p_arg_->inStridesArray_[i][NumInvariantDim - 1] != 1)
+                    {
                         return false;
+                    }
                 }
 
                 if(p_arg_->inStridesArray_[0][NumInvariantDim - 1] != 1 &&
                    p_arg_->inStridesArray_[1][NumInvariantDim - 1] != 1)
+                {
                     return false;
+                }
 
                 if(p_arg_->invariant_lowest_length % XSrcVectorSize != 0)
+                {
                     return false;
+                }
             };
         }
         else
@@ -468,11 +476,15 @@ struct DeviceElementwiseNormalizationImpl
             for(int i = 0; i < NumInput; i++)
             {
                 if(p_arg_->inStridesArray_[i][Rank - 1] != 1)
+                {
                     return false;
+                }
             }
 
             if(p_arg_->Lengths_[Rank - 1] % XSrcVectorSize != 0)
+            {
                 return false;
+            }
         };
 
         if(p_arg_->Lengths_[Rank - 1] % YDstVectorSize != 0)
@@ -484,53 +496,77 @@ struct DeviceElementwiseNormalizationImpl
             bool ret = true;
 
             if(!isLastDimensionCoalesced)
+            {
                 ret = scalarPerVector == 1;
+            }
             else
+            {
                 ret = KThreadSliceSize % scalarPerVector == 0;
+            }
 
             return ret;
         };
 
         if(!IsScalarPerVectorValid(p_arg_->gammaStrides_.back() == 1, GammaSrcVectorSize))
+        {
             return false;
+        }
 
         if(!IsScalarPerVectorValid(p_arg_->betaStrides_.back() == 1, BetaSrcVectorSize))
+        {
             return false;
+        }
 
         // if fastest dim is not reduced
         if constexpr(XYSrcVectorDim == 0) //
         {
             if(p_arg_->gammaStrides_[NumInvariantDim - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % GammaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
         else // if fastest dim is reduced
         {
             if(p_arg_->gammaStrides_[Rank - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % GammaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
 
         // if fastest dim is not reduced
         if constexpr(XYSrcVectorDim == 0)
         {
             if(p_arg_->betaStrides_[NumInvariantDim - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->invariant_lowest_length % BetaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
         else // if fastest dim is reduced
         {
             if(p_arg_->betaStrides_[Rank - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % BetaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
 
         if(p_arg_->x_lds_size_ >= 65536)

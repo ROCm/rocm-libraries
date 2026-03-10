@@ -99,13 +99,16 @@ struct ReferenceGroupnormBwd : public device::BaseOperator
 
             // Calculate dgamma and dbeta
             for(int g = 0; g < G; ++g)
+            {
                 for(int c = 0; c < C; ++c)
                 {
                     ComputeDataType dgamma = 0;
                     ComputeDataType dbeta  = 0;
 
                     for(int n = 0; n < N; ++n)
+                    {
                         for(int h = 0; h < H; ++h)
+                        {
                             for(int w = 0; w < W; ++w)
                             {
                                 ComputeDataType dy =
@@ -119,13 +122,17 @@ struct ReferenceGroupnormBwd : public device::BaseOperator
                                 dgamma += dy * rstd * (x - mean);
                                 dbeta += dy;
                             }
+                        }
+                    }
                     arg.dgamma_gc_(g, c) = ck::type_convert<DGammaDataType>(dgamma);
                     arg.dbeta_gc_(g, c)  = ck::type_convert<DBetaDataType>(dbeta);
                 }
+            }
 
             // Calculate dx
             int reduce_size = H * W * C;
             for(int n = 0; n < N; ++n)
+            {
                 for(int g = 0; g < G; ++g)
                 {
                     ComputeDataType ds = 0;
@@ -135,7 +142,9 @@ struct ReferenceGroupnormBwd : public device::BaseOperator
                     ComputeDataType rstd = ck::type_convert<ComputeDataType>(arg.inv_std_ng_(n, g));
 
                     for(int h = 0; h < H; ++h)
+                    {
                         for(int w = 0; w < W; ++w)
+                        {
                             for(int c = 0; c < C; ++c)
                             {
                                 ComputeDataType dy =
@@ -148,9 +157,13 @@ struct ReferenceGroupnormBwd : public device::BaseOperator
                                 ds += dy * gamma * x;
                                 db += dy * gamma;
                             }
+                        }
+                    }
 
                     for(int h = 0; h < H; ++h)
+                    {
                         for(int w = 0; w < W; ++w)
+                        {
                             for(int c = 0; c < C; ++c)
                             {
                                 ComputeDataType dy =
@@ -166,7 +179,10 @@ struct ReferenceGroupnormBwd : public device::BaseOperator
                                 arg.dx_nhwgc_(n, h, w, g, c) =
                                     ck::type_convert<DXDataType>(dy * gamma * rstd + b * x + c1);
                             }
+                        }
+                    }
                 }
+            }
 
             return 0;
         }

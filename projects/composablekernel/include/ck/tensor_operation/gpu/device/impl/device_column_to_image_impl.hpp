@@ -89,7 +89,9 @@ struct DeviceColumnToImageImpl
         const index_t w_eff = input_spatial_len - image_offset + left_pad + right_pad - x_eff;
         // There are no independent filters
         if(w_eff < 0)
+        {
             return 0;
+        }
         const index_t independent_kernels_num = w_eff / independent_filter_stride + 1;
         return independent_kernels_num;
     }
@@ -364,7 +366,9 @@ struct DeviceColumnToImageImpl
                         const index_t independent_filters_acum = ck::accumulate_n<index_t>(
                             independent_filters.begin(), NDimSpatial, 1, std::multiplies<>());
                         if(independent_filters_acum <= 0)
+                        {
                             continue;
+                        }
 
                         const auto in_grid_desc_m_k =
                             MakeInputDescriptor_M_K(N,
@@ -522,23 +526,35 @@ struct DeviceColumnToImageImpl
 
         // check vector acces with c not packed
         if(!is_c_packed && ScalarPerVector != 1)
+        {
             return false;
+        }
         // check vector access of filter window row (only C if C is not packed)
         if(!is_w_packed && arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of filter window row (X * C)
         if(arg.X_ * arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of pads (w_pad_left/w_pad_right * C)
         if(w_pad_left * arg.C_ % ScalarPerVector != 0 ||
            w_pad_right * arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of with stride and pad
         if((w_pad_left != 0 || w_pad_right != 0) && stride_x > 1 && arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of with dilation
         if(dilation_x > 1 && arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
 
         bool valid = true;
         for(std::size_t i = 0; i < arg.in_grid_desc_m_k_container_.size(); i++)

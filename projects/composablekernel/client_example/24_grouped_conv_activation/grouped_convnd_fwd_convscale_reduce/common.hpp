@@ -242,7 +242,9 @@ bool run_grouped_conv_fwd_convscale_reduce(
                                                    output_strides);
 
     if(!conv_ok)
+    {
         return false;
+    }
 
     /*
      *  Scale with output weight and convert to FP8
@@ -252,7 +254,9 @@ bool run_grouped_conv_fwd_convscale_reduce(
         conv_out, out, scale_out, output_lengths, output_strides);
 
     if(!elem_wise_ok)
+    {
         return false;
+    }
 
     /*
      *  Compute AMAX
@@ -266,7 +270,9 @@ bool run_grouped_conv_fwd_convscale_reduce(
                             NumDimSpatial>(conv_out, amax_device, output_lengths, output_strides);
 
     if(!reduction_ok)
+    {
         return false;
+    }
 
     return true;
 }

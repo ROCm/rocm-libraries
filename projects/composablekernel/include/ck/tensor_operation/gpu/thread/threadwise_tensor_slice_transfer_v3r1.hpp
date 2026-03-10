@@ -342,19 +342,25 @@ struct ThreadwiseTensorSliceTransfer_v3r1
                 if constexpr(is_detected<is_pack8_invocable_t, decltype(src_element_op_)>::value)
                 {
                     if constexpr(decltype(src_element_op_)::is_pack8_invocable)
+                    {
                         return math::min(8, SrcScalarPerVector);
+                    }
                 }
                 else if constexpr(is_detected<is_pack4_invocable_t,
                                               decltype(src_element_op_)>::value)
                 {
                     if constexpr(decltype(src_element_op_)::is_pack4_invocable)
+                    {
                         return math::min(4, SrcScalarPerVector);
+                    }
                 }
                 else if constexpr(is_detected<is_pack2_invocable_t,
                                               decltype(src_element_op_)>::value)
                 {
                     if constexpr(decltype(src_element_op_)::is_pack2_invocable)
+                    {
                         return math::min(2, SrcScalarPerVector);
+                    }
                 }
                 else
                 {

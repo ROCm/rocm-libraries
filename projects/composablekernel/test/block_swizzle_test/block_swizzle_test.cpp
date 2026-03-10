@@ -389,7 +389,9 @@ int main(int argc, char** argv)
 
             iter_end -= current_iter_length;
             if(iter_end <= iter_start)
+            {
                 break;
+            }
         }
     }
 

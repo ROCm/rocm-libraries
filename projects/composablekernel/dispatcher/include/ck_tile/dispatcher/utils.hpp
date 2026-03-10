@@ -152,9 +152,13 @@ class GpuTimer
         if(this != &other)
         {
             if(start_)
+            {
                 (void)hipEventDestroy(start_);
+            }
             if(stop_)
+            {
                 (void)hipEventDestroy(stop_);
+            }
             start_        = other.start_;
             stop_         = other.stop_;
             stream_       = other.stream_;
@@ -264,10 +268,14 @@ BenchmarkStats run_benchmark(Func&& func, int warmup = 2, int iterations = 10)
     times.reserve(iterations);
 
     for(int i = 0; i < warmup; ++i)
+    {
         func();
+    }
 
     for(int i = 0; i < iterations; ++i)
+    {
         times.push_back(func());
+    }
 
     std::sort(times.begin(), times.end());
 
@@ -279,7 +287,9 @@ BenchmarkStats run_benchmark(Func&& func, int warmup = 2, int iterations = 10)
 
     double sum = 0;
     for(double t : times)
+    {
         sum += t;
+    }
     stats.avg_ms = sum / iterations;
 
     return stats;
@@ -336,7 +346,9 @@ ValidationResult validate_result(
 
         double threshold = atol + rtol * std::abs(ref);
         if(diff <= threshold)
+        {
             ++v.matches;
+        }
     }
 
     v.mean_diff = sum_diff / size;
@@ -359,7 +371,9 @@ void compute_reference_gemm(
         {
             double acc = 0;
             for(int64_t k = 0; k < K; ++k)
+            {
                 acc += static_cast<double>(A[m * K + k]) * static_cast<double>(B[k * N + n]);
+            }
             C[m * N + n] = static_cast<CType>(acc);
         }
     }
@@ -377,7 +391,9 @@ void fill_random(T* data, int64_t size, T min_val = T(-1), T max_val = T(1))
     std::uniform_real_distribution<float> dist(static_cast<float>(min_val),
                                                static_cast<float>(max_val));
     for(int64_t i = 0; i < size; ++i)
+    {
         data[i] = static_cast<T>(dist(gen));
+    }
 }
 
 template <typename T>
@@ -398,7 +414,9 @@ void fill_identity(T* data, int64_t rows, int64_t cols)
     fill_zeros(data, rows * cols);
     int64_t min_dim = std::min(rows, cols);
     for(int64_t i = 0; i < min_dim; ++i)
+    {
         data[i * cols + i] = T(1);
+    }
 }
 
 // =============================================================================
@@ -422,7 +440,9 @@ class GpuBuffer
     ~GpuBuffer()
     {
         if(data_)
+        {
             (void)hipFree(data_);
+        }
     }
 
     // Non-copyable
@@ -441,7 +461,9 @@ class GpuBuffer
         if(this != &other)
         {
             if(data_)
+            {
                 (void)hipFree(data_);
+            }
             data_       = other.data_;
             size_       = other.size_;
             other.data_ = nullptr;

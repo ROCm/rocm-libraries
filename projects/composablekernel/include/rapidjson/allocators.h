@@ -86,9 +86,13 @@ class CrtAllocator
     void* Malloc(size_t size)
     {
         if(size) //  behavior of malloc(0) is implementation defined.
+        {
             return RAPIDJSON_MALLOC(size);
+        }
         else
+        {
             return NULL; // standardize to returning NULL.
+        }
     }
     void* Realloc(void* originalPtr, size_t originalSize, size_t newSize)
     {
@@ -317,7 +321,9 @@ class MemoryPoolAllocator
         RAPIDJSON_NOEXCEPT_ASSERT(shared_->refcount > 0);
         size_t capacity = 0;
         for(ChunkHeader* c = shared_->chunkHead; c != 0; c = c->next)
+        {
             capacity += c->capacity;
+        }
         return capacity;
     }
 
@@ -329,7 +335,9 @@ class MemoryPoolAllocator
         RAPIDJSON_NOEXCEPT_ASSERT(shared_->refcount > 0);
         size_t size = 0;
         for(ChunkHeader* c = shared_->chunkHead; c != 0; c = c->next)
+        {
             size += c->size;
+        }
         return size;
     }
 
@@ -347,12 +355,18 @@ class MemoryPoolAllocator
     {
         RAPIDJSON_NOEXCEPT_ASSERT(shared_->refcount > 0);
         if(!size)
+        {
             return NULL;
+        }
 
         size = RAPIDJSON_ALIGN(size);
         if(RAPIDJSON_UNLIKELY(shared_->chunkHead->size + size > shared_->chunkHead->capacity))
+        {
             if(!AddChunk(chunk_capacity_ > size ? chunk_capacity_ : size))
+            {
                 return NULL;
+            }
+        }
 
         void* buffer = GetChunkBuffer(shared_) + shared_->chunkHead->size;
         shared_->chunkHead->size += size;
@@ -363,18 +377,24 @@ class MemoryPoolAllocator
     void* Realloc(void* originalPtr, size_t originalSize, size_t newSize)
     {
         if(originalPtr == 0)
+        {
             return Malloc(newSize);
+        }
 
         RAPIDJSON_NOEXCEPT_ASSERT(shared_->refcount > 0);
         if(newSize == 0)
+        {
             return NULL;
+        }
 
         originalSize = RAPIDJSON_ALIGN(originalSize);
         newSize      = RAPIDJSON_ALIGN(newSize);
 
         // Do not shrink if new size is smaller than original
         if(originalSize >= newSize)
+        {
             return originalPtr;
+        }
 
         // Simply expand it if it is the last allocation and there is sufficient space
         if(originalPtr == GetChunkBuffer(shared_) + shared_->chunkHead->size - originalSize)
@@ -391,11 +411,15 @@ class MemoryPoolAllocator
         if(void* newBuffer = Malloc(newSize))
         {
             if(originalSize)
+            {
                 std::memcpy(newBuffer, originalPtr, originalSize);
+            }
             return newBuffer;
         }
         else
+        {
             return NULL;
+        }
     }
 
     //! Frees a memory block (concept Allocator)
@@ -422,7 +446,9 @@ class MemoryPoolAllocator
     bool AddChunk(size_t capacity)
     {
         if(!baseAllocator_)
+        {
             shared_->ownBaseAllocator = baseAllocator_ = RAPIDJSON_NEW(BaseAllocator)();
+        }
         if(ChunkHeader* chunk =
                static_cast<ChunkHeader*>(baseAllocator_->Malloc(SIZEOF_CHUNK_HEADER + capacity)))
         {
@@ -433,7 +459,9 @@ class MemoryPoolAllocator
             return true;
         }
         else
+        {
             return false;
+        }
     }
 
     static inline void* AlignBuffer(void* buf, size_t& size)

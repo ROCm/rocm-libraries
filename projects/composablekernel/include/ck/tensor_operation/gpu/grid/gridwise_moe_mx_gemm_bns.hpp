@@ -1184,7 +1184,9 @@ struct GridwiseMoeGemmMXBNS
         const index_t max_token_id    = __builtin_amdgcn_readfirstlane(p_max_token_id[0]);
         const index_t expert_block_id = NSwizzle ? blockIdx.x / problem.NBlock : blockIdx.y;
         if(expert_block_id * MPerBlock >= max_token_id)
+        {
             return;
+        }
         const index_t expert_id =
             __builtin_amdgcn_readfirstlane(p_sorted_expert_ids[expert_block_id]);
 
@@ -1223,7 +1225,9 @@ struct GridwiseMoeGemmMXBNS
         const index_t token_pos   = block_m_id * MPerBlock + threadIdx.x / AKThreads * AMRepeats;
 
         if(token_pos >= max_token_id || token0 >= problem.NumTokens)
+        {
             return;
+        }
         StaticallyIndexedArray<IndexType, AMRepeats> gather_offsets;
         static_for<0, AMRepeats, 1>{}([&](auto m0) {
             const index_t fused_token = p_sorted_token_ids[token_pos + m0];

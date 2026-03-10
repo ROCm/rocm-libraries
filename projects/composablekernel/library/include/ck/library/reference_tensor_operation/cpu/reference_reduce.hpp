@@ -76,12 +76,15 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
 
             if(std::any_of(
                    reduceDims.begin(), reduceDims.end(), [](int d) { return d < 0 || d >= Rank; }))
+            {
                 throw std::runtime_error("Invalid reduce dimensions!");
+            }
 
             if constexpr(NumInvariantDim > 0)
             {
                 // get invariant_dims[] and invariant_lengths[]
                 for(int dim = 0, i = 0; dim < Rank; dim++)
+                {
                     if(std::none_of(
                            reduceDims.begin(), reduceDims.end(), [&](int d) { return d == dim; }))
                     {
@@ -89,6 +92,7 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
                         invariant_lengths_[i] = inLengths[dim];
                         i++;
                     };
+                }
             };
 
             // get reduce_lengths_[]
@@ -102,8 +106,12 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
             {
                 // check invariant_lengths_ and outLengths
                 for(int i = 0; i < NumInvariantDim; i++)
+                {
                     if(invariant_lengths_[i] != outLengths_[i])
+                    {
                         throw std::runtime_error("Invalid lengths parameters!");
+                    }
+                }
             }
 
             if constexpr(NumInvariantDim > 0)
@@ -124,7 +132,9 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
             };
 
             if constexpr(NumInvariantDim > 0)
+            {
                 invariant_index_set_ = get_index_set<NumInvariantDim>(invariant_lengths_);
+            }
 
             reduce_index_set_ = get_index_set<NumReduceDim>(reduce_lengths_);
 
@@ -197,11 +207,15 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
                     arg.acc_elementwise_op_(accuVal, accuVal);
 
                     if(!float_equal_one{}(arg.alpha_))
+                    {
                         accuVal *= type_convert<AccDataType>(arg.alpha_);
+                    }
 
                     if(!float_equal_zero{}(arg.beta_))
+                    {
                         accuVal += type_convert<AccDataType>(arg.out_host_[0]) *
                                    type_convert<AccDataType>(arg.beta_);
+                    }
 
                     arg.out_host_[0]       = type_convert<OutDataType>(accuVal);
                     arg.out_index_host_[0] = accuIndex;
@@ -234,14 +248,18 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
                         arg.acc_elementwise_op_(accuVal, accuVal);
 
                         if(!float_equal_one{}(arg.alpha_))
+                        {
                             accuVal *= type_convert<AccDataType>(arg.alpha_);
+                        }
 
                         auto dst_offset = get_offset_from_index<NumInvariantDim>(arg.outStrides_,
                                                                                  invariant_index);
 
                         if(!float_equal_zero{}(arg.beta_))
+                        {
                             accuVal += type_convert<AccDataType>(arg.out_host_[dst_offset]) *
                                        type_convert<AccDataType>(arg.beta_);
+                        }
 
                         arg.out_host_[dst_offset]       = type_convert<OutDataType>(accuVal);
                         arg.out_index_host_[dst_offset] = accuIndex;
@@ -295,11 +313,15 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
                     arg.acc_elementwise_op_(accuVal, accuVal);
 
                     if(!float_equal_one{}(arg.alpha_))
+                    {
                         accuVal *= type_convert<AccDataType>(arg.alpha_);
+                    }
 
                     if(!float_equal_zero{}(arg.beta_))
+                    {
                         accuVal += type_convert<AccDataType>(arg.out_host_[0]) *
                                    type_convert<AccDataType>(arg.beta_);
+                    }
 
                     arg.out_host_[0] = type_convert<OutDataType>(accuVal);
                 }
@@ -328,14 +350,18 @@ struct ReferenceReduce : public device::DeviceReduce<InDataType,
                         arg.acc_elementwise_op_(accuVal, accuVal);
 
                         if(!float_equal_one{}(arg.alpha_))
+                        {
                             accuVal *= type_convert<AccDataType>(arg.alpha_);
+                        }
 
                         auto dst_offset = get_offset_from_index<NumInvariantDim>(arg.outStrides_,
                                                                                  invariant_index);
 
                         if(!float_equal_zero{}(arg.beta_))
+                        {
                             accuVal += type_convert<AccDataType>(arg.out_host_[dst_offset]) *
                                        type_convert<AccDataType>(arg.beta_);
+                        }
 
                         arg.out_host_[dst_offset] = type_convert<OutDataType>(accuVal);
                     };

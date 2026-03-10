@@ -488,7 +488,9 @@ TEST(FP6, TestAllValues)
     const bool ck_logging = ck::EnvIsEnabled(CK_ENV(CK_LOGGING));
 
     if(ck_logging)
+    {
         printf("FP6 Table\n");
+    }
     ck::static_for<0, 64, 1>{}([&](auto i) {
         float fp = type_convert<float>(f6_t(e2m3BitsOCP[i]));
         ASSERT_EQ(fp, e2m3ValuesOCP[i]);

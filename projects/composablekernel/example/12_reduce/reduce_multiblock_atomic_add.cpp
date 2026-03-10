@@ -61,24 +61,32 @@ class SimpleAppArgs
         {
             ch = getopt_long(argc, argv, "D:R:v:l:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inLengths = getTypeValuesFromString<size_t>(optarg);
                 break;
             case 'R':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 reduceDims = getTypeValuesFromString<int>(optarg);
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
@@ -129,12 +137,16 @@ bool reduce_multiblock_atomic_add_test(bool do_verification,
 
     static_for<0, std::tuple_size<reduce_shape_instances>::value, 1>{}([&](auto i) {
         if(matched)
+        {
             return;
+        }
 
         using ShapeType = std::tuple_element_t<i.value, reduce_shape_instances>;
 
         if(ShapeType::Rank_ != inLengths.size() || ShapeType::NumReduceDim_ != reduceDims.size())
+        {
             return;
+        }
 
         std::array<int, ShapeType::NumReduceDim_> a_reduceDims;
 
@@ -166,7 +178,9 @@ int main(int argc, char* argv[])
         SimpleAppArgs arg;
 
         if(arg.processArgs(argc, argv) < 0)
+        {
             return (-1);
+        }
 
         if(arg.data_type == 0)
         {

@@ -115,7 +115,9 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
     constexpr dim3 blocks = Kernel::BlockSize();
 
     if(!Kernel::IsSupportedArgument(kargs))
+    {
         throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");
+    }
 
     if(s.log_level_ > 0)
     {
@@ -134,8 +136,10 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
 
     auto clear_gemm_output = [&]() {
         if(args.k_batch > 1)
+        {
             hipGetErrorString(
                 hipMemsetAsync(args.e_ptr, 0, args.M * args.N * sizeof(CDataType), s.stream_id_));
+        }
     };
 
     if(s.flush_cache_)

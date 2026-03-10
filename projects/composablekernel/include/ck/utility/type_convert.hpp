@@ -347,8 +347,10 @@ inline __host__ __device__ f8_fnuz_t f8_convert_sr<f8_fnuz_t, float>(float x)
     const float max_fp8 = 240.0f;
     // if x is not +/- infinity or nan
     if((val.i32val & NumericUtils<float>::nan_mask) != NumericUtils<float>::Inf)
+    {
         // clip float value
         val.fval = __builtin_amdgcn_fmed3f(val.fval, max_fp8, -max_fp8);
+    }
     ival       = __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0); // 0 pos
     val.i32val = ival;
     return f8_fnuz_t{val.i8val[0]}; // little endian
@@ -415,8 +417,10 @@ inline __host__ __device__ bf8_fnuz_t f8_convert_sr<bf8_fnuz_t, float>(float x)
     const float max_bf8 = 57344.0f;
     // if x is not +/- infinity or nan
     if((val.i32val & NumericUtils<float>::nan_mask) != NumericUtils<float>::Inf)
+    {
         // clip float value
         val.fval = __builtin_amdgcn_fmed3f(val.fval, max_bf8, -max_bf8);
+    }
     ival       = __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0); // 0 pos
     val.i32val = ival;
     return bf8_fnuz_t{val.i8val[0]}; // little endian
@@ -651,8 +655,10 @@ inline __host__ __device__ f8_fnuz_t f8_convert_rne<f8_fnuz_t, float>(float x)
     const float max_fp8 = 240.0f;
     // if x is not +/- infinity or nan
     if((val.i32val & NumericUtils<float>::nan_mask) != NumericUtils<float>::Inf)
+    {
         // clip float value
         val.fval = __builtin_amdgcn_fmed3f(val.fval, max_fp8, -max_fp8);
+    }
     ival       = __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false); // false -> WORD0
     val.i32val = ival;
     return f8_fnuz_t{val.i8val[0]};
@@ -703,8 +709,10 @@ inline __host__ __device__ bf8_fnuz_t f8_convert_rne<bf8_fnuz_t, float>(float x)
     const float max_bf8 = 57344.0f;
     // if x is not +/- infinity or nan
     if((val.i32val & NumericUtils<float>::nan_mask) != NumericUtils<float>::Inf)
+    {
         // clip float value
         val.fval = __builtin_amdgcn_fmed3f(val.fval, max_bf8, -max_bf8);
+    }
     ival       = __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false); // false -> WORD0
     val.i32val = ival;
     return bf8_fnuz_t{val.i8val[0]};

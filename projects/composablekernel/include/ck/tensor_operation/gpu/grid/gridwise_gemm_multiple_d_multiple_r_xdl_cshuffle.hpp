@@ -194,9 +194,13 @@ struct GridwiseGemmMultipleDMultipleR_k0mk1_k0nk1_mn_xdl_cshuffle_v1
             [&](auto i) {
                 using T = remove_cvref_t<tuple_element_t<i.value, Ts>>;
                 if constexpr(isConst)
+                {
                     return static_cast<const T*>(nullptr);
+                }
                 else
+                {
                     return static_cast<T*>(nullptr);
+                }
             },
             Number<Ts::Size()>{});
     }
@@ -256,13 +260,19 @@ struct GridwiseGemmMultipleDMultipleR_k0mk1_k0nk1_mn_xdl_cshuffle_v1
         const auto K = a_grid_desc_m_k.GetLength(I1);
 
         if(!(M == e_grid_desc_m_n.GetLength(I0) && N == e_grid_desc_m_n.GetLength(I1)))
+        {
             return false;
+        }
 
         if(!(M % MPerBlock == 0 && N % NPerBlock == 0 && K % KPerBlock == 0))
+        {
             return false;
+        }
 
         if(M != r_grid_desc_m.GetLength(I0))
+        {
             return false;
+        }
 
         // check gridwise gemm pipeline
         const auto num_k_loop = K / KPerBlock;

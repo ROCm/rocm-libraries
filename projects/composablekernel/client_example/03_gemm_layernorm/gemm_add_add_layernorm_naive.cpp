@@ -105,7 +105,9 @@ bool RunDeviceGemmMeanSquareMean(gemm_reduce_op_ptr& p_op,
         float ave_time = invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
 
         if(time_kernel)
+        {
             std::cout << "Gemm + reduce Perf: " << std::setw(10) << ave_time << " ms" << std::endl;
+        }
 
         return true;
     }
@@ -146,7 +148,9 @@ bool RunDeviceNormalize2D(normalize_op_ptr& p_op,
         float ave_time   = invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
 
         if(time_kernel)
+        {
             std::cout << "Normalize Perf: " << std::setw(10) << ave_time << " ms" << std::endl;
+        }
 
         return true;
     }
@@ -242,7 +246,9 @@ int main()
                                        b_time_kernel))
         {
             if(b_only_run_first_kernel)
+            {
                 break;
+            }
         }
         else
         {
@@ -266,7 +272,9 @@ int main()
                                 b_time_kernel))
         {
             if(b_only_run_first_kernel)
+            {
                 break;
+            }
         }
         else
         {

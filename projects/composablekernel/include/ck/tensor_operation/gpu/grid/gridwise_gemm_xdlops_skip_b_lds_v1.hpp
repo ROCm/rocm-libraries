@@ -260,10 +260,14 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_skip_b_lds_v1
         if(!(M == c_grid_desc_m_n.GetLength(I0) && N == c_grid_desc_m_n.GetLength(I1) &&
              K0 == b_grid_desc_k0_n_k1.GetLength(I0) && K1 == a_grid_desc_k0_m_k1.GetLength(I2) &&
              K1 == b_grid_desc_k0_n_k1.GetLength(I2)))
+        {
             return false;
+        }
 
         if(!(M % MPerBlock == 0 && N % NPerBlock == 0 && K0 % K0PerBlock == 0))
+        {
             return false;
+        }
 
         // 2-stage prefetch currently only support even number of K0 loop
         // TODO: add support for odd number of K0 loop
@@ -280,7 +284,9 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_skip_b_lds_v1
         const auto N0 = N / N1;
 
         if(!(M0 % M01 == 0 && N0 % N01 == 0))
+        {
             return false;
+        }
 
         // TODO: also check validity of all components (blockwise-copy, threadwise-copy, etc)
         return true;

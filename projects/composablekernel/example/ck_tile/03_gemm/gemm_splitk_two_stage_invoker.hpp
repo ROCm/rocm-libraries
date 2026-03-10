@@ -127,7 +127,9 @@ struct SplitKTwoStageInvoker
         std::vector<ck_tile::index_t> shape = {args.M, args.N};
 
         for(auto d : shape)
+        {
             total_elements *= d;
+        }
 
         const ck_tile::index_t kBlockSize      = ElementwiseKernel::BlockSize();
         constexpr ck_tile::index_t kBlockPerCu = 1;
@@ -162,8 +164,10 @@ struct SplitKTwoStageInvoker
 
         auto clear_gemm_output = [&]() {
             if(args.k_batch > 1)
+            {
                 hipGetErrorString(hipMemsetAsync(
                     ws_args.c_ptr, 0, args.M * args.N * sizeof(WorkspaceType), s.stream_id_));
+            }
         };
 
         if(s.flush_cache_)

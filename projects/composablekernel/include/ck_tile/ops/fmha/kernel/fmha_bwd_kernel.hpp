@@ -127,9 +127,13 @@ struct FmhaBwdDQDKDVKernel
     CK_TILE_HOST static index_t GetDqAccSplits(index_t seqlen_k)
     {
         if constexpr(kIsDeterministic)
+        {
             return integer_divide_ceil(seqlen_k, FmhaPipeline::BlockFmhaShape::kN0);
+        }
         else
+        {
             return 1;
+        }
     }
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
@@ -706,7 +710,9 @@ struct FmhaBwdDQDKDVKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         if constexpr(kIsAvailable)
+        {
             run_(std::move(kargs));
+        }
     }
 
     CK_TILE_DEVICE void run_(Kargs kargs) const
@@ -803,8 +809,12 @@ struct FmhaBwdDQDKDVKernel
             // # of required blocks is different in each groups, terminate unnecessary blocks
             // earlier
             if constexpr(!kUseQrQtrDorPipeline)
+            {
                 if(kargs.seqlen_k <= i_n0)
+                {
                     return;
+                }
+            }
         }
         else
         {
@@ -937,12 +947,16 @@ struct FmhaBwdDQDKDVKernel
 
             auto dq_acc_ptr = reinterpret_cast<DType*>(kargs.dq_acc_ptr) + [&]() {
                 if constexpr(kUseKSplit)
+                {
                     return static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_dq_acc +
                            static_cast<long_index_t>(i_tile_n_) * kargs.split_stride_dq_acc +
                            batch_offset_dq_acc;
+                }
                 else
+                {
                     return static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_dq_acc +
                            batch_offset_dq_acc;
+                }
             }();
 
             constexpr auto DstInMemOp = conditional_expr<kUseKSplit>(
@@ -1120,14 +1134,18 @@ struct FmhaBwdDQDKDVKernel
 
         FmhaMask mask = [&]() {
             if constexpr(kHasMask)
+            {
                 return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                     kargs.window_size_left,
                     kargs.window_size_right,
                     kargs.seqlen_q,
                     kargs.seqlen_k,
                     kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+            }
             else
+            {
                 return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+            }
         }();
 
         auto dk_dram = [&]() {

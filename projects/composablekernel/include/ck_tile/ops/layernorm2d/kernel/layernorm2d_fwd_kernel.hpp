@@ -338,7 +338,9 @@ struct Layernorm2dFwd
                 return make_tile_window(mean_m, make_tuple(number<Block_M>{}), {iM});
             }
             else
+            {
                 return make_null_tile_window(make_tuple(number<Block_M>{}));
+            }
         }();
 
         auto inv_std_window = [&]() {
@@ -357,7 +359,9 @@ struct Layernorm2dFwd
                 return make_tile_window(inv_std_m, make_tuple(number<Block_M>{}), {iM});
             }
             else
+            {
                 return make_null_tile_window(make_tuple(number<Block_M>{}));
+            }
         }();
 
         auto sm_scale_window = [&]() {
@@ -376,7 +380,9 @@ struct Layernorm2dFwd
                 return make_tile_window(win_, make_tuple(number<Block_N>{}), {0});
             }
             else
+            {
                 return make_null_tile_window(make_tuple(number<Block_N>{}));
+            }
         }();
 
         auto y_scale_window = [&]() {
@@ -395,7 +401,9 @@ struct Layernorm2dFwd
                 return make_tile_window(win_, make_tuple(number<Block_M>{}), {iM});
             }
             else
+            {
                 return make_null_tile_window(make_tuple(number<Block_M>{}));
+            }
         }();
 
         __shared__ char smem[GetSmemSize()];

@@ -335,7 +335,9 @@ struct GridwiseNormalizationWelfordVariance_mk_to_mk
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
                 if constexpr(I > 0)
+                {
                     block_sync_lds();
+                }
 
                 int count = threadwise_welford.cur_count_;
                 BlockwiseWelford::Run(mean_thread_buf(I), var_thread_buf(I), count);
@@ -392,8 +394,10 @@ struct GridwiseNormalizationWelfordVariance_mk_to_mk
                                          beta_thread_buf(i));
 
                 if constexpr(i != ThreadBufferNumber - 1)
+                {
                     threadwise_beta_load.MoveSrcSliceWindow(beta_grid_desc_m_k,
                                                             thread_copy_fwd_step_m_k);
+                }
             });
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
@@ -418,8 +422,10 @@ struct GridwiseNormalizationWelfordVariance_mk_to_mk
                                        y_global_val_buf);
 
                 if constexpr(i != ThreadBufferNumber - 1)
+                {
                     threadwise_y_store.MoveDstSliceWindow(y_grid_desc_m_k,
                                                           thread_copy_fwd_step_m_k);
+                }
             });
         } // end of sweep once
         else
@@ -439,7 +445,9 @@ struct GridwiseNormalizationWelfordVariance_mk_to_mk
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
                 if constexpr(I > 0)
+                {
                     block_sync_lds();
+                }
 
                 int count = threadwise_welford.cur_count_;
                 BlockwiseWelford::Run(mean_thread_buf(I), var_thread_buf(I), count);

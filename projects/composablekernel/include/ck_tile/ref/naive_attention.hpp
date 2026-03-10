@@ -150,17 +150,25 @@ struct naive_attention_fwd_kernel
         __device__ T* get_base(int i_b, int i_h)
         {
             if constexpr(Layout == naive_attention_layout_enum::BSHD)
+            {
                 return base_ptr + i_b * s * h * d + i_h * d;
+            }
             else if constexpr(Layout == naive_attention_layout_enum::BHSD)
+            {
                 return base_ptr + i_b * s * h * d + i_h * s * d;
+            }
         }
 
         __device__ int get_offset(int i_s, int i_d)
         {
             if constexpr(Layout == naive_attention_layout_enum::BSHD)
+            {
                 return i_s * h * d + i_d;
+            }
             else if constexpr(Layout == naive_attention_layout_enum::BHSD)
+            {
                 return i_s * d + i_d;
+            }
         }
 
         // below set of API will directly use pointer inside this struct
@@ -207,7 +215,9 @@ struct naive_attention_fwd_kernel
             int64_t page_idx = get_phy_page_idx(i_s);
             int64_t base_    = page_idx * h * s * d;
             if constexpr(Layout == naive_attention_layout_enum::PHSD)
+            {
                 return static_cast<int64_t>(i_h * s * d + page_offset * d + i_d) + base_;
+            }
             else if constexpr(Layout == naive_attention_layout_enum::PHDSX)
             {
                 int d_r = i_d / x;
@@ -513,7 +523,9 @@ struct naive_attention_fwd_kernel
                             return reinterpret_cast<QCompute*>(smem_quant_q)[i_dq];
                         }
                         else
+                        {
                             return q_addr.load(i_sq, i_dq); // q will have duplicate load
+                        }
                     }();
                     auto k = [&]() { return k_addr.load(i_sk, i_dq); }();
 
@@ -685,7 +697,9 @@ struct naive_attention_fwd_kernel
 
         // store O
         if(i_dv < args.hdim_v)
+        {
             o_addr.store(type_convert<OType>(o_acc), i_sq, i_dv);
+        }
     }
 };
 

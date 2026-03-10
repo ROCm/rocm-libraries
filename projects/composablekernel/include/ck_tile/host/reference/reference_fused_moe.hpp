@@ -92,7 +92,9 @@ void reference_fused_moe(
     auto f = [&](auto i_flatten) {
         ck_tile::index_t i_tile = i_flatten / block_m;
         if(i_tile >= num_sorted_tiles)
+        {
             return;
+        }
         ck_tile::index_t i_expert = sorted_expert_ids_host.mData[i_tile];
 
 #if CK_TILE_REFERENCE_MOE_SORTING_MOCK_ID

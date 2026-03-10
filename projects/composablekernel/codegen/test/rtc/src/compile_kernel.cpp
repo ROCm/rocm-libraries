@@ -21,9 +21,13 @@ namespace rtc {
 bool EndsWith(const std::string& value, const std::string& suffix)
 {
     if(suffix.size() > value.size())
+    {
         return false;
+    }
     else
+    {
         return std::equal(suffix.rbegin(), suffix.rend(), value.rbegin());
+    }
 }
 
 std::vector<std::string> SplitString(const std::string& s, char delim)
@@ -48,16 +52,22 @@ T generic_read_file(const std::string& filename, size_t offset = 0, size_t nbyte
         // calculate size of remaining bytes to read
         nbytes = is.tellg();
         if(offset > nbytes)
+        {
             throw std::runtime_error("offset is larger than file size");
+        }
         nbytes -= offset;
     }
     if(nbytes < 1)
+    {
         throw std::runtime_error("Invalid size for: " + filename);
+    }
     is.seekg(offset, std::ios::beg);
 
     T buffer(nbytes, 0);
     if(not is.read(&buffer[0], nbytes))
+    {
         throw std::runtime_error("Error reading file: " + filename);
+    }
     return buffer;
 }
 
@@ -108,7 +118,9 @@ kernel clang_compile_kernel(const std::vector<src_file>& srcs, compile_options o
         {
             options.flags += " -c " + src.path.filename().string();
             if(out.empty())
+            {
                 out = src.path.stem().string() + ".o";
+            }
         }
     }
 
@@ -117,13 +129,17 @@ kernel clang_compile_kernel(const std::vector<src_file>& srcs, compile_options o
 
     auto out_path = td.path / out;
     if(not fs::exists(out_path))
+    {
         throw std::runtime_error("Output file missing: " + out);
+    }
 
     auto obj = read_buffer(out_path.string());
 
     std::ofstream ofh("obj.o", std::ios::binary);
     for(auto i : obj)
+    {
         ofh << i;
+    }
     ofh.close();
     // int s = std::system(("/usr/bin/cp " + out_path.string() + " codeobj.bin").c_str());
     // assert(s == 0);
@@ -140,7 +156,9 @@ std::string hiprtc_error(hiprtcResult err, const std::string& msg)
 void hiprtc_check_error(hiprtcResult err, const std::string& msg = "")
 {
     if(err != HIPRTC_SUCCESS)
+    {
         throw std::runtime_error(hiprtc_error(err, msg));
+    }
 }
 
 struct hiprtc_src_file
@@ -241,7 +259,9 @@ struct hiprtc_program
             std::cerr << prog_log << std::endl;
         }
         if(result != HIPRTC_SUCCESS)
+        {
             throw std::runtime_error("Compilation failed.");
+        }
     }
 
     std::string log() const
@@ -249,7 +269,9 @@ struct hiprtc_program
         std::size_t n = 0;
         hiprtc_check_error(hiprtcGetProgramLogSize(prog.get(), &n));
         if(n == 0)
+        {
             return {};
+        }
         std::string buffer(n, '\0');
         hiprtc_check_error(hiprtcGetProgramLog(prog.get(), buffer.data()));
         assert(buffer.back() != 0);
@@ -283,7 +305,9 @@ static kernel hiprtc_compile_kernel(const std::vector<src_file>& srcs, compile_o
     options.flags += " --offload-arch=" + get_device_name();
     auto cos = compile_hip_src_with_hiprtc(srcs, options);
     if(cos.size() != 1)
+    {
         std::runtime_error("No code object");
+    }
     auto& obj = cos.front();
     return kernel{obj.data(), options.kernel_name};
 }

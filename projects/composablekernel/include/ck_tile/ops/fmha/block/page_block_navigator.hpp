@@ -193,10 +193,14 @@ struct PageBlockNavigator
             (is_last_block(new_block_index) ? last_view : complete_view).get_tensor_descriptor();
         tile_window.set_window_origin(local_window_origin);
         if(id >= 0)
+        {
             tile_window.set_bottom_tensor_view_data_ptr(physical_blocks + id * block_stride +
                                                         fixed_offset);
+        }
         else
+        {
             tile_window.set_bottom_tensor_view_data_ptr(nullptr);
+        }
 
         return new_block_index;
     }

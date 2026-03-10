@@ -115,9 +115,13 @@ struct ReferenceMoeMXGemm1 : public device::BaseOperator
 
                             f4_t f4 = 0;
                             if(k % 2 == 1)
+                            {
                                 f4 = (a_f4x2 >> 0) & 0xf;
+                            }
                             else
+                            {
                                 f4 = (a_f4x2 >> 4) & 0xf;
+                            }
                             v_a = type_convert<ComputeTypeA>(f4) *
                                   type_convert<ComputeTypeA>(a_scale);
                         }

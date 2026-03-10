@@ -198,7 +198,9 @@ TEST(MXFP8, HostScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(auto fp8_nan_id : fp8_nan_ids)
         {
             auto idx = exp_id * 256 + fp8_nan_id;
@@ -209,11 +211,15 @@ TEST(MXFP8, HostScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
         {
             if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+            {
                 continue;
+            }
 
             uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
             auto idx        = exp_id * 256 + fp8_uid;
@@ -299,7 +305,9 @@ TEST(MXFP8, DeviceScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(auto fp8_nan_id : fp8_nan_ids)
         {
             auto idx = exp_id * 256 + fp8_nan_id;
@@ -310,11 +318,15 @@ TEST(MXFP8, DeviceScaledConvert)
     for(ck::index_t exp_id = 0; exp_id < 256; exp_id++)
     {
         if(exp_id == e8m0_nan_id)
+        {
             continue;
+        }
         for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
         {
             if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+            {
                 continue;
+            }
 
             uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
             auto idx        = exp_id * 256 + fp8_uid;

@@ -31,7 +31,9 @@ struct DeviceMemoryDeleter
     void operator()(std::byte* ptr) const
     {
         if(ptr)
+        {
             (void)hipFree(ptr);
+        }
     }
 };
 

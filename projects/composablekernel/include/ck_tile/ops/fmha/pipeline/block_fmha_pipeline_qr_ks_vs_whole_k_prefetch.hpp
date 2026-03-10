@@ -65,9 +65,13 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return Problem::kPadHeadDimV ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
 
     static constexpr index_t kAlignmentO =
@@ -79,7 +83,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kQKHeaddim == 32)
@@ -93,9 +99,13 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
             else if constexpr(kQKHeaddim == 96 || kQKHeaddim == 128)
             {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim == 256)
             {
@@ -217,9 +227,13 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
         auto k_tiles = [&]() {
             if constexpr(kPreloadWholeNextIterationK)
+            {
                 return statically_indexed_array<k_tile_type, k0_loops>{};
+            }
             else
+            {
                 return statically_indexed_array<k_tile_type, 1>{};
+            }
         }();
 
         k_tiles[I0] = load_tile(k_dram_window);
@@ -353,10 +367,14 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
                             k_tiles[number<i_k0 + 1>{}] = load_tile(k_dram_window);
                             if constexpr(i_k0 < k0_loops - 2)
+                            {
                                 move_tile_window(k_dram_window, {0, kK0});
+                            }
 
                             if constexpr(i_k0 == 0)
+                            {
                                 clear_tile(s_acc);
+                            }
 
                             block_sync_lds();
                             // execute current unroll of gemm_0
@@ -382,7 +400,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
                             k_tiles[number<i_k0>{}] = load_tile(k_dram_window);
 
                             if constexpr(i_k0 < k0_loops - 1)
+                            {
                                 move_tile_window(k_dram_window, {0, kK0});
+                            }
                         });
 
                         move_tile_window(k_dram_window, {0, -(k0_loops - 1) * kK0});
@@ -404,10 +424,14 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
                             k_tiles[number<i_k0 + 1>{}] = load_tile(k_dram_window);
                             if constexpr(i_k0 < k0_loops - 2)
+                            {
                                 move_tile_window(k_dram_window, {0, kK0});
+                            }
 
                             if constexpr(i_k0 == 0)
+                            {
                                 clear_tile(s_acc);
+                            }
 
                             block_sync_lds();
                             // execute current unroll of gemm_0
@@ -464,7 +488,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
                         k_tiles[I1] = load_tile(k_dram_window);
                         if constexpr(1 < k0_loops - 1)
+                        {
                             move_tile_window(k_dram_window, {0, kK0});
+                        }
 
                         block_sync_lds();
                         gemm_0(s_acc,
@@ -478,7 +504,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
 
                             k_tiles[number<i_k0>{}] = load_tile(k_dram_window);
                             if constexpr(i_k0 < k0_loops - 1)
+                            {
                                 move_tile_window(k_dram_window, {0, kK0});
+                            }
 
                             block_sync_lds();
                             gemm_0(s_acc,
@@ -526,12 +554,18 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
                     store_tile(k_lds_windows[number<i_k0 % NumKLdsBuffers>{}],
                                tile_elementwise_in(k_element_func, k_tiles[I0]));
                     if constexpr(i_k0 == 0)
+                    {
                         clear_tile(s_acc);
+                    }
 
                     if constexpr(i_k0 < k0_loops - 1)
+                    {
                         k_tiles[I0] = load_tile(k_dram_window);
+                    }
                     if constexpr(i_k0 < k0_loops - 2)
+                    {
                         move_tile_window(k_dram_window, {0, kK0});
+                    }
 
                     block_sync_lds();
                     // execute current unroll of gemm_0
@@ -796,7 +830,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
                 {
                     static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                         if constexpr(i_k1 < k1_loops - NumPrefetchV)
+                        {
                             v_tiles[number<i_k1 % NumPrefetchV>{}] = load_tile(v_dram_window);
+                        }
 
                         block_sync_lds();
                         gemm_1(o_acc,
@@ -823,7 +859,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
                         }
 
                         if constexpr(i_k1 < k1_loops - NumPrefetchV)
+                        {
                             move_tile_window(v_dram_window, {0, kK1});
+                        }
                     });
                 }
             }
@@ -880,7 +918,9 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetch
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

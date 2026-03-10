@@ -64,7 +64,9 @@ class GPUVerificationTest : public ::testing::Test
     float ComputeCPUMaxAbs(const std::vector<T>& data)
     {
         if(data.empty())
+        {
             return 0.0f;
+        }
 
         float max_val = 0.0f;
         for(const auto& val : data)
@@ -88,13 +90,17 @@ class GPUVerificationTest : public ::testing::Test
             std::uniform_int_distribution<int> dis(static_cast<int>(min_val),
                                                    static_cast<int>(max_val));
             for(auto& val : data)
+            {
                 val = static_cast<T>(dis(rng_));
+            }
         }
         else
         {
             std::uniform_real_distribution<float> dis(min_val, max_val);
             for(auto& val : data)
+            {
                 val = ck::type_convert<T>(dis(rng_));
+            }
         }
         return data;
     }

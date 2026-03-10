@@ -28,14 +28,22 @@ template <typename HostTensorA, typename HostTensorB, typename Functor>
 void host_elementwise4D(HostTensorB& B_ndhwc, const HostTensorA& A_ncdhw, Functor functor)
 {
     for(std::size_t n = 0; n < A_ncdhw.mDesc.GetLengths()[0]; ++n)
+    {
         for(std::size_t c = 0; c < A_ncdhw.mDesc.GetLengths()[1]; ++c)
+        {
             for(std::size_t d = 0; d < A_ncdhw.mDesc.GetLengths()[2]; ++d)
+            {
                 for(std::size_t h = 0; h < A_ncdhw.mDesc.GetLengths()[3]; ++h)
+                {
                     for(std::size_t w = 0; w < A_ncdhw.mDesc.GetLengths()[4]; ++w)
                     {
                         auto a_val = A_ncdhw(n, c, d, h, w);
                         functor(B_ndhwc(n, d, h, w, c), a_val);
                     }
+                }
+            }
+        }
+    }
 }
 
 template <typename ADataType, typename BDataType, index_t NumDim>

@@ -226,8 +226,10 @@ bool profile_max_pool3d_bwd_impl(int do_verification,
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -270,7 +272,9 @@ bool profile_max_pool3d_bwd_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

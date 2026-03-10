@@ -356,31 +356,47 @@ struct AQuantBlockUniversalGemmAsBsCr
         {
             constexpr auto a_lds_load_distr = [&]() {
                 if constexpr(ALoadTranspose)
+                {
                     return make_static_tile_distribution(typename InputTileDistributionTraits<
                                                          decltype(MakeABlockDistributionEncode()),
                                                          ADataType>::TransposedDstrEncode{});
+                }
                 else
+                {
                     return make_static_tile_distribution(MakeABlockDistributionEncode());
+                }
             }();
             constexpr auto b_lds_load_distr = [&]() {
                 if constexpr(BLoadTranspose)
+                {
                     return make_static_tile_distribution(typename InputTileDistributionTraits<
                                                          decltype(MakeBBlockDistributionEncode()),
                                                          BDataType>::TransposedDstrEncode{});
+                }
                 else
+                {
                     return make_static_tile_distribution(MakeBBlockDistributionEncode());
+                }
             }();
             constexpr auto a_lds_shape = []() {
                 if constexpr(ALoadTranspose)
+                {
                     return make_tuple(number<KPerInnerLoop>{}, number<GemmTraits::MPerBlock>{});
+                }
                 else
+                {
                     return make_tuple(number<GemmTraits::MPerBlock>{}, number<KPerInnerLoop>{});
+                }
             }();
             constexpr auto b_lds_shape = []() {
                 if constexpr(BLoadTranspose)
+                {
                     return make_tuple(number<KPerInnerLoop>{}, number<GemmTraits::NPerBlock>{});
+                }
                 else
+                {
                     return make_tuple(number<GemmTraits::NPerBlock>{}, number<KPerInnerLoop>{});
+                }
             }();
             constexpr auto k_idx_offset = KIdx * KPerInnerLoop;
             constexpr auto a_offset =

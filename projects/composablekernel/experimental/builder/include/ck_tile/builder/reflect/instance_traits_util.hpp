@@ -46,25 +46,45 @@ template <typename T>
 consteval std::string_view type_name_impl()
 {
     if constexpr(std::is_same_v<T, ck::half_t> || std::is_same_v<T, ck_tile::half_t>)
+    {
         return "fp16";
+    }
     else if constexpr(std::is_same_v<T, float>)
+    {
         return "fp32";
+    }
     else if constexpr(std::is_same_v<T, ck::tf32_t>)
+    {
         return "tf32";
+    }
     else if constexpr(std::is_same_v<T, double>)
+    {
         return "fp64";
+    }
     else if constexpr(std::is_same_v<T, int8_t>)
+    {
         return "s8";
+    }
     else if constexpr(std::is_same_v<T, int32_t>)
+    {
         return "s32";
+    }
     else if constexpr(std::is_same_v<T, ck::bhalf_t> || std::is_same_v<T, ck_tile::bf16_t>)
+    {
         return "bf16";
+    }
     else if constexpr(std::is_same_v<T, ck::f8_t> || std::is_same_v<T, ck_tile::fp8_t>)
+    {
         return "fp8";
+    }
     else if constexpr(std::is_same_v<T, ck::bf8_t> || std::is_same_v<T, ck_tile::bf8_t>)
+    {
         return "bf8";
+    }
     else
+    {
         return std::string_view{}; // Return empty for supported types
+    }
 }
 } // namespace impl
 
@@ -105,9 +125,13 @@ constexpr std::string_view elementwise_op_name()
     if constexpr(requires {
                      { T::name } -> std::convertible_to<std::string_view>;
                  })
+    {
         return T::name;
+    }
     else
+    {
         static_assert(false, "Elementwise operation is missing name attribute");
+    }
 }
 
 // Convert ConvolutionForwardSpecialization enum to string
@@ -265,7 +289,9 @@ inline std::string array_to_string(const std::array<T, N>& arr)
     for(std::size_t i = 0; i < arr.size(); ++i)
     {
         if(i > 0)
+        {
             oss << ",";
+        }
         oss << arr[i];
     }
     oss << ")";
@@ -469,7 +495,9 @@ constexpr std::string type_or_type_tuple_name()
 constexpr bool case_insensitive_equal(std::string_view a, std::string_view b)
 {
     if(a.size() != b.size())
+    {
         return false;
+    }
 
     for(size_t i = 0; i < a.size(); ++i)
     {
@@ -478,12 +506,18 @@ constexpr bool case_insensitive_equal(std::string_view a, std::string_view b)
 
         // Convert to lowercase for comparison
         if(c1 >= 'A' && c1 <= 'Z')
+        {
             c1 += 32;
+        }
         if(c2 >= 'A' && c2 <= 'Z')
+        {
             c2 += 32;
+        }
 
         if(c1 != c2)
+        {
             return false;
+        }
     }
     return true;
 }

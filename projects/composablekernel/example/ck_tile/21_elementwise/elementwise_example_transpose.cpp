@@ -32,7 +32,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     ck_tile::index_t stride_in = arg_parser.get_int("stride_in");
 
     if(stride_in < 0)
+    {
         stride_in = N; // Dense input: stride for M dim is N
+    }
     int do_validation = arg_parser.get_int("v");
     int warmup        = arg_parser.get_int("warmup");
     int repeat        = arg_parser.get_int("repeat");
@@ -160,7 +162,9 @@ int main(int argc, char* argv[])
     ck_tile::ArgParser arg_parser;
     std::tie(result, arg_parser) = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     try
     {

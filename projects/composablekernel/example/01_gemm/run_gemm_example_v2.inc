@@ -47,7 +47,9 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
                 }
             }
             else
+            {
                 return static_cast<std::size_t>(stride);
+            }
         };
 
     StrideA = f_get_default_stride(M, K, StrideA, ALayout{});

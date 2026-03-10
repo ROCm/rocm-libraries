@@ -68,7 +68,9 @@ TYPED_TEST(TestGemmABScale_MK_NK, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmABScale_MK_NK, SmallMPadK)
@@ -82,7 +84,9 @@ TYPED_TEST(TestGemmABScale_MK_NK, SmallMPadK)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmABScale_MK_NK, MidLargeM)
@@ -96,7 +100,9 @@ TYPED_TEST(TestGemmABScale_MK_NK, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmABScale_MK_NK, Regular)
@@ -110,7 +116,9 @@ TYPED_TEST(TestGemmABScale_MK_NK, Regular)
     constexpr int StrideE = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideE);
+    }
 }
 
 // Row Row
@@ -125,7 +133,9 @@ TYPED_TEST(TestGemmABScale_MK_KN, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmABScale_MK_KN, SmallMPadK)
@@ -139,7 +149,9 @@ TYPED_TEST(TestGemmABScale_MK_KN, SmallMPadK)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmABScale_MK_KN, MidLargeM)
@@ -153,7 +165,9 @@ TYPED_TEST(TestGemmABScale_MK_KN, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmABScale_MK_KN, Regular)
@@ -167,7 +181,9 @@ TYPED_TEST(TestGemmABScale_MK_KN, Regular)
     constexpr int StrideE = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideE);
+    }
 }
 
 // Col Row

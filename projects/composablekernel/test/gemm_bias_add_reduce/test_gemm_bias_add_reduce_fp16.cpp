@@ -72,7 +72,9 @@ TYPED_TEST(TestGemmBiasAddReduce_FP16_MK_NK, Regular)
     constexpr int K = 1024;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TestGemmBiasAddReduce_FP16_MK_KN, Regular)
@@ -82,7 +84,9 @@ TYPED_TEST(TestGemmBiasAddReduce_FP16_MK_KN, Regular)
     constexpr int K = 1024;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TestGemmBiasAddReduce_FP16_KM_KN, Regular)
@@ -92,7 +96,9 @@ TYPED_TEST(TestGemmBiasAddReduce_FP16_KM_KN, Regular)
     constexpr int K = 1024;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TestGemmBiasAddReduce_FP16_KM_NK, Regular)
@@ -102,5 +108,7 @@ TYPED_TEST(TestGemmBiasAddReduce_FP16_KM_NK, Regular)
     constexpr int K = 1024;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }

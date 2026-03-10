@@ -103,7 +103,9 @@ int main(int argc, char* argv[])
     args.add_option("--arch", "gfx942", "GPU architecture");
 
     if(!args.parse(argc, argv))
+    {
         return 0;
+    }
 
     print_header("Example 06: Multiple Registries & Kernel Sets");
 
@@ -229,7 +231,9 @@ int main(int argc, char* argv[])
 
         std::cout << test.name << " (" << test.M << "x" << test.N << "x" << test.K << "):\n";
         if(selected)
+        {
             std::cout << "  Selected: " << selected->get_name() << "\n";
+        }
         std::cout << "  Time:     " << std::fixed << std::setprecision(4) << time_ms << " ms\n";
         std::cout << "  TFLOPS:   " << std::setprecision(2) << tflops << "\n";
 
@@ -247,7 +251,9 @@ int main(int argc, char* argv[])
             max_error    = std::max(max_error, error);
             // Allow 1% relative tolerance for FP16 accumulation
             if(error > 0.01f * expected + 1.0f)
+            {
                 ++num_errors;
+            }
         }
 
         bool test_passed = (num_errors == 0);
@@ -256,7 +262,9 @@ int main(int argc, char* argv[])
         std::cout << "  Status:   " << (test_passed ? "PASS" : "FAIL") << "\n\n";
 
         if(!test_passed)
+        {
             all_passed = false;
+        }
     }
 
     // =========================================================================

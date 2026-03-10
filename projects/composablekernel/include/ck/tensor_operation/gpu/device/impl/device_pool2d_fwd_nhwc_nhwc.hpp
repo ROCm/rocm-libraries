@@ -303,17 +303,23 @@ struct DevicePool2dFwd_NHWC_NHWC : public DevicePoolFwd<4,
 
         // C should be fastest dimension
         if(pArg->input_nchw_stride_[1] != 1)
+        {
             return false;
+        }
 
         for(int i = 0; i < InOutRank; ++i)
         {
             if(pArg->input_nchw_stride_[i] == 1 &&
                pArg->input_nchw_lengths_[i] % InSrcOutDstVectorSize != 0)
+            {
                 return false;
+            }
 
             if(pArg->output_nchw_stride_[i] == 1 &&
                pArg->output_nchw_lengths_[i] % InSrcOutDstVectorSize != 0)
+            {
                 return false;
+            }
         }
 
         return true;
@@ -339,14 +345,20 @@ struct DevicePool2dFwd_NHWC_NHWC : public DevicePoolFwd<4,
            input_nchw_lengths.size() != InOutRank || window_yx_strides.size() != WindowRank ||
            window_yx_dilations.size() != WindowRank || input_left_hw_pads.size() != WindowRank ||
            input_right_hw_pads.size() != WindowRank)
+        {
             throw std::runtime_error("dimension is incorrect");
+        }
 
         if(pooling_dims != std::vector<ck::index_t>{2, 3})
+        {
             throw std::runtime_error("pooling_dims only support {2, 3} in pool2d so far");
+        }
 
         if(output_nchw_stride != indices_nchw_stride)
+        {
             throw std::runtime_error(
                 "output_nchw_stride need to be equal to indices_nchw_stride for now");
+        }
 
         return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_dev),
                                           static_cast<OutDataType*>(p_out_dev),

@@ -157,7 +157,9 @@ int runGemmExample(int argc, char* argv[])
 {
     auto [result, arg_parser] = createArgs(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     std::string data_type         = arg_parser.get_str("prec");
     std::string a_layout          = arg_parser.get_str("a_layout");

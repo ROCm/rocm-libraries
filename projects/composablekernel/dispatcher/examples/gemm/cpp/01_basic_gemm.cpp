@@ -98,7 +98,9 @@ int main(int argc, char* argv[])
     args.add_option("--arch", "gfx942", "GPU architecture");
 
     if(!args.parse(argc, argv))
+    {
         return 0;
+    }
 
     print_header("Example 01: GEMM Declaration Patterns");
 
@@ -210,7 +212,9 @@ int main(int argc, char* argv[])
     for(int i = 0; i < M * N; ++i)
     {
         if(std::abs(static_cast<float>(c_host[i]) - expected) > 0.01f * expected + 1.0f)
+        {
             ++errors;
+        }
     }
 
     bool passed = (errors == 0);

@@ -29,9 +29,13 @@ std::vector<ck::index_t> f_tensor_strides_ncdhw(ck::index_t N_,
     using namespace ck::literals;
     (void)N_;
     if constexpr(ck::is_same<decltype(layout), ck::tensor_layout::convolution::NDHWC>::value)
+    {
         return {D * C_ * H * W, 1_uz, C_ * H * W, W * C_, C_};
+    }
     else
+    {
         throw std::runtime_error("not supported yet");
+    }
 };
 
 template <typename DOutDataType,
@@ -196,8 +200,10 @@ bool profile_avg_pool3d_bwd_impl(int do_verification,
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -235,7 +241,9 @@ bool profile_avg_pool3d_bwd_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

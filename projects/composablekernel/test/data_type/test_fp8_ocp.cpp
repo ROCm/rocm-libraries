@@ -351,7 +351,9 @@ TEST(FP8OCP, HostFP32FP8Convert)
     for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
     {
         if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
         auto idx        = fp8_uid;
@@ -416,7 +418,9 @@ TEST(FP8OCP, DeviceFP32FP8Convert)
     for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
     {
         if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
         auto idx        = fp8_uid;
@@ -537,7 +541,9 @@ TEST(FP8OCP, HostFP16FP8Convert)
     for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
     {
         if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
         auto idx        = fp8_uid;
@@ -603,7 +609,9 @@ TEST(FP8OCP, DeviceFP16FP8Convert)
     for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
     {
         if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
         auto idx        = fp8_uid;
@@ -724,7 +732,9 @@ TEST(FP8OCP, HostBF16FP8Convert)
     for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
     {
         if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
         auto idx        = fp8_uid;
@@ -791,7 +801,9 @@ TEST(FP8OCP, DeviceBF16FP8Convert)
     for(ck::index_t fp8_id = 0; fp8_id < 256; fp8_id++)
     {
         if(fp8_nan_ids.find(fp8_id) != fp8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t fp8_uid = static_cast<uint8_t>(fp8_id);
         auto idx        = fp8_uid;

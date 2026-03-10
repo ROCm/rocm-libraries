@@ -46,18 +46,26 @@ class TileKernelInstance : public KernelInstance
         constexpr int tile_k = SelectedKernel::TileK;
 
         if(!pad_m && problem.M % tile_m != 0)
+        {
             return false;
+        }
         if(!pad_n && problem.N % tile_n != 0)
+        {
             return false;
+        }
         if(!pad_k && problem.K % tile_k != 0)
+        {
             return false;
+        }
 
         // Check shared memory budget if specified
         if(problem.smem_budget > 0)
         {
             int64_t estimated_smem = estimate_smem_usage();
             if(estimated_smem > problem.smem_budget)
+            {
                 return false;
+            }
         }
 
         return true;

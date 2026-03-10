@@ -148,6 +148,7 @@ bool profile_gemm_bias_add_reduce_impl(int do_verification,
         ref_invoker.Run(ref_argument);
 
         for(int m = 0; m < M; ++m)
+        {
             for(int n = 0; n < N; ++n)
             {
                 ReduceAccDataType acc = static_cast<ReduceAccDataType>(c_m_n_host_result(m, n)) +
@@ -159,6 +160,7 @@ bool profile_gemm_bias_add_reduce_impl(int do_verification,
                 acc += d0;
                 c_m_n_host_result(m, n) = static_cast<CDataType>(acc);
             }
+        }
 
         for(int m = 0; m < M; ++m)
         {

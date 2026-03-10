@@ -182,7 +182,9 @@ struct DeviceGemm_Xdl_CShuffle_Streamk_V3 : public DeviceGemm_Streamk_V2<ALayout
                     grid_dim      = arg.Grid_size;
                 }
                 else
+                {
                     grid_dim = arg.Grid_size;
+                }
 
                 if(stream_config.flush_cache)
                 {

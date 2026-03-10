@@ -74,9 +74,13 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
 #if CK_TILE_FMHA_FWD_FAST_EXP2
@@ -85,37 +89,55 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             // minimize occupancy
             if constexpr(kQKHeaddim <= 32)
             {
                 if constexpr(kPadSeqLenK && FmhaMask::IsMasking)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 64)
             {
                 if constexpr(kPadSeqLenK)
+                {
                     return 2;
+                }
                 else
+                {
                     return 3;
+                }
             }
             else if constexpr(kQKHeaddim <= 128)
             {
                 if constexpr(kPadSeqLenK)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 192)
             {
                 if constexpr(kPadSeqLenK)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -351,7 +373,9 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                                         k_oob_ck,
                                         k_pre_np);
                     if constexpr(i_k0 < k0_loops - 1)
+                    {
                         move_tile_window(k_dram_window, {0, kK0});
+                    }
 
                     async_load_fence(k_dram_window.get_num_of_access());
                     __builtin_amdgcn_s_barrier();
@@ -368,7 +392,9 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
             // TODO: this to fix a bug when loop smaller than 2,
             // the following fence/barrier will be scheduled inside 1st loop
             if constexpr(k0_loops <= 2)
+            {
                 __builtin_amdgcn_sched_barrier(0);
+            }
 
             async_load_fence();
             __builtin_amdgcn_s_barrier();
@@ -536,7 +562,9 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                         sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
                     store_tile(v_lds_window_tmp_next, v_shuffle_tmp_next);
                     if constexpr(i_k1 < k1_loops - 1)
+                    {
                         move_tile_window(v_dram_window, {0, kK1});
+                    }
                 });
             }
             i_total_loops++;
@@ -548,7 +576,9 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
 
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
+                {
                     __builtin_amdgcn_s_barrier();
+                }
                 async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
                                     k_dram_window,
                                     number<-1>{},
@@ -580,7 +610,9 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

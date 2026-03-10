@@ -91,9 +91,13 @@ struct f4x2_pk_t
     {
         static_assert(I < 2, "Index is out of range.");
         if constexpr(I == 1)
+        {
             return (data >> 4);
+        }
         else
+        {
             return data & 0b00001111;
+        }
     }
 
     __host__ __device__ inline type pack(const type x0, const type x1)
@@ -258,7 +262,9 @@ struct f6_pk_t
         for(index_t i = 0; i < vector_size; ++i)
         {
             if(lhs.data_[i] != rhs.data_[i])
+            {
                 return false;
+            }
         }
         return true;
     }
@@ -447,19 +453,33 @@ struct packed_type_info
     {
         using U = remove_cvref_t<T>;
         if constexpr(is_same_v<U, pk_i4_t>)
+        {
             return ck::Tuple<ck::Number<2>, int4_t>{};
+        }
         else if constexpr(is_same_v<U, f4x2_pk_t>)
+        {
             return ck::Tuple<ck::Number<2>, f4_t>{};
+        }
         else if constexpr(is_same_v<U, f6x16_pk_t>)
+        {
             return ck::Tuple<ck::Number<16>, f6_t>{};
+        }
         else if constexpr(is_same_v<U, bf6x16_pk_t>)
+        {
             return ck::Tuple<ck::Number<16>, bf6_t>{};
+        }
         else if constexpr(is_same_v<U, f6x32_pk_t>)
+        {
             return ck::Tuple<ck::Number<32>, f6_t>{};
+        }
         else if constexpr(is_same_v<U, bf6x32_pk_t>)
+        {
             return ck::Tuple<ck::Number<32>, bf6_t>{};
+        }
         else
+        {
             return ck::Tuple<ck::Number<1>, T>{};
+        }
     }
 
     public:
@@ -497,21 +517,31 @@ struct packed_type_maker
         {
             static_assert(N == 0 || N == 16 || N == 32, "Packed size N for f6_t must be 16 or 32.");
             if constexpr(N == 16)
+            {
                 return f6x16_pk_t{};
+            }
             else if constexpr(N == 0 || N == 32)
+            {
                 return f6x32_pk_t{};
+            }
         }
         else if constexpr(is_same_v<U, bf6_t>)
         {
             static_assert(N == 0 || N == 16 || N == 32,
                           "Packed size N for bf6_t must be 16 or 32.");
             if constexpr(N == 16)
+            {
                 return bf6x16_pk_t{};
+            }
             else if constexpr(N == 0 || N == 32)
+            {
                 return bf6x32_pk_t{};
+            }
         }
         else
+        {
             return T{};
+        }
     }
 
     public:
@@ -531,35 +561,61 @@ template <typename T>
 inline const char* get_type_name()
 {
     if constexpr(is_same_v<T, half_t>)
+    {
         return "fp16";
+    }
     else if constexpr(is_same_v<T, bhalf_t>)
+    {
         return "bf16";
+    }
     else if constexpr(is_same_v<T, tf32_t>)
+    {
         return "tf32";
+    }
     else if constexpr(is_same_v<T, int4_t>)
+    {
         return "int4";
+    }
     else if constexpr(is_same_v<T, f4_t>)
+    {
         return "f4";
+    }
     else if constexpr(is_same_v<T, f6_t>)
+    {
         return "f6";
+    }
     else if constexpr(is_same_v<T, bf6_t>)
+    {
         return "bf6";
+    }
     else if constexpr(is_same_v<T, f8_t>)
+    {
         return "f8";
+    }
     else if constexpr(is_same_v<T, bf8_t>)
+    {
         return "bf8";
+    }
 #ifndef CK_CODE_GEN_RTC
     else if constexpr(is_same_v<T, e8m0_bexp_t>)
+    {
         return "e8m0";
+    }
 #endif
     else if constexpr(is_same_v<T, float>)
+    {
         return "fp32";
+    }
 #if defined(__HIPCC_RTC__) || defined(CK_CODE_GEN_RTC)
     else
+    {
         return "unknown";
+    }
 #else
     else
+    {
         return typeid(T).name();
+    }
 #endif
 }
 

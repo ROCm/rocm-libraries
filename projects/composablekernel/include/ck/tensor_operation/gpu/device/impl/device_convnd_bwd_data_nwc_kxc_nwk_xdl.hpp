@@ -1386,7 +1386,9 @@ struct DeviceConvNdBwdDataNwcKxcNwk_Xdl
                 }
             }
             if(!valid)
+            {
                 return false;
+            }
         }
         return true;
     }

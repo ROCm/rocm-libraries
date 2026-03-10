@@ -75,22 +75,30 @@ class SimpleAppArgs
         {
             ch = getopt_long(argc, argv, "D:v:l:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inLengths = getTypeValuesFromString<size_t>(optarg);
                 if(inLengths.size() != 4)
+                {
                     throw std::runtime_error(
                         "Invalid option format! The number of integers is incorrect!");
+                }
 
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
@@ -106,7 +114,9 @@ class SimpleAppArgs
         };
 
         if(optind + 2 > argc)
+        {
             throw std::runtime_error("Invalid cmd-line arguments, more argumetns are needed!");
+        }
 
         init_method = std::atoi(argv[optind++]);
         time_kernel = static_cast<bool>(std::atoi(argv[optind]));

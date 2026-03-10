@@ -257,11 +257,17 @@ __host__ __device__ static inline T cast_from_f8(fp8_storage_t x)
     }
 
     if constexpr(sizeof(T) == 2)
+    {
         retval = (sign << 15) | (exponent << 10) | mantissa;
+    }
     else if constexpr(sizeof(T) == 4)
+    {
         retval = (sign << 31) | (exponent << 23) | mantissa;
+    }
     else
+    {
         retval = (sign << 63) | (static_cast<unsigned long long>(exponent) << 52) | mantissa;
+    }
 
     return bit_cast<T>(retval);
 }
@@ -1268,7 +1274,9 @@ __host__ __device__ static inline fp8_storage_t cast_to_f8(T _x, unsigned int rn
     if((x & fInf) == fInf)
     {
         if constexpr(is_fnuz)
+        {
             return signed_inf;
+        }
 
         return mantissa != 0 ? nan : signed_inf;
     }
@@ -1343,9 +1351,13 @@ __host__ __device__ static inline fp8_storage_t cast_to_f8(T _x, unsigned int rn
   */
 
     if(exponent_diff > 0)
+    {
         mantissa >>= exponent_diff;
+    }
     else if(exponent_diff == -1)
+    {
         mantissa <<= -exponent_diff;
+    }
     bool implicit_one = mantissa & (1ull << mfmt);
     // if there is no implicit 1, it  means the f8 is denormal and need to adjust
     // to denorm exponent
@@ -1394,7 +1406,9 @@ __host__ __device__ static inline fp8_storage_t cast_to_f8(T _x, unsigned int rn
     }
 
     if(f8_exponent == 0 && mantissa == 0)
+    {
         return is_fnuz ? 0 : (sign << 7);
+    }
     mantissa &= (1 << wm) - 1;
     return (sign << 7) | (f8_exponent << wm) | mantissa;
 }

@@ -59,7 +59,9 @@ int main(int argc, char* argv[])
     ck::index_t reduce_length = 1;
 
     for(auto dim : reduce_dims)
+    {
         reduce_length *= in_lengths[dim];
+    }
 
     double alpha{1.0};
     double beta{0.0};

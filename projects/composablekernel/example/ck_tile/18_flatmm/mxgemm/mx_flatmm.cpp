@@ -232,57 +232,77 @@ int run_mx_flatmm_example(const ck_tile::ArgParser& arg_parser)
         if(mx_prec == "fp4" || mx_prec == "fp4xfp4")
         {
             if(persistent_opt == 0)
+            {
                 return run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
                                                   ck_tile::pk_fp4_t,
                                                   ck_tile::fp16_t,
                                                   MXFlatmm_GFX950_FP4FP4_Traits,
                                                   false>(arg_parser, Row{}, Col{}, Row{});
+            }
             else
+            {
                 throw std::runtime_error("Only non-persistent kernels are supported currently!");
+            }
         }
         else if(mx_prec == "fp6" || mx_prec == "fp6xfp6")
         {
             if(persistent_opt == 0)
+            {
                 return run_mx_flatmm_with_layouts<ck_tile::pk_fp6x16_t,
                                                   ck_tile::pk_fp6x16_t,
                                                   ck_tile::fp16_t,
                                                   MXFlatmm_GFX950_FP6FP6_Traits,
                                                   false>(arg_parser, Row{}, Col{}, Row{});
+            }
             else
+            {
                 throw std::runtime_error("Only support non-persistent kernel now!");
+            }
         }
         else if(mx_prec == "fp8" || mx_prec == "fp8xfp8")
         {
             if(persistent_opt == 0)
+            {
                 return run_mx_flatmm_with_layouts<ck_tile::fp8_t,
                                                   ck_tile::fp8_t,
                                                   ck_tile::fp16_t,
                                                   MXFlatmm_GFX950_FP8FP8_Traits,
                                                   false>(arg_parser, Row{}, Col{}, Row{});
+            }
             else
+            {
                 throw std::runtime_error("Only support non-persistent kernel now!");
+            }
         }
         else if(mx_prec == "fp8xfp4")
         {
             if(persistent_opt == 0)
+            {
                 return run_mx_flatmm_with_layouts<ck_tile::fp8_t,
                                                   ck_tile::pk_fp4_t,
                                                   ck_tile::fp16_t,
                                                   MXFlatmm_GFX950_FP8FP4_Traits,
                                                   false>(arg_parser, Row{}, Col{}, Row{});
+            }
             else
+            {
                 throw std::runtime_error("Only support non-persistent kernel now!");
+            }
         }
         else if(mx_prec == "fp4xfp8")
         {
             if(persistent_opt == 0)
+            {
                 return run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
                                                   ck_tile::fp8_t,
                                                   ck_tile::fp16_t,
                                                   MXFlatmm_GFX950_FP4FP8_Traits,
                                                   false>(arg_parser, Row{}, Col{}, Row{});
+            }
             else
+            {
                 throw std::runtime_error("Only support non-persistent kernel now!");
+            }
         }
         else
         {
@@ -299,7 +319,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return EXIT_FAILURE;
+    }
     try
     {
         int warp_tile = arg_parser.get_int("warp_tile");

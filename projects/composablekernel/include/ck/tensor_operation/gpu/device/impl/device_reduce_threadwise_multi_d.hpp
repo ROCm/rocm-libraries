@@ -224,9 +224,13 @@ struct DeviceReduceThreadWiseMultiD : public DeviceReduceMultiD<InDataType,
                 get_2d_lengths<Rank, NumReduceDim>(inLengths_);
 
             if constexpr(NumInvariantDim == 0)
+            {
                 invariant_lowest_length = 1;
+            }
             else
+            {
                 invariant_lowest_length = inLengths_[NumInvariantDim - 1];
+            }
 
             reduce_lowest_length = inLengths_[Rank - 1];
 
@@ -330,31 +334,43 @@ struct DeviceReduceThreadWiseMultiD : public DeviceReduceMultiD<InDataType,
             else
             {
                 if(pArg->inStrides_[NumInvariantDim - 1] != 1)
+                {
                     return (false);
+                }
 
                 if(pArg->invariant_lowest_length % InSrcVectorSize != 0)
+                {
                     return (false);
+                }
             };
         }
         else
         {
             if(pArg->inStrides_[Rank - 1] != 1)
+            {
                 return (false);
+            }
 
             if(pArg->reduce_lowest_length % InSrcVectorSize != 0)
+            {
                 return (false);
+            }
         };
 
         // To improve
         if(pArg->invariant_lowest_length % OutDstVectorSize != 0)
+        {
             return (false);
+        }
 
         std::cerr << "reduce_total_length = " << pArg->reduce_total_length
                   << " KThreadSliceSize = " << KThreadSliceSize << std::endl;
 
         // cases with big reduce_total_length should be handled by Blockwise kernel
         if(pArg->reduce_total_length / KThreadSliceSize >= 32)
+        {
             return (false);
+        }
 
         return (true);
     };

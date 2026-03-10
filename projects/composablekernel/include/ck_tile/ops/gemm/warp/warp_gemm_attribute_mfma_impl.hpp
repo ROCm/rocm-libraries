@@ -1319,17 +1319,25 @@ struct WarpGemmAttributeMfmaImpl_f32_16x16x32_f8_base
         {
 #if defined(__gfx94__) or defined(__gfx95__)
             if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
             else if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, bf8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
             else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, fp8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
             else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, bf8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
 #else
             ck_tile::ignore = c_vec;
             ck_tile::ignore = a_vec;
@@ -1343,17 +1351,25 @@ struct WarpGemmAttributeMfmaImpl_f32_16x16x32_f8_base
     {
 #if defined(__gfx94__) or defined(__gfx95__)
         if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -1478,17 +1494,25 @@ struct WarpGemmAttributeMfmaImpl_f32_32x32x16_f8_base
         {
 #if defined(__gfx94__) or defined(__gfx95__)
             if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
             else if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, bf8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
             else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, fp8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
             else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, bf8_t>)
+            {
                 c_vec = __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8(
                     bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+            }
 #elif defined(__gfx908__) || defined(__gfx90a__)
             static_for<0, 8, 1>{}([&](auto k) {
                 float a_f32 =
@@ -1513,17 +1537,25 @@ struct WarpGemmAttributeMfmaImpl_f32_32x32x16_f8_base
     {
 #if defined(__gfx94__) or defined(__gfx95__)
         if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8(
                 bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), CVecType{0.f}, 0, 0, 0));
+        }
 #elif defined(__gfx908__) || defined(__gfx90a__)
         CVecType c_vec{0.f};
         static_for<0, 8, 1>{}([&](auto k) {
@@ -1611,28 +1643,46 @@ struct WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4
 #if defined(__gfx950__)
         auto dtype2conf = [](auto dtype) {
             if constexpr(std::is_same_v<decltype(dtype), fp8_t>)
+            {
                 return make_tuple(number<0>{}, int32x8_t{});
+            }
             else if constexpr(std::is_same_v<decltype(dtype), bf8_t>)
+            {
                 return make_tuple(number<1>{}, int32x8_t{});
+            }
             else if constexpr(std::is_same_v<decltype(dtype), pk_fp6x16_t>)
+            {
                 return make_tuple(number<2>{}, pk_fp6x32_t{});
+            }
             // else if e3m2 => make_tuple(number<3>{}, int32x6_t{})
             else if constexpr(std::is_same_v<decltype(dtype), pk_fp4_t>)
+            {
                 return make_tuple(number<4>{}, int32x4_t{});
+            }
             else
+            {
                 static_assert(false, "Unsupported data type for mfma scale");
+            }
         };
         auto dtype2code = [&](auto dtype) { return dtype2conf(dtype)(number<0>{}); };
         auto dtype2vec  = [&](auto dtype) { return dtype2conf(dtype)(number<1>{}); };
         auto arg256     = [&](auto x) {
             if constexpr(sizeof(x) == 16)
+            {
                 return int32x8_t{x[0], x[1], x[2], x[3], 0, 0, 0, 0};
+            }
             else if constexpr(sizeof(x) == 24)
+            {
                 return int32x8_t{x[0], x[1], x[2], x[3], x[4], x[5], 0, 0};
+            }
             else if constexpr(sizeof(x) == 32)
+            {
                 return x;
+            }
             else
+            {
                 static_assert(false, "Unexpected vector size for mfma scale");
+            }
         };
 
         auto arg_a         = bit_cast<decltype(dtype2vec(ADataType{}))>(a_vec);
@@ -1719,17 +1769,25 @@ struct WarpGemmAttributeMfmaImpl_f32_32x32x64_f8_bf8_base
         // opsel, scale_b)
 #if defined(__gfx950__)
         if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             c_vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, c_vec, 0, 0, 0, 0, 0, 0);
+        }
         else if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             c_vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, c_vec, 0, 1, 0, 0, 0, 0);
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             c_vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, c_vec, 1, 0, 0, 0, 0, 0);
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             c_vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, c_vec, 1, 1, 0, 0, 0, 0);
+        }
 #else
         ck_tile::ignore = c_vec;
         ck_tile::ignore = a_vec;
@@ -1742,17 +1800,25 @@ struct WarpGemmAttributeMfmaImpl_f32_32x32x64_f8_bf8_base
     {
 #if defined(__gfx950__)
         if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, CVecType{0.f}, 0, 0, 0, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, CVecType{0.f}, 0, 1, 0, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, fp8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, CVecType{0.f}, 1, 0, 0, 0, 0, 0));
+        }
         else if constexpr(std::is_same_v<ADataType, bf8_t> && std::is_same_v<BDataType, bf8_t>)
+        {
             return bit_cast<CVecType>(__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
                 a_vec, b_vec, CVecType{0.f}, 1, 1, 0, 0, 0, 0));
+        }
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;

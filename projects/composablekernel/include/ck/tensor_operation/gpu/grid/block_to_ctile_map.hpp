@@ -58,15 +58,21 @@ struct BlockToCTileMap_M00_N0_M01
                                                        const CTileDim& c_tile_dim) const
     {
         if constexpr(DeviceCTileIndexCheck)
+        {
             return DefaultValidCTileIndex(c_tile_idx, c_tile_dim);
+        }
         else
+        {
             return true;
+        }
     }
 
     __host__ constexpr bool CheckValidity(const CGridDesc_M_N& c_grid_desc_m_n) const
     {
         if constexpr(DeviceCTileIndexCheck)
+        {
             return true; // validity check moved to kernel
+        }
 
         const index_t M0 = math::integer_divide_ceil(c_grid_desc_m_n.GetLength(I0), MPerBlock);
         if(M0 % M01_ == 0)
@@ -653,15 +659,21 @@ struct BlockToCTileMap_M00_N00_M01_N01
                                              const CTileDim& c_tile_dim) const
     {
         if constexpr(DeviceCTileIndexCheck)
+        {
             return DefaultValidCTileIndex(c_tile_idx, c_tile_dim);
+        }
         else
+        {
             return true;
+        }
     }
 
     __host__ constexpr bool CheckValidity(const CGridDesc_M_N& c_grid_desc_m_n) const
     {
         if constexpr(DeviceCTileIndexCheck)
+        {
             return true; // validity check moved to kernel
+        }
 
         const index_t M0 = math::integer_divide_ceil(c_grid_desc_m_n.GetLength(I0), MPerBlock);
         const index_t N0 = math::integer_divide_ceil(c_grid_desc_m_n.GetLength(I1), NPerBlock);
@@ -765,15 +777,21 @@ struct BlockToCTileMap_KSplit_M00_N00_M01_N01
                                              const CTileDim& c_tile_dim) const
     {
         if constexpr(DeviceCTileIndexCheck)
+        {
             return DefaultValidCTileIndex(c_tile_idx, c_tile_dim);
+        }
         else
+        {
             return true;
+        }
     }
 
     __host__ constexpr bool CheckValidity(const CGridDesc_M_N& c_grid_desc_m_n) const
     {
         if constexpr(DeviceCTileIndexCheck)
+        {
             return true; // validity check moved to kernel
+        }
 
         const index_t M0 = math::integer_divide_ceil(c_grid_desc_m_n.GetLength(I0), MPerBlock);
         const index_t N0 = math::integer_divide_ceil(c_grid_desc_m_n.GetLength(I1), NPerBlock);
@@ -1231,7 +1249,9 @@ struct BlockToCTileMap_GemmStreamK
             return dim3(reduction_start_block_idx + get_sk_tiles(), 1, 1);
         }
         else
+        {
             return dim3(reduction_start_block_idx, 1, 1);
+        }
     }
 
     __device__ uint32_t get_block_idx() const
@@ -1604,7 +1624,9 @@ struct BlockToCTileMap_GemmStreamK_v2
             return reduction_start_block_idx + get_sk_tiles();
         }
         else
+        {
             return reduction_start_block_idx;
+        }
     }
 
     __device__ uint32_t get_block_idx() const

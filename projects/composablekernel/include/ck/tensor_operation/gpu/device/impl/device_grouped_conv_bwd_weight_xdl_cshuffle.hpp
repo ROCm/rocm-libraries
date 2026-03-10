@@ -728,11 +728,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
             // This works correctly for any descriptor transform pipeline
             split_k_stride_a_ = a_grid_desc_kbatch_k0_m_k1_.GetElementSpaceSize();
             if(split_k_offset_hack_)
+            {
                 split_k_stride_a_ /= k_batch_;
+            }
 
             split_k_stride_b_ = b_grid_desc_kbatch_k0_n_k1_.GetElementSpaceSize();
             if(split_k_offset_hack_)
+            {
                 split_k_stride_b_ /= k_batch_;
+            }
 
             block_2_ctile_map_ =
                 GridwiseGemm64::MakeCBlockClusterAdaptor(c_grid_desc_m_n_, M01, N01, k_batch_);
@@ -1393,9 +1397,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
             return arg->GetWorkspaceSizeBytes();
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdWeight_Xdl_CShuffle::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(BaseArgument* p_arg,
@@ -1408,9 +1414,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
             p_arg_->p_workspace_ = p_workspace;
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdWeight_Xdl_CShuffle::Argument structure!");
+        }
     }
 };
 

@@ -180,8 +180,10 @@ float mixed_prec_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>&
                 rotating_mem.Next();
                 // clear c mem
                 if(args.k_batch > 1)
+                {
                     hipGetErrorString(hipMemsetAsync(
                         args.e_ptr, 0, args.M * args.N * sizeof(CDataType), s.stream_id_));
+                }
             };
             ave_time = ck_tile::launch_kernel_time_mask(
                 s,
@@ -375,7 +377,9 @@ int run_mixed_prec_flatmm_example(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     using Row = ck_tile::tensor_layout::gemm::RowMajor;
     using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
@@ -437,7 +441,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return EXIT_FAILURE;
+    }
     try
     {
         int warp_tile = arg_parser.get_int("warp_tile");

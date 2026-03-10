@@ -923,11 +923,17 @@ struct GridwiseGemmMultipleDWelfordFirstHalf_xdl_cshuffle
 
                 int delta = 0;
                 if(thread_max_len - NPerBlockTail > PostShuffleThreadSliceSize_N)
+                {
                     delta = 0;
+                }
                 else if(NPerBlockTail > thread_max_len)
+                {
                     delta = PostShuffleThreadSliceSize_N;
+                }
                 else
+                {
                     delta = PostShuffleThreadSliceSize_N - thread_max_len + NPerBlockTail;
+                }
 
                 max_count = shuffle_step * PostShuffleThreadSliceSize_N + delta;
             }

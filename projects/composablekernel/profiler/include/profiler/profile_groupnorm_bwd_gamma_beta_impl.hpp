@@ -33,7 +33,9 @@ bool profile_groupnorm_bwd_gamma_beta_impl(int do_verification,
     using DXDataType    = DYDataType;
 
     if(length.size() != 5)
+    {
         return false;
+    }
 
     index_t N = length[0];
     index_t G = length[3];
@@ -199,8 +201,10 @@ bool profile_groupnorm_bwd_gamma_beta_impl(int do_verification,
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -235,7 +239,9 @@ bool profile_groupnorm_bwd_gamma_beta_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

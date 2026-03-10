@@ -156,9 +156,13 @@ void preShuffleScaleBuffer(ck::e8m0_bexp_t* src, ck::e8m0_bexp_t* dst, int MN, i
             // 2-k)));
 
             if constexpr(KLast)
+            {
                 dst[outputIndex] = src[n * K + k];
+            }
             else
+            {
                 dst[outputIndex] = src[k * MN + n];
+            }
         }
     }
 }
@@ -225,9 +229,13 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
     auto f_host_tensor_descriptor =
         [](ck::index_t row, ck::index_t col, ck::index_t stride, auto layout) {
             if constexpr(std::is_same_v<decltype(layout), ck::tensor_layout::gemm::RowMajor>)
+            {
                 return HostTensorDescriptor({row, col}, {stride, 1});
+            }
             else
+            {
                 return HostTensorDescriptor({row, col}, {1, stride});
+            }
         };
     auto f_get_default_stride =
         [](ck::index_t row, ck::index_t col, ck::index_t stride, auto layout) {
@@ -235,12 +243,18 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
             {
                 // give a chance if stride is -1, return a default packed stride
                 if constexpr(std::is_same_v<decltype(layout), ck::tensor_layout::gemm::RowMajor>)
+                {
                     return static_cast<ck::index_t>(col);
+                }
                 else
+                {
                     return static_cast<ck::index_t>(row);
+                }
             }
             else
+            {
                 return static_cast<ck::index_t>(stride);
+            }
         };
 
     StrideA = f_get_default_stride(M, K, StrideA, ALayout{});
@@ -272,8 +286,10 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
         std::make_shared<Tensor<BDataType>>(f_host_tensor_descriptor(K, N, StrideB, BRefLayout{}));
     auto b_input = b_k_n;
     if constexpr(BPreShuffle)
+    {
         b_input = std::make_shared<Tensor<BDataType>>(
             f_host_tensor_descriptor(K, N, StrideB, BRefLayout{})); // use layout only for size
+    }
 
     // scales for A and B
     Tensor<XDataType> a_m_k_scale(f_host_tensor_descriptor(
@@ -303,23 +319,39 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
 
     auto a_data_element = [](float x) {
         if constexpr(ck::is_same_v<ADataType, ck::f4x2_pk_t>)
+        {
             return ck::type_convert<ADataType>(ck::float2_t(x));
+        }
         else if constexpr(ck::packed_size_v<ADataType> == 32)
+        {
             return ck::type_convert<ADataType>(ck::float32_t(x));
+        }
         else if constexpr(ck::packed_size_v<ADataType> == 16)
+        {
             return ck::type_convert<ADataType>(ck::float16_t(x));
+        }
         else
+        {
             return ck::type_convert<ADataType>(x);
+        }
     };
     auto b_data_element = [](float x) {
         if constexpr(ck::is_same_v<BDataType, ck::f4x2_pk_t>)
+        {
             return ck::type_convert<BDataType>(ck::float2_t(x));
+        }
         else if constexpr(ck::packed_size_v<BDataType> == 32)
+        {
             return ck::type_convert<BDataType>(ck::float32_t(x));
+        }
         else if constexpr(ck::packed_size_v<BDataType> == 16)
+        {
             return ck::type_convert<BDataType>(ck::float16_t(x));
+        }
         else
+        {
             return ck::type_convert<BDataType>(x);
+        }
     };
 
     using int_distr   = std::uniform_int_distribution<int>;
@@ -382,7 +414,9 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
     }
 
     if(config.verbosity > 0)
+    {
         std::cout << "Device memory allocation..." << std::endl;
+    }
     DeviceMem a_device_buf(sizeof(ADataType) * a_m_k.GetElementSpaceSize());
     DeviceMem a_scale_device_buf(sizeof(XDataType) * a_m_k_scale.GetElementSpaceSize());
     DeviceMem b_device_buf(sizeof(BDataType) * b_k_n->GetElementSpaceSize());
@@ -390,14 +424,18 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
     DeviceMem c_device_buf(sizeof(CDataType) * c_m_n_device_result.GetElementSpaceSize());
 
     if(config.verbosity > 0)
+    {
         std::cout << "Upload data to device..." << std::endl;
+    }
     a_device_buf.ToDevice(a_m_k.mData.data());
     a_scale_device_buf.ToDevice(a_shuffled_scale.mData.data());
     b_device_buf.ToDevice(b_input->mData.data());
     b_scale_device_buf.ToDevice(b_shuffled_scale.mData.data());
 
     if(config.verbosity > 0)
+    {
         std::cout << "Done." << std::endl;
+    }
 
     auto a_element_op = AElementOp{};
     auto b_element_op = BElementOp{};
@@ -499,12 +537,16 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
                 c_m_n_device_result, c_m_n_host_result, "Error: Incorrect results!", 5e-1, 5e-1);
 
         if(config.verbosity > 0 && res_verified)
+        {
             std::cout << "Verification Successful!" << std::endl;
+        }
     }
     else
     {
         if(config.verbosity > 0)
+        {
             std::cout << "Done." << std::endl;
+        }
     }
 
     if(config.time_kernel)

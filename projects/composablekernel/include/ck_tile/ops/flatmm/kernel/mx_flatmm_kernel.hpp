@@ -81,8 +81,10 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             int maxActiveBlocksPerCU = 0;
 
             if(hipGetDeviceProperties(&prop, deviceId) != hipSuccess)
+            {
                 throw std::runtime_error(std::string("hipGetDeviceProperties failed: ") +
                                          hipGetErrorName(hipGetLastError()));
+            }
 
             if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
                    &maxActiveBlocksPerCU,
@@ -90,9 +92,11 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                        kentry<1, MXFlatmmKernel, remove_cvref_t<decltype(kargs)>>),
                    block_size,
                    dync_smem_size) != hipSuccess)
+            {
                 throw std::runtime_error(
                     std::string("hipOccupancyMaxActiveBlocksPerMultiprocessor failed: ") +
                     hipGetErrorName(hipGetLastError()));
+            }
 
             const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
             const int total_work_tile_cnt   = TilePartitioner::GridSize(kargs.M, kargs.N);
@@ -102,7 +106,9 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             //           << ", total_work_tile_cnt: " << total_work_tile_cnt << std::endl;
 
             if(kargs.k_batch != 1)
+            {
                 throw std::runtime_error("Wrong! k_batch != 1 not supported in persistent kernel");
+            }
             return dim3(min(persistent_block_size, total_work_tile_cnt), 1, kargs.k_batch);
         }
         else

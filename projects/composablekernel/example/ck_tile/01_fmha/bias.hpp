@@ -41,7 +41,9 @@ struct bias_info
     void serialize(std::ostream& os) const
     {
         if(type == bias_enum::no_bias)
+        {
             os << "n";
+        }
         else if(type == bias_enum::elementwise_bias)
         {
             os << "e";
@@ -73,14 +75,18 @@ struct bias_info
                 info.type      = bias_enum::elementwise_bias;
                 info.rank_info = std::stoi(v);
                 if(info.rank_info < 0 || info.rank_info > 2)
+                {
                     throw std::invalid_argument("invalid bias rank: " + str);
+                }
             }
             else if(t == "a" || t == "alibi")
             {
                 info.type      = bias_enum::alibi;
                 info.rank_info = std::stoi(v);
                 if(info.rank_info < 0 || info.rank_info > 1)
+                {
                     throw std::invalid_argument("invalid bias rank: " + str);
+                }
             }
             else
             {

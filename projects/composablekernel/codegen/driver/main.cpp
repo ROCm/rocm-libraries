@@ -94,14 +94,18 @@ struct Epilogue
         std::cout << std::endl;
         std::cout << "TEMPLATES:" << std::endl;
         for(auto x : e.List())
+        {
             std::cout << "    " << x << std::endl;
+        }
         std::cout << std::endl;
         return 0;
     }
 
     // print out all the instances for the operation that was chosen at the command line
     for(auto name : args)
+    {
         std::cout << e.Emit(name) << std::endl;
+    }
 
     return 0;
 }

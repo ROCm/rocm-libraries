@@ -217,9 +217,13 @@ struct UniversalGemmKernel
 
         static constexpr bool value = []() {
             if constexpr(is_detected<has_persistent_type, GemmPipeline>{})
+            {
                 return GemmPipeline::UsePersistentKernel;
+            }
             else
+            {
                 return false;
+            }
         }();
     };
     static constexpr bool PersistentKernel = has_persistent_kernel::value;
@@ -233,9 +237,13 @@ struct UniversalGemmKernel
 
         static constexpr bool value = []() {
             if constexpr(is_detected<has_get_output_offset_t, TilePartitioner>{})
+            {
                 return true;
+            }
             else
+            {
                 return false;
+            }
         }();
     };
     static constexpr bool has_tile_partitioner_output_offset =

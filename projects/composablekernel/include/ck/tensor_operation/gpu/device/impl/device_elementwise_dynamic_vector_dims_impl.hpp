@@ -121,7 +121,9 @@ struct DeviceElementwiseImpl
         }
         // Add dummy dim if M0_dim is not equal to M1_dim
         if(M0_dim != M1_dim && NumDim >= 2)
+        {
             batch_dims[NumDim - 2] = 1;
+        }
         return generate_tuple([&](auto I) { return batch_dims[I]; }, Number<NumDim - 1>{});
     }
 

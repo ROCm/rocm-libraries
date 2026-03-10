@@ -37,15 +37,21 @@ struct DeviceOperationInstanceFactory<
         {
 #ifdef CK_ENABLE_FP16
             if constexpr(is_same_v<DOutDataType, F16> && is_same_v<DInDataType, F16>)
+            {
                 add_device_avgpool_bwd_ndhwc_f16_instances(op_ptrs);
+            }
 #endif
 #ifdef CK_ENABLE_BF16
             else if constexpr(is_same_v<DOutDataType, BF16> && is_same_v<DInDataType, BF16>)
+            {
                 add_device_avgpool_bwd_ndhwc_bf16_instances(op_ptrs);
+            }
 #endif
 #ifdef CK_ENABLE_FP32
             else if constexpr(is_same_v<DOutDataType, F32> && is_same_v<DInDataType, F32>)
+            {
                 add_device_avgpool_bwd_ndhwc_f32_instances(op_ptrs);
+            }
 #endif
         }
 

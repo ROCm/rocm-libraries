@@ -139,16 +139,24 @@ struct DeviceGemm_Xdl_CShuffleV3_BPreshuffle : public DeviceGemmV2BPreshuffle<AL
 
     static constexpr index_t APackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<ADataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr index_t BPackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     int GetPreShuffleParameters() override { return NPerXDL; }
@@ -207,10 +215,12 @@ struct DeviceGemm_Xdl_CShuffleV3_BPreshuffle : public DeviceGemmV2BPreshuffle<AL
                         rotating_mem.Next();
                         // clear c mem
                         if(arg_.KBatch > 1)
+                        {
                             hipGetErrorString(hipMemsetAsync(arg_.p_c_grid,
                                                              0,
                                                              arg_.M * arg_.N * sizeof(CDataType),
                                                              stream_config.stream_id_));
+                        }
                     };
 
                     ave_time = ck::utility::launch_and_time_kernel_with_preprocess<false>(
@@ -225,10 +235,12 @@ struct DeviceGemm_Xdl_CShuffleV3_BPreshuffle : public DeviceGemmV2BPreshuffle<AL
                 else
                 {
                     if(arg.KBatch > 1)
+                    {
                         hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
                                                          0,
                                                          arg.M * arg.N * sizeof(CDataType),
                                                          stream_config.stream_id_));
+                    }
 
                     ave_time = launch_and_time_kernel(
                         stream_config, kernel, dim3(gdx, gdy, gdz), dim3(BlockSize), 0, arg);

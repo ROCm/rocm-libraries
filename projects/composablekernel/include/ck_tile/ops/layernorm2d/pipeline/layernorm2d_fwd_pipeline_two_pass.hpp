@@ -44,9 +44,13 @@ struct Layernorm2dFwdPipelineTwoPass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_2p"; // block per row
+        }
         else
+        {
             return "wpr_2p"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -174,9 +178,13 @@ struct Layernorm2dFwdPipelineTwoPass
             },
             var);
         if constexpr(kSaveMean)
+        {
             store_tile(mean_window, cast_tile<MeanDataType>(mean));
+        }
         if constexpr(kSaveInvStd)
+        {
             store_tile(inv_std_window, cast_tile<InvStdDataType>(inv_std));
+        }
 
         // reverse read x to reuse cache
         ck_tile::index_t stride_to_right_most_window =

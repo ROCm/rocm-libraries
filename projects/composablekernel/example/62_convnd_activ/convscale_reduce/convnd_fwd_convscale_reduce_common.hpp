@@ -369,7 +369,9 @@ bool run_grouped_conv_fwd(bool do_verification,
         reduce_invoker->Run(reduce_argument.get(), StreamConfig{nullptr, time_kernel});
 
     if(time_kernel)
+    {
         std::cout << "\nReduce time: " << reduce_time << " ms" << std::endl;
+    }
 
     avg_time += reduce_time;
 

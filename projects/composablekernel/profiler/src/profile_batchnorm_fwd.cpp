@@ -69,30 +69,40 @@ class BatchnormFwdArgParser
         {
             ch = getopt_long(argc, argv, "D:R:v:o:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inLengths = getTypeValuesFromString<size_t>(optarg);
                 break;
             case 'R':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 reduceDims = getTypeValuesFromString<int>(optarg);
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
             case 'o':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_dumpout = static_cast<bool>(std::atoi(optarg));
                 break;
@@ -112,7 +122,9 @@ class BatchnormFwdArgParser
         };
 
         if(optind + 5 > argc)
+        {
             throw std::runtime_error("Invalid cmd-line arguments, more argumetns are needed!");
+        }
 
         data_type              = std::atoi(argv[optind++]);
         updateMovingAverage    = std::atoi(argv[optind++]);
@@ -121,7 +133,9 @@ class BatchnormFwdArgParser
         time_kernel            = static_cast<bool>(std::atoi(argv[optind++]));
 
         if(data_type != 0 && data_type != 1 && data_type != 3 && data_type != 5 && data_type != 6)
+        {
             return -1;
+        }
 
         return 0;
     };
@@ -137,7 +151,9 @@ int profile_batchnorm_forward(int argc, char* argv[])
     BatchnormFwdArgParser arg_parser;
 
     if(arg_parser(argc, argv) != 0)
+    {
         return -1;
+    }
 
     using F16  = ck::half_t;
     using F32  = float;

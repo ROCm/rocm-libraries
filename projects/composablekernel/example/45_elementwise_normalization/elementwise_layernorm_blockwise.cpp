@@ -71,6 +71,7 @@ void host_elementwise2D(HostTensorC& C,
     using ctype = ck::remove_reference_t<decltype(C(0, 0))>;
 
     for(std::size_t m = 0; m < shape[0]; ++m)
+    {
         for(std::size_t n = 0; n < shape[1]; ++n)
         {
             auto a_val  = A(m, n);
@@ -79,6 +80,7 @@ void host_elementwise2D(HostTensorC& C,
             functor(c_val, a_val, b_val);
             C(m, n) = c_val;
         }
+    }
 }
 
 int main(int argc, char* argv[])

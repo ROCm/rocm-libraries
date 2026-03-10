@@ -1105,6 +1105,7 @@ struct MoeFlatmmKernel
             statically_indexed_array<index_t, ScaleMRepeat> scale_m_offsets;
 
             if constexpr(!BMXFP4_Pipeline)
+            {
                 static_for<0, MRepeat, 1>{}([&](auto mIter) {
                     static_for<0, kM0, 1>{}([&](auto m0) {
                         static_for<0, kM2, 1>{}([&](auto m2) {
@@ -1115,6 +1116,7 @@ struct MoeFlatmmKernel
                         });
                     });
                 });
+            }
 
             constexpr int DynamicTileOffsetFlag = 0;
 
@@ -1246,17 +1248,23 @@ struct MoeFlatmmKernel
                 scale_m_window.load(scale_m_buffer);
                 scale_n_buffer = load_tile(scale_n_window);
                 if constexpr(IsGateUp)
+                {
                     scale_n_up_buffer = load_tile(scale_n_up_window);
+                }
             }
 
             if constexpr(EnableBias)
             {
                 exp_bias_buffer = load_tile(exp_bias_window);
                 if constexpr(IsGateUp)
+                {
                     exp_bias_up_buffer = load_tile(exp_bias_up_window);
+                }
             }
             if constexpr(!IsInputGemm)
+            {
                 exp_weight_buffer = load_tile(exp_weight_window);
+            }
 
             auto in_lds_window = make_tile_window(
                 o_lds_block,
@@ -1291,6 +1299,7 @@ struct MoeFlatmmKernel
 
             constexpr auto LdsTileDistr = [&] {
                 if constexpr(IsGateUp)
+                {
                     return make_static_tile_distribution(
                         detail::make_embed_tile_distribution_encoding(
                             tile_distribution_encoding<
@@ -1303,9 +1312,12 @@ struct MoeFlatmmKernel
                                 sequence<1, 2>,
                                 sequence<0, 0>>{},
                             typename CWarpDstr::DstrEncode{}));
+                }
                 else
+                {
                     return make_static_tile_distribution(
                         EpiloguePipeline::MakeLdsDistributionEncode());
+                }
             }();
 
             using LDSTileTensor =
@@ -1401,20 +1413,28 @@ struct MoeFlatmmKernel
 
                     static_for<0, ActVectorSize, 1>{}([&](auto idx) {
                         if constexpr(!BMXFP4_Pipeline)
+                        {
                             lds_tile[lds_stage].get_thread_buffer()[idx] *=
                                 epi_scale_m[idx] * epi_scale_n[idx];
+                        }
                         if(kind !=
                            MoeFlatmmKind::kFFN_gemm1_split_k) // disable weight and bias for split-k
                         {
                             if constexpr(EnableBias)
+                            {
                                 lds_tile[lds_stage].get_thread_buffer()[idx] += epi_exp_bias[idx];
+                            }
                             if constexpr(!IsInputGemm)
+                            {
                                 lds_tile[lds_stage].get_thread_buffer()[idx] *= epi_exp_weight[idx];
+                            }
                         }
                         if constexpr(kind ==
                                      MoeFlatmmKind::kFFN_gemm1_gate_only) // for mlp1 gate-only
+                        {
                             lds_tile[lds_stage].get_thread_buffer()[idx] =
                                 ActivationOp{}(lds_tile[lds_stage].get_thread_buffer()[idx]);
+                        }
                     });
                 }
             };
@@ -1435,8 +1455,10 @@ struct MoeFlatmmKernel
                     index_t scatter_token_id    = fused_token & token_id_mask;
                     c_scatter_valids[mIter][m0] = (scatter_token_id < kargs.NumTokens);
                     if constexpr(IsInputGemm)
+                    {
                         scatter_token_id =
                             scatter_token_id * kargs.TopK + (fused_token >> token_id_offset);
+                    }
                     c_scatter_offsets[mIter][m0] = scatter_token_id * kargs.stride_C;
                 });
             });
@@ -1484,9 +1506,13 @@ struct MoeFlatmmKernel
                 if constexpr(!IsInputGemm ||
                              decltype(c_block_window.get_bottom_tensor_view())::DstInMemOp ==
                                  memory_operation_enum::atomic_add)
+                {
                     c_scatter_tile_window.update(c_out_tensor);
+                }
                 else
+                {
                     c_scatter_tile_window.store(c_out_tensor);
+                }
 
                 if constexpr(iAccess != num_access - 1)
                 {

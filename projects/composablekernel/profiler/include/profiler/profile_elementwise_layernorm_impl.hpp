@@ -29,6 +29,7 @@ void host_elementwise2D(HostTensorC& C,
     using ctype = ck::remove_reference_t<decltype(C(0, 0))>;
 
     for(std::size_t m = 0; m < shape[0]; ++m)
+    {
         for(std::size_t n = 0; n < shape[1]; ++n)
         {
             auto a_val  = A(m, n);
@@ -37,6 +38,7 @@ void host_elementwise2D(HostTensorC& C,
             functor(c_val, a_val, b_val);
             C(m, n) = c_val;
         }
+    }
 }
 
 template <typename ADataType,
@@ -56,7 +58,9 @@ bool profile_elementwise_layernorm_impl(int do_verification,
     using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
     if(length.size() != 2)
+    {
         return false;
+    }
 
     index_t M      = length[0];
     index_t N      = length[1];
@@ -224,8 +228,10 @@ bool profile_elementwise_layernorm_impl(int do_verification,
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -258,7 +264,9 @@ bool profile_elementwise_layernorm_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

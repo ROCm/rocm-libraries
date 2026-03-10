@@ -333,7 +333,9 @@ struct GridwiseWelfordSecondHalfLayernorm2d
 
         static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
             if constexpr(I > 0)
+            {
                 block_sync_lds();
+            }
 
             BlockwiseWelford::Run(
                 welford_mean_thread_buf(I), welford_var_thread_buf(I), welford_count_thread_buf(I));

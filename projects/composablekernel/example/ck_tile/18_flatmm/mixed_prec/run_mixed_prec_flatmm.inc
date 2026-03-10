@@ -16,7 +16,9 @@ int run_mixed_prec_flatmm_with_layouts(int argc,
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     using ADataType   = PrecActType;
     using BDataType   = PrecWeightType;

@@ -288,23 +288,35 @@ struct DeviceImageToColumnImpl
 
         // check vector acces with c not packed
         if(!is_c_packed && ScalarPerVector != 1)
+        {
             return false;
+        }
         // check vector access of filter window row (only C if C is not packed)
         if(!is_w_packed && arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of filter window row (X * C)
         if(arg.X_ * arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of pads (w_pad_left/w_pad_right * C)
         if(w_pad_left * arg.C_ % ScalarPerVector != 0 ||
            w_pad_right * arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of with stride and pad
         if((w_pad_left != 0 || w_pad_right != 0) && stride_x > 1 && arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
         // check vector access of with dilation
         if(dilation_x > 1 && arg.C_ % ScalarPerVector != 0)
+        {
             return false;
+        }
 
         return GridwiseTensorRearrangeKernel::CheckValidity(arg.in_grid_desc_m_k_,
                                                             arg.out_grid_desc_m_k_);

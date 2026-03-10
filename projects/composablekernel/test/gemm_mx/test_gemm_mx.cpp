@@ -97,7 +97,9 @@ TYPED_TEST(TestGemmMX_MK_NK, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_MK_NK, MidLargeM)
@@ -111,7 +113,9 @@ TYPED_TEST(TestGemmMX_MK_NK, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_MK_NK, Regular)
@@ -125,7 +129,9 @@ TYPED_TEST(TestGemmMX_MK_NK, Regular)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_MK_NK, Large)
@@ -161,7 +167,9 @@ TYPED_TEST(TestGemmMX_MK_KN, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_MK_KN, MidLargeM)
@@ -175,7 +183,9 @@ TYPED_TEST(TestGemmMX_MK_KN, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_MK_KN, Regular)
@@ -189,7 +199,9 @@ TYPED_TEST(TestGemmMX_MK_KN, Regular)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_MK_KN, Large)
@@ -258,7 +270,9 @@ TYPED_TEST(TestGemmMX_KM_NK, Regular)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, M, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmMX_KM_NK, Large)

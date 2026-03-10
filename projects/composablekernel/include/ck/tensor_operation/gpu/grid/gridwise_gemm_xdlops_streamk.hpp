@@ -381,34 +381,46 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
         if constexpr(is_same<tensor_layout::gemm::RowMajor, ALayout>::value)
         {
             if(karg.K % ABlockTransferSrcScalarPerVector != 0)
+            {
                 return false;
+            }
         }
         else
         {
             if(karg.M % ABlockTransferSrcScalarPerVector != 0)
+            {
                 return false;
+            }
         }
 
         if constexpr(is_same<tensor_layout::gemm::RowMajor, BLayout>::value)
         {
             if(karg.N % BBlockTransferSrcScalarPerVector != 0)
+            {
                 return false;
+            }
         }
         else
         {
             if(karg.K % BBlockTransferSrcScalarPerVector != 0)
+            {
                 return false;
+            }
         }
 
         if constexpr(is_same<tensor_layout::gemm::RowMajor, CLayout>::value)
         {
             if(karg.N % CBlockTransferScalarPerVector_NWaveNPerXDL != 0)
+            {
                 return false;
+            }
         }
         else
         {
             if(karg.M % CBlockTransferScalarPerVector_NWaveNPerXDL != 0)
+            {
                 return false;
+            }
         }
 
         return true;
@@ -601,7 +613,9 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
         uint32_t total_iter_length = iter_end - iter_start;
 
         if(is_padding_block)
+        {
             return;
+        }
 
         uint32_t* p_semaphore =
             reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(p_workspace) +
@@ -1034,6 +1048,7 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
 
                         // LDS to global
                         if(is_dp_block)
+                        {
                             c_block_copy_lds_to_global.template Run<decltype(c_block_buf),
                                                                     decltype(c_grid_buf),
                                                                     InMemoryDataOperationEnum::Set>(
@@ -1041,6 +1056,7 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
                                 c_block_buf,
                                 c_grid_desc_mblock_mperblock_nblock_nperblock,
                                 c_grid_buf);
+                        }
                         else if(is_sk_block)
                         {
                             if constexpr(Block2CTileMap::ReductionStrategy ==
@@ -1118,7 +1134,9 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_streamk
             // exit condition
             iter_end -= current_iter_length;
             if(iter_end <= iter_start)
+            {
                 break;
+            }
 
             if constexpr(Block2CTileMap::ReductionStrategy == StreamKReductionStrategy::Reduction)
             {

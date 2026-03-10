@@ -1303,7 +1303,9 @@ struct TestMXMFMA
                 }
             }
             else
+            {
                 return static_cast<std::size_t>(stride);
+            }
         };
 
         params.StrideA = f_get_default_stride(BLOCK_M, BLOCK_K, params.StrideA, ALayout{});
@@ -1485,7 +1487,9 @@ struct TestMFMA
                 }
             }
             else
+            {
                 return static_cast<std::size_t>(stride);
+            }
         };
 
         params.StrideA = f_get_default_stride(BLOCK_M, BLOCK_K, params.StrideA, ALayout{});

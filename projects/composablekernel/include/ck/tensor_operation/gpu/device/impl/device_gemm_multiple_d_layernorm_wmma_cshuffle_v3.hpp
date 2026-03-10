@@ -479,7 +479,9 @@ struct DeviceGemmMultipleDLayernorm_Wmma_CShuffleV3
 
             if(arg.p_workspace_e_grid_ == nullptr || arg.p_workspace_mean_ == nullptr ||
                arg.p_workspace_var_ == nullptr || arg.p_workspace_count_ == nullptr)
+            {
                 throw std::runtime_error("wrong! WorkSpace pointer has not been set");
+            }
 
             index_t gdx, gdy, gdz;
             std::tie(gdx, gdy, gdz) =
@@ -633,7 +635,9 @@ struct DeviceGemmMultipleDLayernorm_Wmma_CShuffleV3
         workspace_size += pArg_->gemm_nblock_ * sizeof(int32_t) + 128;
 
         if constexpr(!is_same_v<EMeanVarDataType, HDataType>)
+        {
             workspace_size += pArg_->MRaw_ * pArg_->NRaw_ * sizeof(EMeanVarDataType);
+        }
 
         return (workspace_size);
     };
@@ -668,10 +672,14 @@ struct DeviceGemmMultipleDLayernorm_Wmma_CShuffleV3
         count_space_sz         = math::integer_least_multiple(count_space_sz, 128);
 
         if constexpr(!is_same_v<EMeanVarDataType, HDataType>)
+        {
             pArg_->p_workspace_e_grid_ =
                 reinterpret_cast<char*>(pArg_->p_workspace_count_) + count_space_sz;
+        }
         else
+        {
             pArg_->p_workspace_e_grid_ = static_cast<void*>(pArg_->p_h_grid_);
+        }
     };
 
     static bool IsSupportedArgument(const Argument& arg)

@@ -274,7 +274,9 @@ bool profile_grouped_gemm_fixed_nk_impl(int do_verification,
             if(gemm_ptr->IsSupportedArgument(argument_ptr.get()))
             {
                 for(std::size_t i = 0; i < gemm_descs.size(); i++)
+                {
                     c_device_buf[i]->SetZero();
+                }
 
                 invoker_ptr->Run(argument_ptr.get(),
                                  StreamConfig{nullptr, false, 0, n_warmup, n_iter});

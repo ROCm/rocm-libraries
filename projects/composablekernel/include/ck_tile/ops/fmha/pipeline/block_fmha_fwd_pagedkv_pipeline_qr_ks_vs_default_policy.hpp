@@ -70,12 +70,18 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSDefaultPolicy
         if constexpr(1 < Problem::kNumGemm0Warps)
         {
             if constexpr(128 >= Problem::BlockFmhaShape::kK0)
+            {
                 return BlockGemmARegBSmemCRegV2R1<GemmProblem, BlockGemmPolicy>{};
+            }
             else
+            {
                 return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+            }
         }
         else
+        {
             return BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
+        }
     }
 };
 

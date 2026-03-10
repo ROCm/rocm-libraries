@@ -340,18 +340,26 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
 
             constexpr auto a_lds_shape = []() {
                 if constexpr(is_a_load_tr_v())
+                {
                     return make_tuple(number<KPerBlock>{}, number<MPerBlock>{});
+                }
                 else
+                {
                     return make_tuple(number<MPerBlock>{}, number<KPerBlock>{});
+                }
             }();
             auto a_copy_lds_window0 = make_tile_window(a_lds_block0, a_lds_shape, {0, 0});
             auto a_copy_lds_window1 = make_tile_window(a_lds_block1, a_lds_shape, {0, 0});
 
             constexpr auto b_lds_shape = []() {
                 if constexpr(is_b_load_tr_v())
+                {
                     return make_tuple(number<KPerBlock>{}, number<NPerBlock>{});
+                }
                 else
+                {
                     return make_tuple(number<NPerBlock>{}, number<KPerBlock>{});
+                }
             }();
             auto b_copy_lds_window0 = make_tile_window(b_lds_block0, b_lds_shape, {0, 0});
             auto b_copy_lds_window1 = make_tile_window(b_lds_block1, b_lds_shape, {0, 0});
@@ -446,21 +454,29 @@ struct GemmPipelineAgBgCrCompV4 : public BaseGemmPipelineAgBgCrCompV4<Problem>
 
             constexpr auto a_lds_input_tile_distr = [&]() {
                 if constexpr(is_a_load_tr_v())
+                {
                     return make_static_tile_distribution(
                         typename InputTileDistributionTraits<
                             decltype(BlockGemm::MakeABlockDistributionEncode()),
                             typename Problem::ADataType>::TransposedDstrEncode{});
+                }
                 else
+                {
                     return ALdsTileDistr;
+                }
             }();
             constexpr auto b_lds_input_tile_distr = [&]() {
                 if constexpr(is_b_load_tr_v())
+                {
                     return make_static_tile_distribution(
                         typename InputTileDistributionTraits<
                             decltype(BlockGemm::MakeBBlockDistributionEncode()),
                             typename Problem::BDataType>::TransposedDstrEncode{});
+                }
                 else
+                {
                     return BLdsTileDistr;
+                }
             }();
             auto a_lds_ld_window0 =
                 make_tile_window(a_lds_block0, a_lds_shape, {0, 0}, a_lds_input_tile_distr);

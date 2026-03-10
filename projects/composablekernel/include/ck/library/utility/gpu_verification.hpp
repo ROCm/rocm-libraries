@@ -38,7 +38,9 @@ struct GpuVerifyResult
     float error_percentage() const
     {
         if(total == 0)
+        {
             return 0.0f;
+        }
         return static_cast<float>(error_count) / static_cast<float>(total) * 100.0f;
     }
 
@@ -200,7 +202,9 @@ __device__ T block_reduce(const T& value, F reduce)
     for(unsigned int s = BlockSize / 2; s >= 1; s >>= 1)
     {
         if(threadIdx.x < s)
+        {
             workspace[threadIdx.x] = reduce(workspace[threadIdx.x], workspace[threadIdx.x + s]);
+        }
         __syncthreads();
     }
 
@@ -274,13 +278,17 @@ compare_elements(const T& actual, const T& expected, const float rtol, const flo
     for(const auto x : o_bytes)
     {
         if(x != std::byte{0})
+        {
             all_zero = false;
+        }
     }
 
     for(const auto x : r_bytes)
     {
         if(x != std::byte{0})
+        {
             all_zero = false;
+        }
     }
 
     return std::make_tuple(e, inequal, all_zero);
@@ -474,7 +482,9 @@ __global__ __launch_bounds__((BlockSize)) //
         local_max, [](const auto& a, const auto& b) { return std::max(a, b); });
 
     if(threadIdx.x == 0)
+    {
         atomicMax(max_val, block_max);
+    }
 }
 
 // Host-side wrapper for GPU max reduction

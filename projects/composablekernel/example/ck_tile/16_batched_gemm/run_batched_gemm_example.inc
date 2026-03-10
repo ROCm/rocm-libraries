@@ -90,7 +90,9 @@ int run_batched_gemm_example_with_layouts(int argc,
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     ck_tile::index_t M = arg_parser.get_int("m");
     ck_tile::index_t N = arg_parser.get_int("n");
@@ -146,7 +148,9 @@ int run_batched_gemm_example_with_layouts(int argc,
             }
         }
         else
+        {
             return stride;
+        }
     };
 
     stride_A = f_get_default_stride(M, K, stride_A, a_layout);
@@ -319,7 +323,9 @@ int run_batched_gemm_example(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     using Row = ck_tile::tensor_layout::gemm::RowMajor;
     using Col = ck_tile::tensor_layout::gemm::ColumnMajor;

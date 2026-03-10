@@ -283,14 +283,18 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
 
     static constexpr index_t KGroup = []() {
         if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
+        {
             // On gfx950, we have a mfma that required 32 f8 elements as input,
             // splited into 2 groups of 16 f8 elements.
             // the 2 groups is not contiguous in the B preshuffed layout.
             // and we do not want it to be contiguous in the B preshuffled layout
             // because a memory instruction can only read 16 f8 elements at a time.
             return mfma_selector::selected_mfma.k_per_blk == 32 ? 2 : 1;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr index_t KRepeat = KPerBlock / KLane / (KPack / KGroup);
@@ -315,16 +319,24 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
 
     static constexpr index_t APackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<ADataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr index_t BPackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __host__ static auto CalculateGridSize(index_t M, index_t N)
@@ -1126,7 +1138,9 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         // static_assert(NSwizzle == false, "to do fix: need another pr in sorting merged");
         const index_t expert_block_id = NSwizzle ? blockIdx.x / problem.NBlock : blockIdx.y;
         if(expert_block_id * MPerBlock >= max_token_id)
+        {
             return;
+        }
         const index_t expert_id =
             __builtin_amdgcn_readfirstlane(p_sorted_expert_ids[expert_block_id]);
         const auto block_mn = [&]() -> std::pair<int, int> {
@@ -1164,7 +1178,9 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const index_t token_pos   = block_m_id * MPerBlock + threadIdx.x / AKThreads * AMRepeats;
 
         if(token_pos >= max_token_id || token0 >= problem.NumTokens)
+        {
             return;
+        }
         StaticallyIndexedArray<IndexType, AMRepeats> gather_offsets;
         static_for<0, AMRepeats, 1>{}([&](auto m0) {
             const index_t fused_token = p_sorted_token_ids[token_pos + m0];
@@ -1592,7 +1608,9 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         // static_assert(NSwizzle == false, "to do fix: need another pr in sorting merged");
         const index_t expert_block_id = NSwizzle ? blockIdx.x / problem.NBlock : blockIdx.y;
         if(expert_block_id * MPerBlock >= max_token_id)
+        {
             return;
+        }
         const index_t expert_id =
             __builtin_amdgcn_readfirstlane(p_sorted_expert_ids[expert_block_id]);
         const auto block_mn = [&]() -> std::pair<int, int> {
@@ -1630,7 +1648,9 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const index_t token_pos   = block_m_id * MPerBlock + threadIdx.x / AKThreads * AMRepeats;
 
         if(token_pos >= max_token_id || token0 >= problem.NumTokens)
+        {
             return;
+        }
         StaticallyIndexedArray<IndexType, AMRepeats> gather_offsets;
         static_for<0, AMRepeats, 1>{}([&](auto m0) {
             const index_t fused_token = p_sorted_token_ids[token_pos + m0];

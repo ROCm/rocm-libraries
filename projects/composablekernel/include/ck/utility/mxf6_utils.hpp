@@ -94,7 +94,9 @@ template <>
 __host__ __device__ inline bool is_zero<f6_t>(e8m0_bexp_t const scale, f6_t const data)
 {
     if(is_nan<f6_t>(scale, data))
+    {
         return false;
+    }
 
     // no need to check for scale as it does not have a 0 representation
     f6_t result = (data & 0b00111111) & NumericUtils<f6_t>::set_sign_mask;
@@ -117,7 +119,9 @@ template <>
 __host__ __device__ inline bool is_zero<bf6_t>(e8m0_bexp_t const scale, bf6_t const data)
 {
     if(is_nan<bf6_t>(scale, data))
+    {
         return false;
+    }
 
     // no need to check for scale as it does not have a 0 representation
     bf6_t result = (data & 0b00111111) & NumericUtils<bf6_t>::set_sign_mask;
@@ -139,10 +143,14 @@ template <>
 __host__ __device__ inline float to_float<f6_t>(e8m0_bexp_t const scale, f6_t const data)
 {
     if(is_nan<f6_t>(scale, data))
+    {
         return NumericLimits<float>::QuietNaN();
+    }
 
     if(is_zero<f6_t>(scale, data))
+    {
         return 0.0f;
+    }
 
     f6_t prepared_data = data & 0b00111111;
 
@@ -165,10 +173,14 @@ template <>
 __host__ __device__ inline float to_float<bf6_t>(e8m0_bexp_t const scale, bf6_t const data)
 {
     if(is_nan<bf6_t>(scale, data))
+    {
         return NumericLimits<float>::QuietNaN();
+    }
 
     if(is_zero<bf6_t>(scale, data))
+    {
         return 0.0f;
+    }
 
     bf6_t prepared_data = data & 0b00111111;
 
@@ -202,15 +214,19 @@ __host__ __device__ inline f6_t sat_convert_to_type<f6_t>(float value)
     }
 
     if(std::abs(value) > NumericLimits<f6_t>::DataMaxNorm()) // covers inf case as well
+    {
         return sign ? NumericUtils<f6_t>::data_max_negative_normal_mask
                     : NumericUtils<f6_t>::data_max_positive_normal_mask;
+    }
 
     f6_t res = convert_to_type<f6_t>(value);
 
     if(std::abs(to_float<f6_t>(NumericLimits<e8m0_bexp_t>::Binary_1(), res)) <
        NumericLimits<f6_t>::DataMinSubnorm())
+    {
         return sign ? NumericUtils<f6_t>::negative_zero_mask
                     : NumericUtils<f6_t>::positive_zero_mask;
+    }
 
     return res;
 }
@@ -240,15 +256,19 @@ __host__ __device__ inline bf6_t sat_convert_to_type<bf6_t>(float value)
     }
 
     if(std::abs(value) > NumericLimits<bf6_t>::DataMaxNorm()) // covers inf case as well
+    {
         return sign ? NumericUtils<bf6_t>::data_max_negative_normal_mask
                     : NumericUtils<bf6_t>::data_max_positive_normal_mask;
+    }
 
     bf6_t res = convert_to_type<bf6_t>(value);
 
     if(std::abs(to_float<bf6_t>(NumericLimits<e8m0_bexp_t>::Binary_1(), res)) <
        NumericLimits<bf6_t>::DataMinSubnorm())
+    {
         return sign ? NumericUtils<bf6_t>::negative_zero_mask
                     : NumericUtils<bf6_t>::positive_zero_mask;
+    }
 
     return res;
 }
@@ -271,19 +291,25 @@ __host__ __device__ inline f6_t sat_convert_to_type_sr<f6_t>(float value, uint32
     uint32_t sign = t.value_bitwise >> 31;
 
     if(std::isnan(value))
+    {
         return sign ? NumericUtils<f6_t>::data_max_negative_normal_mask
                     : NumericUtils<f6_t>::data_max_positive_normal_mask;
+    }
 
     if(std::abs(value) > NumericLimits<f6_t>::DataMaxNorm()) // covers inf case as well
+    {
         return sign ? NumericUtils<f6_t>::data_max_negative_normal_mask
                     : NumericUtils<f6_t>::data_max_positive_normal_mask;
+    }
 
     f6_t res = convert_to_type_sr<f6_t>(value, seed);
 
     if(std::abs(to_float<f6_t>(NumericLimits<e8m0_bexp_t>::Binary_1(), res)) <
        NumericLimits<f6_t>::DataMinSubnorm())
+    {
         return sign ? NumericUtils<f6_t>::negative_zero_mask
                     : NumericUtils<f6_t>::positive_zero_mask;
+    }
 
     return res;
 }
@@ -306,18 +332,24 @@ __host__ __device__ inline bf6_t sat_convert_to_type_sr<bf6_t>(float value, uint
     uint32_t sign = t.value_bitwise >> 31;
 
     if(std::isnan(value))
+    {
         return sign ? NumericUtils<bf6_t>::data_max_negative_normal_mask
                     : NumericUtils<bf6_t>::data_max_positive_normal_mask;
+    }
     if(std::abs(value) > NumericLimits<bf6_t>::DataMaxNorm()) // covers inf case as well
+    {
         return sign ? NumericUtils<bf6_t>::data_max_negative_normal_mask
                     : NumericUtils<bf6_t>::data_max_positive_normal_mask;
+    }
 
     bf6_t res = convert_to_type_sr<bf6_t>(value, seed);
 
     if(std::abs(to_float<bf6_t>(NumericLimits<e8m0_bexp_t>::Binary_1(), res)) <
        NumericLimits<bf6_t>::DataMinSubnorm())
+    {
         return sign ? NumericUtils<bf6_t>::negative_zero_mask
                     : NumericUtils<bf6_t>::positive_zero_mask;
+    }
 
     return res;
 }

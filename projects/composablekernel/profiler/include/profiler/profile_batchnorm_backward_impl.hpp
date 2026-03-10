@@ -52,7 +52,9 @@ bool profile_batchnorm_backward_impl(bool do_verification,
         std::accumulate(inOutLengths.begin(), inOutLengths.end(), 1, std::multiplies<size_t>{});
 
     if(std::any_of(reduceDims.begin(), reduceDims.end(), [](int d) { return d < 0 || d >= Rank; }))
+    {
         throw std::runtime_error("Invalid reduce dimensions!");
+    }
 
     for(int dim = 0; dim < Rank; dim++)
     {
@@ -329,13 +331,17 @@ bool profile_batchnorm_backward_impl(bool do_verification,
 
         // inputting of savedMean, savedInvVariance
         if(haveSavedMeanInvVar)
+        {
             num_bytes += invariant_length * sizeof(MeanVarDataType) * 2;
+        }
 
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {

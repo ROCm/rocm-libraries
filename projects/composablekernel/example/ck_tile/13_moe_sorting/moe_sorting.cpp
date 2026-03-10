@@ -162,8 +162,10 @@ bool test_moe_sorting(ck_tile::ArgParser args)
             return v_;
         }
         else
+        {
             // return std::vector<int>{};
             return ck_tile::HostTensor<IndexType>{{1}};
+        }
     }();
 
     // tokens already considered batch size
@@ -219,14 +221,18 @@ bool test_moe_sorting(ck_tile::ArgParser args)
         moe_buf_dev.ToDevice(moe_buf_host.data());
     }
     if(local_expert_masking)
+    {
         local_expert_masking_dev.ToDevice(local_expert_masking_host.data());
+    }
 
     // if return zero, means no need workspace, can set moe_sorting_args.p_ws to nullptr
     ck_tile::index_t workspace_size =
         moe_sorting_get_workspace_size(tokens, num_experts, topk, dispatch_policy);
     ck_tile::DeviceMem moe_sorting_ws(workspace_size != 0 ? workspace_size : 0);
     if(workspace_size != 0 && clear_inside == false)
+    {
         moe_sorting_ws.SetZero(); // note, clear here!!!!
+    }
 
     moe_sorting_trait trait{
         index_prec, weight_prec, local_expert_masking, clear_inside, dispatch_policy};
@@ -345,9 +351,13 @@ bool test_moe_sorting(ck_tile::ArgParser args)
     }
 
     if(ms < 0)
+    {
         printf("not supported\n");
+    }
     else
+    {
         printf("ms:%f, ", ms);
+    }
     fflush(stdout);
     if(ms < 0)
     {
@@ -437,7 +447,9 @@ bool test_moe_sorting(ck_tile::ArgParser args)
     printf("valid:%s", rtn ? "y" : "n");
     fflush(stdout);
     if(!rtn)
+    {
         printf(", (%d)", seed);
+    }
     printf("\n");
     fflush(stdout);
 
@@ -466,7 +478,9 @@ int main(int argc, char** argv)
     {
         auto [result, args] = create_args(argc, argv);
         if(!result)
+        {
             return -1;
+        }
 
         std::string index_prec  = args.get_str("pr_i");
         std::string weight_prec = args.get_str("pr_w");

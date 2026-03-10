@@ -110,7 +110,9 @@ struct DeviceElementwiseImpl : public DeviceElementwise<InDataTypeTuple,
             return PadDescriptor_M_1d(desc_m, gridSize, blockSize);
         }
         else
+        {
             return PadDescriptor_M_1d(desc, gridSize, blockSize);
+        }
     }
 
     template <index_t TupleSize>
@@ -246,16 +248,22 @@ struct DeviceElementwiseImpl : public DeviceElementwise<InDataTypeTuple,
     static bool IsSupportedArgument(const Argument& arg)
     {
         if(arg.lengths_.back() % MPerThread != 0)
+        {
             return false;
+        }
 
         auto IsScalarPerVectorValid = [&](const std::array<index_t, NumDim>& lengths,
                                           const std::array<index_t, NumDim>& strides,
                                           index_t scalarPerVector) {
             if(strides.back() == 1 && lengths.back() % scalarPerVector == 0)
+            {
                 return true;
+            }
 
             if(strides.back() != 1 && scalarPerVector == 1)
+            {
                 return true;
+            }
 
             return false;
         };
@@ -264,13 +272,17 @@ struct DeviceElementwiseImpl : public DeviceElementwise<InDataTypeTuple,
         static_for<0, NumInput, 1>{}([&](auto I) {
             if(!IsScalarPerVectorValid(
                    arg.lengths_, arg.inStridesArray_[I.value], InScalarPerVectorSeq::At(I)))
+            {
                 valid = false;
+            }
         });
 
         static_for<0, NumOutput, 1>{}([&](auto I) {
             if(!IsScalarPerVectorValid(
                    arg.lengths_, arg.outStridesArray_[I.value], OutScalarPerVectorSeq::At(I)))
+            {
                 valid = false;
+            }
         });
 
         return valid;

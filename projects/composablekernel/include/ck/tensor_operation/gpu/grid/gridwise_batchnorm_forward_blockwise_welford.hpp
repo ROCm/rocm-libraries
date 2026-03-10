@@ -289,7 +289,9 @@ struct GridwiseBatchNormForwardWithBlockwiseWelford
 
         static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
             if constexpr(I > 0)
+            {
                 block_sync_lds();
+            }
 
             int count = threadwise_welford.cur_count_;
             BlockwiseWelford::Run(mean_thread_buf(I), var_thread_buf(I), count);

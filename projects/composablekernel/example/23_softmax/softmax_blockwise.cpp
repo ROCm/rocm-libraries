@@ -92,18 +92,24 @@ class SimpleAppArgs
         {
             ch = getopt_long(argc, argv, "D:v:l:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inLengths = getTypeValuesFromString<size_t>(optarg);
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
@@ -119,7 +125,9 @@ class SimpleAppArgs
         };
 
         if(optind + 2 > argc)
+        {
             throw std::runtime_error("Invalid cmd-line arguments, more argumetns are needed!");
+        }
 
         init_method = std::atoi(argv[optind++]);
         time_kernel = static_cast<bool>(std::atoi(argv[optind]));
@@ -145,7 +153,9 @@ int main(int argc, char* argv[])
     if(argc > 1)
     {
         if(args.processArgs(argc, argv) < 0)
+        {
             return (-1);
+        }
     };
 
     Tensor<InDataType> in(args.inLengths);
@@ -171,22 +181,32 @@ int main(int argc, char* argv[])
         case 1:
             in.GenerateTensorValue(GeneratorTensor_1<InDataType>{1}, num_thread);
             if(beta != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_1<OutDataType>{1}, num_thread);
+            }
             break;
         case 2:
             in.GenerateTensorValue(GeneratorTensor_2<InDataType>{-5, 5}, num_thread);
             if(beta != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5}, num_thread);
+            }
             break;
         default:
             in.GenerateTensorValue(GeneratorTensor_3<InDataType>{-5.0, 5.0}, num_thread);
             if(beta != 0.0f)
+            {
                 out_ref.GenerateTensorValue(GeneratorTensor_3<OutDataType>{-5.0, 5.0}, num_thread);
+            }
         }
 
         if(beta != 0.0f)
+        {
             for(size_t i = 0; i < out_ref.mDesc.GetElementSpaceSize(); i++)
+            {
                 out.mData[i] = out_ref.mData[i];
+            }
+        }
     };
     // std::cout << "beta = " << beta << std::endl;
     // LogRangeAsType<float>(std::cout << "tensor in: " , in.mData, ",") << std::endl;
@@ -199,7 +219,9 @@ int main(int argc, char* argv[])
     in_dev.ToDevice(in.mData.data());
 
     if(beta != 0.0f)
+    {
         out_dev.ToDevice(out.mData.data());
+    }
 
     if(args.do_verification)
     {

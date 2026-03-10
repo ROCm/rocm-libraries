@@ -43,7 +43,9 @@ inline void collect_index_params(char* argv[],
                                  const ck::index_t num)
 {
     for(ck::index_t p = from; p < from + num; p++)
+    {
         params.push_back(std::stoi(argv[p]));
+    }
 }
 
 // Defualt strides for row-major: {Dim1 * Dim2 * Dim3, Dim2 * Dim3, Dim3, 1}

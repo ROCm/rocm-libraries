@@ -100,9 +100,13 @@ struct FlatmmScalePointer<SharedGranularityMN, 0, ScaleType_>
     {
         // with additional oob check
         if constexpr(GranularityMN == 1)
+        {
             return i < length ? ptr[i] : 0;
+        }
         else
+        {
             return i / GranularityMN < length ? ptr[i / GranularityMN] : 0;
+        }
     }
 };
 

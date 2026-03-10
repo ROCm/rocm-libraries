@@ -70,7 +70,9 @@ class TestCkTileMultiReduceThreadwise : public ::testing::Test
         auto output_number_elements = [&output_shape]() {
             ck_tile::index_t prod = 1;
             for(auto len : output_shape)
+            {
                 prod *= len;
+            }
             return prod;
         }();
 

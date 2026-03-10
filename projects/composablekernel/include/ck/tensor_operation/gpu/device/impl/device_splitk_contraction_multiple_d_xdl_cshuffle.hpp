@@ -955,16 +955,24 @@ struct DeviceSplitKContractionMultipleD_Xdl_CShuffle
             if(GridwiseGemm::CalculateHasMainKBlockLoop(K))
             {
                 if(arg.split_k_ <= 1)
+                {
                     return launch_kernel(integral_constant<bool, true>{});
+                }
                 else
+                {
                     return launch_kernel_atomic_add(integral_constant<bool, true>{});
+                }
             }
             else
             {
                 if(arg.split_k_ <= 1)
+                {
                     return launch_kernel(integral_constant<bool, false>{});
+                }
                 else
+                {
                     return launch_kernel_atomic_add(integral_constant<bool, false>{});
+                }
             }
         }
 
@@ -1008,7 +1016,9 @@ struct DeviceSplitKContractionMultipleD_Xdl_CShuffle
             }
         }
         if(!valid)
+        {
             return false;
+        }
 
         // check vector access
         static_assert((ABlockTransferSrcVectorDim == 2 || ABlockTransferSrcVectorDim == 3) &&

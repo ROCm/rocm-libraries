@@ -71,7 +71,9 @@ class TestCkTileMoeSmoothquant : public ::testing::Test
              ck_tile::index_t topk    = 5)
     {
         if(stride < 0)
+        {
             stride = hidden_size;
+        }
 
         assert(stride >= hidden_size);
 

@@ -162,9 +162,13 @@ void preShuffleScaleBuffer(ck::e8m0_bexp_t* src, ck::e8m0_bexp_t* dst, int MN, i
             // src[n * K + k] = ck::type_convert<ck::e8m0_bexp_t>(static_cast<float>(powf(2.0f, n2 +
             // k2 * MNXdlPack)));
             if constexpr(KLast)
+            {
                 dst[outputIndex] = src[n * K + k];
+            }
             else
+            {
                 dst[outputIndex] = src[k * MN + n];
+            }
         }
     }
 }

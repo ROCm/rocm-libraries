@@ -197,9 +197,13 @@ struct DeviceSoftmaxImpl : public DeviceSoftmax<InDataType,
                 get_2d_lengths<Rank, NumReduceDim>(inLengths_);
 
             if constexpr(NumInvariantDim == 0)
+            {
                 invariant_lowest_length_ = 1;
+            }
             else
+            {
                 invariant_lowest_length_ = inLengths_[NumInvariantDim - 1];
+            }
 
             blkGroupSize          = 1;
             numBlockTileIteration = (reduce_total_length + K_BlockTileSize - 1) / K_BlockTileSize;

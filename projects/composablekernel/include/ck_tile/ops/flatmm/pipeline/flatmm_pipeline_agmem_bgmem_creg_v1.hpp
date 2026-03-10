@@ -42,11 +42,17 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
     CK_TILE_HOST_DEVICE static auto TailHandler(const RunFunction& run_func, bool has_hot_loop)
     {
         if constexpr(!DispatchHotloop)
+        {
             return run_func(bool_constant<true>{}, integral_constant<TailNumber, tail_num>{});
+        }
         else if(has_hot_loop)
+        {
             return run_func(bool_constant<true>{}, integral_constant<TailNumber, tail_num>{});
+        }
         else
+        {
             return run_func(bool_constant<false>{}, integral_constant<TailNumber, tail_num>{});
+        }
     }
 
     template <bool DispatchHotloop = false, typename RunFunction>
@@ -54,9 +60,13 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_num)
     {
         if(TailNumber::Even == tail_num)
+        {
             return TailHandler<DispatchHotloop, TailNumber::Even>(run_func, has_hot_loop);
+        }
         else if(TailNumber::Odd == tail_num)
+        {
             return TailHandler<DispatchHotloop, TailNumber::Odd>(run_func, has_hot_loop);
+        }
         else
         {
             assert(false && "Wrong TailNumber!");
@@ -262,11 +272,17 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
             if(j == 0)
                 ;
             else if(j == 1)
+            {
                 inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+            }
             else if(j == 2)
+            {
                 inst_idx = mfma_perM_perK - 1;
+            }
             else
+            {
                 inst_idx = mfma_perM_perK - j;
+            }
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -420,7 +436,9 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -443,7 +461,9 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         }
         // Add Aload when Aload data > needed
         if(Aload_num_perK == 0)
+        {
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+        }
         __builtin_amdgcn_sched_barrier(0);
     }
 
@@ -485,7 +505,9 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -515,7 +537,9 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
+                {
                     dsread_perM = dsread_per_wg;
+                }
 
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }

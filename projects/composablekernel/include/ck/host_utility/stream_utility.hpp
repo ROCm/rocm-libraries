@@ -18,7 +18,9 @@ static inline int getAvailableComputeUnitCount(const StreamConfig& stream_config
     uint32_t cuMask[MAX_MASK_DWORDS];
 
     for(int i = 0; i < MAX_MASK_DWORDS; i++)
+    {
         cuMask[i] = 0;
+    }
 
     auto countSetBits = [](uint32_t dword) {
         int count = 0;
@@ -26,7 +28,9 @@ static inline int getAvailableComputeUnitCount(const StreamConfig& stream_config
         while(dword != 0)
         {
             if(dword & 0x1)
+            {
                 count++;
+            }
 
             dword = dword >> 1;
         };
@@ -39,7 +43,9 @@ static inline int getAvailableComputeUnitCount(const StreamConfig& stream_config
     int ret = 0;
 
     for(int i = 0; i < MAX_MASK_DWORDS; i++)
+    {
         ret += countSetBits(cuMask[i]);
+    }
 
     return (ret);
 };

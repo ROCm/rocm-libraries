@@ -53,7 +53,9 @@ class GenericStringBuffer
     GenericStringBuffer& operator=(GenericStringBuffer&& rhs)
     {
         if(&rhs != this)
+        {
             stack_ = std::move(rhs.stack_);
+        }
         return *this;
     }
 #endif

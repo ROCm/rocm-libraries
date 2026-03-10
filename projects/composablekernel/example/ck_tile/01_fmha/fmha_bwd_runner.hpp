@@ -86,17 +86,27 @@ bwd_result fmha_bwd_run(mode_enum mode,
 {
     const std::string data_type = []() {
         if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdFp32>)
+        {
             return "fp32";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdFp16>)
+        {
             return "fp16";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdBf16>)
+        {
             return "bf16";
+        }
         else
+        {
             static_assert(false);
+        }
     }();
 
     if(nhead_k < 0)
+    {
         nhead_k = nhead;
+    }
     if(nhead % nhead_k != 0)
     {
         std::cerr << "nhead:" << nhead << " must be multiple of nhead_k:" << nhead_k << std::endl;
@@ -107,10 +117,14 @@ bwd_result fmha_bwd_run(mode_enum mode,
     auto next_seed = [&random_engine]() { return static_cast<unsigned int>(random_engine()); };
 
     if(hdim_v < 0)
+    {
         hdim_v = hdim_q;
+    }
 
     if(scale == .0f)
+    {
         scale = 1.0 / ck_tile::sqrt(static_cast<float>(hdim_q));
+    }
 
     bias_info bias = bias_info::decode(bias_str);
 
@@ -230,9 +244,13 @@ bwd_result fmha_bwd_run(mode_enum mode,
                            ck_tile::index_t s /*seqlen*/,
                            ck_tile::index_t d /*hdim*/) {
         if(permute)
+        {
             return std::array<ck_tile::index_t, 4>{b, h, s, d};
+        }
         else
+        {
             return std::array<ck_tile::index_t, 4>{b, s, h, d};
+        }
     };
 
     // host memory for storing all the tensor elements
@@ -742,6 +760,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                 // if left window size is negative, means causal
                 // else means generic (for current batch)
                 if(mask.left < 0)
+                {
                     ck_tile::reference_batched_masking<AccDataType>(
                         s_host_ref,
                         ck_tile::make_generic_attention_mask_from_lr_window<FmhaMasks::CausalMask>(
@@ -750,7 +769,9 @@ bwd_result fmha_bwd_run(mode_enum mode,
                             real_seqlen_q,
                             real_seqlen_k,
                             mask.type == mask_enum::mask_top_left));
+                }
                 else
+                {
                     ck_tile::reference_batched_masking<AccDataType>(
                         s_host_ref,
                         ck_tile::make_generic_attention_mask_from_lr_window<FmhaMasks::GenericMask>(
@@ -759,6 +780,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                             real_seqlen_q,
                             real_seqlen_k,
                             mask.type == mask_enum::mask_top_left));
+                }
             }
             const ck_tile::HostTensor<AccDataType> masked_s_host_ref = s_host_ref;
             ck_tile::reference_batched_softmax<AccDataType, LSEDataType, AccDataType>(
@@ -846,7 +868,9 @@ bwd_result fmha_bwd_run(mode_enum mode,
         // Some block may be skipped with causal mask and dq are not set to zeros
         // In these cases thus we need to zero out it first
         if(!deterministic || mask.type != mask_enum::no_mask)
+        {
             dq_acc_buf.SetZero();
+        }
 
         ck_tile::stream_config stream_config_v{nullptr, true, 0, 0, 1};
         launcher(fmha_args, stream_config_v);

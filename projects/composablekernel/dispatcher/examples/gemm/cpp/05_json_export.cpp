@@ -58,7 +58,9 @@ int main(int argc, char* argv[])
     args.add_flag("--list", "List all kernel sets");
 
     if(!args.parse(argc, argv))
+    {
         return 0;
+    }
 
     print_header("Example 05: JSON Export");
 
@@ -96,7 +98,9 @@ int main(int argc, char* argv[])
     print_separator();
     std::cout << json.substr(0, std::min(size_t(500), json.size()));
     if(json.size() > 500)
+    {
         std::cout << "\n...";
+    }
     std::cout << "\n";
     print_separator();
 

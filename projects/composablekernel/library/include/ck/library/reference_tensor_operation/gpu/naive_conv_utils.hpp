@@ -65,42 +65,64 @@ inline int map_dim_char_to_index(char dim_char, index_t ndim_spatial, bool is_we
 {
     // G dimension
     if(dim_char == 'G')
+    {
         return 0;
+    }
 
     // Batch/output channels dimension (N for input/output, K for weight's first non-G dim)
     if(dim_char == 'N')
+    {
         return 1;
+    }
     if(dim_char == 'K' && is_weight)
+    {
         return 1;
+    }
 
     // Channel dimension (C for input/weight, K for output)
     if(dim_char == 'C')
+    {
         return 2;
+    }
     if(dim_char == 'K' && !is_weight)
+    {
         return 2;
+    }
 
     // Spatial dimensions - map based on ndim_spatial
     // Input/Output use: D/H/W, Weight uses: Z/Y/X
     if(ndim_spatial == 1)
     {
         if(dim_char == 'W' || dim_char == 'X')
+        {
             return 3;
+        }
     }
     else if(ndim_spatial == 2)
     {
         if(dim_char == 'H' || dim_char == 'Y')
+        {
             return 3;
+        }
         if(dim_char == 'W' || dim_char == 'X')
+        {
             return 4;
+        }
     }
     else if(ndim_spatial == 3)
     {
         if(dim_char == 'D' || dim_char == 'Z')
+        {
             return 3;
+        }
         if(dim_char == 'H' || dim_char == 'Y')
+        {
             return 4;
+        }
         if(dim_char == 'W' || dim_char == 'X')
+        {
             return 5;
+        }
     }
 
     // Should not reach here
@@ -123,9 +145,13 @@ inline std::vector<index_t> compute_conv_tensor_strides(const std::vector<index_
     for(const char* p = layout_name; *p != '\0'; ++p)
     {
         if(*p == 'K')
+        {
             has_k = true;
+        }
         if(*p == 'N')
+        {
             has_n = true;
+        }
     }
     bool is_weight = has_k && !has_n;
 
@@ -137,7 +163,9 @@ inline std::vector<index_t> compute_conv_tensor_strides(const std::vector<index_
         char c = *p;
         // Skip underscores (strided layouts)
         if(c == '_')
+        {
             continue;
+        }
         // Valid dimension characters
         if(std::find(std::begin(dim_chars), std::end(dim_chars), c) != std::end(dim_chars))
         {

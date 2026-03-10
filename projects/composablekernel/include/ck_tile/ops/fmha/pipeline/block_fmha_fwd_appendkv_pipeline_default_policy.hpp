@@ -39,9 +39,13 @@ struct BlockFmhaFwdAppendKVPipelineDefaultPolicy
 
             // TODO: not correct!
             if constexpr(total_pixels > 4)
+            {
                 return 4;
+            }
             else
+            {
                 return 2;
+            }
         }
         else
         {

@@ -313,7 +313,9 @@ CK_TILE_HOST_DEVICE void print(const tuple<T...>& t)
         bool first = true;
         static_for<0, sizeof...(T), 1>{}([&t, &first](auto i) {
             if(!first)
+            {
                 printf(", ");
+            }
             print(t.get(i));
             first = false;
         });

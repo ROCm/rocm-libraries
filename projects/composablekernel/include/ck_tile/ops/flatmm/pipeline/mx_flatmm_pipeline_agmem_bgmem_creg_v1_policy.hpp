@@ -223,6 +223,7 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         static_assert(BlockWarps::at(I0) == 1, "requires Wave_M == 1");
 
         if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
+        {
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
                     sequence<NWarps>,
@@ -231,7 +232,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0>, sequence<0, 2>>,
                     sequence<2>,
                     sequence<1>>{});
+        }
         else if constexpr(std::is_same_v<ADataType, fp8_t>)
+        {
             return make_static_tile_distribution(
                 tile_distribution_encoding<
                     sequence<NWarps>,
@@ -241,7 +244,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0>, sequence<1, 2>>,
                     sequence<2, 2>,
                     sequence<0, 2>>{});
+        }
         else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+        {
             // K_Lane=4, K_Thread=32
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
@@ -252,8 +257,11 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0>, sequence<0, 2>>,
                     sequence<2, 2>,
                     sequence<1, 2>>{});
+        }
         else
+        {
             static_assert(false, "unsupported datatype");
+        }
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_BFlatBytesDramTileDistribution()
@@ -265,6 +273,7 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t WaveRepeat = WaveNum / TileShape::flatNPerWarp;
 
         if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
+        {
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
                     sequence<WaveRepeat>,
@@ -274,7 +283,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0, 0>, sequence<1>>,
                     sequence<2>,
                     sequence<2>>{});
+        }
         else if constexpr(std::is_same_v<BDataType, fp8_t>)
+        {
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
                     sequence<WaveRepeat>,
@@ -284,7 +295,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0, 1>, sequence<2>>,
                     sequence<2, 2>,
                     sequence<0, 3>>{});
+        }
         else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+        {
             return make_static_tile_distribution(
                 tile_distribution_encoding< //
                     sequence<WaveRepeat>,
@@ -297,8 +310,11 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0, 0>, sequence<1>>,
                     sequence<2, 2>,
                     sequence<2, 3>>{});
+        }
         else
+        {
             static_assert(false, "unsupported datatype");
+        }
     }
 
     template <typename WindowTmp>

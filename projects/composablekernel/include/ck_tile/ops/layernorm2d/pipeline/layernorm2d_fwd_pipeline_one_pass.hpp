@@ -45,9 +45,13 @@ struct Layernorm2dFwdPipelineOnePass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr"; // block per row
+        }
         else
+        {
             return "wpr"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -136,7 +140,9 @@ struct Layernorm2dFwdPipelineOnePass
                 acc(idx) = type_convert<ComputeDataType>(x_resi(idx)) + acc(idx);
             });
             if constexpr(kFusedAdd == Layernorm2dFusedAddEnum::PRE_ADD_STORE)
+            {
                 store_tile(y_residual_window, cast_tile<YResidualDataType>(acc));
+            }
         }
 
         // compute reduce each-thread->cross-lane->cross-warp
@@ -170,9 +176,13 @@ struct Layernorm2dFwdPipelineOnePass
             var);
 
         if constexpr(kSaveMean)
+        {
             store_tile(mean_window, cast_tile<MeanDataType>(mean));
+        }
         if constexpr(kSaveInvStd)
+        {
             store_tile(inv_std_window, cast_tile<InvStdDataType>(inv_std));
+        }
 
         // layernorm computation
         auto ln = make_static_distributed_tensor<ComputeDataType>(acc.get_tile_distribution());
@@ -193,7 +203,9 @@ struct Layernorm2dFwdPipelineOnePass
             Epilogue{}(y_window_, sm_scale_window_, y_scale_window, ln, smem);
         }
         else
+        {
             Epilogue{}(y_window_, ln, nullptr);
+        }
     }
 };
 } // namespace ck_tile

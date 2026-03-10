@@ -132,11 +132,17 @@ struct ReferenceFactory
         {
             std::string dir_str;
             if constexpr(ConvDirectionIsForward<SIGNATURE>)
+            {
                 dir_str = "Forward";
+            }
             else if constexpr(ConvDirectionIsBackwardData<SIGNATURE>)
+            {
                 dir_str = "BackwardData";
+            }
             else if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
+            {
                 dir_str = "BackwardWeight";
+            }
 
             return std::string("GPU_Reference_") + dir_str + "_" + std::to_string(SPATIAL_DIM) +
                    "D";

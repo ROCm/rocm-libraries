@@ -254,7 +254,9 @@ struct DeviceBatchNormBwdImpl : public DeviceBatchNormBwd<XDataType,
 
                     // we want the blkGroupSize be not more than 128
                     if(testBlkGroupSize <= 128)
+                    {
                         break;
+                    }
 
                     iterations++;
                 };
@@ -755,55 +757,79 @@ struct DeviceBatchNormBwdImpl : public DeviceBatchNormBwd<XDataType,
             if(pArg_->xStrides_[NumInvariantDim - 1] != 1 ||
                pArg_->dyStrides_[NumInvariantDim - 1] != 1 ||
                pArg_->dxStrides_[NumInvariantDim - 1] != 1)
+            {
                 return false;
+            }
 
             if(pArg_->xyLengths_[NumInvariantDim - 1] % XSrcVectorSize != 0 ||
                pArg_->xyLengths_[NumInvariantDim - 1] % DySrcVectorSize != 0 ||
                pArg_->xyLengths_[NumInvariantDim - 1] % DxDstVectorSize != 0)
+            {
                 return false;
+            }
         }
         else
         {
             if(pArg_->xStrides_[Rank - 1] != 1 || pArg_->dyStrides_[Rank - 1] != 1 ||
                pArg_->dxStrides_[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(pArg_->xyLengths_[Rank - 1] % XSrcVectorSize != 0 ||
                pArg_->xyLengths_[Rank - 1] % DySrcVectorSize != 0 ||
                pArg_->xyLengths_[Rank - 1] % DxDstVectorSize != 0)
+            {
                 return false;
+            }
         };
 
         if(pArg_->bnScaleStrides_[NumInvariantDim - 1] != 1 && ScaleSrcVectorSize != 1)
+        {
             return false;
+        }
 
         if(pArg_->bnDscaleDbiasStrides_[NumInvariantDim - 1] != 1 && DscaleDbiasDstVectorSize != 1)
+        {
             return false;
+        }
 
         if(pArg_->bnScaleBiasMeanVarLengths_[NumInvariantDim - 1] % ScaleSrcVectorSize != 0)
+        {
             return false;
+        }
 
         if(pArg_->bnScaleBiasMeanVarLengths_[NumInvariantDim - 1] % DscaleDbiasDstVectorSize != 0)
+        {
             return false;
+        }
 
         if(pArg_->haveSavedMeanInvVar_)
         {
             if(pArg_->bnMeanVarStrides_[NumInvariantDim - 1] != 1 && MeanVarSrcVectorSize != 1)
+            {
                 return false;
+            }
 
             if(pArg_->bnScaleBiasMeanVarLengths_[NumInvariantDim - 1] % MeanVarSrcVectorSize != 0)
+            {
                 return false;
+            }
         };
 
         bool is_valid = true;
 
         static_for<0, NumInvariantDim, 1>{}([&](auto I) {
             if(pArg_->xyLengths_[I] != pArg_->bnScaleBiasMeanVarLengths_[I])
+            {
                 is_valid = false;
+            }
         });
 
         if(!is_valid)
+        {
             return false;
+        }
 
         return true;
     };

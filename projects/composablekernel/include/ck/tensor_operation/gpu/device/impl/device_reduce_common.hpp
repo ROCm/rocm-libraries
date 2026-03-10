@@ -27,10 +27,14 @@ std::pair<long_index_t, long_index_t> get_2d_lengths(const std::vector<index_t>&
     constexpr int NumInvariantDim = Rank - NumReduceDim;
 
     for(int i = NumInvariantDim; i < Rank; i++)
+    {
         reduce_total_length *= inLengths[i];
+    }
 
     for(int i = 0; i < NumInvariantDim; i++)
+    {
         invariant_total_length *= inLengths[i];
+    }
 
     return std::make_pair(invariant_total_length, reduce_total_length);
 };
@@ -46,10 +50,14 @@ std::pair<long_index_t, long_index_t> get_2d_lengths(const std::array<index_t, R
     constexpr int NumInvariantDim = Rank - NumReduceDim;
 
     for(int i = NumInvariantDim; i < Rank; i++)
+    {
         reduce_total_length *= inLengths[i];
+    }
 
     for(int i = 0; i < NumInvariantDim; i++)
+    {
         invariant_total_length *= inLengths[i];
+    }
 
     return std::make_pair(invariant_total_length, reduce_total_length);
 };
@@ -89,17 +97,21 @@ std::vector<index_t> shuffle_tensor_dimensions(const std::vector<index_t>& origL
 
     // collect invariant dimensions
     for(int i = 0; i < Rank; i++)
+    {
         if((reduceFlag & (1 << i)) == 0)
         {
             newLengthsStrides.push_back(origLengthsStrides[i]);
         };
+    }
 
     // collect reduce dimensions
     for(int i = 0; i < Rank; i++)
+    {
         if((reduceFlag & (1 << i)) > 0)
         {
             newLengthsStrides.push_back(origLengthsStrides[i]);
         };
+    }
 
     return newLengthsStrides;
 };
@@ -122,17 +134,21 @@ shuffle_tensor_dimensions(const std::array<index_t, Rank>& origLengthsStrides,
     // collect invariant dimensions
     int pos = 0;
     for(int i = 0; i < Rank; i++)
+    {
         if((reduceFlag & (1 << i)) == 0)
         {
             newLengthsStrides[pos++] = origLengthsStrides[i];
         };
+    }
 
     // collect reduce dimensions
     for(int i = 0; i < Rank; i++)
+    {
         if((reduceFlag & (1 << i)) > 0)
         {
             newLengthsStrides[pos++] = origLengthsStrides[i];
         };
+    }
 
     return newLengthsStrides;
 };

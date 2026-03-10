@@ -90,7 +90,9 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
                 }
             }
             else
+            {
                 return static_cast<std::size_t>(stride);
+            }
         };
 
     StrideA = f_get_default_stride(M, K, StrideA, ALayout{});
@@ -268,9 +270,13 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
                 uint8_t i4       = 0;
 
                 if(k % 2 == 1)
+                {
                     i4 = (i4x2.data >> 0) & 0xf;
+                }
                 else
+                {
                     i4 = (i4x2.data >> 4) & 0xf;
+                }
 
                 float v_b       = i4_to_f32_gfx9(i4);
                 b_k_n_f32(k, n) = v_b;

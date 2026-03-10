@@ -837,8 +837,10 @@ struct DeviceGroupedGemm_Wmma_CShuffleV3 : public DeviceGroupedGemmSplitK<ALayou
             return p_arg_->gemm_kernel_args_.size() * sizeof(GemmTransKernelArg);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Wmma_CShuffleV3::Argument structure!");
+        }
     }
 
     size_t GetDeviceKernelArgSize(const BaseArgument* p_arg) const override
@@ -860,8 +862,10 @@ struct DeviceGroupedGemm_Wmma_CShuffleV3 : public DeviceGroupedGemmSplitK<ALayou
             p_arg_->UpdateKBatch(kbatch);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemm_Wmma_CShuffleV3::Argument structure!");
+        }
     }
 
     void SetDeviceKernelArgs(BaseArgument* p_arg, void* p_dev_kernel_args) const override

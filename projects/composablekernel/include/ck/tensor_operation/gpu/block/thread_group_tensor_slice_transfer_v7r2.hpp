@@ -142,9 +142,13 @@ struct ThreadGroupTensorSliceTransfer_v7r2
            ThreadGroup::GetThreadId() < thread_cluster_desc_.GetElementSize())
         {
             if constexpr(is_detected<is_tuple, decltype(dst_bufs)>::value)
+            {
                 threadwise_transfer_.RunWrite(dst_descs, dst_bufs, thread_scratch_id);
+            }
             else
+            {
                 threadwise_transfer_.RunWrite(dst_descs, tie(dst_bufs), thread_scratch_id);
+            }
         }
     }
 

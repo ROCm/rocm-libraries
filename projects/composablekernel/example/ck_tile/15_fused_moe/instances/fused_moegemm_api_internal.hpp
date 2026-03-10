@@ -28,7 +28,9 @@ float fused_moegemm_(const ck_tile::stream_config& s, fused_moegemm_args a)
             return ck_tile::element_wise::FastGeluAsm{};
         }
         else
+        {
             return ck_tile::element_wise::Silu{};
+        }
     };
     using f_act_ = ck_tile::remove_cvref_t<decltype(get_activation_())>;
 

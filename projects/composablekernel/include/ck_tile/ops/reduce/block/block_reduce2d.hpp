@@ -422,7 +422,9 @@ struct BlockReduce2dCrossWarpSync
         constexpr index_t num_reduce_warps = GetReduceWarps<YDistributedTensor_>();
 
         if constexpr(num_reduce_warps == 1)
+        {
             return;
+        }
         block_sync_lds();
         // Each warp's lane 0 writes its partial results to shared memory
         const index_t smem_offset = warp_id;
@@ -605,7 +607,9 @@ struct BlockReduce2dLinearCrossWarpSync
 
         // skip if nonthing to do
         if constexpr(num_reduce_warps == 1)
+        {
             return;
+        }
 
         // store into smem only for lane-0 within one warp
         if(lane_id == 0)

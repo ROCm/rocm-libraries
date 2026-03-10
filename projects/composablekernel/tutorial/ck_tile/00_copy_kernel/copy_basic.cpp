@@ -139,10 +139,16 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     if(arg_parser.get_str("prec") == "fp16")
+    {
         return run<ck_tile::half_t>(arg_parser) ? 0 : -2;
+    }
     else
+    {
         return run<float>(arg_parser) ? 0 : -2;
+    }
 }

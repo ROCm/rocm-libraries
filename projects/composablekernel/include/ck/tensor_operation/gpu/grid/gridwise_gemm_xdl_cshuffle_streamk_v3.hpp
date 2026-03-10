@@ -1651,7 +1651,9 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                 // exit condition
                 iter_end -= current_iter_length;
                 if(iter_end <= iter_start)
+                {
                     break;
+                }
                 if(problem.reduction_strategy == StreamKReductionStrategy::Reduction)
                 {
                     block_acc_offset -= MPerBlock * NPerBlock;
@@ -2309,7 +2311,9 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                 // exit condition
                 iter_end -= current_iter_length;
                 if(iter_end <= iter_start)
+                {
                     break;
+                }
                 if(problem.reduction_strategy == StreamKReductionStrategy::Reduction)
                 {
                     block_acc_offset -= MPerBlock * NPerBlock;

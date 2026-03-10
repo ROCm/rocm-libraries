@@ -50,9 +50,13 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
     static constexpr ck_tile::index_t get_default_stride(ck_tile::index_t row, ck_tile::index_t col)
     {
         if constexpr(IsRowMajor)
+        {
             return col;
+        }
         else
+        {
             return row;
+        }
     }
 
     void Run()

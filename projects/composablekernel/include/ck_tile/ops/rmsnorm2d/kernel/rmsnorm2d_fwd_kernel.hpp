@@ -291,7 +291,9 @@ struct Rmsnorm2dFwd
                 return make_tile_window(inv_rms_m, make_tuple(number<Block_M>{}), {iM});
             }
             else
+            {
                 return make_null_tile_window(make_tuple(number<Block_M>{}));
+            }
         }();
 
         auto sm_scale_window = [&]() {

@@ -349,16 +349,24 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 
     static constexpr index_t APackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<LDSTypeA>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr index_t BPackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<LDSTypeB>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr index_t WaveSize =

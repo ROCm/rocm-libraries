@@ -50,7 +50,9 @@ void host_broadcast3D_am_bmnk(HostTensorC& C,
     using ctype = ck::remove_reference_t<decltype(C(0, 0))>;
 
     for(std::size_t m = 0; m < shape[0]; ++m)
+    {
         for(std::size_t n = 0; n < shape[1]; ++n)
+        {
             for(std::size_t k = 0; k < shape[2]; ++k)
             {
                 auto a_val  = A(m);
@@ -59,6 +61,8 @@ void host_broadcast3D_am_bmnk(HostTensorC& C,
                 functor(c_val, a_val, b_val);
                 C(m, n, k) = c_val;
             }
+        }
+    }
 }
 
 int main()

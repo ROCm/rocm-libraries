@@ -41,7 +41,9 @@ std::size_t GetSize(V mLens, V mStrides)
     for(std::size_t i = 0; i < mLens.Size(); ++i)
     {
         if(mLens[i] == 0)
+        {
             continue;
+        }
 
         space += (mLens[i] - 1) * mStrides[i];
     }
@@ -92,9 +94,13 @@ void print_classification(const Buffer& x)
 {
     std::unordered_set<std::string> result;
     for(const auto& i : x)
+    {
         result.insert(classify(i));
+    }
     for(const auto& c : result)
+    {
         std::cout << c << ", ";
+    }
     std::cout << std::endl;
 }
 

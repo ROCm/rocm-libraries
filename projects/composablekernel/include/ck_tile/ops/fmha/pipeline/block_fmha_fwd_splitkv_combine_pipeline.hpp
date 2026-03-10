@@ -78,7 +78,9 @@ struct BlockFmhaFwdSplitKVCombinePipeline
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kHeadDimV <= 32)
@@ -217,9 +219,13 @@ struct BlockFmhaFwdSplitKVCombinePipeline
                 constexpr auto i_idx = make_tuple(idx0);
 
                 if(lse_sum[i_idx] == ck_tile::type_convert<LSEDataType>(0.0f))
+                {
                     lse_logsum(i_idx) = -numeric<LSEDataType>::infinity();
+                }
                 else
+                {
                     lse_logsum(i_idx) = ck_tile::log(lse_sum(i_idx)) + lse_max(i_idx);
+                }
             });
         }
 

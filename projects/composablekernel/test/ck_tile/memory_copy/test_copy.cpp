@@ -62,7 +62,9 @@ class TestCkTileMemoryCopy : public ::testing::TestWithParam<std::tuple<int, int
         std::cout << "output: " << y_host_dev.mDesc << std::endl;
 
         for(size_t i = 0; i < x_host.get_element_space_size_in_bytes(); i++)
+        {
             host_init_buf.mData[i] = i % 64;
+        }
         memcpy(x_host.mData.data(),
                host_init_buf.mData.data(),
                x_host.get_element_space_size_in_bytes());

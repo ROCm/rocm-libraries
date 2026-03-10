@@ -393,12 +393,18 @@ struct PoolKernel
         // Get tensors based on dimensionality
         auto [in_tensor_padded, out_tensor_padded, out_index_tensor_padded] = [&]() {
             if constexpr(WindowShape::size() == 2)
+            {
                 return MakeTensorView2D(kargs);
+            }
             else if constexpr(WindowShape::size() == 3)
+            {
                 return MakeTensorView3D(kargs);
+            }
             else
+            {
                 static_assert(WindowShape::size() == 2 || WindowShape::size() == 3,
                               "Unsupported WindowShape rank: only 2D or 3D pooling is supported");
+            }
         }();
 
         auto reduce_op = typename Problem::ReduceOp{};

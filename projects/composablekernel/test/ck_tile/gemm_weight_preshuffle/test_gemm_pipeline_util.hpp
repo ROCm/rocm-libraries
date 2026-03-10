@@ -23,14 +23,22 @@ constexpr ck_tile::index_t get_k_warp_tile()
     constexpr bool is_8bit_float =
         std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::bf8_t>;
     if constexpr(M_Warp_Tile == 32)
+    {
         return is_8bit_float ? 64 : 16;
+    }
     else
+    {
         return is_8bit_float ? 128 : 32;
+    }
 #else
     if constexpr(M_Warp_Tile == 32)
+    {
         return 16;
+    }
     else
+    {
         return 32;
+    }
 #endif
 #endif
 }
@@ -313,7 +321,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
                     }
                 }
                 else
+                {
                     return stride;
+                }
             };
 
         ck_tile::index_t stride_A = f_get_default_stride(M, K, StrideA, ALayout{});

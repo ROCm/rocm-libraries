@@ -107,7 +107,9 @@ struct UTF8
     static void Encode(OutputStream& os, unsigned codepoint)
     {
         if(codepoint <= 0x7F)
+        {
             os.Put(static_cast<Ch>(codepoint & 0xFF));
+        }
         else if(codepoint <= 0x7FF)
         {
             os.Put(static_cast<Ch>(0xC0 | ((codepoint >> 6) & 0xFF)));
@@ -133,7 +135,9 @@ struct UTF8
     static void EncodeUnsafe(OutputStream& os, unsigned codepoint)
     {
         if(codepoint <= 0x7F)
+        {
             PutUnsafe(os, static_cast<Ch>(codepoint & 0xFF));
+        }
         else if(codepoint <= 0x7FF)
         {
             PutUnsafe(os, static_cast<Ch>(0xC0 | ((codepoint >> 6) & 0xFF)));
@@ -236,7 +240,9 @@ struct UTF8
         Ch c = static_cast<Ch>(-1);
         RAPIDJSON_COPY();
         if(!(c & 0x80))
+        {
             return true;
+        }
 
         bool result = true;
         switch(GetRange(static_cast<unsigned char>(c)))
@@ -315,13 +321,19 @@ struct UTF8
         RAPIDJSON_STATIC_ASSERT(sizeof(typename InputByteStream::Ch) == 1);
         typename InputByteStream::Ch c = Take(is);
         if(static_cast<unsigned char>(c) != 0xEFu)
+        {
             return c;
+        }
         c = is.Take();
         if(static_cast<unsigned char>(c) != 0xBBu)
+        {
             return c;
+        }
         c = is.Take();
         if(static_cast<unsigned char>(c) != 0xBFu)
+        {
             return c;
+        }
         c = is.Take();
         return c;
     }
@@ -440,7 +452,9 @@ struct UTF16
         typename InputStream::Ch c;
         os.Put(static_cast<typename OutputStream::Ch>(c = is.Take()));
         if(c < 0xD800 || c > 0xDFFF)
+        {
             return true;
+        }
         else if(c <= 0xDBFF)
         {
             os.Put(c = is.Take());
@@ -828,7 +842,9 @@ struct Transcoder
     {
         unsigned codepoint;
         if(!SourceEncoding::Decode(is, &codepoint))
+        {
             return false;
+        }
         TargetEncoding::Encode(os, codepoint);
         return true;
     }
@@ -838,7 +854,9 @@ struct Transcoder
     {
         unsigned codepoint;
         if(!SourceEncoding::Decode(is, &codepoint))
+        {
             return false;
+        }
         TargetEncoding::EncodeUnsafe(os, codepoint);
         return true;
     }

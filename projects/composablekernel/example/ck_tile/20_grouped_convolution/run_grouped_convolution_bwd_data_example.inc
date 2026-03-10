@@ -54,7 +54,9 @@ int run_grouped_conv_bwd_data_example_with_layouts(
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     using AccDataType = float;
 

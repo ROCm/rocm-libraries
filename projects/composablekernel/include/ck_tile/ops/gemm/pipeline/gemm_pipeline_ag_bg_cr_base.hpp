@@ -54,13 +54,21 @@ struct GemmPipelineAgBgCrImplBase
         constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
         constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
         if constexpr(std::is_same_v<ADataType, float>)
+        {
             return false;
+        }
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        {
             return false;
+        }
         else if constexpr(kKWarpTile > kMaxKWarpTile)
+        {
             return false;
+        }
         else
+        {
             return std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
+        }
     }();
 
     static constexpr bool is_b_load_tr = []() {
@@ -68,13 +76,21 @@ struct GemmPipelineAgBgCrImplBase
         constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
         constexpr index_t kMaxKWarpTile = (sizeof(BDataType) == 1) ? 64 : 32;
         if constexpr(std::is_same_v<BDataType, float>)
+        {
             return false;
+        }
         else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        {
             return false;
+        }
         else if constexpr(kKWarpTile > kMaxKWarpTile)
+        {
             return false;
+        }
         else
+        {
             return std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
+        }
     }();
 #else
     static constexpr bool is_a_load_tr = false;
@@ -126,9 +142,13 @@ struct GemmPipelineAgBgCrImplBase
                                       bool_constant<LoadTranspose> = {}) const
     {
         if constexpr(LoadTranspose)
+        {
             load_tile_transpose(dst_block_tile, lds_tile_window);
+        }
         else
+        {
             load_tile(dst_block_tile, lds_tile_window);
+        }
     }
 
     template <typename OverrideADataType = ADataType, typename OverrideBDataType = BDataType>
@@ -245,9 +265,13 @@ struct GemmPipelineAgBgCrImplBase
     {
         auto a_lds_shape = []() {
             if constexpr(is_a_load_tr)
+            {
                 return make_tuple(number<KPerBlock>{}, number<MPerBlock>{});
+            }
             else
+            {
                 return make_tuple(number<MPerBlock>{}, number<KPerBlock>{});
+            }
         }();
 
         auto a_copy_lds_window = make_tile_window(a_lds_block_view, a_lds_shape, {0, 0});
@@ -327,9 +351,13 @@ struct GemmPipelineAgBgCrImplBase
     {
         auto b_lds_shape = []() {
             if constexpr(is_b_load_tr)
+            {
                 return make_tuple(number<KPerBlock>{}, number<NPerBlock>{});
+            }
             else
+            {
                 return make_tuple(number<NPerBlock>{}, number<KPerBlock>{});
+            }
         }();
 
         auto b_copy_lds_window = make_tile_window(b_lds_block_view, b_lds_shape, {0, 0});

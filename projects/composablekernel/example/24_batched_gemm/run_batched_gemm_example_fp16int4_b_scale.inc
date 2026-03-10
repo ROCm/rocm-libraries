@@ -363,9 +363,13 @@ bool run_batched_gemm(const ProblemSize& problem_size, const ExecutionConfig& co
                     ck::pk_i4_t i4x2 = b_g_k_n(bs, k, n).data;
                     int8_t i4        = 0;
                     if(k % 2 == 1)
+                    {
                         i4 = (i4x2.data >> 0) & 0xf;
+                    }
                     else
+                    {
                         i4 = (i4x2.data >> 4) & 0xf;
+                    }
                     i4  = i4 - 8;
                     v_b = ck::type_convert<float>(i4);
 

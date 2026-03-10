@@ -42,7 +42,9 @@ inline uint32_t clzll(uint64_t x)
 #else
     // Scan the high 32 bits.
     if(_BitScanReverse(&r, static_cast<uint32_t>(x >> 32)))
+    {
         return 63 - (r + 32);
+    }
 
     // Scan the low 32 bits.
     _BitScanReverse(&r, static_cast<uint32_t>(x & 0xFFFFFFFF));

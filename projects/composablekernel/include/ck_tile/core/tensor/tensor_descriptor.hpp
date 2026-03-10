@@ -386,16 +386,24 @@ make_naive_tensor_descriptor_packed(const tuple<Lengths...>& lengths,
 
     constexpr index_t first_dim_length = []() {
         if constexpr(is_constant_v<remove_cvref_t<decltype(element_space_size)>>)
+        {
             return decltype(element_space_size)::value;
+        }
         else
+        {
             return -1;
+        }
     }();
     using last_t                      = remove_cvref_t<decltype(lengths.template get<N - 1>())>;
     constexpr index_t last_dim_length = []() {
         if constexpr(is_constant_v<last_t>)
+        {
             return std::max(last_t::value, GuaranteedLastDimensionVectorLength);
+        }
         else
+        {
             return -1;
+        }
     }();
 
     using GuaranteedVectorLengths =

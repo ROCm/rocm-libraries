@@ -50,8 +50,11 @@ void host_elementwise4D(HostTensorC& C,
     using ctype = ck::remove_reference_t<decltype(C(0, 0, 0, 0))>;
 
     for(std::size_t n = 0; n < shape[0]; ++n)
+    {
         for(std::size_t c = 0; c < shape[1]; ++c)
+        {
             for(std::size_t h = 0; h < shape[2]; ++h)
+            {
                 for(std::size_t w = 0; w < shape[3]; ++w)
                 {
                     auto a_val  = A(n, c, h, w);
@@ -60,6 +63,9 @@ void host_elementwise4D(HostTensorC& C,
                     functor(c_val, a_val, b_val);
                     C(n, c, h, w) = c_val;
                 }
+            }
+        }
+    }
 }
 
 int main()

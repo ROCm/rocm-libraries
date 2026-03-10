@@ -36,9 +36,13 @@ std::ostream& LogRange([[clang::lifetimebound]] std::ostream& os, Range&& range,
     for(auto&& v : range)
     {
         if(first)
+        {
             first = false;
+        }
         else
+        {
             os << delim;
+        }
         os << v;
     }
     return os;
@@ -51,9 +55,13 @@ std::ostream& LogRangeAsType(std::ostream& os, Range&& range, std::string delim)
     for(auto&& v : range)
     {
         if(first)
+        {
             first = false;
+        }
         else
+        {
             os << delim;
+        }
 
         using RangeType = ck::remove_cvref_t<decltype(v)>;
         if constexpr(std::is_same_v<RangeType, ck::f8_t> || std::is_same_v<RangeType, ck::bf8_t> ||
@@ -288,7 +296,9 @@ struct HostTensorDescriptor
     void CalculateStrides(const Layout& layout)
     {
         if constexpr(std::is_same_v<Layout, ck::tensor_layout::BypassLayoutVerification>)
+        {
             return;
+        }
         // This is a workaround if the original stride value is -1 (which means "unknown") has been
         // passed in and casted to size_t (unsigned).
         auto strides_int = AsInt(mStrides);
@@ -313,7 +323,9 @@ struct HostTensorDescriptor
             mStrides.clear();
             mStrides.resize(mLens.size(), 0);
             if(mStrides.empty())
+            {
                 return;
+            }
 
             mStrides.back() = 1;
             std::partial_sum(mLens.rbegin(),
@@ -325,7 +337,9 @@ struct HostTensorDescriptor
             {
                 // swap the last two strides
                 if(mStrides.size() >= 2)
+                {
                     std::swap(mStrides[mStrides.size() - 1], mStrides[mStrides.size() - 2]);
+                }
             }
         }
         // The other case is if one of the strides is unknown
@@ -476,7 +490,9 @@ struct HostTensorDescriptor
         : HostTensorDescriptor(std::vector<std::size_t>(lens.begin(), lens.end()), {}, layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     template <typename Layout = DefaultLayout,
@@ -486,7 +502,9 @@ struct HostTensorDescriptor
         : HostTensorDescriptor(std::vector<std::size_t>(lens.begin(), lens.end()), {}, layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     template <typename Lengths,
@@ -499,7 +517,9 @@ struct HostTensorDescriptor
         : HostTensorDescriptor(std::vector<std::size_t>(lens.begin(), lens.end()), {}, layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     template <typename X,
@@ -515,7 +535,9 @@ struct HostTensorDescriptor
                                layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     // HostTensorDescriptor({row, col}, {row_stride, col_stride})
@@ -528,7 +550,9 @@ struct HostTensorDescriptor
                                layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     // HostTensorDescriptor({row, col}, strides)
@@ -541,7 +565,9 @@ struct HostTensorDescriptor
                                layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     template <typename Lengths,
@@ -561,7 +587,9 @@ struct HostTensorDescriptor
                                layout)
     {
         if(dbg)
+        {
             std::cout << "HostTensorDescriptor ctor (" << __LINE__ << ")" << std::endl;
+        }
     }
 
     std::size_t GetNumOfDimension() const;
@@ -640,7 +668,9 @@ struct joinable_thread : std::thread
     ~joinable_thread()
     {
         if(this->joinable())
+        {
             this->join();
+        }
     }
 };
 
@@ -797,13 +827,19 @@ struct Tensor
             for(auto& itm : mData)
             {
                 if(dtype == "float")
+                {
                     file << ck::type_convert<float>(itm) << std::endl;
+                }
                 else if(dtype == "int")
+                {
                     file << ck::type_convert<int>(itm) << std::endl;
+                }
                 else
+                {
                     // TODO: we didn't implement operator<< for all custom
                     // data types, here fall back to float in case compile error
                     file << ck::type_convert<float>(itm) << std::endl;
+                }
             }
             file.close();
         }
@@ -989,7 +1025,9 @@ struct Tensor
         using ck::math::integer_divide_ceil;
         using ck::math::min;
         if(num_thread == -1ULL)
+        {
             num_thread = min(ck::get_available_cpu_cores(), 80U); // max 80 threads
+        }
         // At least 2MB per thread
         num_thread = min(num_thread, integer_divide_ceil(this->GetElementSpaceSize(), 0x200000));
         constexpr std::size_t BLOCK_BYTES = 64;
@@ -1018,13 +1056,19 @@ struct Tensor
                     // integer constructors are interpreted as direct initialization of the internal
                     // storage with binary values instead of treating integers as subset of floats.
                     if constexpr(ck::is_same_v<T, ck::f8_t> || ck::is_same_v<T, ck::bf8_t>)
+                    {
                         return ck::type_convert<T>(static_cast<float>(fn(dis_(g_))));
+                    }
                     else if constexpr(ck::packed_size_v<T> == 1)
+                    {
                         return ck::type_convert<T>(fn(dis_(g_)));
+                    }
                     else if constexpr(ck::is_same_v<T, ck::f4x2_pk_t>)
+                    {
                         return ck::f4x2_pk_t{ck::type_convert<ck::f4x2_t>(
                             ck::float2_t{ck::type_convert<float>(fn(dis_(g_))),
                                          ck::type_convert<float>(fn(dis_(g_)))})};
+                    }
                     else if constexpr(ck::is_same_v<T, ck::f6x32_pk_t> ||
                                       ck::is_same_v<T, ck::bf6x32_pk_t>)
                     {
@@ -1084,27 +1128,41 @@ struct Tensor
                                           ck::type_convert<float>(fn(dis_(g_)))});
                     }
                     else
+                    {
                         static_assert(false, "Unsupported packed size for T");
+                    }
                 };
 
                 std::size_t ib = ib_begin;
                 for(; ib < ib_end - 1; ++ib)
+                {
                     ck::static_for<0, BLOCK_SIZE, 1>{}([&](auto iw_) {
                         constexpr size_t iw       = iw_.value;
                         dst[ib * BLOCK_SIZE + iw] = t_fn();
                     });
+                }
                 for(std::size_t iw = 0; iw < BLOCK_SIZE; ++iw)
+                {
                     if(ib * BLOCK_SIZE + iw < element_space_size)
+                    {
                         dst[ib * BLOCK_SIZE + iw] = t_fn();
+                    }
+                }
             };
 
             if(it > 0)
+            {
                 threads.emplace_back(std::move(job));
+            }
             else
+            {
                 job(); // last job run in the main thread
+            }
         }
         for(auto& t : threads)
+        {
             t.join();
+        }
     }
 
     template <typename... Is>

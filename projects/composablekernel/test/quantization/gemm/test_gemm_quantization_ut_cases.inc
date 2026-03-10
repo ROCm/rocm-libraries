@@ -10,7 +10,9 @@ TYPED_TEST(TestGemmQuantization, SmallM)
     constexpr int K = 320;
 
     for(int M : Ms)
+    {
         this->Run({{M, N, K}});
+    }
 }
 
 TYPED_TEST(TestGemmQuantization, MidLargeM)
@@ -20,7 +22,9 @@ TYPED_TEST(TestGemmQuantization, MidLargeM)
     constexpr int K = 320;
 
     for(int M : Ms)
+    {
         this->Run({{M, N, K}});
+    }
 }
 
 TYPED_TEST(TestGemmQuantization, MNKPadded)
@@ -30,7 +34,9 @@ TYPED_TEST(TestGemmQuantization, MNKPadded)
     constexpr int K = 280;
 
     for(int M : Ms)
+    {
         this->Run({{M, N, K}});
+    }
 }
 
 TYPED_TEST(TestGemmQuantization, Regular)
@@ -40,5 +46,7 @@ TYPED_TEST(TestGemmQuantization, Regular)
     std::vector<int> Ks{512};
 
     for(int K : Ks)
+    {
         this->Run({{M, N, K}});
+    }
 }

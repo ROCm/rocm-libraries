@@ -247,14 +247,18 @@ float moe_gemm(const ck_tile::MoeFlatmmHostArgs<ScaleM, ScaleN>& args,
                 rotating_mem.Next();
                 // clear c mem
                 if(moe_kind == ck_tile::MoeFlatmmKind::kFFN_gemm2)
+                {
                     hipGetErrorString(hipMemsetAsync(
                         args.e_ptr, 0, args.NumTokens * args.N * sizeof(CDataType), s.stream_id_));
+                }
                 else if(args.k_batch > 1)
+                {
                     hipGetErrorString(
                         hipMemsetAsync(args.e_ptr,
                                        0,
                                        args.NumTokens * args.TopK * outputN * sizeof(CDataType),
                                        s.stream_id_));
+                }
             };
             return ck_tile::launch_kernel_time_mask(
                 s,
@@ -417,7 +421,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return EXIT_FAILURE;
+    }
 
     try
     {

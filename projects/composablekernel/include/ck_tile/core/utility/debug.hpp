@@ -42,19 +42,33 @@ struct CK_PRINTF<ConvertTo,
     CK_TILE_HOST_DEVICE static constexpr auto default_format_and_type()
     {
         if constexpr(std::is_same_v<T, float>)
+        {
             return std::make_tuple(make_str_literal("%8.3f"), T{});
+        }
         else if constexpr(std::is_same_v<T, int>)
+        {
             return std::make_tuple(make_str_literal("%5d"), T{});
+        }
         else if constexpr(std::is_same_v<T, unsigned int>)
+        {
             return std::make_tuple(make_str_literal("%5u"), T{});
+        }
         else if constexpr(sizeof(T) == 1)
+        {
             return std::make_tuple(make_str_literal("0x%02hhx"), uint8_t{});
+        }
         else if constexpr(sizeof(T) == 2)
+        {
             return std::make_tuple(make_str_literal("0x%04hx"), uint16_t{});
+        }
         else if constexpr(sizeof(T) == 4)
+        {
             return std::make_tuple(make_str_literal("0x%08x"), uint32_t{});
+        }
         else
+        {
             static_assert(false, "Unsupported type");
+        }
     }
     template <typename T>
     using default_format_t =
@@ -67,17 +81,25 @@ struct CK_PRINTF<ConvertTo,
     {
         constexpr auto fmt_tid = make_str_literal("tid %03d: [%02d] ");
         if constexpr(sizeof...(PREFIXChars) == 0)
+        {
             return fmt_tid;
+        }
         else
+        {
             return fmt_tid + make_str_literal(" ") + str_literal<PREFIXChars...>{};
+        }
     }
     CK_TILE_HOST_DEVICE static constexpr auto get_suffix()
     {
         constexpr auto lf = make_str_literal("\n");
         if constexpr(sizeof...(SUFFIXChars) == 0)
+        {
             return lf;
+        }
         else
+        {
             return str_literal<SUFFIXChars...>{} + lf;
+        }
     }
 
     template <typename T, index_t N, typename Y, index_t... Is, typename... Args>
@@ -120,7 +142,9 @@ template <typename T>
 CK_TILE_HOST_DEVICE void print_warp0(T&& x)
 {
     if(get_thread_id() < get_warp_size())
+    {
         print(std::forward<T>(x));
+    }
 }
 template <typename... Ts>
 struct CK_PRINTF_WARP0 : public CK_PRINTF<Ts...>
@@ -131,7 +155,9 @@ struct CK_PRINTF_WARP0 : public CK_PRINTF<Ts...>
     CK_TILE_HOST_DEVICE void operator()(const T& buf, Args&&... args) const
     {
         if(get_thread_id() < get_warp_size())
+        {
             base_t::operator()(buf, std::forward<Args>(args)...);
+        }
     }
 };
 

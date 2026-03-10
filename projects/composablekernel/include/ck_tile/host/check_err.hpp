@@ -286,7 +286,9 @@ check_err(const Range& out,
 {
 
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     const auto is_infinity_error = [=](auto o, auto r) {
         const bool either_not_finite = !std::isfinite(o) || !std::isfinite(r);
@@ -353,7 +355,9 @@ check_err(const Range& out,
           bool allow_infinity_ref = false)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     const auto is_infinity_error = [=](auto o, auto r) {
         const bool either_not_finite = !std::isfinite(o) || !std::isfinite(r);
@@ -422,7 +426,9 @@ check_err(const Range& out,
           bool allow_infinity_ref = false)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     const auto is_infinity_error = [=](auto o, auto r) {
         const bool either_not_finite = !std::isfinite(o) || !std::isfinite(r);
@@ -491,7 +497,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
                            double atol            = 0)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     bool res{true};
     int err_count   = 0;
@@ -551,7 +559,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
                            bool allow_infinity_ref              = false)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     const auto is_infinity_error = [=](auto o, auto r) {
         const bool either_not_finite = !std::isfinite(o) || !std::isfinite(r);
@@ -636,7 +646,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
                            bool allow_infinity_ref = false)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     const auto is_infinity_error = [=](auto o, auto r) {
         const bool either_not_finite = !std::isfinite(o) || !std::isfinite(r);
@@ -698,7 +710,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
                            double                 = 0)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     int err_count = 0;
 
@@ -750,7 +764,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
                            double                 = 0)
 {
     if(check_size_mismatch(out, ref, msg))
+    {
         return false;
+    }
 
     int err_count   = 0;
     float max_err   = 0.0f;

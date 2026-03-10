@@ -44,7 +44,9 @@ bool profile_pool2d_fwd_impl(int do_verification,
     if(in_length.size() != InOutRank || window_spatial_lengths.size() != WindowRank ||
        window_strides.size() != WindowRank || window_dilations.size() != WindowRank ||
        input_left_pads.size() != WindowRank || input_right_pads.size() != WindowRank)
+    {
         return false;
+    }
 
     std::vector<index_t> out_length(InOutRank);
 
@@ -197,13 +199,17 @@ bool profile_pool2d_fwd_impl(int do_verification,
                                 out_n_c_ho_wo_host.mDesc.GetElementSize() * sizeof(OutDataType);
 
         if constexpr(OutputIndex)
+        {
             num_bytes += out_indices_n_c_ho_wo_host.mDesc.GetElementSize() * sizeof(IndexDataType);
+        }
 
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -242,10 +248,12 @@ bool profile_pool2d_fwd_impl(int do_verification,
                     << std::endl;
 
                 if constexpr(OutputIndex)
+                {
                     LogRangeAsType<float>(std::cout << "out_indices_n_c_ho_wo_device  : ",
                                           out_indices_n_c_ho_wo_device.mData,
                                           ",")
                         << std::endl;
+                }
             }
 
             if(!pass)
@@ -257,7 +265,9 @@ bool profile_pool2d_fwd_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

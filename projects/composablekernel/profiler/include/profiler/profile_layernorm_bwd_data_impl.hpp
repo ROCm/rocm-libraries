@@ -35,13 +35,17 @@ bool profile_layernorm_bwd_data_impl(int do_verification,
     using DBetaDataType  = DXDataType;
 
     if(length.size() != Rank || Rank < 2)
+    {
         return false;
+    }
 
     // Assume normalize dimension except for batch (first) dimension
     std::vector<index_t> reduce_length{length.begin() + 1, length.end()};
     std::vector<index_t> reduce_dim;
     for(int i = 1; i < Rank; ++i)
+    {
         reduce_dim.push_back(i);
+    }
 
     Tensor<DYDataType> dy(length);
     Tensor<XDataType> x(length);
@@ -203,8 +207,10 @@ bool profile_layernorm_bwd_data_impl(int do_verification,
         float gb_per_sec = num_bytes / 1.E6 / avg_time;
 
         if(time_kernel)
+        {
             std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << gb_per_sec << " GB/s, "
                       << inst_ptr->GetTypeString() << std::endl;
+        }
 
         if(avg_time < best_avg_time)
         {
@@ -235,7 +241,9 @@ bool profile_layernorm_bwd_data_impl(int do_verification,
             else
             {
                 if(time_kernel)
+                {
                     std::cout << "pass" << std::endl;
+                }
             }
         }
     }

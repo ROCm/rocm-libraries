@@ -246,9 +246,13 @@ struct ThreadwiseTensorSliceTransfer_v2
 
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_v2(const SrcDesc& src_desc,
@@ -452,9 +456,13 @@ struct ThreadwiseTensorSliceTransfer_v2_gather
 
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_v2_gather(
@@ -1268,9 +1276,13 @@ struct ThreadwiseTensorSliceTransfer_v4
 
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_v4(const Index& src_ref_idx)
@@ -1724,9 +1736,13 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic
 
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_StaticToStatic(

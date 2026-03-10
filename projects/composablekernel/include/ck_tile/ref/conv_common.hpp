@@ -51,7 +51,9 @@ calculate_input_index(index_t n,
 {
     long_index_t idx = n * strides[0];
     for(index_t i = 0; i < NDimSpatial; ++i)
+    {
         idx += spatial_idx[i] * strides[i + 1];
+    }
     idx += g * strides[NDimSpatial + 1] + c;
     return idx;
 }
@@ -68,7 +70,9 @@ calculate_weight_index(index_t g,
 {
     long_index_t idx = g * strides[0] + k * strides[1];
     for(index_t i = 0; i < NDimSpatial; ++i)
+    {
         idx += spatial_idx[i] * strides[i + 2];
+    }
     idx += c * strides[NDimSpatial + 2];
     return idx;
 }
@@ -85,7 +89,9 @@ calculate_output_index(index_t n,
 {
     long_index_t idx = n * strides[0];
     for(index_t i = 0; i < NDimSpatial; ++i)
+    {
         idx += spatial_idx[i] * strides[i + 1];
+    }
     idx += g * strides[NDimSpatial + 1] + k;
     return idx;
 }

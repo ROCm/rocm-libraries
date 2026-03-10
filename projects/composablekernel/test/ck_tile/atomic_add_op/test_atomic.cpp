@@ -104,8 +104,12 @@ class TestAtomicKernel : public ::testing::TestWithParam<std::tuple<int, int>>
         // host reference computation
         x_dev_input.FromDevice(x_host_dev.mData.data());
         for(int i = 0; i < m; ++i)
+        {
             for(int j = 0; j < n; ++j)
+            {
                 x_host_ref(i, j) = static_cast<XDataType>(1);
+            }
+        }
 
         const bool pass = ck_tile::check_err(x_host_dev, x_host_ref);
         EXPECT_TRUE(pass);

@@ -84,7 +84,9 @@ int main(int argc, char* argv[])
     args.add_option("--arch", "gfx942", "GPU architecture");
 
     if(!args.parse(argc, argv))
+    {
         return 0;
+    }
 
     int M                = args.get_int("--size", 512);
     int N                = M;
@@ -104,11 +106,17 @@ int main(int argc, char* argv[])
     std::cout << "  Layout:      RCR (A=row, B=col, C=row)\n";
     std::cout << "  Verify:      " << verify;
     if(verify == 0)
+    {
         std::cout << " (disabled)";
+    }
     else if(verify == 1)
+    {
         std::cout << " (CPU reference)";
+    }
     else if(verify == 2)
+    {
         std::cout << " (GPU reference)";
+    }
     std::cout << "\n";
     std::cout << "  Benchmark:   " << (do_benchmark ? "yes" : "no") << "\n";
     if(do_benchmark)
@@ -219,7 +227,9 @@ int main(int argc, char* argv[])
 
     std::cout << "\nRunning kernel:\n";
     if(selected)
+    {
         std::cout << "  Selected: " << selected->get_name() << "\n";
+    }
 
     c_dev.SetZero();
     float time_ms = 0.0f;

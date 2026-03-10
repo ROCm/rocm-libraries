@@ -69,13 +69,19 @@ run(RefConvInstance<SIGNATURE, InDataType, WeiDataType, OutDataType> auto& conv,
     // eventually.
 
     if(!args.make_input_descriptor().is_packed())
+    {
         return RunResult::not_supported("TODO: Support non-packed input tensor in reference conv");
+    }
 
     if(!args.make_weight_descriptor().is_packed())
+    {
         return RunResult::not_supported("TODO: Support non-packed weight tensor in reference conv");
+    }
 
     if(!args.make_output_descriptor().is_packed())
+    {
         return RunResult::not_supported("TODO: Support non-packed output tensor in reference conv");
+    }
 
     conv.Run(input, weight, output, param);
     return RunResult::from_runtime(0); // ref conv does not return a meaningful runtime.

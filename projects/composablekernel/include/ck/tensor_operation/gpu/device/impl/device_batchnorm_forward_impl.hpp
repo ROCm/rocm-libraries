@@ -248,7 +248,9 @@ struct DeviceBatchNormFwdImpl : public DeviceBatchNormFwd<XDataType,
 
                     // we want the blkGroupSize be not more than 16
                     if(testBlkGroupSize <= 16)
+                    {
                         break;
+                    }
 
                     iterations++;
                 };
@@ -711,47 +713,71 @@ struct DeviceBatchNormFwdImpl : public DeviceBatchNormFwd<XDataType,
         {
             if(pArg_->xStrides_[NumInvariantDim - 1] != 1 ||
                pArg_->yStrides_[NumInvariantDim - 1] != 1)
+            {
                 return false;
+            }
 
             if(pArg_->xyLengths_[NumInvariantDim - 1] % XSrcVectorSize != 0 ||
                pArg_->xyLengths_[NumInvariantDim - 1] % YDstVectorSize != 0)
+            {
                 return false;
+            }
         }
         else
         {
             if(pArg_->xStrides_[Rank - 1] != 1 || pArg_->yStrides_[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(pArg_->xyLengths_[Rank - 1] % XSrcVectorSize != 0 ||
                pArg_->xyLengths_[Rank - 1] % YDstVectorSize != 0)
+            {
                 return false;
+            }
         };
 
         if(pArg_->bnScaleStrides_[NumInvariantDim - 1] != 1 && ScaleSrcVectorSize != 1)
+        {
             return false;
+        }
         if(pArg_->bnBiasStrides_[NumInvariantDim - 1] != 1 && BiasSrcVectorSize != 1)
+        {
             return false;
+        }
 
         if(pArg_->bnScaleBiasMeanVarLengths_[NumInvariantDim - 1] % ScaleSrcVectorSize != 0)
+        {
             return false;
+        }
         if(pArg_->bnScaleBiasMeanVarLengths_[NumInvariantDim - 1] % BiasSrcVectorSize != 0)
+        {
             return false;
+        }
 
         if(pArg_->bnMeanVarStrides_[NumInvariantDim - 1] != 1 && MeanVarSrcDstVectorSize != 1)
+        {
             return false;
+        }
 
         if(pArg_->bnScaleBiasMeanVarLengths_[NumInvariantDim - 1] % MeanVarSrcDstVectorSize != 0)
+        {
             return false;
+        }
 
         bool is_valid = true;
 
         static_for<0, NumInvariantDim, 1>{}([&](auto I) {
             if(pArg_->xyLengths_[I] != pArg_->bnScaleBiasMeanVarLengths_[I])
+            {
                 is_valid = false;
+            }
         });
 
         if(!is_valid)
+        {
             return false;
+        }
 
         return true;
     };

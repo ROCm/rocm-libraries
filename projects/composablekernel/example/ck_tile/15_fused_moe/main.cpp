@@ -157,7 +157,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     ck_tile::index_t block_m           = arg_parser.get_int("bm");
     ck_tile::index_t activation        = arg_parser.get_int("act");
     if(stride < 0)
+    {
         stride = hidden_size;
+    }
     std::string prec_i        = arg_parser.get_str("prec_i");
     std::string prec_w        = arg_parser.get_str("prec_w");
     std::string prec_o        = arg_parser.get_str("prec_o");
@@ -198,9 +200,13 @@ bool run(const ck_tile::ArgParser& arg_parser)
     auto prec_str = [&]() {
         auto base_str = prec_i;
         if(prec_i != prec_w)
+        {
             base_str += "x" + prec_w;
+        }
         if(prec_i != prec_o)
+        {
             base_str += "=" + prec_o;
+        }
         if(fused_quant != 0)
         {
             base_str += std::string("(") + prec_st + "|" + prec_sw + "|" + prec_sq + ")";
@@ -209,19 +215,29 @@ bool run(const ck_tile::ArgParser& arg_parser)
     }();
     auto api_str = [&]() {
         if(api == 0)
+        {
             return std::string("fmoe");
+        }
         else if(api == 1)
+        {
             return std::string("moeg");
+        }
         else if(api == 2)
+        {
             return std::string("moes");
+        }
         return std::string("");
     }();
 
     auto stride_str = [&]() {
         if(stride == hidden_size)
+        {
             return std::string("");
+        }
         else
+        {
             return std::string(", st:") + std::to_string(stride);
+        }
     }();
 
     std::cout << "[" << api_str << "|" << prec_str << "]" << " t:" << tokens;
@@ -318,7 +334,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
             topk_ids_host.mData[i] = e_cnt;
             e_cnt++;
             if(e_cnt >= experts)
+            {
                 e_cnt = 0;
+            }
         }
     }
     else
@@ -406,7 +424,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
             ck_tile::moe_sorting_get_workspace_size(tokens, experts, topk, 0 /*dispatch_policy*/);
         ck_tile::DeviceMem moe_sorting_ws(workspace_size != 0 ? workspace_size : 0);
         if(workspace_size != 0)
+        {
             moe_sorting_ws.SetZero(); // note, clear here!!!!
+        }
         ck_tile::DeviceMem local_tokens_dev(sizeof(ck_tile::index_t));
         if(is_local_token)
         {
@@ -679,7 +699,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     std::string prec_i  = arg_parser.get_str("prec_i");
     std::string prec_w  = arg_parser.get_str("prec_w");

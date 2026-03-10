@@ -74,12 +74,16 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     const index_t group_id = block_id / grid_size_grp;
 
     if(group_id >= group_count)
+    {
         return;
+    }
 
     auto karg = gemm_desc_ptr[group_id];
 
     if(karg.M == 0 || karg.N == 0 || karg.K == 0)
+    {
         return;
+    }
 
 #if defined(__gfx11__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
@@ -860,9 +864,11 @@ struct DeviceGroupedGemm_Wmma_Multi_ABD_Fixed_NK
             return p_arg_->gemm_desc_kernel_arg_.size() * sizeof(GemmTransKernelArg);
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedGemm_Wmma_Multi_ABD_Fixed_NK::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(BaseArgument* p_arg,

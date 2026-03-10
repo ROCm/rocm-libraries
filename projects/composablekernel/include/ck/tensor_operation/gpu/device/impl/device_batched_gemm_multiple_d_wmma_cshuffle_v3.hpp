@@ -428,11 +428,13 @@ struct DeviceBatchedGemmMultiD_Wmma_CShuffleV3
                         rotating_mem.Next();
                         // clear c mem
                         if(arg_.KBatch > 1)
+                        {
                             HIP_CHECK_ERROR(
                                 hipMemsetAsync(arg_.p_e_grid,
                                                0,
                                                arg.Batch * arg_.M * arg_.N * sizeof(EDataType),
                                                stream_config.stream_id_));
+                        }
                     };
 
                     ave_time = ck::utility::launch_and_time_kernel_with_preprocess<false>(
@@ -449,11 +451,13 @@ struct DeviceBatchedGemmMultiD_Wmma_CShuffleV3
                 {
                     const auto clear_workspace = [&]() {
                         if(arg.KBatch > 1)
+                        {
                             HIP_CHECK_ERROR(
                                 hipMemsetAsync(arg.p_e_grid,
                                                0,
                                                arg.Batch * arg.M * arg.N * sizeof(EDataType),
                                                stream_config.stream_id_));
+                        }
                     };
 
                     ave_time =

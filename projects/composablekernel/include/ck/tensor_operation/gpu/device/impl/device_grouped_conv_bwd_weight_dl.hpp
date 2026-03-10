@@ -1041,7 +1041,9 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
 
         // DL version only supports split_k equal to 1
         if(arg.k_batch_ != 1)
+        {
             return false;
+        }
 
         if constexpr(!((NDimSpatial == 1 &&
                         (is_NWGC_GKXC_NWGK<InLayout, WeiLayout, OutLayout>() ||

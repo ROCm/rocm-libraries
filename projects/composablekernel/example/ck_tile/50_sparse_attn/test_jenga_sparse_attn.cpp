@@ -147,11 +147,17 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
 
     // Handle default values
     if(nhead_k < 0)
+    {
         nhead_k = nhead;
+    }
     if(seqlen_k < 0)
+    {
         seqlen_k = seqlen_q;
+    }
     if(hdim_v < 0)
+    {
         hdim_v = hdim_q;
+    }
 
     ck_tile::index_t BLKQ = block_size;
     ck_tile::index_t BLKK = block_size;

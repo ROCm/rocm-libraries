@@ -174,9 +174,13 @@ struct GenericAttentionMask
 
             index_t sink_seq_end = sink > 0 ? ((sink + XTile - 1) / XTile) * XTile : 0;
             if(x_start <= sink_seq_end && sink > 0)
+            {
                 return ck_tile::make_tuple(0, 0, x_end);
+            }
             else
+            {
                 return ck_tile::make_tuple(sink_seq_end, x_start, x_end);
+            }
         }
     }
 
@@ -237,7 +241,9 @@ struct GenericAttentionMask
     CK_TILE_HOST_DEVICE constexpr auto IsOutOfSinkBound(index_t i_y, index_t i_x) const
     {
         if constexpr(!IsMasking)
+        {
             return i_x >= x_total;
+        }
         // no need to do min/max here, since i_x will never be < 0 or >= x_total
         index_t x_start = -y + i_y + 1;
         index_t x_end   = min(i_y + x, x_total);
@@ -245,16 +251,24 @@ struct GenericAttentionMask
         if constexpr(IsLocal)
         {
             if((i_x < sink) && (y < y_total) && ((i_y + x) > 1) && i_y < x_total)
+            {
                 return false;
+            }
             else
+            {
                 return i_x < x_start || i_x >= x_end;
+            }
         }
         else
         {
             if((i_x < sink) && (y < y_total) && ((i_y + x) > 1) && i_y < x_total)
+            {
                 return false;
+            }
             else
+            {
                 return i_x >= x_end || i_y >= y_total;
+            }
         }
     }
 
@@ -399,9 +413,13 @@ struct SimplifiedGenericAttentionMask
             index_t sink_seq_end = sink > 0 ? ((sink + XTile - 1) / XTile) * XTile : 0;
 
             if(x_start <= sink_seq_end && sink > 0)
+            {
                 return ck_tile::make_tuple(0, 0, x_end);
+            }
             else
+            {
                 return ck_tile::make_tuple(sink_seq_end, x_start, x_end);
+            }
         }
     }
 
@@ -495,13 +513,19 @@ struct SimplifiedGenericAttentionMask
     CK_TILE_HOST_DEVICE constexpr auto IsOutOfSinkBound(index_t i_y, index_t i_x) const
     {
         if constexpr(!IsMasking)
+        {
             return i_x >= x_total;
+        }
         index_t x_start = -y + i_y + 1;          // this could be negative, but it's fine
         index_t x_end   = min(i_y + x, x_total); // need min in case x is padded
         if((i_x < sink) && (y < y_total) && ((i_y + x) > 1) && i_y < x_total)
+        {
             return false;
+        }
         else
+        {
             return i_x < x_start || i_x >= x_end || i_y >= y_total;
+        }
     }
 
     // if current tile is at the edge, means need per-pixel mask check.

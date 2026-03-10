@@ -86,18 +86,30 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
     // Base pipeline selection based on quant mode and preshuffle settings
     constexpr auto base_gemm_pipeline = []() {
         if constexpr(eight_warps)
+        {
             return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+        }
         else if constexpr(GemmConfig::PreshuffleB)
+        {
             return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
+        }
         else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped &&
                           GemmConfig::APreshuffleQuant)
+        {
             return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+        }
         else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped || IS_FP8BLOCKSCALE)
+        {
             return ck_tile::BaseGemmPipelineAgBgCrMem<GemmPipelineProblem>{};
+        }
         else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
+        {
             return ck_tile::BaseGemmPipelineAgBgCrMem<GemmPipelineProblem>{};
+        }
         else
+        {
             return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
+        }
     }();
     using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
 
@@ -282,11 +294,13 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                 rotating_mem.Next();
                 // clear c mem
                 if(args.k_batch > 1)
+                {
                     hipGetErrorString(
                         hipMemsetAsync(args.c_ptr,
                                        0,
                                        args.M * args.N * sizeof(typename TypeConfig::CDataType),
                                        s.stream_id_));
+                }
             };
             ave_time = ck_tile::launch_kernel_time_mask(
                 s,
@@ -860,6 +874,7 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
         else if constexpr(QuantMode == ck_tile::QuantType::BQuantGrouped)
         {
             if constexpr(std::is_same_v<BQDataType, ck_tile::e8m0_t>)
+            {
                 ck_tile::reference_mx_gemm_bquant<ADataType,
                                                   BQDataType,
                                                   BDataType,
@@ -869,7 +884,9 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
                                                   BLayout,
                                                   false>(
                     a_m_k, *bq_tensor_ptr, b_k_n, c_m_n_host_ref);
+            }
             else
+            {
                 ck_tile::reference_gemm_quant<ADataType,
                                               BQDataType,
                                               BDataType,
@@ -877,6 +894,7 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
                                               CDataType,
                                               BQuantGroupSize,
                                               false>(a_m_k, *bq_tensor_ptr, b_k_n, c_m_n_host_ref);
+            }
         }
         else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
         {
@@ -991,19 +1009,23 @@ int run_gemm_example_prec_type(const ck_tile::ArgParser& arg_parser)
             if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped &&
                          !GemmConfig::APreshuffleQuant && BQuantGroupSize::kN == 128 &&
                          (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp == 8))
+            {
                 return run_gemm_example_with_layouts<GemmConfig,
                                                      TypeConfig,
                                                      AQuantGroupSize,
                                                      BQuantGroupSize,
                                                      QuantMode>(
                     arg_parser, Row{}, Col{}, Col{}, Col{}, Row{});
+            }
             else
+            {
                 return run_gemm_example_with_layouts<GemmConfig,
                                                      TypeConfig,
                                                      AQuantGroupSize,
                                                      BQuantGroupSize,
                                                      QuantMode>(
                     arg_parser, Row{}, Row{}, Col{}, Col{}, Row{});
+            }
         }
 
         if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped)

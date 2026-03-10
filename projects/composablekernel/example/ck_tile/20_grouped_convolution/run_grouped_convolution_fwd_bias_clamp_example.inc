@@ -59,7 +59,9 @@ int run_grouped_conv_fwd_bias_clamp_example_with_layouts(
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     using AccDataType = float;
 
@@ -191,9 +193,13 @@ int run_grouped_conv_fwd_bias_clamp_example_with_layouts(
             float x_float = ck_tile::type_convert<float>(x);
             x_float += ck_tile::type_convert<float>(element_bias);
             if(x_float < floor)
+            {
                 x_float = floor;
+            }
             else if(x_float > ceil)
+            {
                 x_float = ceil;
+            }
             y = x_float;
         };
         auto bias_tuple = ck_tile::make_tuple(bias);

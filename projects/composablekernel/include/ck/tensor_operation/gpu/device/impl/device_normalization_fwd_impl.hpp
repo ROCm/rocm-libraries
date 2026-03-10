@@ -228,9 +228,13 @@ struct DeviceNormalizationFwdImpl : public DeviceNormalizationFwd<XDataType,
                 x_grid_desc_m_k_.GetLength(Number<1>{}) <= KThreadClusterSize * KThreadSliceSize;
 
             if constexpr(NumInvariantDim == 0)
+            {
                 invariant_lowest_length_ = 1;
+            }
             else
+            {
                 invariant_lowest_length_ = Lengths_[NumInvariantDim - 1];
+            }
         }
 
         ComputeDataType epsilon_;
@@ -343,22 +347,32 @@ struct DeviceNormalizationFwdImpl : public DeviceNormalizationFwd<XDataType,
             else
             {
                 if(p_arg_->xStrides_[NumInvariantDim - 1] != 1)
+                {
                     return false;
+                }
 
                 if(p_arg_->invariant_lowest_length_ % XSrcVectorSize != 0)
+                {
                     return false;
+                }
 
                 if(p_arg_->invariant_lowest_length_ % YDstVectorSize != 0)
+                {
                     return false;
+                }
             };
         }
         else
         {
             if(p_arg_->xStrides_[Rank - 1] != 1)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % XSrcVectorSize != 0)
+            {
                 return false;
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % YDstVectorSize != 0)
             {
@@ -370,40 +384,58 @@ struct DeviceNormalizationFwdImpl : public DeviceNormalizationFwd<XDataType,
         if constexpr(GammaSrcVectorDim == 0)
         {
             if(p_arg_->gammaStrides_[NumInvariantDim - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % GammaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
         else // if fastest dim is reduced
         {
             if(p_arg_->gammaStrides_[Rank - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % GammaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
 
         // if fastest dim is not reduced
         if constexpr(BetaSrcVectorDim == 0)
         {
             if(p_arg_->betaStrides_[NumInvariantDim - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->invariant_lowest_length_ % BetaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
         else // if fastest dim is reduced
         {
             if(p_arg_->betaStrides_[Rank - 1] != 1)
+            {
                 return (false);
+            }
 
             if(p_arg_->Lengths_[Rank - 1] % BetaSrcVectorSize != 0)
+            {
                 return (false);
+            }
         }
 
         if(p_arg_->invariant_lowest_length_ % SaveMeanInvStdDstVectorSize != 0)
+        {
             return false;
+        }
 
         return true;
     };
@@ -429,7 +461,9 @@ struct DeviceNormalizationFwdImpl : public DeviceNormalizationFwd<XDataType,
         if(lengths.size() != Rank || xStrides.size() != Rank || gammaStrides.size() != Rank ||
            betaStrides.size() != Rank || yStrides.size() != Rank ||
            saveMeanStrides.size() != NumInvariantDim || saveInvStdStrides.size() != NumInvariantDim)
+        {
             throw std::runtime_error("dimension is incorrect");
+        }
 
         return std::make_unique<Argument>(lengths,
                                           xStrides,

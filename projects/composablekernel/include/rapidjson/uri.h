@@ -246,9 +246,13 @@ class GenericUri
             s2 = uri.base_;
         }
         if(s1 == s2)
+        {
             return true;
+        }
         if(s1 == 0 || s2 == 0)
+        {
             return false;
+        }
         return internal::StrCmp<Ch>(s1, s2) == 0;
     }
 
@@ -329,7 +333,9 @@ class GenericUri
                         while(lastslashpos > 0)
                         {
                             if(baseuri.path_[lastslashpos - 1] == '/')
+                            {
                                 break;
+                            }
                             lastslashpos--;
                         }
                         std::memcpy(&resuri.path_[pos], baseuri.path_, lastslashpos * sizeof(Ch));
@@ -362,7 +368,9 @@ class GenericUri
     {
         // Create own allocator if user did not supply.
         if(!allocator_)
+        {
             ownAllocator_ = allocator_ = RAPIDJSON_NEW(Allocator)();
+        }
 
         // Allocate one block containing each part of the URI (5) plus base plus full URI, all null
         // terminated. Order: scheme, auth, path, query, frag, base, uri Note need to set,
@@ -415,7 +423,9 @@ class GenericUri
             while(pos1 < len)
             {
                 if(uri[pos1] == ':')
+                {
                     break;
+                }
                 pos1++;
             }
             if(pos1 != len)
@@ -423,11 +433,17 @@ class GenericUri
                 while(pos2 < len)
                 {
                     if(uri[pos2] == '/')
+                    {
                         break;
+                    }
                     if(uri[pos2] == '?')
+                    {
                         break;
+                    }
                     if(uri[pos2] == '#')
+                    {
                         break;
+                    }
                     pos2++;
                 }
                 if(pos1 < pos2)
@@ -450,11 +466,17 @@ class GenericUri
             while(pos2 < len)
             {
                 if(uri[pos2] == '/')
+                {
                     break;
+                }
                 if(uri[pos2] == '?')
+                {
                     break;
+                }
                 if(uri[pos2] == '#')
+                {
                     break;
+                }
                 pos2++;
             }
             std::memcpy(auth_, &uri[start], (pos2 - start) * sizeof(Ch));
@@ -472,9 +494,13 @@ class GenericUri
             while(pos2 < len)
             {
                 if(uri[pos2] == '?')
+                {
                     break;
+                }
                 if(uri[pos2] == '#')
+                {
                     break;
+                }
                 pos2++;
             }
             if(start != pos2)
@@ -482,7 +508,9 @@ class GenericUri
                 std::memcpy(path_, &uri[start], (pos2 - start) * sizeof(Ch));
                 path_[pos2 - start] = '\0';
                 if(path_[0] == '/')
+                {
                     RemoveDotSegments(); // absolute path - normalize
+                }
                 start = pos2;
             }
         }
@@ -497,7 +525,9 @@ class GenericUri
             while(pos2 < len)
             {
                 if(uri[pos2] == '#')
+                {
                     break;
+                }
                 pos2++;
             }
             if(start != pos2)
@@ -580,7 +610,9 @@ class GenericUri
             while((pathpos + slashpos) < pathlen)
             {
                 if(path_[pathpos + slashpos] == '/')
+                {
                     break;
+                }
                 slashpos++;
             }
             // Check for .. and . segments
@@ -598,7 +630,9 @@ class GenericUri
                     while(lastslashpos > 0)
                     {
                         if(path_[lastslashpos - 1] == '/')
+                        {
                             break;
+                        }
                         lastslashpos--;
                     }
                     // Set the new path_ position

@@ -811,7 +811,9 @@ struct DeviceGroupedGemmSoftmaxGemmPermute_Xdl_CShuffle
                 }
             }
             if(!valid)
+            {
                 return false;
+            }
         }
 
         // all gemm problems have to simultaneously meet has_main_k_block_loop or

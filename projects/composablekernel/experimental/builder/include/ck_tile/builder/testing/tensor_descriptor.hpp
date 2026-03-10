@@ -141,9 +141,13 @@ std::ostream& operator<<(std::ostream& stream, const Extent<RANK>& extent)
     for(const auto x : extent)
     {
         if(first)
+        {
             first = false;
+        }
         else
+        {
             stream << ", ";
+        }
 
         stream << x;
     }
@@ -423,7 +427,9 @@ struct TensorDescriptor
                 continue;
             }
             if(strides[indices[i]] != x)
+            {
                 return false;
+            }
 
             x *= lengths[indices[i]];
         }

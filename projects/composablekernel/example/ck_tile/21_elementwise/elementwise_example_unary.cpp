@@ -33,7 +33,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     ck_tile::index_t N      = arg_parser.get_int("n");
     ck_tile::index_t stride = arg_parser.get_int("stride");
     if(stride < 0)
+    {
         stride = N;
+    }
     int do_validation = arg_parser.get_int("v");
     int warmup        = arg_parser.get_int("warmup");
     int repeat        = arg_parser.get_int("repeat");
@@ -76,7 +78,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     // Compute flattened size
     ck_tile::index_t total_elements = 1;
     for(auto d : shape)
+    {
         total_elements *= d;
+    }
 
     const ck_tile::index_t kBlockSize      = Kernel::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = 1;
@@ -182,9 +186,13 @@ auto string_to_op(const std::string& op)
         std::variant<ck_tile::element_wise::UnarySquare, ck_tile::element_wise::UnaryConvert>;
 
     if(op == "1")
+    {
         return OpVariant{ck_tile::element_wise::UnarySquare{}};
+    }
     else if(op == "2")
+    {
         return OpVariant{ck_tile::element_wise::UnaryConvert{}};
+    }
     else
     {
         throw std::runtime_error("Unsupported unary operation: " + op);
@@ -197,7 +205,9 @@ int main(int argc, char* argv[])
     ck_tile::ArgParser arg_parser;
     std::tie(result, arg_parser) = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     try
     {

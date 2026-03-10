@@ -382,10 +382,12 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                             constexpr index_t reg_offset = [&]() {
                                 if constexpr(GemmTraits::BQuantGroupSize::kN >=
                                              (NWarp * WarpGemm::kN))
+                                {
                                     return (nIter * NWarp * WarpGemm::kN) /
                                                GemmTraits::BQuantGroupSize::kN *
                                                Traits::KQPerBlock +
                                            kQScale;
+                                }
                                 else
                                 {
                                     return nIter * Traits::KQPerBlock + kQScale;

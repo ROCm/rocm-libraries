@@ -44,7 +44,9 @@ int main()
 
     x.GenerateTensorValue(GeneratorTensor_3<XDataType>{-1.0, 1.0});
     for(int i = 0; i < N; ++i)
+    {
         indices(i) = i;
+    }
 
     DeviceMem x_device_buf(sizeof(XDataType) * x.mDesc.GetElementSpaceSize());
     DeviceMem y_device_buf(sizeof(YDataType) * y.mDesc.GetElementSpaceSize());

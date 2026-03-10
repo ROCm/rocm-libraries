@@ -47,22 +47,36 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceSoftma
             if constexpr(Rank == 3)
             {
                 if constexpr(NumReduceDim == 1)
+                {
                     add_device_softmax_f16_f16_rank3_reduce1_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 2)
+                {
                     add_device_softmax_f16_f16_rank3_reduce2_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 3)
+                {
                     add_device_softmax_f16_f16_rank3_reduce3_instances(op_ptrs);
+                }
             }
             else if constexpr(Rank == 4)
             {
                 if constexpr(NumReduceDim == 1)
+                {
                     add_device_softmax_f16_f16_rank4_reduce1_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 2)
+                {
                     add_device_softmax_f16_f16_rank4_reduce2_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 3)
+                {
                     add_device_softmax_f16_f16_rank4_reduce3_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 4)
+                {
                     add_device_softmax_f16_f16_rank4_reduce4_instances(op_ptrs);
+                }
             }
         }
 #endif
@@ -73,22 +87,36 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceSoftma
             if constexpr(Rank == 3)
             {
                 if constexpr(NumReduceDim == 1)
+                {
                     add_device_softmax_f32_f32_rank3_reduce1_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 2)
+                {
                     add_device_softmax_f32_f32_rank3_reduce2_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 3)
+                {
                     add_device_softmax_f32_f32_rank3_reduce3_instances(op_ptrs);
+                }
             }
             else if constexpr(Rank == 4)
             {
                 if constexpr(NumReduceDim == 1)
+                {
                     add_device_softmax_f32_f32_rank4_reduce1_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 2)
+                {
                     add_device_softmax_f32_f32_rank4_reduce2_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 3)
+                {
                     add_device_softmax_f32_f32_rank4_reduce3_instances(op_ptrs);
+                }
                 else if constexpr(NumReduceDim == 4)
+                {
                     add_device_softmax_f32_f32_rank4_reduce4_instances(op_ptrs);
+                }
             }
         }
 #endif

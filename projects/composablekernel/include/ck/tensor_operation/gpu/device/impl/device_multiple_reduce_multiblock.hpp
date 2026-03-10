@@ -316,7 +316,9 @@ struct DeviceMultipleReduceMultiBlock : public DeviceMultipleReduce<Rank,
 
                     // we want the blkGroupSize be not more than 128
                     if(testBlkGroupSize <= 128)
+                    {
                         break;
+                    }
 
                     iterations++;
                 };
@@ -479,8 +481,12 @@ struct DeviceMultipleReduceMultiBlock : public DeviceMultipleReduce<Rank,
         if constexpr(use_multiblock)
         {
             for(size_t i = 0; i < pArg->beta_values_.Size(); i++)
+            {
                 if(pArg->beta_values_[i] != 0.0f)
+                {
                     return (false);
+                }
+            }
         };
 
         if constexpr(InSrcVectorDim == 0)
@@ -492,50 +498,70 @@ struct DeviceMultipleReduceMultiBlock : public DeviceMultipleReduce<Rank,
             else
             {
                 if(pArg->inStrides_[NumInvariantDim - 1] != 1 && InSrcVectorSize != 1)
+                {
                     return (false);
+                }
 
                 if(pArg->inLengths_[NumInvariantDim - 1] % InSrcVectorSize != 0)
+                {
                     return (false);
+                }
             };
         }
         else
         {
             if(pArg->inStrides_[Rank - 1] != 1 && InSrcVectorSize != 1)
+            {
                 return (false);
+            }
 
             if(pArg->inLengths_[Rank - 1] % InSrcVectorSize != 0)
+            {
                 return (false);
+            }
         };
         // To improve
         bool valid = true;
         static_for<0, NumReduction, 1>{}([&](auto I) {
             if(pArg->outStridesArray_[I.value][NumOutputDim - 1] != 1 &&
                OutDstVectorSizeSeq::At(I) != 1)
+            {
                 valid = false;
+            }
 
             if(pArg->outLengths_[NumOutputDim - 1] % OutDstVectorSizeSeq::At(I) != 0)
+            {
                 valid = false;
+            }
         });
 
         if(!valid)
+        {
             return (false);
+        }
 
         if constexpr(use_multiblock)
         {
             // blkGroupSize of 1 should be handled by Blockwise path using
             // InMemoryDataOperationEnum::Set
             if(pArg->blkGroupSize == 1)
+            {
                 return (false);
+            }
 
             // This is very strong restriction, but needed to avoid some failure
             if(pArg->outLengths_[NumOutputDim - 1] % M_BlockTileSize != 0)
+            {
                 return (false);
+            }
         }
         else
         {
             // cases with very small reduce_total_length should be handled by ThreadWise kernel
             if(pArg->reduce_total_length / KThreadSliceSize < 2)
+            {
                 return (false);
+            }
         };
 
         return (true);

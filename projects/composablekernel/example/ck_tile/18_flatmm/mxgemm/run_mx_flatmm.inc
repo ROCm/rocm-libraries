@@ -47,10 +47,14 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
         K / ScaleGranularityK, N / ScaleGranularityN, 0, is_row_major(b_layout));
 
     if(K % ScaleGranularityK != 0)
+    {
         throw std::runtime_error("wrong! K must be multiple of ScaleGranularityK.");
+    }
     if(K % ck_tile::numeric_traits<ADataType>::PackedSize != 0 ||
        K % ck_tile::numeric_traits<BDataType>::PackedSize != 0)
+    {
         throw std::runtime_error("wrong! K must be multiple of packed size.");
+    }
 
     ck_tile ::HostTensor<ADataType> a_host(
         ck_tile::host_tensor_descriptor(M, K, stride_A, is_row_major(a_layout)));
@@ -76,10 +80,14 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
         std::uniform_int_distribution<int> dis(1, 4);
 
         for(size_t i = 0; i < a_buffer_bytes; ++i)
+        {
             random_bufA[i] = static_cast<int8_t>(dis(gen));
+        }
 
         for(size_t i = 0; i < b_buffer_bytes; ++i)
+        {
             random_bufB[i] = static_cast<int8_t>(dis(gen));
+        }
 
         memcpy(a_host.data(), random_bufA.data(), a_buffer_bytes);
         memcpy(b_origin_host.data(), random_bufB.data(), b_buffer_bytes);

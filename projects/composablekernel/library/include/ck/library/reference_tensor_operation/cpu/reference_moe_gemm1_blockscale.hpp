@@ -104,9 +104,13 @@ struct ReferenceMoeGemm1BlockScale : public device::BaseOperator
                             uint8_t i4x2 = arg.a_t_k_(t, k).data;
                             uint8_t i4   = 0;
                             if(k % 2 == 1)
+                            {
                                 i4 = (i4x2 >> 0) & 0xf;
+                            }
                             else
+                            {
                                 i4 = (i4x2 >> 4) & 0xf;
+                            }
 #if CK_USE_PK4_LAYOUT_SHUFFLE
                             v_a = i4_to_f32_gfx9(i4);
 #else

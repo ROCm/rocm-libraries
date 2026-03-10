@@ -217,25 +217,43 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     const std::string data_type = []() {
         if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp32>)
+        {
             return "fp32";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp16>)
+        {
             return "fp16";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdBf16>)
+        {
             return "bf16";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8>)
+        {
             return "fp8";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdBf8>)
+        {
             return "bf8";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+        {
             return "fp8bf16";
+        }
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Fp32>)
+        {
             return "fp8fp32";
+        }
         else
+        {
             static_assert(false);
+        }
     }();
 
     if(nhead_k < 0)
+    {
         nhead_k = nhead;
+    }
     if(nhead % nhead_k != 0)
     {
         std::cerr << "nhead:" << nhead << " must be multiple of nhead_k:" << nhead_k << std::endl;
@@ -246,7 +264,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
     auto next_seed = [&random_engine]() { return static_cast<unsigned int>(random_engine()); };
 
     if(hdim_v < 0)
+    {
         hdim_v = hdim_q;
+    }
 
 #if !CK_TILE_FMHA_FWD_APPENDKV_API
     if(seqlen_knew != 0)
@@ -401,7 +421,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif
 
     if(scale_s == .0f)
+    {
         scale_s = 1.0 / ck_tile::sqrt(static_cast<float>(hdim_q)); // TODO: q ? v ?
+    }
 
     bias_info bias = bias_info::decode(bias_str);
 
@@ -450,7 +472,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 cum_vec.resize(batch + 1);
                 cum_vec[0] = 0;
                 for(int i = 0; i < batch; ++i)
+                {
                     cum_vec[i + 1] = cum_vec[i] + per_batch_vec[i];
+                }
             }
         };
 
@@ -542,9 +566,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                        ck_tile::index_t s /*seqlen*/,
                                        ck_tile::index_t d /*hdim*/) {
         if(permute)
+        {
             return std::array<ck_tile::index_t, 4>{b, h, s, d};
+        }
         else
+        {
             return std::array<ck_tile::index_t, 4>{b, s, h, d};
+        }
     };
 
     // host memory for storing all the tensor elements
@@ -902,12 +930,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
     // Padding / effective length diagnostic logging
     auto print_vec = [&](const char* label, const std::vector<int>& v) {
         if(v.empty())
+        {
             return;
+        }
         std::cout << ", " << label << ":[";
         for(std::size_t i = 0; i < v.size(); ++i)
         {
             if(i)
+            {
                 std::cout << ",";
+            }
             std::cout << v[i];
         }
         std::cout << "]";
@@ -935,14 +967,18 @@ fwd_result fmha_fwd_run(mode_enum mode,
         {
             std::vector<int> eff_q(batch);
             for(int b_i = 0; b_i < batch; ++b_i)
+            {
                 eff_q[b_i] = static_cast<int>(cuq_cum[b_i + 1] - cuq_cum[b_i]);
+            }
             print_vec("q_eff", eff_q);
         }
         if(!cukv_cum.empty())
         {
             std::vector<int> eff_kv(batch);
             for(int b_i = 0; b_i < batch; ++b_i)
+            {
                 eff_kv[b_i] = static_cast<int>(cukv_cum[b_i + 1] - cukv_cum[b_i]);
+            }
             print_vec("kv_eff", eff_kv);
         }
     }
@@ -993,16 +1029,24 @@ fwd_result fmha_fwd_run(mode_enum mode,
         const ck_tile::index_t stride_knew = (i_perm ? hdim_q : nhead_k * hdim_q);
         const ck_tile::index_t stride_v    = [&]() {
             if(is_v_rowmajor)
+            {
                 return i_perm ? hdim_v : nhead_k * hdim_v;
+            }
             else
+            {
                 return 0 < page_block_size ? (i_perm ? page_block_size : nhead_k * page_block_size)
                                               : (i_perm ? shape_seqlen_k : nhead_k * shape_seqlen_k);
+            }
         }();
         const ck_tile::index_t stride_vnew = [&]() {
             if(is_v_rowmajor)
+            {
                 return i_perm ? hdim_v : nhead_k * hdim_v;
+            }
             else
+            {
                 return i_perm ? seqlen_knew : nhead_k * seqlen_knew;
+            }
         }();
         const ck_tile::index_t stride_bias    = (i_perm ? max_seqlen_k : 1 * max_seqlen_k);
         const ck_tile::index_t stride_randval = (max_seqlen_k);
@@ -1016,17 +1060,25 @@ fwd_result fmha_fwd_run(mode_enum mode,
         const ck_tile::index_t nhead_stride_knew = (i_perm ? seqlen_knew * hdim_q : hdim_q);
         const ck_tile::index_t nhead_stride_v    = [&]() {
             if(is_v_rowmajor)
+            {
                 return 0 < page_block_size ? (i_perm ? page_block_size * hdim_v : hdim_v)
                                               : (i_perm ? shape_seqlen_k * hdim_v : hdim_v);
+            }
             else
+            {
                 return 0 < page_block_size ? (i_perm ? hdim_v * page_block_size : page_block_size)
                                               : (i_perm ? hdim_v * shape_seqlen_k : shape_seqlen_k);
+            }
         }();
         const ck_tile::index_t nhead_stride_vnew = [&]() {
             if(is_v_rowmajor)
+            {
                 return i_perm ? seqlen_knew * hdim_v : hdim_v;
+            }
             else
+            {
                 return i_perm ? hdim_v * seqlen_knew : seqlen_knew;
+            }
         }();
         const ck_tile::index_t nhead_stride_bias =
             (i_perm ? 0 * shape_seqlen_q * max_seqlen_k : 0 * max_seqlen_k);
@@ -1066,9 +1118,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
         args.k_ptr = k_buf.GetDeviceBuffer();
         args.v_ptr = v_buf.GetDeviceBuffer();
         if(init_sink_value != 0)
+        {
             args.sink_ptr = sink_buf.GetDeviceBuffer();
+        }
         else
+        {
             args.sink_ptr = nullptr;
+        }
         args.batch    = batch;
         args.seqlen_q = shape_seqlen_q; // unused in group mode
         args.hdim_q   = hdim_q;
@@ -1471,19 +1527,29 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
         auto p_compute_element_func = [&]() {
             if constexpr(supports_qscale)
+            {
                 return ck_tile::scales{scale_p_host};
+            }
             else
+            {
                 return ck_tile::identity{};
+            }
         }();
 
         auto oacc_element_func = [&]() {
             if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t> && supports_qscale)
+            {
                 return ck_tile::make_composes(ck_tile::saturates<ck_tile::fp8_t>{},
                                               ck_tile::scales{scale_o_host});
+            }
             else if constexpr(supports_qscale)
+            {
                 return ck_tile::scales{scale_o_host};
+            }
             else
+            {
                 return ck_tile::identity{};
+            }
         }();
 
         float p_undrop = 1.0 - p_drop;
@@ -1809,6 +1875,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 // if left window size is negative, means causal
                 // else means generic (for current batch)
                 if(mask.left < 0)
+                {
                     ck_tile::reference_batched_masking<SaccDataType>(
                         s_host_ref,
                         ck_tile::make_generic_attention_mask_from_lr_window<FmhaMasks::CausalMask>(
@@ -1818,7 +1885,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                             real_seqlen_q,
                             real_seqlen_k,
                             mask.type == mask_enum::mask_top_left));
+                }
                 else
+                {
                     ck_tile::reference_batched_masking<SaccDataType>(
                         s_host_ref,
                         ck_tile::make_generic_attention_mask_from_lr_window<FmhaMasks::GenericMask>(
@@ -1828,6 +1897,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                             real_seqlen_q,
                             real_seqlen_k,
                             mask.type == mask_enum::mask_top_left));
+                }
             }
             const ck_tile::HostTensor<SaccDataType> masked_s_host_ref = s_host_ref;
             if(init_sink_value != 0)

@@ -86,16 +86,24 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     ck_tile::index_t x_stride = arg_parser.get_int("x_stride");
     if(x_stride < 0)
+    {
         x_stride = n;
+    }
     ck_tile::index_t xr_stride = arg_parser.get_int("xr_stride");
     if(xr_stride < 0)
+    {
         xr_stride = n;
+    }
     ck_tile::index_t y_stride = arg_parser.get_int("y_stride");
     if(y_stride < 0)
+    {
         y_stride = n;
+    }
     ck_tile::index_t yr_stride = arg_parser.get_int("yr_stride");
     if(yr_stride < 0)
+    {
         yr_stride = n;
+    }
     assert(x_stride >= n);
 
     std::string prec_i  = arg_parser.get_str("prec_i");
@@ -488,7 +496,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     std::string prec_i  = arg_parser.get_str("prec_i");
     std::string prec_o  = arg_parser.get_str("prec_o");

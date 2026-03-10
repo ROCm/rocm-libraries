@@ -18,7 +18,9 @@ constexpr size_t constexpr_strlen(const char* c)
 {
     size_t t = 0;
     while(*c++)
+    {
         ++t;
+    }
     return t;
 }
 } // namespace str_literal_detail
@@ -39,11 +41,17 @@ struct str_literal
     CK_TILE_HOST_DEVICE static constexpr auto duplicate_n(const str_literal<Ys...> sep)
     {
         if constexpr(N == 0)
+        {
             return str_literal<>{};
+        }
         else if constexpr(N == 1)
+        {
             return str_literal<Xs...>{};
+        }
         else
+        {
             return duplicate_n<N - 1>(sep) + str_literal<Ys..., Xs...>{};
+        }
     }
 };
 
@@ -112,7 +120,9 @@ CK_TILE_HOST_DEVICE void print(const T (&value)[N])
     for(size_t i = 0; i < N; ++i)
     {
         if(i > 0)
+        {
             printf(", ");
+        }
         print(value[i]); // Recursively call print for each element
     }
     printf("]");

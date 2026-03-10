@@ -20,7 +20,9 @@ std::string array_to_seq(const std::array<T, N>& arr)
     for(size_t i = 0; i < N; ++i)
     {
         if(i > 0)
+        {
             oss << ",";
+        }
         oss << arr[i];
     }
     oss << ")";

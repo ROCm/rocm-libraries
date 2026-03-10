@@ -1016,9 +1016,11 @@ struct DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage
             arg_ptr->p_dev_gemm_kargs_ = p_dev_kernel_args;
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage::Argument structure!");
+        }
     }
 
     size_t GetDeviceKernelArgSize(const BaseArgument* p_arg) const override
@@ -1029,9 +1031,11 @@ struct DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage
             return arg->gemm_kernel_args_.size() * sizeof(GemmTransKernelArg);
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage::Argument structure!");
+        }
     }
 
     size_t GetWorkSpaceSize(const BaseArgument* p_arg) const override
@@ -1042,9 +1046,11 @@ struct DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage
             return arg->GetWorkspaceSizeBytes();
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(
@@ -1059,9 +1065,11 @@ struct DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage
             p_arg_->UpdateEPointers();
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage::Argument structure!");
+        }
     }
 
     [[deprecated]] static void SetKBatchSize(Argument& arg, index_t kbatch)
@@ -1077,9 +1085,11 @@ struct DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage
             p_arg_->UpdateKBatch(kbatch);
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage::Argument structure!");
+        }
     }
 };
 

@@ -58,7 +58,9 @@ struct FusedMoeGemmPipeline_FlatmmUk
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             // minimize occupancy

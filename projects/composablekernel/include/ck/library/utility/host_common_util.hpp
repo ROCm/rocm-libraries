@@ -105,6 +105,7 @@ get_index_set(const std::array<index_t, NDim>& dim_lengths)
         partial_index_set = get_index_set<NDim - 1>(partial_dim_lengths);
 
         for(index_t i = 0; i < dim_lengths[0]; i++)
+        {
             for(const auto& partial_index : partial_index_set)
             {
                 std::array<index_t, NDim> index;
@@ -115,6 +116,7 @@ get_index_set(const std::array<index_t, NDim>& dim_lengths)
 
                 index_set.push_back(index);
             };
+        }
 
         return index_set;
     };
@@ -127,7 +129,9 @@ static inline size_t get_offset_from_index(const std::array<index_t, NDim>& stri
     size_t offset = 0;
 
     for(int i = 0; i < NDim; i++)
+    {
         offset += index[i] * strides[i];
+    }
 
     return (offset);
 };

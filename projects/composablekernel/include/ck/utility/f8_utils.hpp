@@ -60,17 +60,23 @@ __host__ __device__ Y run_cast_to_f8(X x, uint32_t rng)
     if constexpr(negative_zero_nan)
     {
         if((x_bitwise & nan_mask) == nan_mask)
+        {
             return Y{nan_code};
+        }
     }
     else
     {
         if((x_bitwise & nan_mask) == nan_mask)
+        {
             return Y{static_cast<uint8_t>(signed_inf + (mantissa != 0 ? 1 : 0))};
+        }
     }
 
     // check if x is 0.0
     if(x_bitwise == 0)
+    {
         return Y{0};
+    }
 
     // First need to check if it is normal or denorm as there is a difference of implict 1
     // Then need to adjust the exponent to align with the F8 exponent, in the meanwhile, shift
@@ -128,9 +134,13 @@ In this case, the fp16 mantissa should be shift left by 1 */
  midpoint, but after shift right by 4 bits, it would look like midpoint. */
 
     if(exponent_diff > 0)
+    {
         mantissa >>= exponent_diff;
+    }
     else if(exponent_diff == -1)
+    {
         mantissa <<= -exponent_diff;
+    }
     bool implicit_one = mantissa & (1 << in_mant);
     // if there is no implict 1, it  means the f8 is denormal and need to adjust to denorm exponent
     out_exponent =
@@ -178,7 +188,9 @@ In this case, the fp16 mantissa should be shift left by 1 */
 
     // check if x is 0.0 or -0.0
     if(out_exponent == 0 && mantissa == 0)
+    {
         return Y{negative_zero_nan ? 0 : static_cast<uint8_t>(sign << (out_exp + out_mant))};
+    }
     mantissa &= (1 << out_mant) - 1;
     return Y{static_cast<uint8_t>((sign << (out_exp + out_mant)) | (out_exponent << out_mant) |
                                   mantissa)};
@@ -211,7 +223,9 @@ __host__ __device__ Y run_cast_from_f8(X x)
 
     // check if x is 0.0
     if(!static_cast<uint8_t>(x))
+    {
         return static_cast<Y>(0);
+    }
 
     // unpack the input
     uint32_t sign     = static_cast<uint8_t>(x) >> (in_exp + in_mant);
@@ -225,14 +239,20 @@ __host__ __device__ Y run_cast_from_f8(X x)
     if constexpr(negative_zero_nan)
     {
         if(static_cast<uint8_t>(x) == nan_code)
+        {
             return NaN;
+        }
     }
     else
     {
         if(static_cast<uint8_t>(x) == nan_code)
+        {
             return Neg0;
+        }
         if(exponent == ((1 << in_exp) - 1))
+        {
             return (mantissa == 0) ? (sign ? NegInf : Inf) : NaN;
+        }
     }
 
     if constexpr((NumericUtils<Y>::mant == 10) && (NumericUtils<X>::mant == 2) &&

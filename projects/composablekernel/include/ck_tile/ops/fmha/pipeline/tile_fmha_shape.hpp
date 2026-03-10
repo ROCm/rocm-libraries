@@ -11,20 +11,34 @@ template <index_t Headdim>
 static CK_TILE_HOST_DEVICE constexpr index_t ceil_to_qualified_tile_length()
 {
     if constexpr(Headdim == 48)
+    {
         return 48;
+    }
     else if constexpr(Headdim == 80)
+    {
         return 96;
+    }
     else if constexpr(Headdim == 96)
+    {
         return 128;
+    }
     else if constexpr(Headdim == 160)
+    {
         return 256;
+    }
     else if constexpr(Headdim == 192)
+    {
         return 192;
+    }
     else if constexpr(is_power_of_two_integer(Headdim))
+    {
         return Headdim;
+    }
     else
+    {
         static_assert(Headdim == 0,
                       "only Headdim of 48, 96, 160, 192 and power-of-two is supported");
+    }
 };
 
 template <typename BlockTile_, // sequence<...

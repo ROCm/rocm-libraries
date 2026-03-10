@@ -363,7 +363,9 @@ struct GridwiseWelfordSecondHalfReduceFirstHalf
 
             static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
                 if constexpr(I > 0)
+                {
                     block_sync_lds();
+                }
 
                 BlockwiseWelford::Run(welford_mean_thread_buf(I),
                                       welford_var_thread_buf(I),
@@ -504,7 +506,9 @@ struct GridwiseWelfordSecondHalfReduceFirstHalf
 
         static_for<0, MThreadSliceSize, 1>{}([&](auto I) {
             if constexpr(I > 0)
+            {
                 block_sync_lds();
+            }
 
             BlockwiseReduce::Reduce(reduce_work_buf, reduce_dscale_thread_buf(I));
             block_sync_lds();

@@ -232,7 +232,9 @@ bool profile_batched_gemm_softmax_gemm_impl(bool do_verification,
         // mask out upper triangle
         acc0_g_m_n.ForEach([&](auto& self, auto idx) {
             if(MaskOutUpperTriangle && idx[1] < idx[2])
+            {
                 self(idx) = -ck::NumericLimits<float>::Infinity();
+            }
         });
 
         auto ref_softmax          = ReferenceSoftmaxInstance{};

@@ -290,7 +290,9 @@ int run(int argc, char* argv[])
             const auto mask = typename DeviceMHAInstance::C0MatrixMask(N);
             acc0_g0_g1_m_n.ForEach([&](auto& self, auto idx) {
                 if(mask.IsMaskedElement(idx[2], idx[3]))
+                {
                     self(idx) = -ck::NumericLimits<float>::Infinity();
+                }
             });
 
             // softmax

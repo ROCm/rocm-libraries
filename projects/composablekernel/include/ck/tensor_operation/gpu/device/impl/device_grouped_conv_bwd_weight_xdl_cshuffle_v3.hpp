@@ -686,11 +686,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             // This works correctly for any descriptor transform pipeline
             split_k_stride_a_ = a_grid_desc_k0_m_k1_.GetElementSpaceSize();
             if(split_k_offset_hack_)
+            {
                 split_k_stride_a_ /= k_batch_;
+            }
 
             split_k_stride_b_ = b_grid_desc_k0_n_k1_.GetElementSpaceSize();
             if(split_k_offset_hack_)
+            {
                 split_k_stride_b_ /= k_batch_;
+            }
 
             // A/B/C Batch Stride (multiply by NumGroupsToMerge for group merging)
             compute_ptr_offset_of_batch_.BatchStrideA_ = a_g_n_k_wos_strides[0] * NumGroupsToMerge;

@@ -109,9 +109,13 @@ struct ReferenceMoeMXGemm2 : public device::BaseOperator
 
                             f4_t f4 = 0;
                             if(k % 2 == 1)
+                            {
                                 f4 = (f4x2 >> 0) & 0xf;
+                            }
                             else
+                            {
                                 f4 = (f4x2 >> 4) & 0xf;
+                            }
 
                             v_a = type_convert<ComputeTypeA>(f4) *
                                   type_convert<ComputeTypeA>(a_scale);
@@ -128,9 +132,13 @@ struct ReferenceMoeMXGemm2 : public device::BaseOperator
 
                             f4_t f4 = 0;
                             if(k % 2 == 1)
+                            {
                                 f4 = (f4x2 >> 0) & 0xf;
+                            }
                             else
+                            {
                                 f4 = (f4x2 >> 4) & 0xf;
+                            }
 
                             v_b = type_convert<ComputeTypeB>(f4) *
                                   type_convert<ComputeTypeB>(b_scale);
@@ -162,7 +170,9 @@ struct ReferenceMoeMXGemm2 : public device::BaseOperator
             make_ParallelTensorFunctor(
                 [&](auto n) {
                     for(std::size_t m = 0; m < max_token_id; ++m)
+                    {
                         f_mk_kn_mn(m, n);
+                    }
                 },
                 arg.c_t_n_.mDesc.GetLengths()[1])(std::thread::hardware_concurrency());
 

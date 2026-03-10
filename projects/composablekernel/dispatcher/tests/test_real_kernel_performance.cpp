@@ -137,7 +137,9 @@ int main()
         for(int i = 0; i < M * N; i++)
         {
             if(std::abs(float(C_gpu[i]) - float(K)) < 1.0f)
+            {
                 correct++;
+            }
         }
 
         bool passed = (correct == M * N);

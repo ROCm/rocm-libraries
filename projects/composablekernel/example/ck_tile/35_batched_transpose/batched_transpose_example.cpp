@@ -209,8 +209,10 @@ bool run_batched_transpose(ck_tile::ArgParser args)
            layout_in.c_str(),
            ms);
     if(ms < 0)
+    {
         printf("------------------------------------not "
                "supported-------------------------------------\n");
+    }
     fflush(stdout);
 
     if(ms < 0)
@@ -263,7 +265,9 @@ int main(int argc, char** argv)
 {
     auto [result, args] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
     std::string prec = args.get_str("pr");
 
     bool r = true;

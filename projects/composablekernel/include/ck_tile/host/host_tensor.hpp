@@ -33,9 +33,13 @@ CK_TILE_HOST std::ostream& LogRange(std::ostream& os,
     for(auto&& v : range)
     {
         if(first)
+        {
             first = false;
+        }
         else
+        {
             os << delim;
+        }
         os << std::setw(width) << std::setprecision(precision) << v;
     }
     return os;
@@ -52,9 +56,13 @@ CK_TILE_HOST std::ostream& LogRangeAsType(std::ostream& os,
     for(auto&& v : range)
     {
         if(first)
+        {
             first = false;
+        }
         else
+        {
             os << delim;
+        }
         os << std::setw(width) << std::setprecision(precision) << static_cast<T>(v);
     }
     return os;
@@ -110,7 +118,9 @@ struct HostTensorDescriptor
         mStrides.clear();
         mStrides.resize(mLens.size(), 0);
         if(mStrides.empty())
+        {
             return;
+        }
 
         mStrides.back() = 1;
         std::partial_sum(mLens.rbegin(),
@@ -189,7 +199,9 @@ struct HostTensorDescriptor
         for(std::size_t i = 0; i < mLens.size(); ++i)
         {
             if(mLens[i] == 0)
+            {
                 continue;
+            }
 
             space += (mLens[i] - 1) * mStrides[i];
         }
@@ -414,9 +426,13 @@ struct HostTensor
     void SetZero()
     {
         if constexpr(std::is_same_v<T, e8m0_t>)
+        {
             std::fill(mData.begin(), mData.end(), e8m0_t{1.f});
+        }
         else
+        {
             std::fill(mData.begin(), mData.end(), 0);
+        }
     }
 
     template <typename F>
@@ -781,15 +797,23 @@ struct HostTensor
             for(auto& itm : mData)
             {
                 if(dtype == "float")
+                {
                     file << type_convert<float>(itm) << std::endl;
+                }
                 else if(dtype == "int")
+                {
                     file << type_convert<int>(itm) << std::endl;
+                }
                 else if(dtype == "int8_t")
+                {
                     file << static_cast<int>(type_convert<ck_tile::int8_t>(itm)) << std::endl;
+                }
                 else
+                {
                     // TODO: we didn't implement operator<< for all custom
                     // data types, here fall back to float in case compile error
                     file << type_convert<float>(itm) << std::endl;
+                }
             }
             file.close();
         }
@@ -859,7 +883,9 @@ auto get_default_stride(std::size_t row,
         }
     }
     else
+    {
         return stride;
+    }
 }
 } // namespace ck_tile
 #pragma clang diagnostic pop

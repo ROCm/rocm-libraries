@@ -206,7 +206,9 @@ class TestCkTileStreamK : public ::testing::Test
                     }
                 }
                 else
+                {
                     return stride;
+                }
             };
 
         stride_A = f_get_default_stride(M, K, stride_A, ALayout{});

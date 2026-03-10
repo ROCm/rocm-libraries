@@ -86,11 +86,15 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
     CK_TILE_HOST_DEVICE static LSEDataType get_validated_lse(const LSEDataType raw_lse)
     {
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || FmhaMask::IsMasking)
+        {
             return (raw_lse == -numeric<LSEDataType>::infinity()) //
                        ? type_convert<LSEDataType>(0.f)
                        : raw_lse;
+        }
         else
+        {
             return raw_lse;
+        }
     };
 
     template <typename... Ts>
@@ -500,7 +504,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                 s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
             }
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm0();
+            }
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
@@ -564,9 +570,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
                         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                                      BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                        {
                             p(i_j_idx) = exp2(s_acc[i_j_idx] - row_lse);
+                        }
                         else
+                        {
                             p(i_j_idx) = exp2(scale * s_acc[i_j_idx] - row_lse);
+                        }
                     });
                 });
 
@@ -602,7 +612,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
             }
             block_sync_lds();
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm12();
+            }
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
@@ -672,7 +684,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                 move_tile_window(ds_lds_read_window, {kK4, 0});
             }
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm3();
+            }
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
@@ -698,7 +712,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
             }
             block_sync_lds();
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm4();
+            }
             if constexpr(is_epilogue)
             {
                 // Results Scale
@@ -754,10 +770,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
         // QGrad Scale
         if constexpr(FmhaDropout::IsDropout)
+        {
             tile_elementwise_inout([&scale_rp_undrop](auto& x) { x = x * scale_rp_undrop; },
                                    dq_acc);
+        }
         else
+        {
             tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
+        }
         dq_epilogue(dq_dram_window, dq_acc, nullptr);
         return;
     }

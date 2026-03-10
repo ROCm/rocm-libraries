@@ -85,7 +85,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     ck_tile::index_t hidden_size = arg_parser.get_int("h");
     ck_tile::index_t stride      = arg_parser.get_int("stride");
     if(stride < 0)
+    {
         stride = hidden_size;
+    }
     ck_tile::index_t experts = arg_parser.get_int("e");
     ck_tile::index_t topk    = arg_parser.get_int("k");
     std::string prec_i       = arg_parser.get_str("prec_i");
@@ -272,7 +274,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     const std::string prec_i = arg_parser.get_str("prec_i");
     const std::string prec_o = arg_parser.get_str("prec_o");

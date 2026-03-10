@@ -98,7 +98,9 @@ void fmha_bwd_test(const FmhaBwdTestParam& param)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for current parameters";
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -307,7 +309,9 @@ TEST_P(BasicQPadding, DataTypeConfig)
     // Calculate physical Q length (padded)
     ck_tile::index_t seqlen_qpad = ((seqlen_q + 63) / 64) * 64; // Round up to multiple of 64
     if(seqlen_q > 256)
+    {
         seqlen_qpad = ((seqlen_q + 127) / 128) * 128; // Larger alignment for longer sequences
+    }
 
     std::vector<ck_tile::index_t> seqlen_qpads(batch, seqlen_qpad);
     std::vector<ck_tile::index_t> seqlen_kpads(batch, seqlen_k); // No K padding
@@ -340,7 +344,9 @@ TEST_P(BasicQPadding, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for Q padding with hdim_q=" << hdim_q;
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -395,7 +401,9 @@ TEST_P(BasicKVPadding, DataTypeConfig)
     // Set up K/V padding
     ck_tile::index_t seqlen_kpad = ((seqlen_k + 63) / 64) * 64;
     if(seqlen_k > 256)
+    {
         seqlen_kpad = ((seqlen_k + 127) / 128) * 128;
+    }
     std::vector<ck_tile::index_t> seqlen_kpads(batch, seqlen_kpad);
 
     auto result = fmha_bwd_run<DataTypeConfig>(
@@ -426,7 +434,9 @@ TEST_P(BasicKVPadding, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for K/V padding with hdim_q=" << hdim_q;
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -483,11 +493,15 @@ TEST_P(QKVPadding, DataTypeConfig)
     // Set up both Q and K/V padding
     ck_tile::index_t seqlen_qpad = ((seqlen_q + 63) / 64) * 64;
     if(seqlen_q > 256)
+    {
         seqlen_qpad = ((seqlen_q + 127) / 128) * 128;
+    }
 
     ck_tile::index_t seqlen_kpad = ((seqlen_k + 63) / 64) * 64;
     if(seqlen_k > 256)
+    {
         seqlen_kpad = ((seqlen_k + 127) / 128) * 128;
+    }
 
     std::vector<ck_tile::index_t> seqlen_qpads(batch, seqlen_qpad);
     std::vector<ck_tile::index_t> seqlen_kpads(batch, seqlen_kpad);
@@ -520,7 +534,9 @@ TEST_P(QKVPadding, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for Q+K/V padding with hdim_q=" << hdim_q;
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -627,7 +643,9 @@ TEST_P(ZeroLengthPadding, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for zero-length padding";
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -704,17 +722,29 @@ TEST_P(VariedPaddingRatios, DataTypeConfig)
     // Calculate padding based on common alignment strategies
     auto calc_pad = [](ck_tile::index_t len) -> ck_tile::index_t {
         if(len <= 64)
+        {
             return 64;
+        }
         else if(len <= 128)
+        {
             return 128;
+        }
         else if(len <= 256)
+        {
             return 256;
+        }
         else if(len <= 384)
+        {
             return 384;
+        }
         else if(len <= 512)
+        {
             return 512;
+        }
         else
+        {
             return ((len + 127) / 128) * 128;
+        }
     };
 
     std::vector<ck_tile::index_t> seqlen_qpads(batch, calc_pad(seqlen_q));
@@ -748,7 +778,9 @@ TEST_P(VariedPaddingRatios, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for varied padding ratios";
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -815,9 +847,13 @@ TEST_P(PaddingWithMask, DataTypeConfig)
     ck_tile::index_t seqlen_kpad = ((seqlen_k + 63) / 64) * 64;
 
     if(seqlen_q > 256)
+    {
         seqlen_qpad = ((seqlen_q + 127) / 128) * 128;
+    }
     if(seqlen_k > 256)
+    {
         seqlen_kpad = ((seqlen_k + 127) / 128) * 128;
+    }
 
     std::vector<ck_tile::index_t> seqlen_qpads(batch, seqlen_qpad);
     std::vector<ck_tile::index_t> seqlen_kpads(batch, seqlen_kpad);
@@ -850,7 +886,9 @@ TEST_P(PaddingWithMask, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for padding with mask";
+    }
     ASSERT_EQ(result, bwd_result::success);
 }
 
@@ -984,6 +1022,8 @@ TEST_P(MultiBatchPadding, DataTypeConfig)
         stream_config);
 
     if(result == bwd_result::no_instance)
+    {
         GTEST_SKIP() << "No instance for multi-batch padding";
+    }
     ASSERT_EQ(result, bwd_result::success);
 }

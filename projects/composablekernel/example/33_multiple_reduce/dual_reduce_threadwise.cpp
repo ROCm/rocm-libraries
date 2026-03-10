@@ -58,7 +58,9 @@ int main(int argc, char* argv[])
         SimpleAppArgs arg;
 
         if(arg.processArgs(argc, argv) < 0)
+        {
             return (-1);
+        }
 
         std::array<int, NumReduceDim> reduceDims = {1, 2, 3};
 

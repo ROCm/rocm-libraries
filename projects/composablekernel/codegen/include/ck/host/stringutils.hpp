@@ -32,7 +32,9 @@ inline std::string JoinStrings(Strings strings, const std::string& delim)
 {
     auto it = strings.begin();
     if(it == strings.end())
+    {
         return "";
+    }
 
     auto nit = std::next(it);
     return std::accumulate(nit, strings.end(), *it, [&](std::string x, std::string y) {
@@ -53,7 +55,9 @@ InterpolateString(const std::string& input, F f, std::string start = "${", std::
         auto next_end   = std::search(next_start, input.end(), end.begin(), end.end());
         result.append(it, next_start);
         if(next_start == input.end())
+        {
             break;
+        }
         if(next_end == input.end())
         {
             throw std::runtime_error("Unbalanced brackets");
@@ -75,7 +79,9 @@ inline std::string InterpolateString(const std::string& input,
             auto key = trim({start_it, last_it});
             auto it  = vars.find(key);
             if(it == vars.end())
+            {
                 throw std::runtime_error("Unknown key: " + key);
+            }
             return it->second;
         },
         std::move(start),

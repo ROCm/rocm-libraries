@@ -102,9 +102,13 @@ struct BlockwiseWelford
         mean_value = mean_block_buf[offset];
 
         if constexpr(GetActualVariance)
+        {
             var_value = var_block_buf[offset] / count;
+        }
         else
+        {
             var_value = var_block_buf[offset];
+        }
     };
 };
 } // namespace ck

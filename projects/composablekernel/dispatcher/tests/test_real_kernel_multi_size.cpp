@@ -52,9 +52,13 @@ TestResult run_test(Dispatcher& dispatcher, int M, int N, int K)
 
     // Initialize: A=1, B=1, expected C=K
     for(int i = 0; i < M * K; i++)
+    {
         A_host[i] = ADataType(1.0f);
+    }
     for(int i = 0; i < K * N; i++)
+    {
         B_host[i] = BDataType(1.0f);
+    }
 
     ADataType *A_dev, *B_dev;
     CDataType* C_dev;
@@ -172,7 +176,9 @@ int main()
         std::cout << "  Status: " << (result.passed ? "[OK] PASS" : "[FAIL] FAIL") << "\n\n";
 
         if(result.passed)
+        {
             num_passed++;
+        }
     }
 
     // Summary

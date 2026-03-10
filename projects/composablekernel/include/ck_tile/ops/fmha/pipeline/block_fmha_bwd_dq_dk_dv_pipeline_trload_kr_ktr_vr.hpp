@@ -84,11 +84,15 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
     CK_TILE_HOST_DEVICE static LSEDataType get_validated_lse(const LSEDataType raw_lse)
     {
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || FmhaMask::IsMasking)
+        {
             return (raw_lse == -numeric<LSEDataType>::infinity()) //
                        ? type_convert<LSEDataType>(0.f)
                        : raw_lse;
+        }
         else
+        {
             return raw_lse;
+        }
     };
     template <typename... Ts>
     CK_TILE_DEVICE auto operator()(void* smem_ptr, Ts&&... args) const
@@ -540,7 +544,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 d = load_tile(d_lds_read_window);
             }
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm0();
+            }
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
@@ -604,9 +610,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
                         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                                      BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                        {
                             p(i_j_idx) = exp2(s_acc[i_j_idx] - row_lse);
+                        }
                         else
+                        {
                             p(i_j_idx) = exp2(scale * s_acc[i_j_idx] - row_lse);
+                        }
                     });
                 });
 
@@ -644,7 +654,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             }
             block_sync_lds();
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm12();
+            }
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
@@ -719,7 +731,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 move_tile_window(ds_lds_read_window, {kK4, 0});
             }
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm3();
+            }
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
@@ -751,7 +765,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 do_reg_tensor = load_tile(do_lds_read_window);
             }
             if constexpr(is_main_body)
+            {
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm4();
+            }
             if constexpr(is_epilogue)
             {
                 // QGrad Scale

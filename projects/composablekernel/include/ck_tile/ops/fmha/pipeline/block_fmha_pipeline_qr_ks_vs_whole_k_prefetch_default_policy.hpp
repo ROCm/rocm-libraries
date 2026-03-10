@@ -300,9 +300,13 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
                                                  decltype(warp_gemm)>;
 
         if constexpr(1 < Problem::kNumGemm0Warps)
+        {
             return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+        }
         else
+        {
             return BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
+        }
     }
 
     // leave some exclusive space so that the second v_lds buffer will nenver overlap with the first
@@ -316,9 +320,13 @@ struct BlockFmhaPipelineQRKSVSWholeKPrefetchDefaultPolicy
             GetSmemSizeV<Problem>() / GetNumVLdsBuffers<Problem>();
 
         if constexpr(single_k_lds_buffer_size <= single_v_lds_buffer_size)
+        {
             return 0;
+        }
         else
+        {
             return integer_least_multiple(single_k_lds_buffer_size - single_v_lds_buffer_size, 64);
+        }
     };
 
     template <typename Problem>

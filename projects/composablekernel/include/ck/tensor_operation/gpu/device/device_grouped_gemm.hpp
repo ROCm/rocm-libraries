@@ -68,7 +68,9 @@ struct GroupedGemmKernelArgument
     {
         std::stringstream str;
         for(auto sd : StrideDs)
+        {
             str << sd << ",";
+        }
 
         std::cout << "arg {" << "M:" << M << ", " << "N:" << N << ", " << "K:" << K << ", "
                   << "SA:" << StrideA << ", " << "SB:" << StrideB << ", " << "SE:" << StrideE

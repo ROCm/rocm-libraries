@@ -151,5 +151,7 @@ float moe_smoothquant(moe_smoothquant_traits t,
         return moe_smoothquant_dispatch<ck_tile::bf16_t, ck_tile::fp8_t>(t, a, s);
     }
     else
+    {
         throw std::runtime_error("Without supported instances!");
+    }
 }

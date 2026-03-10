@@ -60,7 +60,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     ck_tile::index_t n      = arg_parser.get_int("n");
     ck_tile::index_t stride = arg_parser.get_int("stride");
     if(stride < 0)
+    {
         stride = n;
+    }
     float epsilon                   = arg_parser.get_float("e");
     std::string input_data_type     = arg_parser.get_str("prec");
     std::string quantized_data_type = arg_parser.get_str("quant");
@@ -135,7 +137,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
                            sizeof(QYDataType) * m * n;
 
     if constexpr(SaveX)
+    {
         num_byte += sizeof(XDataType) * m * n;
+    }
 
     float gb_per_sec = num_byte / 1.E6 / ave_time;
     std::cout << ", " << ave_time * 1.E3 << " us, " << gb_per_sec << " GB/s" << std::endl;
@@ -288,7 +292,9 @@ int main(int argc, char* argv[])
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     const std::string input_data_type     = arg_parser.get_str("prec");
     const std::string quantized_data_type = arg_parser.get_str("quant");

@@ -336,11 +336,17 @@ struct tile_window_with_static_distribution
 
         const index_t linear_off = [&]() {
             if constexpr(std::is_integral_v<offset_t>)
+            {
                 return offset;
+            }
             else if constexpr(is_constant_v<offset_t>)
+            {
                 return offset_t::value;
+            }
             else
+            {
                 return get_load_offset(offset_t{});
+            }
         }();
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
@@ -367,7 +373,9 @@ struct tile_window_with_static_distribution
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 // data index [y0, y1, ...]
@@ -444,9 +452,13 @@ struct tile_window_with_static_distribution
                 constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
                 constexpr auto pre_nop_ = [&]() {
                     if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
+                    {
                         return bool_constant<true>{};
+                    }
                     else
+                    {
                         return bool_constant<false>{};
+                    }
                 }();
 
                 // data index [y0, y1, ...]
@@ -541,9 +553,13 @@ struct tile_window_with_static_distribution
                 constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
                 constexpr auto pre_nop_ = [&]() {
                     if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
+                    {
                         return bool_constant<true>{};
+                    }
                     else
+                    {
                         return bool_constant<false>{};
+                    }
                 }();
 
                 // read from bottom tensor
@@ -618,7 +634,9 @@ struct tile_window_with_static_distribution
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 // Use precomputed window origin & tensor descriptor
@@ -639,15 +657,19 @@ struct tile_window_with_static_distribution
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 if constexpr(!static_move_ys)
+                {
                     this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                         smem,
                         bottom_tensor_thread_coord,
                         offset + dram_ys_offset,
                         bool_constant<oob_conditional_check>{});
+                }
                 else
                 {
                     this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
@@ -666,14 +688,18 @@ struct tile_window_with_static_distribution
                         idx_diff_ys);
 
                     if constexpr(!static_move_ys)
+                    {
                         Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                             window_adaptor_thread_coord,
                             bottom_tensor_thread_coord,
                             idx_diff_ps_ys);
+                    }
 
                     if constexpr(!static_move_ys)
+                    {
                         Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                             window_adaptor_warp_coord, bottom_tensor_warp_coord, idx_diff_ps_ys);
+                    }
                 }
             });
         });
@@ -810,7 +836,9 @@ struct tile_window_with_static_distribution
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 // data index [y0, y1, ...]

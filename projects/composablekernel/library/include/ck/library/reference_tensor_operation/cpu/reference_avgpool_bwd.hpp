@@ -318,7 +318,9 @@ struct ReferenceAvgPoolBwd : public device::BaseOperator
         if(window_spatial_lengths.size() != NDimSpatial || window_strides.size() != NDimSpatial ||
            window_dilations.size() != NDimSpatial || dinput_left_pads.size() != NDimSpatial ||
            dinput_right_pads.size() != NDimSpatial)
+        {
             throw std::runtime_error("dimension is incorrect");
+        }
 
         return Argument{dinput,
                         doutput,

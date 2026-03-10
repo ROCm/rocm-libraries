@@ -81,9 +81,13 @@ struct BlockFmhaPipelineQRKSVS
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return kPadHeadDimV ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
 
     static constexpr index_t kAlignmentO =
@@ -95,7 +99,9 @@ struct BlockFmhaPipelineQRKSVS
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kQKHeaddim <= 32)
@@ -109,9 +115,13 @@ struct BlockFmhaPipelineQRKSVS
             else if constexpr(kQKHeaddim <= 128)
             {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -245,9 +255,13 @@ struct BlockFmhaPipelineQRKSVS
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
                          BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
                 set_tile(m, sink_v * scale_s * C_LOG2E);
+            }
             else
+            {
                 set_tile(m, sink_v * C_LOG2E);
+            }
 #else
             set_tile(m, sink_v);
 #endif
@@ -262,8 +276,10 @@ struct BlockFmhaPipelineQRKSVS
 
         const auto tile_range_result = [&mask, &q_origin]() {
             if constexpr(kHasSink)
+            {
                 return mask.GetSinkTileRangeAlongX(
                     q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+            }
             else
             {
                 auto [start, end] =
@@ -450,7 +466,9 @@ struct BlockFmhaPipelineQRKSVS
                     return s_acc_element_func * k_descale;
                 }
                 else
+                {
                     return s_acc_element_func;
+                }
             }();
 
             // STAGE 2, scale_s, add bias, mask, softmax
@@ -518,7 +536,9 @@ struct BlockFmhaPipelineQRKSVS
             if constexpr(kHasSink)
             {
                 if(i_total_loops == 0)
+                {
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
+                }
             }
             move_tile_window(bias_dram_window, {0, kN0});
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
@@ -686,11 +706,15 @@ struct BlockFmhaPipelineQRKSVS
 
                 index_t seq_offset = [&]() {
                     if constexpr(!kHasSink)
+                    {
                         return seqlen_k_start + i_total_loops * kN0;
+                    }
 
                     const bool in_sink_phase = (num_sink_loop > i_total_loops);
                     if(i_total_loops == num_sink_loop)
+                    {
                         move_tile_window(randval_dram_window, {0, seqlen_k_start - sink_seq_end});
+                    }
 
                     return in_sink_phase ? (kv_load_start + i_total_loops * kN0)
                                          : (seqlen_k_start + (i_total_loops - num_sink_loop) * kN0);
@@ -857,7 +881,9 @@ struct BlockFmhaPipelineQRKSVS
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

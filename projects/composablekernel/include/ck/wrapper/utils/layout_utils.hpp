@@ -190,7 +190,9 @@ __host__ __device__ constexpr auto get(const Layout<Shape, UnrolledDesc>& layout
     const auto upper_dims = generate_tuple(
         [&](auto i) {
             if constexpr(i < shape_offset || i >= shape_offset + new_shape_dims)
+            {
                 return Sequence<>{};
+            }
 
             else
             {

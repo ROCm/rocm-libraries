@@ -171,15 +171,23 @@ CK_TILE_HOST_DEVICE typename T::raw_type convert_to_type(float value, float scal
     {
         // closer to 0
         if(std::abs(value) <= std::abs(min_subnorm - value))
+        {
             return sign << (numeric_traits<T>::exp + numeric_traits<T>::mant);
+        }
         else
+        {
             return 1 | (sign << (numeric_traits<T>::exp + numeric_traits<T>::mant));
+        }
     }
 
     if(exponent_diff > 0)
+    {
         mantissa >>= exponent_diff;
+    }
     else if(exponent_diff == -1)
+    {
         mantissa <<= -exponent_diff;
+    }
     bool implicit_one = mantissa & (1 << mfmt);
     out_exponent      = (act_exponent + exponent_diff) + mini_bias - (implicit_one ? 0 : 1);
 

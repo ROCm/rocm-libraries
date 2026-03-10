@@ -46,7 +46,9 @@ struct FillUniformDistribution
     void operator()(ForwardIter first, ForwardIter last) const
     {
         if(first == last)
+        {
             return;
+        }
         using T_iter = std::decay_t<decltype(*first)>;
         static_assert(std::is_same_v<T, T_iter> || std::is_void_v<T>,
                       "Iterator value type must match template type T");
@@ -81,26 +83,40 @@ struct FillUniformDistribution
                 g_.discard(ib_begin * BLOCK_SIZE * PackedSize);
                 auto t_fn = [&]() {
                     if constexpr(PackedSize == 2)
+                    {
                         return type_convert<T_iter>(fp32x2_t{d_(g_), d_(g_)});
+                    }
                     else
+                    {
                         return type_convert<T_iter>(d_(g_));
+                    }
                 };
 
                 size_t ib = ib_begin;
                 for(; ib < ib_end - 1; ++ib) // full blocks
+                {
                     static_for<0, BLOCK_SIZE, 1>{}([&](auto iw_) {
                         constexpr size_t iw             = iw_.value;
                         *(first + ib * BLOCK_SIZE + iw) = t_fn();
                     });
+                }
                 for(size_t iw = 0; iw < BLOCK_SIZE; ++iw) // last block
+                {
                     if(ib * BLOCK_SIZE + iw < total)
+                    {
                         *(first + ib * BLOCK_SIZE + iw) = t_fn();
+                    }
+                }
             };
 
             if(it > 0)
+            {
                 threads.emplace_back(std::move(job));
+            }
             else
+            {
                 job(); // last job run in the main thread
+            }
         }
     }
 
@@ -261,7 +277,9 @@ struct FillNormalDistribution
                 std::size_t iw_end   = std::min((it + 1) * work_per_thread, total);
                 auto thread_f        = [this, total, iw_begin, iw_end, &first] {
                     if(iw_begin > total || iw_end > total)
+                    {
                         return;
+                    }
                     // need to make each thread unique, add an offset to current seed
                     std::mt19937 gen(seed_.has_value() ? (*seed_ + iw_begin)
                                                        : std::random_device{}());
@@ -416,12 +434,16 @@ struct FillStepRange
             if constexpr(IsAscending)
             {
                 if(n > end_value_)
+                {
                     n = start_value_;
+                }
             }
             else
             {
                 if(n < end_value_)
+                {
                     n = start_value_;
+                }
             }
 
             return type_convert<T>(tmp);
@@ -523,7 +545,9 @@ struct FillTrigValue
                 v = sin(i);
             }
             if constexpr(UseAbs_)
+            {
                 v = abs(v);
+            }
             i++;
             return ck_tile::type_convert<T_>(v);
         }

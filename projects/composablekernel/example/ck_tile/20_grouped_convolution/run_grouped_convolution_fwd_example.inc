@@ -55,7 +55,9 @@ int run_grouped_conv_fwd_example_with_layouts(
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     using AccDataType = float;
 

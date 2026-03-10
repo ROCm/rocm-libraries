@@ -191,7 +191,9 @@ void limited_foreach(size_t n, size_t limit, auto f, auto delim)
     if(n <= limit)
     {
         for(size_t i = 0; i < n; ++i)
+        {
             f(i);
+        }
     }
     else
     {
@@ -200,12 +202,16 @@ void limited_foreach(size_t n, size_t limit, auto f, auto delim)
         const auto skip_count  = n - limit;
 
         for(size_t i = 0; i < begin_count; ++i)
+        {
             f(i);
+        }
 
         delim(skip_count);
 
         for(size_t i = n - end_count; i < n; ++i)
+        {
             f(i);
+        }
     }
 };
 
@@ -294,19 +300,27 @@ struct TensorPrinter
         const auto ck_value = *static_cast<const CKType*>(value);
 
         if constexpr(DT == DataType::I32 || DT == DataType::I8 || DT == DataType::U8)
+        {
             ss << ck_value;
+        }
         else if constexpr(DT == DataType::FP64 || DT == DataType::FP32)
+        {
             ss << std::fixed << std::setprecision(config.float_precision) << ck_value;
+        }
         else if constexpr(DT == DataType::FP16 || DT == DataType::BF16 || DT == DataType::FP8 ||
                           DT == DataType::BF8)
+        {
             ss << std::fixed
                << std::setprecision(config.float_precision)
                // Note: We are using CK types here (cpp_type_t uses DataTypeToCK), so
                // use CK's type_convert function.
                << ::ck::type_convert<float>(ck_value);
+        }
         else
+        {
             // TODO: Tuple types? Currently not implemented in DataTypeToCK...
             static_assert(false, "stringify_value unsupported data type, please implement");
+        }
     }
 
     /// @brief Print the value at an index to a stream.
@@ -469,12 +483,16 @@ struct TensorPrinter
 
                     // Print an extra separating line between two slices
                     if(outer_flat_index != 0)
+                    {
                         stream.msg('\n');
+                    }
 
                     // Print an information header about the current slice
                     stream.msg("Tensor \"", name, "\", slice [");
                     for(auto x : outer_index)
+                    {
                         stream.msg(x, ", ");
+                    }
                     stream.msg(":, :]\n");
 
                     // And print is as matrix

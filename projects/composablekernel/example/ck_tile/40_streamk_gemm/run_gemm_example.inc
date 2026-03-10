@@ -178,7 +178,9 @@ int runGemmExampleWithLayouts(int argc,
 {
     auto [result, arg_parser] = createArgs(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     static_assert(!GemmConfiguration::PRESHUFFLE, "Not implemented");
     static_assert(!GemmConfiguration::USE_STRUCTURED_SPARSITY, "Not implemented");

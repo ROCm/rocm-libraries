@@ -1283,9 +1283,11 @@ struct DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffleV3
             return arg->GetWorkspaceSizeBytes();
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffleV3::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(BaseArgument* p_arg,
@@ -1298,9 +1300,11 @@ struct DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffleV3
             p_arg_->p_workspace_ = p_workspace;
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffleV3::Argument structure!");
+        }
     }
 
 #ifdef CK_EXPERIMENTAL_BUILDER

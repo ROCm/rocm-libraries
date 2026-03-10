@@ -438,7 +438,9 @@ TEST(BF6, TestAllValues)
     const bool ck_logging = ck::EnvIsEnabled(CK_ENV(CK_LOGGING));
 
     if(ck_logging)
+    {
         printf("BF6 Table\n");
+    }
     ck::static_for<0, 64, 1>{}([&](auto i) {
         float fp = type_convert<float>(bf6_t(e3m2BitsOCP[i]));
         ASSERT_EQ(fp, e3m2ValuesOCP[i]);

@@ -272,11 +272,17 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
             if(j == 0)
                 ;
             else if(j == 1)
+            {
                 inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+            }
             else if(j == 2)
+            {
                 inst_idx = mfma_perM_perK - 1;
+            }
             else
+            {
                 inst_idx = mfma_perM_perK - j;
+            }
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -431,7 +437,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -454,7 +462,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
         }
         // Add Aload when Aload data > needed
         if(Aload_num_perK == 0)
+        {
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+        }
         __builtin_amdgcn_sched_barrier(0);
     }
 
@@ -496,7 +506,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -526,7 +538,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
+                {
                     dsread_perM = dsread_per_wg;
+                }
 
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }

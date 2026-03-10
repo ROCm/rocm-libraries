@@ -14,7 +14,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_KN, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_NK, SmallM)
@@ -28,7 +30,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_NK, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_KM_KN, SmallM)
@@ -74,7 +78,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_KN, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_NK, MidLargeM)
@@ -88,7 +94,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_NK, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_KM_KN, MidLargeM)
@@ -134,7 +142,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_KN, PaddK)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_NK, PaddK)
@@ -148,7 +158,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_NK, PaddK)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_KM_KN, PaddK)
@@ -194,7 +206,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_KN, Regular)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_NK, Regular)
@@ -208,7 +222,9 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_NK, Regular)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmUniversal_FP16_KM_KN, Regular)

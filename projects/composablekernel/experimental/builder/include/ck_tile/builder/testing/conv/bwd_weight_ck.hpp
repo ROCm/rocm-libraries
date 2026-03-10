@@ -201,7 +201,9 @@ template <auto SIGNATURE>
                                      args.k_batch);
 
     if(!conv.IsSupportedArgument(ck_args))
+    {
         return RunResult::not_supported("invalid ck arguments");
+    }
 
     return RunResult::from_runtime(conv.MakeInvoker().Run(ck_args, {}));
 }
@@ -268,7 +270,9 @@ template <auto SIGNATURE>
                                      args.k_batch);
 
     if(!conv.IsSupportedArgument(ck_args))
+    {
         return RunResult::not_supported("invalid ck arguments");
+    }
 
     return RunResult::from_runtime(conv.MakeInvoker().Run(ck_args, {}));
 }

@@ -70,6 +70,7 @@ struct BlockwiseGemmXdlops_pipeline_base
 
     static constexpr index_t KGroup = []() {
         if constexpr(is_same_v<remove_cvref_t<ComputeDataType>, f8_t>)
+        {
             // On gfx950, we have mfma that required 32 f8 elements as input,
             // splited into 2 groups of 16 f8 elements.
             // the 2 groups is not contiguous in the B preshuffed layout.
@@ -79,8 +80,11 @@ struct BlockwiseGemmXdlops_pipeline_base
                     (MPerXDL == 32 && MPerXDL == 32 && xdlops_gemm.KPerXdlops == 64))
                        ? 2
                        : 1;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     using HotLoopInstList =

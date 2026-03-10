@@ -136,7 +136,9 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
 
     // Don't create reference if we're only listing instances
     if(list_instances)
+    {
         do_verification = 0;
+    }
 
     // Initialize tensors based on do_verification:
     // - do_verification=2: GPU-side initialization

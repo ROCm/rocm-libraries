@@ -54,14 +54,22 @@ constexpr index_t get_k_warp_tile()
     constexpr bool is_8bit_float =
         std::is_same_v<PrecType, fp8_t> || std::is_same_v<PrecType, bf8_t>;
     if constexpr(M_Warp_Tile == 32)
+    {
         return is_8bit_float ? 64 : 16;
+    }
     else
+    {
         return is_8bit_float ? 128 : 32;
+    }
 #else
     if constexpr(M_Warp_Tile == 32)
+    {
         return (sizeof(PrecType) == 2 || IsFlatMM == false) ? 16 : 32;
+    }
     else
+    {
         return (sizeof(PrecType) == 2 || IsFlatMM == false) ? 32 : 64;
+    }
 #endif
 #endif
 }

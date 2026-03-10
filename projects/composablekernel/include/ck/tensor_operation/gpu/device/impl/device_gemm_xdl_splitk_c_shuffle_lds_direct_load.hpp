@@ -205,10 +205,12 @@ struct DeviceGemmXdlSplitKCShuffle_LdsDirectLoad : public DeviceGemmSplitK<ALayo
 
             const auto Run = [&](const auto& kernel) {
                 if(kbatch > 1)
+                {
                     hipGetErrorString(hipMemsetAsync(karg.p_c_grid,
                                                      0,
                                                      karg.M * karg.N * sizeof(CDataType),
                                                      stream_config.stream_id_));
+                }
 
                 ave_time = launch_and_time_kernel(stream_config,
                                                   kernel,

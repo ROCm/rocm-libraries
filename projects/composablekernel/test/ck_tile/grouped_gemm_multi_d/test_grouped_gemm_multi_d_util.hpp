@@ -295,7 +295,9 @@ class TestCkTileGroupedGemmMultiD : public ::testing::Test
                     }
                 }
                 else
+                {
                     return stride;
+                }
             };
 
         std::vector<ck_tile::HostTensor<ADataType>> a_m_k_tensors;

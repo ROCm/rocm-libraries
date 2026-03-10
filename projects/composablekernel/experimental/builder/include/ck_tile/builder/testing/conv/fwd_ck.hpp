@@ -126,7 +126,9 @@ template <auto SIGNATURE>
     const auto output_desc = args.make_output_descriptor();
 
     if(args.k_batch != 1)
+    {
         return RunResult::not_supported("ck fwd does not support k_batch != 1");
+    }
 
     auto ck_args = conv.MakeArgument(inputs.input,
                                      inputs.weight,
@@ -149,7 +151,9 @@ template <auto SIGNATURE>
                                      args.cde_elementwise_op);
 
     if(!conv.IsSupportedArgument(ck_args))
+    {
         return RunResult::not_supported("unsupported ck arguments");
+    }
 
     return RunResult::from_runtime(conv.MakeInvoker().Run(ck_args, s_conf));
 }

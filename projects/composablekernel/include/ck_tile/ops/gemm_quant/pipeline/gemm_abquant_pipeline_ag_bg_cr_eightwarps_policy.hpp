@@ -84,9 +84,13 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     template <bool swap_warp_group>
     static constexpr inline auto warp_groups_transform = []() {
         if constexpr(swap_warp_group)
+        {
             return make_functor_transform(swap_warp_t{}, number<KWarps>{});
+        }
         else
+        {
             return make_pass_through_transform(number<KWarps>{});
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeAQ() { return 1; }
@@ -245,11 +249,15 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     CK_TILE_DEVICE static constexpr auto MakeAsyncLoadBDramWindow(const WindowTmp& window_tmp)
     {
         if constexpr(!PreshuffleB)
+        {
             return MakeAsyncLoadADramWindow(window_tmp);
+        }
         else
+        {
             return make_tile_window(window_tmp.get_bottom_tensor_view(),
                                     number_tuple<NPerBlock / WarpTileN, KPerBlock * WarpTileN>{},
                                     window_tmp.get_window_origin());
+        }
     }
 
     template <index_t MNPerBlock, index_t warp_groups_>
@@ -310,7 +318,9 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
         if constexpr(!PreshuffleB)
+        {
             return MakeABLdsBlockDescriptor_<NPerBlock, 2>();
+        }
         else
         {
             constexpr index_t K1_ = warp_size;                        // 64
@@ -335,7 +345,9 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     CK_TILE_DEVICE static constexpr auto MakeBLdsReadBlockDescriptor()
     {
         if constexpr(!PreshuffleB)
+        {
             return MakeABLdsBlockDescriptor_<NPerBlock, 2>();
+        }
         else
         {
             constexpr index_t K1_ = warp_size / WarpTileN; // 4

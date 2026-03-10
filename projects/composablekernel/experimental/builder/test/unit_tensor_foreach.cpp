@@ -269,7 +269,9 @@ TEST(TensorForeach, CopyTensor)
                             const auto actual   = reinterpret_cast<const Counter*>(dst)[offset];
 
                             if(expected != actual)
+                            {
                                 atomicAdd(invalid, 1);
+                            }
                         });
 
     Counter invalid = 0;
@@ -313,7 +315,9 @@ TEST(TensorForeach, FlatTensorIterator)
                             const auto flat_index = ckt::calculate_offset(index, packed_strides);
                             const auto offset     = ckt::calculate_offset(index, strides);
                             if(iterator[flat_index] != data[offset])
+                            {
                                 atomicAdd(invalid, 1);
+                            }
                         });
 
     Counter invalid = 0;

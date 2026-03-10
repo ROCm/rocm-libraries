@@ -403,15 +403,21 @@ struct ABQuantGemmPipelineAgBgCrEightWarps : public BaseGemmPipelineAgBgCrCompV3
             load_global(0);
         }
         if(is_pong)
+        {
             load_local(1);
+        }
         s_waitcnt</*vmcnt*/ AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
         if(is_pong)
+        {
             calc_gemm(1);
+        }
         if constexpr(N_LOOP >= 2)
+        {
             move_global();
+        }
         s_waitcnt</*vmcnt*/ 0>();
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);

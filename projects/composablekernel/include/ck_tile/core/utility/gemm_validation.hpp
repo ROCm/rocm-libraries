@@ -38,11 +38,17 @@ inline void validate_gemm_stride(std::string a_layout,
 {
     // set default stride
     if(Stride_A <= 0)
+    {
         Stride_A = (a_layout == "R") ? K : M;
+    }
     if(Stride_B <= 0)
+    {
         Stride_B = (b_layout == "R") ? N : K;
+    }
     if(Stride_C <= 0)
+    {
         Stride_C = (c_layout == "R") ? N : M;
+    }
 
     validate_stride(a_layout, M, K, Stride_A, "Stride_A");
     validate_stride(b_layout, K, N, Stride_B, "Stride_B");

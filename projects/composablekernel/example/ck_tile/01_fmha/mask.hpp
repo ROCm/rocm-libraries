@@ -30,11 +30,17 @@ struct mask_info
     void serialize(std::ostream& os) const
     {
         if(type == mask_enum::no_mask)
+        {
             os << "n";
+        }
         else if(type == mask_enum::mask_top_left)
+        {
             os << "t(" << left << ":" << right << ")";
+        }
         else if(type == mask_enum::mask_bottom_right)
+        {
             os << "b(" << left << ":" << right << ")";
+        }
         else
         {
             os << "g(" << y << ":" << x << ")";
@@ -181,7 +187,9 @@ struct mask_info
     std::size_t get_unmaskarea() const
     {
         if(type == mask_enum::no_mask)
+        {
             return static_cast<std::size_t>(seqlen_q) * seqlen_k;
+        }
         std::size_t area = 0;
         for(ck_tile::index_t i_y = 0; i_y < seqlen_q; ++i_y)
         {

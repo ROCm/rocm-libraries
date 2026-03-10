@@ -147,7 +147,9 @@ int main(int argc, char* argv[])
     {
         auto [result, parser] = create_args(argc, argv);
         if(!result)
+        {
             return EXIT_FAILURE;
+        }
 
         benchmark_single(parser);
         return 0;

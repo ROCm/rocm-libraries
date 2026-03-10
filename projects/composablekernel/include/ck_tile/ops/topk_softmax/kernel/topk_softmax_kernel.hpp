@@ -94,7 +94,9 @@ struct TopkSoftmaxKernel
         index_t block_row_id = static_cast<index_t>(blockIdx.x * Problem::RowsPerBlock);
 
         if(block_row_id > kargs.num_rows)
+        {
             return;
+        }
 
         index_t block_os_inp = amd_wave_read_first_lane(block_row_id * kargs.stride_input);
         index_t block_os_out = amd_wave_read_first_lane(block_row_id * kargs.stride_output);

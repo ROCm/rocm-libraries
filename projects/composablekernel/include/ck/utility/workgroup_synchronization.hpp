@@ -26,7 +26,9 @@ static __device__ void gms_init(int NumWarps, int* p_control_bits)
     regs.two32[1] = NumWarps;
 
     if(threadIdx.x == 0)
+    {
         atomicCAS(reinterpret_cast<unsigned long*>(p_control_bits), 0, regs.one64);
+    }
 };
 
 // all the workgroups in the synchronization group is supposed to call this function
@@ -42,7 +44,9 @@ static __device__ void gms_barrier(int* p_control_bits)
             const int r0 = __atomic_load_n(&p_control_bits[0], __ATOMIC_RELAXED);
 
             if(r0 == BarrierInitFlag)
+            {
                 break;
+            }
 
         } while(true);
 
@@ -55,7 +59,9 @@ static __device__ void gms_barrier(int* p_control_bits)
             const int r1 = __atomic_load_n(&p_control_bits[1], __ATOMIC_RELAXED);
 
             if(r1 == 0)
+            {
                 break;
+            }
 
         } while(true);
     };
@@ -68,7 +74,9 @@ static __device__ void gms_reset(int* p_control_bits)
 {
     // reset the barrier object
     if(threadIdx.x == 0)
+    {
         (void)atomicCAS(&p_control_bits[0], BarrierInitFlag, 0);
+    }
 };
 
 } // namespace ck

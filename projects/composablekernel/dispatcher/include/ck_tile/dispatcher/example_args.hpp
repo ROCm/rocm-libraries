@@ -134,7 +134,9 @@ class ExampleArgs
     {
         std::string val = get(name);
         if(val.empty())
+        {
             return default_val;
+        }
         try
         {
             return std::stoi(val);
@@ -150,7 +152,9 @@ class ExampleArgs
     {
         std::string val = get(name);
         if(val.empty())
+        {
             return default_val;
+        }
         try
         {
             return std::stof(val);
@@ -184,7 +188,9 @@ class ExampleArgs
         for(const auto& name : order_)
         {
             if(name == "-h")
+            {
                 continue; // Skip -h, show --help only
+            }
             max_len = std::max(max_len, name.length());
         }
 
@@ -192,7 +198,9 @@ class ExampleArgs
         for(const auto& name : order_)
         {
             if(name == "-h")
+            {
                 continue;
+            }
 
             std::cout << "  " << std::left << std::setw(max_len + 2) << name;
 

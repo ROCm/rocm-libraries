@@ -62,19 +62,33 @@ inline std::string arch_to_string(GpuArch arch)
 inline GpuArch string_to_arch(const std::string& arch_str)
 {
     if(arch_str == "gfx908")
+    {
         return GpuArch::GFX_908;
+    }
     if(arch_str == "gfx90a")
+    {
         return GpuArch::GFX_90A;
+    }
     if(arch_str == "gfx942")
+    {
         return GpuArch::GFX_942;
+    }
     if(arch_str == "gfx950")
+    {
         return GpuArch::GFX_950;
+    }
     if(arch_str == "gfx1100")
+    {
         return GpuArch::GFX_1100;
+    }
     if(arch_str == "gfx1200")
+    {
         return GpuArch::GFX_1200;
+    }
     if(arch_str == "gfx1201")
+    {
         return GpuArch::GFX_1201;
+    }
     return GpuArch::UNKNOWN;
 }
 
@@ -127,21 +141,37 @@ inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch)
 inline std::size_t get_lds_capacity(Pipeline pipeline)
 {
     if(pipeline == Pipeline::Mem)
+    {
         return 65536;
+    }
     if(pipeline == Pipeline::CompV1)
+    {
         return 65536;
+    }
     if(pipeline == Pipeline::CompV2)
+    {
         return 65536;
+    }
     if(pipeline == Pipeline::CompV3)
+    {
         return 65536;
+    }
     if(pipeline == Pipeline::CompV4)
+    {
         return 32768;
+    }
     if(pipeline == Pipeline::CompV5)
+    {
         return 65536;
+    }
     if(pipeline == Pipeline::PreShuffleV1)
+    {
         return 32768;
+    }
     if(pipeline == Pipeline::PreShuffleV2)
+    {
         return 32768;
+    }
     return 65536; // Default
 }
 

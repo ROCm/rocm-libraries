@@ -1156,7 +1156,9 @@ struct FmhaFwdKernel
         bool has_padded_seqlen_k = false;
 
         if constexpr(kIsGroupMode)
+        {
             has_padded_seqlen_k = (kargs.seqlen_k_ptr != nullptr);
+        }
 
         if(has_padded_seqlen_k)
         {
@@ -1236,7 +1238,9 @@ struct FmhaFwdKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         if constexpr(kIsAvailable)
+        {
             run_(std::move(kargs));
+        }
     }
 
     CK_TILE_DEVICE void run_(Kargs kargs) const
@@ -1491,10 +1495,14 @@ struct FmhaFwdKernel
                 q_dram,
                 [&]() {
                     if constexpr(FmhaPipeline::kQLoadOnce)
+                    {
                         return make_tuple(number<FmhaPipeline::kM0>{},
                                           number<FmhaPipeline::kSubQKHeaddim>{});
+                    }
                     else
+                    {
                         return make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kK0>{});
+                    }
                 }(),
                 {i_m0, 0});
 
@@ -1627,6 +1635,7 @@ struct FmhaFwdKernel
 
             FmhaMask mask = [&]() {
                 if constexpr(kHasMask)
+                {
                     return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                         kargs.window_size_left,
                         kargs.window_size_right,
@@ -1634,8 +1643,11 @@ struct FmhaFwdKernel
                         kargs.seqlen_q,
                         kargs.seqlen_k,
                         kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+                }
                 else
+                {
                     return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+                }
             }();
 
             // WA i_batch capture structure binding before c++20
@@ -1712,11 +1724,15 @@ struct FmhaFwdKernel
 
                     auto o_acc_element_func = [&]() {
                         if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
+                        {
                             return make_composes(
                                 ck_tile::saturates<ck_tile::fp8_t>{},
                                 ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o});
+                        }
                         else
+                        {
                             return ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o};
+                        }
                     }();
                     return FmhaPipeline{}(q_dram_window,
                                           identity{}, // q_element_func
@@ -2354,10 +2370,14 @@ struct FmhaFwdKernel
                 q_dram,
                 [&]() {
                     if constexpr(FmhaPipeline::kQLoadOnce)
+                    {
                         return make_tuple(number<FmhaPipeline::kM0>{},
                                           number<FmhaPipeline::kSubQKHeaddim>{});
+                    }
                     else
+                    {
                         return make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kK0>{});
+                    }
                 }(),
                 {i_m0, 0});
 
@@ -2440,6 +2460,7 @@ struct FmhaFwdKernel
 
             FmhaMask mask = [&]() {
                 if constexpr(kHasMask)
+                {
                     return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                         kargs.window_size_left,
                         kargs.window_size_right,
@@ -2447,8 +2468,11 @@ struct FmhaFwdKernel
                         kargs.seqlen_q,
                         kargs.seqlen_k,
                         kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+                }
                 else
+                {
                     return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+                }
             }();
 
             // WA i_batch capture structure binding before c++20

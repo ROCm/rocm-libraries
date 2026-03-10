@@ -60,9 +60,13 @@ struct [[deprecated]] BlockFmhaPipelineQRKSVSFp8
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return kPadHeadDimV ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
 
     static constexpr index_t kAlignmentO =
@@ -74,7 +78,9 @@ struct [[deprecated]] BlockFmhaPipelineQRKSVSFp8
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kQKHeaddim <= 32)
@@ -88,9 +94,13 @@ struct [[deprecated]] BlockFmhaPipelineQRKSVSFp8
             else if constexpr(kQKHeaddim <= 128)
             {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -501,7 +511,9 @@ struct [[deprecated]] BlockFmhaPipelineQRKSVSFp8
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             tmp = tmp * descale_sv;
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {

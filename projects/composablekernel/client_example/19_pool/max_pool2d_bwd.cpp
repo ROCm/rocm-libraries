@@ -168,7 +168,9 @@ int main(int argc, char* argv[])
         std::string op_name = op_ptr->GetTypeString();
 
         if(op_ptr->IsSupportedArgument(argument_ptr.get()))
+        {
             invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, true});
+        }
     }
 
     // Run MaxPool bwd

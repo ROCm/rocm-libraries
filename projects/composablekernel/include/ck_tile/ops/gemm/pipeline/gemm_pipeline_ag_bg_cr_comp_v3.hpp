@@ -24,22 +24,36 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
         if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+        {
             return num_loop > 3;
+        }
         else
+        {
             return num_loop > PrefetchStages;
+        }
     }
 
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
         if(BlockHasHotloop(num_loop) || num_loop == 3)
+        {
             if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+            {
                 return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
+            }
             else
+            {
                 return TailNumber::Odd;
+            }
+        }
         else if(num_loop == 2)
+        {
             return TailNumber::Even;
+        }
         else
+        {
             return (Problem::BlockGemmShape::NumWarps == 8) ? TailNumber::One : TailNumber::Odd;
+        }
     }
 
     template <size_t I = 0, typename RunFunction>
@@ -54,6 +68,7 @@ struct BaseGemmPipelineAgBgCrCompV3
 
         constexpr auto scenarios = []() {
             if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+            {
                 return std::array<std::pair<bool, ck_tile::TailNumber>, 5>{
                     std::make_pair(false, TailNumber::One),  // 1 loop
                     std::make_pair(false, TailNumber::Even), // 2 loop
@@ -61,18 +76,25 @@ struct BaseGemmPipelineAgBgCrCompV3
                     std::make_pair(true, TailNumber::Even),  // 4 / 6 / 8 / ... loops
                     std::make_pair(true, TailNumber::Odd),   // 5 / 7 / 9 / ... loops
                 };
+            }
             else
+            {
                 return std::array<std::pair<bool, ck_tile::TailNumber>, 3>{
                     std::make_pair(true, TailNumber::Odd),
                     std::make_pair(false, TailNumber::Odd),
                     std::make_pair(false, TailNumber::Even),
                 };
+            }
         }();
         if(has_hot_loop_first_lane == scenarios[I].first &&
            tail_number_first_lane == scenarios[I].second)
+        {
             return run_func(bool_constant<scenarios[I].first>{}, constant<scenarios[I].second>{});
+        }
         else if constexpr(I + 1 < scenarios.size())
+        {
             return TailHandler<I + 1>(run_func, has_hot_loop, tail_number);
+        }
 
 #if defined(__HIP_DEVICE_COMPILE__)
         // This path should be unreachable in device code if tail_number is valid.

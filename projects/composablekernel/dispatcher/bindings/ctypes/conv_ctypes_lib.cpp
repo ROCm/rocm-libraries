@@ -41,7 +41,9 @@ extern "C" {
 int conv_dispatcher_init()
 {
     if(g_registry)
+    {
         return 0; // Already initialized
+    }
 
     g_registry   = std::make_shared<ConvRegistry>();
     g_dispatcher = std::make_shared<ConvDispatcher>(g_registry.get());
@@ -97,22 +99,30 @@ int conv_dispatcher_cleanup()
 int conv_dispatcher_get_kernel_count()
 {
     if(!g_registry)
+    {
         return 0;
+    }
     return static_cast<int>(g_registry->size());
 }
 
 int conv_dispatcher_get_kernel_name(int index, char* buffer, int buffer_size)
 {
     if(index < 0 || !buffer || buffer_size <= 0)
+    {
         return -1;
+    }
 
     if(!g_registry)
+    {
         return -1;
+    }
 
     // Use registry to get kernel names (they are registered with full names)
     const auto& kernels = g_registry->all_kernels();
     if(static_cast<size_t>(index) >= kernels.size())
+    {
         return -1;
+    }
 
     const auto* kernel = kernels[index];
     std::strncpy(buffer, kernel->name().c_str(), buffer_size - 1);
@@ -142,7 +152,9 @@ struct ConvProblemC
 int conv_dispatcher_is_supported(const ConvProblemC* prob)
 {
     if(!g_registry || !prob)
+    {
         return 0;
+    }
 
     ConvProblem problem;
     problem.N              = prob->N;
@@ -164,7 +176,9 @@ int conv_dispatcher_is_supported(const ConvProblemC* prob)
 int conv_dispatcher_select_kernel(const ConvProblemC* prob, char* kernel_name, int buffer_size)
 {
     if(!g_registry || !prob || !kernel_name || buffer_size <= 0)
+    {
         return -1;
+    }
 
     ConvProblem problem;
     problem.N              = prob->N;
@@ -181,7 +195,9 @@ int conv_dispatcher_select_kernel(const ConvProblemC* prob, char* kernel_name, i
 
     const auto* kernel = g_dispatcher->select(problem);
     if(!kernel)
+    {
         return -1;
+    }
 
     std::strncpy(kernel_name, kernel->name().c_str(), buffer_size - 1);
     kernel_name[buffer_size - 1] = '\0';
@@ -330,9 +346,13 @@ float conv_dispatcher_run(const void* input_ptr,
 {
     // Validate all required pointers before kernel launch
     if(!g_dispatcher || !prob)
+    {
         return -1.0f;
+    }
     if(!input_ptr || !weight_ptr || !output_ptr)
+    {
         return -1.0f; // Null data pointer would cause kernel crash
+    }
 
     // Build problem for kernel selection
     ConvProblem problem;
@@ -351,7 +371,9 @@ float conv_dispatcher_run(const void* input_ptr,
     // Select kernel
     const auto* kernel = g_dispatcher->select(problem);
     if(!kernel)
+    {
         return -1.0f;
+    }
 
     // Dispatch based on direction
     switch(prob->direction)

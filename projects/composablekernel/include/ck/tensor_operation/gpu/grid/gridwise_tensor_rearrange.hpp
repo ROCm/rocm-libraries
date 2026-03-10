@@ -139,10 +139,14 @@ struct GridwiseTensorRearrange
     {
         if(in_grid_desc.GetLength(I0) % MPerBlock != 0 ||
            in_grid_desc.GetLength(I1) % KPerBlock != 0)
+        {
             return false;
+        }
         if(out_grid_desc.GetLength(I0) % MPerBlock != 0 ||
            out_grid_desc.GetLength(I1) % KPerBlock != 0)
+        {
             return false;
+        }
         return true;
     }
 };

@@ -29,7 +29,9 @@ reference_softmax(const HostTensor<InputType>& x, HostTensor<OutputType>& y, ind
             for(index_t i = rank - 1; i >= 0; i--)
             {
                 if(i == target_dim)
+                {
                     continue;
+                }
                 t_[i] = r % x_len[i];
                 r     = r / x_len[i];
             }

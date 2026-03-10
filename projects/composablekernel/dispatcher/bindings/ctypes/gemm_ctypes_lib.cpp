@@ -140,23 +140,41 @@ int dispatcher_get_kernel_config(int* tile_m,
     auto& algo = key.algorithm;
 
     if(tile_m)
+    {
         *tile_m = algo.tile_shape.m;
+    }
     if(tile_n)
+    {
         *tile_n = algo.tile_shape.n;
+    }
     if(tile_k)
+    {
         *tile_k = algo.tile_shape.k;
+    }
     if(warp_tile_m)
+    {
         *warp_tile_m = algo.warp_tile_shape.m;
+    }
     if(warp_tile_n)
+    {
         *warp_tile_n = algo.warp_tile_shape.n;
+    }
     if(warp_tile_k)
+    {
         *warp_tile_k = algo.warp_tile_shape.k;
+    }
     if(warp_m)
+    {
         *warp_m = algo.wave_shape.m;
+    }
     if(warp_n)
+    {
         *warp_n = algo.wave_shape.n;
+    }
     if(warp_k)
+    {
         *warp_k = algo.wave_shape.k;
+    }
 
     return 0;
 }
@@ -241,11 +259,17 @@ int dispatcher_run_gemm(
 
     auto cleanup_gpu_mem = [&]() {
         if(A_dev)
+        {
             (void)hipFree(A_dev);
+        }
         if(B_dev)
+        {
             (void)hipFree(B_dev);
+        }
         if(C_dev)
+        {
             (void)hipFree(C_dev);
+        }
     };
 
     if(hipMalloc(&A_dev, M * K * sizeof(ADataType)) != hipSuccess)

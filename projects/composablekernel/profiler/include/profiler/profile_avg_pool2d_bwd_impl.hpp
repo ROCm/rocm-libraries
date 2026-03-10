@@ -24,9 +24,13 @@ std::vector<ck::index_t> f_tensor_strides_nchw(
     using namespace ck::literals;
     (void)N;
     if constexpr(ck::is_same<decltype(layout), ck::tensor_layout::convolution::NHWC>::value)
+    {
         return {C * H * W, 1_uz, W * C, C};
+    }
     else
+    {
         throw std::runtime_error("not supported yet");
+    }
 };
 
 template <typename DOutDataType, typename DInDataType, typename DOutLayout, typename DInLayout>

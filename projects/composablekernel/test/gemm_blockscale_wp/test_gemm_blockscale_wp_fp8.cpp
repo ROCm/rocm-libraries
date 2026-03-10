@@ -50,5 +50,7 @@ TYPED_TEST(TestGemmBlockScaleWP_FP8_MK_NK, Regular0)
     constexpr int K = 512;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }

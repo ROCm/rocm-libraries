@@ -72,7 +72,9 @@ constexpr bool is_valid_permutation()
     for(size_t i = 0; i < size; ++i)
     {
         if(Value[i] < 0 || Value[i] >= static_cast<decltype(Value[0])>(size))
+        {
             return false;
+        }
     }
 
     // Check all values are unique (valid permutation)
@@ -81,7 +83,9 @@ constexpr bool is_valid_permutation()
         for(size_t j = i + 1; j < size; ++j)
         {
             if(Value[i] == Value[j])
+            {
                 return false;
+            }
         }
     }
 

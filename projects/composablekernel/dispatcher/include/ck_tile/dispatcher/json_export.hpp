@@ -272,7 +272,9 @@ inline std::string export_registry_json(const Registry& registry, bool include_s
         for(const auto& [dtype, count] : by_datatype)
         {
             if(!first)
+            {
                 json << ",\n";
+            }
             json << "      \"" << dtype << "\": " << count;
             first = false;
         }
@@ -284,7 +286,9 @@ inline std::string export_registry_json(const Registry& registry, bool include_s
         for(const auto& [pipeline, count] : by_pipeline)
         {
             if(!first)
+            {
                 json << ",\n";
+            }
             json << "      \"" << pipeline << "\": " << count;
             first = false;
         }
@@ -296,7 +300,9 @@ inline std::string export_registry_json(const Registry& registry, bool include_s
         for(const auto& [scheduler, count] : by_scheduler)
         {
             if(!first)
+            {
                 json << ",\n";
+            }
             json << "      \"" << scheduler << "\": " << count;
             first = false;
         }
@@ -308,7 +314,9 @@ inline std::string export_registry_json(const Registry& registry, bool include_s
         for(const auto& [layout, count] : by_layout)
         {
             if(!first)
+            {
                 json << ",\n";
+            }
             json << "      \"" << layout << "\": " << count;
             first = false;
         }
@@ -320,7 +328,9 @@ inline std::string export_registry_json(const Registry& registry, bool include_s
         for(const auto& [arch, count] : by_gfx_arch)
         {
             if(!first)
+            {
                 json << ",\n";
+            }
             json << "      \"" << arch << "\": " << count;
             first = false;
         }

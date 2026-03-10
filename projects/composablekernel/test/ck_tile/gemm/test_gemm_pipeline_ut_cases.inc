@@ -128,7 +128,9 @@ TYPED_TEST(TEST_SUITE_NAME, Regular)
     constexpr int K = 512;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TEST_SUITE_NAME, LargeMatrix)

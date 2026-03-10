@@ -27,13 +27,21 @@ struct quant_scale_info
     void serialize(std::ostream& os) const
     {
         if(type == quant_scale_enum::no_scale)
+        {
             os << "n";
+        }
         else if(type == quant_scale_enum::pertensor)
+        {
             os << "pt";
+        }
         else if(type == quant_scale_enum::blockscale)
+        {
             os << "bs";
+        }
         else if(type == quant_scale_enum::kv_blockscale)
+        {
             os << "kvbs";
+        }
     }
 
     static quant_scale_info decode(std::string str)

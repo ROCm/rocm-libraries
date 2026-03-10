@@ -122,7 +122,9 @@ struct GenericPermute
         index_t id = blockIdx.x * BlockSize() + threadIdx.x;
 
         if(id >= kargs.num_elements)
+        {
             return;
+        }
 
         const auto perm_length =
             generate_tuple([&](auto I) { return kargs.perm_length[I]; }, number<kMaxRanks>{});

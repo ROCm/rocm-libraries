@@ -165,5 +165,7 @@ CK_TILE_HOST void test_convert()
     }
 
     for(int i = 0; i < N; ++i)
+    {
         EXPECT_EQ(ref[i], out[i]) << "i:" << i;
+    }
 }

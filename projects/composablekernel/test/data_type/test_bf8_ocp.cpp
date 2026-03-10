@@ -373,7 +373,9 @@ TEST(BF8OCP, HostFP32BF8Convert)
     for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
     {
         if(bf8_nan_ids.find(bf8_id) != bf8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
         auto idx        = bf8_uid;
@@ -442,7 +444,9 @@ TEST(BF8OCP, DeviceFP32BF8Convert)
     for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
     {
         if(bf8_nan_ids.find(bf8_id) != bf8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
         auto idx        = bf8_uid;
@@ -567,7 +571,9 @@ TEST(BF8OCP, HostFP16BF8Convert)
     for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
     {
         if(bf8_nan_ids.find(bf8_id) != bf8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
         auto idx        = bf8_uid;
@@ -637,7 +643,9 @@ TEST(BF8OCP, DeviceFP16BF8Convert)
     for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
     {
         if(bf8_nan_ids.find(bf8_id) != bf8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
         auto idx        = bf8_uid;
@@ -762,7 +770,9 @@ TEST(BF8OCP, HostBF16BF8Convert)
     for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
     {
         if(bf8_nan_ids.find(bf8_id) != bf8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
         auto idx        = bf8_uid;
@@ -833,7 +843,9 @@ TEST(BF8OCP, DeviceBF16BF8Convert)
     for(ck::index_t bf8_id = 0; bf8_id < 256; bf8_id++)
     {
         if(bf8_nan_ids.find(bf8_id) != bf8_nan_ids.end())
+        {
             continue;
+        }
 
         uint8_t bf8_uid = static_cast<uint8_t>(bf8_id);
         auto idx        = bf8_uid;

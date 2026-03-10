@@ -829,8 +829,10 @@ struct DeviceGroupedGemm_Xdl : public DeviceGroupedGemm<ALayout,
             return p_arg_->group_count_ * sizeof(GemmBiasTransKernelArg);
         }
         else
+        {
             throw std::runtime_error("The argument pointer is not an object of "
                                      "DeviceGroupedGemmMultipleDXdlCShuffle::Argument structure!");
+        }
     }
 
     size_t GetDeviceKernelArgSize(const BaseArgument* p_arg) const override

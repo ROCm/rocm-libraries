@@ -179,11 +179,17 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
             if(j == 0)
                 ;
             else if(j == 1)
+            {
                 inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+            }
             else if(j == 2)
+            {
                 inst_idx = mfma_perM_perK - 1;
+            }
             else
+            {
                 inst_idx = mfma_perM_perK - j;
+            }
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -334,7 +340,9 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -361,7 +369,9 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
         }
         // Add Aload when Aload data > needed
         if(Aload_num_perK == 0)
+        {
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+        }
         __builtin_amdgcn_sched_barrier(0);
     }
 
@@ -401,7 +411,9 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                 if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
                 {
                     if(mIter == MIterPerWarp - 1 - dswrite_mIter)
+                    {
                         dswrite_perM = 1;
+                    }
                 }
 
                 // Calculate buffer_load number per M
@@ -429,7 +441,9 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
+                {
                     dsread_perM = dsread_per_wg;
+                }
 
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }
@@ -585,7 +599,9 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
         move_tile_window(a_copy_dram_window, {0, kKPerBlock});
 
         if constexpr(IsGateUpMode)
+        {
             static_assert(NIterPerWarp % 2 == 0);
+        }
         auto up_weight_stride = b_flat_dram_window.get_bottom_tensor_view()
                                     .get_tensor_descriptor()
                                     .get_lengths()[number<0>{}] /
@@ -597,18 +613,24 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                 b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
                 if constexpr(!IsGateUpMode)
+                {
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                }
                 else
                 {
                     if constexpr(nIter % 2 == 0)
+                    {
                         move_tile_window(
                             b_flat_dram_windows(nIter)(kIter),
                             {nIter / 2 * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                    }
                     else
+                    {
                         move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                          {nIter / 2 * NFlatPerBlockPerIter + up_weight_stride,
                                           kIter * KFlatPerBlockPerIter});
+                    }
                 }
                 b_warp_tensor_ping(nIter)(kIter) = load_tile(b_flat_dram_windows(nIter)(kIter));
             });
@@ -653,19 +675,25 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                     b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
                     if constexpr(!IsGateUpMode)
+                    {
                         move_tile_window(
                             b_flat_dram_windows(nIter)(kIter),
                             {nIter * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                    }
                     else
                     {
                         if constexpr(nIter % 2 == 0)
+                        {
                             move_tile_window(
                                 b_flat_dram_windows(nIter)(kIter),
                                 {nIter / 2 * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                        }
                         else
+                        {
                             move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                              {nIter / 2 * NFlatPerBlockPerIter + up_weight_stride,
                                               kIter * KFlatPerBlockPerIter});
+                        }
                     }
 
                     b_warp_tensor_pong(nIter)(kIter) = load_tile(b_flat_dram_windows(nIter)(kIter));
@@ -741,19 +769,25 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                     b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
                     if constexpr(!IsGateUpMode)
+                    {
                         move_tile_window(
                             b_flat_dram_windows(nIter)(kIter),
                             {nIter * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                    }
                     else
                     {
                         if constexpr(nIter % 2 == 0)
+                        {
                             move_tile_window(
                                 b_flat_dram_windows(nIter)(kIter),
                                 {nIter / 2 * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                        }
                         else
+                        {
                             move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                              {nIter / 2 * NFlatPerBlockPerIter + up_weight_stride,
                                               kIter * KFlatPerBlockPerIter});
+                        }
                     }
 
                     b_warp_tensor_ping(nIter)(kIter) = load_tile(b_flat_dram_windows(nIter)(kIter));
@@ -832,19 +866,25 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                     b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
                     if constexpr(!IsGateUpMode)
+                    {
                         move_tile_window(
                             b_flat_dram_windows(nIter)(kIter),
                             {nIter * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                    }
                     else
                     {
                         if constexpr(nIter % 2 == 0)
+                        {
                             move_tile_window(
                                 b_flat_dram_windows(nIter)(kIter),
                                 {nIter / 2 * NFlatPerBlockPerIter, kIter * KFlatPerBlockPerIter});
+                        }
                         else
+                        {
                             move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                              {nIter / 2 * NFlatPerBlockPerIter + up_weight_stride,
                                               kIter * KFlatPerBlockPerIter});
+                        }
                     }
 
                     b_warp_tensor_pong(nIter)(kIter) = load_tile(b_flat_dram_windows(nIter)(kIter));

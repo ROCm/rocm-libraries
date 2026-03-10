@@ -79,7 +79,9 @@ struct AccumulateWithIndexAndNanCheck<false, ReduceOperation, AccDataType, Index
         ReduceOperation{}(accuVal, currVal, changed);
 
         if(changed)
+        {
             accuIndex = currIndex;
+        }
     };
 };
 
@@ -106,7 +108,9 @@ struct AccumulateWithIndexAndNanCheck<true, ReduceOperation, AccDataType, IndexD
             ReduceOperation{}(accuVal, currVal, changed);
 
             if(changed)
+            {
                 accuIndex = currIndex;
+            }
         }
     };
 };

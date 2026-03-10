@@ -318,7 +318,9 @@ struct BlockFmhaFwdV3Pipeline
 
     static constexpr ck_tile::index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             return 2;
@@ -1281,7 +1283,9 @@ struct BlockFmhaFwdV3Pipeline
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

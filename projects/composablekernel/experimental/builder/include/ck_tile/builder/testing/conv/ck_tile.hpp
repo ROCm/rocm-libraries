@@ -53,7 +53,9 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     const dim3 blocks = Conv::BlockSize();
 
     if(!Conv::IsSupportedArgument(kargs))
+    {
         return RunResult::not_supported("unsupported ck_tile arguments");
+    }
 
     const std::size_t zeroing_size = std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
                                                      std::end(kargs.wei_g_k_c_xs_lengths.data),

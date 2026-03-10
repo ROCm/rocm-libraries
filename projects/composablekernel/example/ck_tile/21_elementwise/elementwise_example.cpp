@@ -37,7 +37,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     // If stride is negative (default -1), set it to N, assuming a dense row-major layout.
     if(stride < 0)
+    {
         stride = N;
+    }
     int do_validation = arg_parser.get_int("v");
     int warmup        = arg_parser.get_int("warmup");
     int repeat        = arg_parser.get_int("repeat");
@@ -131,7 +133,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
     // Compute flattened size
     ck_tile::index_t total_elements = 1;
     for(auto d : shape)
+    {
         total_elements *= d;
+    }
 
     // kBlockSize: The number of work items in a GPU workgroup (thread block).
     // This is often a multiple of the wavefront size, 64 on CDNA.
@@ -215,7 +219,9 @@ int main(int argc, char* argv[])
     ck_tile::ArgParser arg_parser;
     std::tie(result, arg_parser) = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     try
     {

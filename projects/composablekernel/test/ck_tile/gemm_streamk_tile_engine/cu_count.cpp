@@ -32,11 +32,15 @@ int get_cu_count()
     const hipError_t device_status = hipGetDevice(&dev);
 
     if(has_error(device_status))
+    {
         return 0;
+    }
 
     const hipError_t prop_status = hipGetDeviceProperties(&dev_prop, dev);
     if(has_error(prop_status))
+    {
         return 0;
+    }
 
     return dev_prop.multiProcessorCount;
 }

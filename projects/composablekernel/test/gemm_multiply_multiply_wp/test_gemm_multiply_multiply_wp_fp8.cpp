@@ -53,7 +53,9 @@ TYPED_TEST(TestGemmMultiplyMultiplyWP_FP8_MK_NK, Regular0)
     constexpr int K = 2048;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TestGemmMultiplyMultiplyWP_FP8_MK_NK, Regular1)
@@ -63,7 +65,9 @@ TYPED_TEST(TestGemmMultiplyMultiplyWP_FP8_MK_NK, Regular1)
     constexpr int K = 4096;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TestGemmMultiplyMultiplyWP_FP8_MK_NK, Regular2)
@@ -73,5 +77,7 @@ TYPED_TEST(TestGemmMultiplyMultiplyWP_FP8_MK_NK, Regular2)
     constexpr int K = 2048;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K);
+    }
 }

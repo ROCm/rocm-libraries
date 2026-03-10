@@ -118,8 +118,10 @@ struct UniversalInvoker
 
         auto clear_gemm_output = [&]() {
             if(args.k_batch > 1)
+            {
                 hipGetErrorString(hipMemsetAsync(
                     args.e_ptr, 0, args.M * args.N * sizeof(CDataType), s.stream_id_));
+            }
         };
 
         if(s.flush_cache_)

@@ -427,9 +427,13 @@ struct DeviceAvgPool2dBwd_NHWC_NHWC : public DeviceAvgPoolBwd<2,
         for(int i = 0; i < Rank; ++i)
         {
             if(arg.dout_n_c_wos_strides_[i] == 1)
+            {
                 doutFastestDim = i;
+            }
             if(arg.din_n_c_wos_strides_[i] == 1)
+            {
                 dinFastestDim = i;
+            }
         }
         if(InSrcOutDstVectorSize != 1 && (dinFastestDim != 1 || doutFastestDim != 1))
         {
@@ -438,14 +442,20 @@ struct DeviceAvgPool2dBwd_NHWC_NHWC : public DeviceAvgPoolBwd<2,
         if(doutFastestDim == -1 || dinFastestDim == -1)
         {
             if constexpr(InSrcOutDstVectorSize != 1)
+            {
                 return false;
+            }
         }
         else
         {
             if(arg.dout_n_c_wos_lengths_[doutFastestDim] % InSrcOutDstVectorSize != 0)
+            {
                 return false;
+            }
             if(arg.din_n_c_wos_length_[dinFastestDim] % InSrcOutDstVectorSize != 0)
+            {
                 return false;
+            }
         }
         return true;
     }

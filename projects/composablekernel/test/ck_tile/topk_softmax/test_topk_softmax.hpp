@@ -208,7 +208,9 @@ bool test_topk_softmax(ck_tile::ArgParser args)
            activation.c_str(),
            ms);
     if(ms < 0)
+    {
         printf("not supported\n");
+    }
     fflush(stdout);
     if(ms < 0)
     {

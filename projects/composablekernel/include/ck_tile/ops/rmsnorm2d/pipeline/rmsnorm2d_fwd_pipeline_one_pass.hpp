@@ -37,9 +37,13 @@ struct Rmsnorm2dFwdPipelineOnePass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_op"; // block per row
+        }
         else
+        {
             return "wpr_op"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -120,7 +124,9 @@ struct Rmsnorm2dFwdPipelineOnePass
             [&](const auto& v_) { return rsqrtf(v_ / row_size + epsilon); }, square_sum);
 
         if constexpr(kSaveInvRms)
+        {
             store_tile(inv_rms_window, cast_tile<InvRmsDataType>(inv_rms));
+        }
 
         // rmsnorm computation
         auto rmsn = make_static_distributed_tensor<ComputeDataType>(x.get_tile_distribution());

@@ -338,9 +338,13 @@ struct RunResult
 inline std::ostream& operator<<(std::ostream& os, const RunResult& result)
 {
     if(result.error.has_value())
+    {
         return os << "invalid run (" << result.error.value() << ")";
+    }
     else
+    {
         return os << "successful run (" << result.runtime << " ms)";
+    }
 }
 
 /// @brief Invoke a device operation created by CK Builder.

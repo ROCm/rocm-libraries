@@ -186,7 +186,9 @@ int main(int argc, char* argv[])
                 in_tensor_size * sizeof(InDataType) + out_tensor_size * sizeof(OutDataType);
 
             if constexpr(OutputIndex)
+            {
                 num_bytes += out_tensor_size * sizeof(IndexDataType);
+            }
 
             float gb_per_sec = num_bytes / 1.E6 / ave_time;
 

@@ -72,9 +72,13 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+        {
             return kPadHeadDimV ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
         else
+        {
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+        }
     }();
 
     static constexpr index_t kAlignmentOacc =
@@ -85,7 +89,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 
     static constexpr index_t kBlockPerCu = []() {
         if constexpr(Problem::kBlockPerCu != -1)
+        {
             return Problem::kBlockPerCu;
+        }
         else
         {
             if constexpr(kQKHeaddim <= 32)
@@ -99,9 +105,13 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
             else if constexpr(kQKHeaddim <= 128)
             {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                {
                     return 1;
+                }
                 else
+                {
                     return 2;
+                }
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -234,9 +244,13 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
                 set_tile(m, sink_v * C_LOG2E * scale_s);
+            }
             else
+            {
                 set_tile(m, sink_v * C_LOG2E);
+            }
 #else
             set_tile(m, sink_v);
 #endif
@@ -251,8 +265,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         const auto q_origin          = q_dram_window.get_window_origin();
         const auto tile_range_result = [&mask, &q_origin, num_splits, i_split]() {
             if constexpr(kHasSink)
+            {
                 return mask.GetSinkTileRangeAlongX(
                     q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, num_splits, i_split);
+            }
             else
             {
                 auto [start, end] = mask.GetTileRangeAlongX(
@@ -297,9 +313,13 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                {
                     set_tile(m, sink_v * C_LOG2E * scale_s);
+                }
                 else
+                {
                     set_tile(m, sink_v * C_LOG2E);
+                }
 #else
                 set_tile(m, sink_v);
 #endif
@@ -342,10 +362,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 
         const index_t bias_n_offset = [&]() {
             if constexpr(kHasSink)
+            {
                 return kv_load_start;
+            }
             else
+            {
                 return logical_seqlen_k_start -
                        (physical_seqlen_k_start - aligned_physical_seqlen_k_start);
+            }
         }();
 
         auto bias_dram_window =
@@ -389,9 +413,13 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 
             const auto k_move_offset = [&]() {
                 if constexpr(kHasSink)
+                {
                     return is_sink_tile ? logical_seqlen_k_start - sink_seq_end + kN0 : kN0;
+                }
                 else
+                {
                     return kN0;
+                }
             }();
 
             auto physical_next_block_id_k =
@@ -803,7 +831,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
                 else
+                {
                     return 1 / l[i_idx];
+                }
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);

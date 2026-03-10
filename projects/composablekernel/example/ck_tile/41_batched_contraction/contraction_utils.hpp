@@ -203,10 +203,14 @@ void print_dims(const std::string& name,
     {
         std::cout << dims[i];
         if(i < dims.size() - 1)
+        {
             std::cout << ",";
+        }
     }
     std::cout << "] ";
     if(total != 0)
+    {
         std::cout << "(total=" << total << ")";
+    }
     std::cout << std::endl;
 }

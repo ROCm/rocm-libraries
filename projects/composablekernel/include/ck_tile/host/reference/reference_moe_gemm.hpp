@@ -109,9 +109,11 @@ __global__ void moe_gemm_kernel(const ck_tile::index_t* p_sorted_token_ids_,
                     scale_B_ptr[expert_id * scale_B_expert_stride + col / scale_granularity_n +
                                 (k / scale_granularity_k) * scale_B_stride];
                 if constexpr(MoeGemmKind == 1)
+                {
                     scale_B_up = scale_B_ptr[expert_id * scale_B_expert_stride +
                                              (col + problem_N) / scale_granularity_n +
                                              (k / scale_granularity_k) * scale_B_stride];
+                }
             }
 
             constexpr index_t packed_size_a = ck_tile::numeric_traits<ADataType>::PackedSize;
@@ -127,10 +129,12 @@ __global__ void moe_gemm_kernel(const ck_tile::index_t* p_sorted_token_ids_,
                                                                              : k * strideB + col);
             long b_index_up;
             if constexpr(MoeGemmKind == 1)
+            {
                 b_index_up = long(expert_id) * N * K +
                              ((std::is_same_v<LayoutB, tensor_layout::gemm::ColumnMajor>)
                                   ? (col + problem_N) * strideB + k
                                   : k * strideB + col + problem_N);
+            }
 
             AccDataType v_a;
             AccDataType v_b;
@@ -139,17 +143,25 @@ __global__ void moe_gemm_kernel(const ck_tile::index_t* p_sorted_token_ids_,
             {
                 const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(A[a_index / packed_size_a]);
                 if(k % 2 == 1)
+                {
                     v_a = fp32_val.hi;
+                }
                 else
+                {
                     v_a = fp32_val.lo;
+                }
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
                 const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a]);
                 if(k % 2 == 1)
+                {
                     v_a = fp32_val.hi;
+                }
                 else
+                {
                     v_a = fp32_val.lo;
+                }
             }
             else
             {
@@ -159,45 +171,65 @@ __global__ void moe_gemm_kernel(const ck_tile::index_t* p_sorted_token_ids_,
             {
                 const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(B[b_index / packed_size_b]);
                 if(k % 2 == 1)
+                {
                     v_b = fp32_val.hi;
+                }
                 else
+                {
                     v_b = fp32_val.lo;
+                }
                 if constexpr(MoeGemmKind == 1)
                 {
                     const fp32x2_t fp32_val_up =
                         pk_int4_t_to_fp32x2_t(B[b_index_up / packed_size_b]);
                     if(k % 2 == 1)
+                    {
                         v_b_up = fp32_val_up.hi;
+                    }
                     else
+                    {
                         v_b_up = fp32_val_up.lo;
+                    }
                 }
             }
             else if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
                 const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b], 1.0f);
                 if(k % 2 == 1)
+                {
                     v_b = fp32_val.hi;
+                }
                 else
+                {
                     v_b = fp32_val.lo;
+                }
                 if constexpr(MoeGemmKind == 1)
                 {
                     const fp32x2_t fp32_val_up =
                         pk_fp4_to_fp32x2(B[b_index_up / packed_size_b], 1.0f);
                     if(k % 2 == 1)
+                    {
                         v_b_up = fp32_val_up.hi;
+                    }
                     else
+                    {
                         v_b_up = fp32_val_up.lo;
+                    }
                 }
             }
             else
             {
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
                 if constexpr(MoeGemmKind == 1)
+                {
                     v_b_up = ck_tile::type_convert<AccDataType>(B[b_index_up]);
+                }
             }
             acc_temp += v_a * v_b;
             if constexpr(MoeGemmKind == 1)
+            {
                 acc_up_temp += v_a * v_b_up;
+            }
         }
 
         acc += acc_temp * scale_A * scale_B;
@@ -208,7 +240,9 @@ __global__ void moe_gemm_kernel(const ck_tile::index_t* p_sorted_token_ids_,
         {
             bias = expert_bias_ptr[expert_id * N + col];
             if constexpr(MoeGemmKind == 1)
+            {
                 bias_up = expert_bias_ptr[expert_id * N + col + problem_N];
+            }
         }
 
         int c_index = (std::is_same_v<LayoutC, tensor_layout::gemm::RowMajor>)

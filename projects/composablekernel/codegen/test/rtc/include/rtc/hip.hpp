@@ -33,7 +33,9 @@ struct buffer
     T& at(std::size_t i)
     {
         if(i >= size())
+        {
             throw std::runtime_error("Out of bounds");
+        }
         return data()[i];
     }
 
@@ -43,7 +45,9 @@ struct buffer
     const T& at(std::size_t i) const
     {
         if(i >= size())
+        {
             throw std::runtime_error("Out of bounds");
+        }
         return data()[i];
     }
     const T* data() const { return ptr.get(); }

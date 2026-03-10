@@ -300,11 +300,17 @@ struct ReferencePoolingFwd : public device::BaseOperator
         {
             // TODO - support generic pooling
             if constexpr(InOutRank == 5 && WindowRank == 3)
+            {
                 return RunPooling3dFwd(arg);
+            }
             else if constexpr(InOutRank == 4 && WindowRank == 2)
+            {
                 return RunPooling2dFwd(arg);
+            }
             else
+            {
                 throw std::runtime_error("Only support pooling3d or pooling2d so far");
+            }
         }
 
         float Run(const device::BaseArgument* p_arg,

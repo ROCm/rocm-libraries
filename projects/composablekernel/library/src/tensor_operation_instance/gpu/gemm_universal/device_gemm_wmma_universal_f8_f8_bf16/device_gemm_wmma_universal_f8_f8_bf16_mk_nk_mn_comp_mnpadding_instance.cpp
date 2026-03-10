@@ -15,7 +15,9 @@ void add_device_gemm_wmma_universal_f8_f8_bf16_mk_nk_mn_comp_mnpadding_instances
         instances)
 {
     if(ck::is_gfx11_supported())
+    {
         return;
+    }
 
     add_device_operation_instances(
         instances, device_gemm_wmma_universal_f8_f8_bf16_mk_nk_mn_comp_instances<GemmMNPadding>{});

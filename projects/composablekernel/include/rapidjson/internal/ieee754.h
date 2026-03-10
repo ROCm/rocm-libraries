@@ -62,11 +62,17 @@ class Double
     static int EffectiveSignificandSize(int order)
     {
         if(order >= -1021)
+        {
             return 53;
+        }
         else if(order <= -1074)
+        {
             return 0;
+        }
         else
+        {
             return order + 1074;
+        }
     }
 
     private:

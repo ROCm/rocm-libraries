@@ -518,9 +518,11 @@ struct DeviceGroupedConvBwdWeight_Explicit
             return arg->GetWorkspaceSizeBytes();
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle::Argument structure!");
+        }
     }
 
     void SetWorkSpacePointer(BaseArgument* p_arg,
@@ -533,9 +535,11 @@ struct DeviceGroupedConvBwdWeight_Explicit
             p_arg_->p_workspace_ = p_workspace;
         }
         else
+        {
             throw std::runtime_error(
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle::Argument structure!");
+        }
     }
 };
 

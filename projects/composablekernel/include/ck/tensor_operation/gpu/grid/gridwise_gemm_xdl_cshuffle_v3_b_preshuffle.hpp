@@ -279,16 +279,24 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
 
     static constexpr index_t APackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<ADataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     static constexpr index_t BPackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __host__ static auto CalculateGridSize(index_t M, index_t N, index_t KBatch)

@@ -21,7 +21,9 @@ int run_grouped_conv_fwd_bias_clamp_example(int argc, char* argv[])
 
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     std::string data_type  = arg_parser.get_str("prec");
     std::string in_layout  = arg_parser.get_str("in_layout");

@@ -539,9 +539,11 @@ float fmha_bwd_(const ck_tile::stream_config& s, fmha_bwd_args a)
     if constexpr(!std::is_same_v<T2, void>)
     {
         if(s.log_level_ > 0)
+        {
             std::cout << ", " << fmha_bwd_dot_do_o_get_name_<T0, Arch>() << "@"
                       << fmha_bwd_convert_dq_get_name_<T2, Arch>() << "@"
                       << fmha_bwd_dq_dk_dv_get_name_<T1, Arch>() << std::flush;
+        }
         return ck_tile::launch_kernel(
             s,
             [=](const ck_tile::stream_config& s_) { fmha_bwd_dot_do_o_oneshot_<T0, Arch>(s_, a); },
@@ -553,8 +555,10 @@ float fmha_bwd_(const ck_tile::stream_config& s, fmha_bwd_args a)
     else
     {
         if(s.log_level_ > 0)
+        {
             std::cout << ", " << fmha_bwd_dot_do_o_get_name_<T0, Arch>() << "@"
                       << fmha_bwd_dq_dk_dv_get_name_<T1, Arch>() << std::flush;
+        }
         return ck_tile::launch_kernel(
             s,
             [=](const ck_tile::stream_config& s_) { fmha_bwd_dot_do_o_oneshot_<T0, Arch>(s_, a); },

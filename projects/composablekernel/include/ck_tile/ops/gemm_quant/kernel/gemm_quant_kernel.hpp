@@ -1567,9 +1567,13 @@ struct QuantGemmKernel
     CK_TILE_DEVICE void operator()(const QuantGemmKernelArgs& kargs) const
     {
         if constexpr(!kIsAvailableV<GemmPipeline>)
+        {
             ignore = kargs;
+        }
         else
+        {
             Run_(kargs);
+        }
     }
 };
 

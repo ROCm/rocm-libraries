@@ -186,9 +186,13 @@ struct DeviceGemm_Xdl_CShuffleV3R1 : public DeviceGemmV2R1<ALayout,
         [](auto i) {
             using DLayout = remove_cvref_t<tuple_element_t<i.value, DsLayout>>;
             if constexpr(std::is_same<CLayout, DLayout>::value)
+            {
                 return Number<CShuffleBlockTransferScalarPerVector_NPerBlock>{};
+            }
             else
+            {
                 return Number<1>{};
+            }
         },
         Number<NumDTensor>{});
 

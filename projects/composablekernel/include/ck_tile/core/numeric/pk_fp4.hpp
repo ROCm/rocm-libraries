@@ -254,9 +254,13 @@ CK_TILE_HOST_DEVICE constexpr pk_fp4_raw_t pk_fp4_t::_unpack(number<I>) const
 {
     static_assert(I < 2, "Index is out of range.");
     if constexpr(I == 1)
+    {
         return (data >> 4);
+    }
     else
+    {
         return data & 0b00001111;
+    }
 }
 CK_TILE_ARITHMETIC_USING_FLOAT(CK_TILE_HOST_DEVICE, pk_fp4_t)
 // TODO: consider replace this macro to improve performance
@@ -273,23 +277,31 @@ CK_TILE_DEVICE T _from_f4(pk_fp4_raw_t src, float scale = 1.0f)
         return detail::lane0(tmp);
     }
     else if constexpr(std::is_same_v<T, fp32x2_t>)
+    {
         return __builtin_amdgcn_cvt_scalef32_pk_f32_fp4(src, scale, 0);
+    }
     else if constexpr(std::is_same_v<T, fp16_t>)
     {
         fp16x2_t tmp = __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(src, scale, 0);
         return detail::lane0(tmp);
     }
     else if constexpr(std::is_same_v<T, fp16x2_t>)
+    {
         return __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(src, scale, 0);
+    }
     else if constexpr(std::is_same_v<T, bf16_t>)
     {
         bf16x2_t tmp = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(src, scale, 0);
         return detail::lane0(tmp);
     }
     else if constexpr(std::is_same_v<T, bf16x2_t>)
+    {
         return __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(src, scale, 0);
+    }
     else
+    {
         static_assert(std::false_type::value, "Unsupported type.");
+    }
     return T{};
 }
 template <typename T>
@@ -301,20 +313,34 @@ CK_TILE_DEVICE pk_fp4_raw_t _to_f4(T src, float scale = 1.0f)
         pk_fp4_raw_t pf4[4];
     } cvt{0};
     if constexpr(std::is_same_v<T, fp32_t>)
+    {
         cvt.u32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_f32(cvt.u32, src, src, scale, 0);
+    }
     else if constexpr(std::is_same_v<T, fp32x2_t>)
+    {
         cvt.u32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_f32(
             cvt.u32, detail::lane0(src), detail::lane1(src), scale, 0);
+    }
     else if constexpr(std::is_same_v<T, fp16_t>)
+    {
         cvt.u32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_f16(cvt.u32, fp16x2_t{src, src}, scale, 0);
+    }
     else if constexpr(std::is_same_v<T, fp16x2_t>)
+    {
         cvt.u32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_f16(cvt.u32, src, scale, 0);
+    }
     else if constexpr(std::is_same_v<T, bf16_t>)
+    {
         cvt.u32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_bf16(cvt.u32, bf16x2_t{src, src}, scale, 0);
+    }
     else if constexpr(std::is_same_v<T, bf16x2_t>)
+    {
         cvt.u32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_bf16(cvt.u32, src, scale, 0);
+    }
     else
+    {
         static_assert(std::false_type::value, "Unsupported type.");
+    }
     return cvt.pf4[0];
 }
 

@@ -67,11 +67,17 @@ void alibi_traverse_with_slope(attention_score<DataType>& score,
 std::string alibi_mode_to_str(ck_tile::AlibiMode mode)
 {
     if(mode == ck_tile::AlibiMode::VERTICAL)
+    {
         return std::string("alibi_verti");
+    }
     else if(mode == ck_tile::AlibiMode::FROM_TOP_LEFT)
+    {
         return std::string("alibi_top-l");
+    }
     else if(mode == ck_tile::AlibiMode::FROM_BOTTOM_RIGHT)
+    {
         return std::string("alibi_bot-r");
+    }
     return "";
 }
 

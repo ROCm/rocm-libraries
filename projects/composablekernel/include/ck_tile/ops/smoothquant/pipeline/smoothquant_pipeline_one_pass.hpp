@@ -29,9 +29,13 @@ struct SmoothquantPipelineOnePass
 
     static constexpr const char* name = []() {
         if constexpr(kNeedCrossWarpSync)
+        {
             return "bpr_op"; // block per row
+        }
         else
+        {
             return "wpr_op"; // warp per row
+        }
     }();
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()

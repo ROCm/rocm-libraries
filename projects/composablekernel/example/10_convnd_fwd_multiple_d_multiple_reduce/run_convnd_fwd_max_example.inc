@@ -302,7 +302,9 @@ bool run_convnd_fwd_max(const ck::utils::conv::ConvParam& problem_size,
             pass && ck::utils::check_err(
                         r0_device, r0_host, "Error: incorrect results! (Matrix R0)", 1e-3f, 1e-3f);
         if(pass)
+        {
             std::cout << "Verification on CPU: PASS" << std::endl;
+        }
 
         return pass;
     }

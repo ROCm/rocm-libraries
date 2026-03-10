@@ -14,7 +14,9 @@ TYPED_TEST(TestGemmBScale_MK_NK, SmallM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmBScale_MK_NK, MidLargeM)
@@ -28,7 +30,9 @@ TYPED_TEST(TestGemmBScale_MK_NK, MidLargeM)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }
 
 TYPED_TEST(TestGemmBScale_MK_NK, Regular)
@@ -42,5 +46,7 @@ TYPED_TEST(TestGemmBScale_MK_NK, Regular)
     constexpr int StrideC = N;
 
     for(int M : Ms)
+    {
         this->Run(M, N, K, StrideA, StrideB, StrideC);
+    }
 }

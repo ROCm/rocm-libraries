@@ -158,7 +158,9 @@ set_tile(DstrTensors& dstr_tensor, number<v>, bool_constant<skip_subdword_opt> =
         using dvec_t = array<index_t, tensor_bytes / 4>;
         auto& tensor = reinterpret_cast<dvec_t&>(dstr_tensor.get_thread_buffer());
         for(auto i = 0; i < tensor.size(); i++)
+        {
             tensor.get(i) = v;
+        }
 #endif
     }
     else
@@ -353,12 +355,16 @@ CK_TILE_DEVICE auto cast_tile(const SrcTensor& src_tensor)
     if constexpr((std::is_same_v<DstType, fp8_t> || std::is_same_v<DstType, bf8_t>) &&
                  std::is_same_v<typename SrcTensor::DataType, float> &&
                  (SrcTensor::get_thread_buffer_size() % 4 == 0))
+    {
         return impl::cast_tile_pk_fp8_fp32<DstType, SrcTensor>(src_tensor);
+    }
 #if CK_TILE_USE_PK_FP16_TILE_CAST
     else if constexpr(std::is_same_v<DstType, fp16_t> &&
                       std::is_same_v<typename SrcTensor::DataType, float> &&
                       (SrcTensor::get_thread_buffer_size() % 2 == 0))
+    {
         return impl::cast_tile_pkrtz_fp16_fp32<DstType, SrcTensor>(src_tensor);
+    }
 #endif
 #if 0 // currently it causes extra spills in qr_async_vr pipeline of fmha_fwd
     else if constexpr((std::is_same_v<DstType, fp16_t> || std::is_same_v<DstType, bf16_t>) &&
@@ -368,10 +374,14 @@ CK_TILE_DEVICE auto cast_tile(const SrcTensor& src_tensor)
 #endif
 #if CK_TILE_USE_SUBDWORD_TILE_CAST
     else if constexpr(sizeof(DstType) < 4 || sizeof(typename SrcTensor::DataType) < 4)
+    {
         return impl::cast_tile_opt_subdword<DstType, SrcTensor>(src_tensor);
+    }
 #endif
     else
+    {
         return tile_elementwise_in(type_convert<DstType, typename SrcTensor::DataType>, src_tensor);
+    }
 }
 
 // no-op function for null_tensor arguments

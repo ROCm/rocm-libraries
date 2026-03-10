@@ -58,9 +58,13 @@ CK_TILE_HOST void reference_grouped_conv_fwd(const HostTensor<InDataType>& input
                 }
             }
             if constexpr(Tuple::size() > 0)
+            {
                 elfunc(v_acc, v_acc, ds.at(ck_tile::number<0>{})(g, n, k, wo));
+            }
             else
+            {
                 elfunc(v_acc, v_acc);
+            }
             OutDataType v_acc_out = ck_tile::type_convert<OutDataType>(v_acc);
             output(g, n, k, wo)   = v_acc_out;
         };
@@ -105,9 +109,13 @@ CK_TILE_HOST void reference_grouped_conv_fwd(const HostTensor<InDataType>& input
                 }
             }
             if constexpr(Tuple::size() > 0)
+            {
                 elfunc(v_acc, v_acc, ds.at(ck_tile::number<0>{})(g, n, k, ho, wo));
+            }
             else
+            {
                 elfunc(v_acc, v_acc);
+            }
             OutDataType v_acc_out   = ck_tile::type_convert<OutDataType>(v_acc);
             output(g, n, k, ho, wo) = v_acc_out;
         };
@@ -159,9 +167,13 @@ CK_TILE_HOST void reference_grouped_conv_fwd(const HostTensor<InDataType>& input
                 }
             }
             if constexpr(Tuple::size() > 0)
+            {
                 elfunc(v_acc, v_acc, ds.at(ck_tile::number<0>{})(g, n, k, d_o, ho, wo));
+            }
             else
+            {
                 elfunc(v_acc, v_acc);
+            }
             OutDataType v_acc_out        = ck_tile::type_convert<OutDataType>(v_acc);
             output(g, n, k, d_o, ho, wo) = v_acc_out;
         };

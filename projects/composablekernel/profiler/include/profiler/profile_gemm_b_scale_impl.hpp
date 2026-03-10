@@ -124,9 +124,13 @@ bool profile_gemm_b_scale_impl(int do_verification,
 
     static constexpr index_t BPackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     DeviceMem a_device_buf(sizeof(ADataType) * a_m_k.mDesc.GetElementSpaceSize());
@@ -178,9 +182,13 @@ bool profile_gemm_b_scale_impl(int do_verification,
                 ck::pk_i4_t i4x2 = b_k_n(k_shuffle, n).data;
                 int i4           = 0;
                 if(k_shuffle % 2 == 0)
+                {
                     i4 = (i4x2.data >> 0) & 0xf;
+                }
                 else
+                {
                     i4 = (i4x2.data >> 4) & 0xf;
+                }
                 i4  = i4 - 8;
                 v_b = ck::type_convert<float>(i4);
 

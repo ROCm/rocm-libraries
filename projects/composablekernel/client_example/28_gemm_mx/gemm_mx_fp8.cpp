@@ -81,9 +81,13 @@ void preShuffleScaleBuffer(ck::e8m0_bexp_t* src, ck::e8m0_bexp_t* dst, int MN, i
             // src[n * K + k] = ck::type_convert<ck::e8m0_bexp_t>(static_cast<float>(powf(2.0f, n2 +
             // k2 * MNXdlPack)));
             if constexpr(KLast)
+            {
                 dst[outputIndex] = src[n * K + k];
+            }
             else
+            {
                 dst[outputIndex] = src[k * MN + n];
+            }
         }
     }
 }
@@ -163,12 +167,18 @@ int main(int argc, char* argv[])
             {
                 // give a chance if stride is -1, return a default packed stride
                 if constexpr(std::is_same_v<decltype(layout), ck::tensor_layout::gemm::RowMajor>)
+                {
                     return static_cast<ck::index_t>(col);
+                }
                 else
+                {
                     return static_cast<ck::index_t>(row);
+                }
             }
             else
+            {
                 return static_cast<ck::index_t>(stride);
+            }
         };
 
     if(K % ScaleBlockSize != 0)

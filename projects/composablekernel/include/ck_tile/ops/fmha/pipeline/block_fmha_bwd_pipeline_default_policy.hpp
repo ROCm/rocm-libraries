@@ -1924,10 +1924,14 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     {
         constexpr index_t smem_size_bias = [&]() {
             if constexpr(Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
                 return sizeof(typename Problem::BiasDataType) *
                        MakeBiasLdsBlockDescriptor<Problem>().get_element_space_size();
+            }
             else
+            {
                 return 0;
+            }
         }();
         return smem_size_bias;
     }

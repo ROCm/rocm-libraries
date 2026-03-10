@@ -185,7 +185,9 @@ int main(int argc, char* argv[])
                 }
             }
             else
+            {
                 return static_cast<std::size_t>(stride);
+            }
         };
 
     StrideA = f_get_default_stride(M, K, StrideA, A0Layout{});

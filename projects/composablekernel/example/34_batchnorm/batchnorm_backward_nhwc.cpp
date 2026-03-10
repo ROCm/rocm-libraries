@@ -65,22 +65,30 @@ class BatchNormBwdArg
         {
             ch = getopt_long(argc, argv, "D:v:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inOutLengths = getTypeValuesFromString<size_t>(optarg);
 
                 if(inOutLengths.size() != 4)
+                {
                     throw std::runtime_error(
                         "NHWC tensor layout should have 4 length values specified!");
+                }
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
@@ -96,7 +104,9 @@ class BatchNormBwdArg
         };
 
         if(optind + 5 > argc)
+        {
             throw std::runtime_error("Invalid cmd-line arguments, more argumetns are needed!");
+        }
 
         data_type              = std::atoi(argv[optind++]);
         haveSavedMeanInvVar    = std::atoi(argv[optind++]);
@@ -340,7 +350,9 @@ bool bnorm_bwd_nhwc_test(bool do_verification,
         std::cout << "Perf: " << avg_time << " ms, " << gb_per_sec << " GB/s" << std::endl;
     }
     else
+    {
         (void)invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+    }
 
     bool pass = true;
 
@@ -418,75 +430,93 @@ int main(int argc, char* argv[])
         BatchNormBwdArg arg;
 
         if(arg.processArgs(argc, argv) < 0)
+        {
             return (-1);
+        }
 
         if(arg.data_type == 0)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_bwd_nhwc_test<ck::half_t, float, true>(arg.do_verification,
                                                                     arg.init_method,
                                                                     arg.time_kernel,
                                                                     arg.inOutLengths,
                                                                     arg.haveSavedMeanInvVar,
                                                                     epsilon);
+            }
             else
+            {
                 pass = bnorm_bwd_nhwc_test<ck::half_t, float, false>(arg.do_verification,
                                                                      arg.init_method,
                                                                      arg.time_kernel,
                                                                      arg.inOutLengths,
                                                                      arg.haveSavedMeanInvVar,
                                                                      epsilon);
+            }
         }
         else if(arg.data_type == 1)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_bwd_nhwc_test<float, float, true>(arg.do_verification,
                                                                arg.init_method,
                                                                arg.time_kernel,
                                                                arg.inOutLengths,
                                                                arg.haveSavedMeanInvVar,
                                                                epsilon);
+            }
             else
+            {
                 pass = bnorm_bwd_nhwc_test<float, float, false>(arg.do_verification,
                                                                 arg.init_method,
                                                                 arg.time_kernel,
                                                                 arg.inOutLengths,
                                                                 arg.haveSavedMeanInvVar,
                                                                 epsilon);
+            }
         }
         else if(arg.data_type == 5)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_bwd_nhwc_test<ck::bhalf_t, float, true>(arg.do_verification,
                                                                      arg.init_method,
                                                                      arg.time_kernel,
                                                                      arg.inOutLengths,
                                                                      arg.haveSavedMeanInvVar,
                                                                      epsilon);
+            }
             else
+            {
                 pass = bnorm_bwd_nhwc_test<ck::bhalf_t, float, false>(arg.do_verification,
                                                                       arg.init_method,
                                                                       arg.time_kernel,
                                                                       arg.inOutLengths,
                                                                       arg.haveSavedMeanInvVar,
                                                                       epsilon);
+            }
         }
         else if(arg.data_type == 6)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_bwd_nhwc_test<double, double, true>(arg.do_verification,
                                                                  arg.init_method,
                                                                  arg.time_kernel,
                                                                  arg.inOutLengths,
                                                                  arg.haveSavedMeanInvVar,
                                                                  epsilon);
+            }
             else
+            {
                 pass = bnorm_bwd_nhwc_test<double, double, false>(arg.do_verification,
                                                                   arg.init_method,
                                                                   arg.time_kernel,
                                                                   arg.inOutLengths,
                                                                   arg.haveSavedMeanInvVar,
                                                                   epsilon);
+            }
         }
     }
     else

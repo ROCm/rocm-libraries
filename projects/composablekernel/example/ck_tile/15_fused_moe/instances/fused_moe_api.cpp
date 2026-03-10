@@ -16,11 +16,17 @@ float fused_moe(fused_moe_traits t, fused_moe_args a, const ck_tile::stream_conf
 
     auto o_data_bytes = [&]() {
         if(t.prec_o == "fp32")
+        {
             return 4;
+        }
         else if(t.prec_o == "fp16" || t.prec_o == "bf16")
+        {
             return 2;
+        }
         else if(t.prec_o == "int8" || t.prec_o == "fp8")
+        {
             return 1;
+        }
         return 1;
     }();
 
@@ -91,7 +97,9 @@ float fused_moe(fused_moe_traits t, fused_moe_args a, const ck_tile::stream_conf
 
     // keep unsupported case return negative
     if(r0 < 0 || r1 < 0)
+    {
         return -1;
+    }
 
     return r;
 }

@@ -190,17 +190,29 @@ class Algorithm
     void auto_fill()
     {
         if(wave_m_ == ANY_INT)
+        {
             wave_m_ = 2;
+        }
         if(wave_n_ == ANY_INT)
+        {
             wave_n_ = 2;
+        }
         if(wave_k_ == ANY_INT)
+        {
             wave_k_ = 1;
+        }
         if(warp_m_ == ANY_INT)
+        {
             warp_m_ = 32;
+        }
         if(warp_n_ == ANY_INT)
+        {
             warp_n_ = 32;
+        }
         if(warp_k_ == ANY_INT)
+        {
             warp_k_ = 16;
+        }
     }
 };
 
@@ -285,7 +297,9 @@ class KernelSet
         for(const auto& d : decls_)
         {
             if(d.algorithm.needs_expansion())
+            {
                 return true;
+            }
         }
         return false;
     }
@@ -297,7 +311,9 @@ class KernelSet
         {
             os << "  - " << d.name();
             if(d.algorithm.needs_expansion())
+            {
                 os << " [expands]";
+            }
             os << "\n";
         }
     }
@@ -404,7 +420,9 @@ class Registry
             const auto& d = declarations_.at(key);
             std::cout << "  " << d.name();
             if(d.has_wildcards())
+            {
                 std::cout << " [wildcards]";
+            }
             std::cout << "\n";
         }
     }

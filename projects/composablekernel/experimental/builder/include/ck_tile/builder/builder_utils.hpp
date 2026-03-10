@@ -47,7 +47,9 @@ struct StringLiteral
     constexpr StringLiteral(const char (&str)[N])
     {
         for(size_t i = 0; i < N; ++i)
+        {
             data[i] = str[i];
+        }
     }
 
     constexpr bool operator==(const StringLiteral<N>& other) const

@@ -43,7 +43,9 @@ struct maxPoolFwdArgParser
             for(int i = 1; i < argc; i++)
             {
                 if(parse_opt(argc, argv, kv.first, i))
+                {
                     break;
+                }
             }
         }
     }

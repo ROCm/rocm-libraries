@@ -336,19 +336,27 @@ struct DeviceMultipleReduceThreadWise : public DeviceMultipleReduce<Rank,
             else
             {
                 if(pArg->inStrides_[NumInvariantDim - 1] != 1 && InSrcVectorSize != 1)
+                {
                     return (false);
+                }
 
                 if(pArg->inLengths_[NumInvariantDim - 1] % InSrcVectorSize != 0)
+                {
                     return (false);
+                }
             };
         }
         else
         {
             if(pArg->inStrides_[Rank - 1] != 1 && InSrcVectorSize != 1)
+            {
                 return (false);
+            }
 
             if(pArg->inLengths_[Rank - 1] % InSrcVectorSize != 0)
+            {
                 return (false);
+            }
         };
 
         // To improve
@@ -356,14 +364,20 @@ struct DeviceMultipleReduceThreadWise : public DeviceMultipleReduce<Rank,
         static_for<0, NumReduction, 1>{}([&](auto I) {
             if(pArg->outStridesArray_[I.value][NumOutputDim - 1] != 1 &&
                OutDstVectorSizeSeq::At(I) != 1)
+            {
                 valid = false;
+            }
 
             if(pArg->outLengths_[NumOutputDim - 1] % OutDstVectorSizeSeq::At(I) != 0)
+            {
                 valid = false;
+            }
         });
 
         if(!valid)
+        {
             return (false);
+        }
 
         return (true);
     };

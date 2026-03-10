@@ -268,9 +268,13 @@ struct DeviceReduceMultiBlock : public DeviceReduce<InDataType,
                 get_2d_lengths<Rank, NumReduceDim>(inLengths_);
 
             if constexpr(NumInvariantDim == 0)
+            {
                 invariant_lowest_length = 1;
+            }
             else
+            {
                 invariant_lowest_length = inLengths_[NumInvariantDim - 1];
+            }
 
             reduce_lowest_length = inLengths_[Rank - 1];
 
@@ -286,7 +290,9 @@ struct DeviceReduceMultiBlock : public DeviceReduce<InDataType,
 
                     // we want the blkGroupSize be not more than 128
                     if(testBlkGroupSize <= 128)
+                    {
                         break;
+                    }
 
                     iterations++;
                 };
@@ -439,7 +445,9 @@ struct DeviceReduceMultiBlock : public DeviceReduce<InDataType,
         if constexpr(use_multiblock)
         {
             if(static_cast<float>(pArg->beta_) != 0.0f)
+            {
                 return (false);
+            }
         };
 
         if constexpr(InSrcVectorDim == 0)
@@ -451,35 +459,49 @@ struct DeviceReduceMultiBlock : public DeviceReduce<InDataType,
             else
             {
                 if(pArg->inStrides_[NumInvariantDim - 1] != 1)
+                {
                     return (false);
+                }
 
                 if(pArg->invariant_lowest_length % InSrcVectorSize != 0)
+                {
                     return (false);
+                }
             };
         }
         else
         {
             if(pArg->inStrides_[Rank - 1] != 1)
+            {
                 return (false);
+            }
 
             if(pArg->reduce_lowest_length % InSrcVectorSize != 0)
+            {
                 return (false);
+            }
         };
 
         // To improve
         if(pArg->invariant_lowest_length % OutDstVectorSize != 0)
+        {
             return (false);
+        }
 
         if constexpr(use_multiblock)
         {
             // blkGroupSize of 1 should be handled by Blockwise path using
             // InMemoryDataOperationEnum::Set
             if(pArg->blkGroupSize == 1)
+            {
                 return (false);
+            }
 
             // This is very strong restriction, but needed to avoid some failure
             if(pArg->invariant_lowest_length % M_BlockTileSize != 0)
+            {
                 return (false);
+            }
         }
         else
         {

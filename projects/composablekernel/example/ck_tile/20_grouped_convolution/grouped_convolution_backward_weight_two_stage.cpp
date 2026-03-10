@@ -50,7 +50,9 @@ int main(int argc, char* argv[])
 
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     try
     {

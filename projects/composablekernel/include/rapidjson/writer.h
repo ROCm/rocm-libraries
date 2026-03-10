@@ -382,7 +382,9 @@ class Writer
         const char* end = internal::i32toa(i, buffer);
         PutReserve(*os_, static_cast<size_t>(end - buffer));
         for(const char* p = buffer; p != end; ++p)
+        {
             PutUnsafe(*os_, static_cast<typename OutputStream::Ch>(*p));
+        }
         return true;
     }
 
@@ -392,7 +394,9 @@ class Writer
         const char* end = internal::u32toa(u, buffer);
         PutReserve(*os_, static_cast<size_t>(end - buffer));
         for(const char* p = buffer; p != end; ++p)
+        {
             PutUnsafe(*os_, static_cast<typename OutputStream::Ch>(*p));
+        }
         return true;
     }
 
@@ -402,7 +406,9 @@ class Writer
         const char* end = internal::i64toa(i64, buffer);
         PutReserve(*os_, static_cast<size_t>(end - buffer));
         for(const char* p = buffer; p != end; ++p)
+        {
             PutUnsafe(*os_, static_cast<typename OutputStream::Ch>(*p));
+        }
         return true;
     }
 
@@ -412,7 +418,9 @@ class Writer
         char* end = internal::u64toa(u64, buffer);
         PutReserve(*os_, static_cast<size_t>(end - buffer));
         for(char* p = buffer; p != end; ++p)
+        {
             PutUnsafe(*os_, static_cast<typename OutputStream::Ch>(*p));
+        }
         return true;
     }
 
@@ -421,7 +429,9 @@ class Writer
         if(internal::Double(d).IsNanOrInf())
         {
             if(!(writeFlags & kWriteNanAndInfFlag) && !(writeFlags & kWriteNanAndInfNullFlag))
+            {
                 return false;
+            }
             if(writeFlags & kWriteNanAndInfNullFlag)
             {
                 PutReserve(*os_, 4);
@@ -445,7 +455,9 @@ class Writer
                 PutUnsafe(*os_, '-');
             }
             else
+            {
                 PutReserve(*os_, 8);
+            }
             PutUnsafe(*os_, 'I');
             PutUnsafe(*os_, 'n');
             PutUnsafe(*os_, 'f');
@@ -461,7 +473,9 @@ class Writer
         char* end = internal::dtoa(d, buffer, maxDecimalPlaces_);
         PutReserve(*os_, static_cast<size_t>(end - buffer));
         for(char* p = buffer; p != end; ++p)
+        {
             PutUnsafe(*os_, static_cast<typename OutputStream::Ch>(*p));
+        }
         return true;
     }
 
@@ -482,9 +496,13 @@ class Writer
         };
 
         if(TargetEncoding::supportUnicode)
+        {
             PutReserve(*os_, 2 + length * 6); // "\uxxxx..."
+        }
         else
+        {
             PutReserve(*os_, 2 + length * 12); // "\uxxxx\uyyyy..."
+        }
 
         PutUnsafe(*os_, '\"');
         GenericStringStream<SourceEncoding> is(str);
@@ -496,7 +514,9 @@ class Writer
                 // Unicode escaping
                 unsigned codepoint;
                 if(RAPIDJSON_UNLIKELY(!SourceEncoding::Decode(is, &codepoint)))
+                {
                     return false;
+                }
                 PutUnsafe(*os_, '\\');
                 PutUnsafe(*os_, 'u');
                 if(codepoint <= 0xD7FF || (codepoint >= 0xE000 && codepoint <= 0xFFFF))
@@ -546,7 +566,9 @@ class Writer
                               ? Transcoder<SourceEncoding, TargetEncoding>::Validate(is, *os_)
                               : Transcoder<SourceEncoding, TargetEncoding>::TranscodeUnsafe(is,
                                                                                             *os_))))
+            {
                 return false;
+            }
         }
         PutUnsafe(*os_, '\"');
         return true;
@@ -589,7 +611,9 @@ class Writer
                    !(writeFlags & kWriteValidateEncodingFlag
                          ? Transcoder<SourceEncoding, TargetEncoding>::Validate(is, *os_)
                          : Transcoder<SourceEncoding, TargetEncoding>::TranscodeUnsafe(is, *os_))))
+            {
                 return false;
+            }
         }
         return true;
     }
@@ -603,13 +627,19 @@ class Writer
             if(level->valueCount > 0)
             {
                 if(level->inArray)
+                {
                     os_->Put(','); // add comma if it is not the first element in array
-                else               // in object
+                }
+                else // in object
+                {
                     os_->Put((level->valueCount % 2 == 0) ? ',' : ':');
+                }
             }
             if(!level->inArray && level->valueCount % 2 == 0)
+            {
                 RAPIDJSON_ASSERT(
                     type == kStringType); // if it's in object, then even number should be a name
+            }
             level->valueCount++;
         }
         else
@@ -623,7 +653,9 @@ class Writer
     bool EndValue(bool ret)
     {
         if(RAPIDJSON_UNLIKELY(level_stack_.Empty())) // end of json text
+        {
             Flush();
+        }
         return ret;
     }
 
@@ -684,7 +716,9 @@ inline bool Writer<StringBuffer>::WriteDouble(double d)
         // Note: This code path can only be reached if (RAPIDJSON_WRITE_DEFAULT_FLAGS &
         // kWriteNanAndInfFlag).
         if(!(kWriteDefaultFlags & kWriteNanAndInfFlag))
+        {
             return false;
+        }
         if(kWriteDefaultFlags & kWriteNanAndInfNullFlag)
         {
             PutReserve(*os_, 4);
@@ -708,7 +742,9 @@ inline bool Writer<StringBuffer>::WriteDouble(double d)
             PutUnsafe(*os_, '-');
         }
         else
+        {
             PutReserve(*os_, 8);
+        }
         PutUnsafe(*os_, 'I');
         PutUnsafe(*os_, 'n');
         PutUnsafe(*os_, 'f');
@@ -731,10 +767,14 @@ template <>
 inline bool Writer<StringBuffer>::ScanWriteUnescapedString(StringStream& is, size_t length)
 {
     if(length < 16)
+    {
         return RAPIDJSON_LIKELY(is.Tell() < length);
+    }
 
     if(!RAPIDJSON_LIKELY(is.Tell() < length))
+    {
         return false;
+    }
 
     const char* p           = is.src_;
     const char* end         = is.head_ + length;
@@ -743,16 +783,22 @@ inline bool Writer<StringBuffer>::ScanWriteUnescapedString(StringStream& is, siz
     const char* endAligned =
         reinterpret_cast<const char*>(reinterpret_cast<size_t>(end) & static_cast<size_t>(~15));
     if(nextAligned > end)
+    {
         return true;
+    }
 
     while(p != nextAligned)
+    {
         if(*p < 0x20 || *p == '\"' || *p == '\\')
         {
             is.src_ = p;
             return RAPIDJSON_LIKELY(is.Tell() < length);
         }
         else
+        {
             os_->PutUnsafe(*p++);
+        }
+    }
 
     // The rest of string using SIMD
     static const char dquote[16] = {'\"',
@@ -828,7 +874,9 @@ inline bool Writer<StringBuffer>::ScanWriteUnescapedString(StringStream& is, siz
 #endif
             char* q = reinterpret_cast<char*>(os_->PushUnsafe(len));
             for(size_t i = 0; i < len; i++)
+            {
                 q[i] = p[i];
+            }
 
             p += len;
             break;
@@ -844,10 +892,14 @@ template <>
 inline bool Writer<StringBuffer>::ScanWriteUnescapedString(StringStream& is, size_t length)
 {
     if(length < 16)
+    {
         return RAPIDJSON_LIKELY(is.Tell() < length);
+    }
 
     if(!RAPIDJSON_LIKELY(is.Tell() < length))
+    {
         return false;
+    }
 
     const char* p           = is.src_;
     const char* end         = is.head_ + length;
@@ -856,16 +908,22 @@ inline bool Writer<StringBuffer>::ScanWriteUnescapedString(StringStream& is, siz
     const char* endAligned =
         reinterpret_cast<const char*>(reinterpret_cast<size_t>(end) & static_cast<size_t>(~15));
     if(nextAligned > end)
+    {
         return true;
+    }
 
     while(p != nextAligned)
+    {
         if(*p < 0x20 || *p == '\"' || *p == '\\')
         {
             is.src_ = p;
             return RAPIDJSON_LIKELY(is.Tell() < length);
         }
         else
+        {
             os_->PutUnsafe(*p++);
+        }
+    }
 
     // The rest of string using SIMD
     const uint8x16_t s0 = vmovq_n_u8('"');
@@ -906,7 +964,9 @@ inline bool Writer<StringBuffer>::ScanWriteUnescapedString(StringStream& is, siz
         { // some of characters is escaped
             char* q = reinterpret_cast<char*>(os_->PushUnsafe(len));
             for(size_t i = 0; i < len; i++)
+            {
                 q[i] = p[i];
+            }
 
             p += len;
             break;

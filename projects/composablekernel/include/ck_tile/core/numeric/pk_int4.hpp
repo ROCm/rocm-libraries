@@ -180,9 +180,13 @@ CK_TILE_HOST_DEVICE int8x2_t pk_int4_t_to_int8x2_t(const pk_int4_t& x)
     int8_t x_h = (x_u8 & 0xF0) >> 4;
 
     if(x_l & 0x08)
+    {
         x_l |= 0xF0;
+    }
     if(x_h & 0x08)
+    {
         x_h |= 0xF0;
+    }
 
 #ifdef CK_TILE_USE_PK4_LAYOUT_SHUFFLE
     int8x2_t res = {x_h, x_l};

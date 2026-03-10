@@ -83,22 +83,30 @@ class BatchNormFwdArg
         {
             ch = getopt_long(argc, argv, "D:v:", long_options, &option_index);
             if(ch == -1)
+            {
                 break;
+            }
             switch(ch)
             {
             case 'D':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 inOutLengths = getTypeValuesFromString<size_t>(optarg);
 
                 if(inOutLengths.size() != 4)
+                {
                     throw std::runtime_error(
                         "NHWC tensor layout should have 4 length values specified!");
+                }
                 break;
             case 'v':
                 if(!optarg)
+                {
                     throw std::runtime_error("Invalid option format!");
+                }
 
                 do_verification = static_cast<bool>(std::atoi(optarg));
                 break;
@@ -114,7 +122,9 @@ class BatchNormFwdArg
         };
 
         if(optind + 6 > argc)
+        {
             throw std::runtime_error("Invalid cmd-line arguments, more argumetns are needed!");
+        }
 
         data_type              = std::atoi(argv[optind++]);
         updateMovingAverage    = std::atoi(argv[optind++]);
@@ -124,7 +134,9 @@ class BatchNormFwdArg
         use_multiblock_welford = static_cast<bool>(std::atoi(argv[optind]));
 
         if(data_type != 0 && data_type != 1 && data_type != 3 && data_type != 5 && data_type != 6)
+        {
             return (-1);
+        }
 
         return (0);
     };
@@ -209,9 +221,13 @@ bool bnorm_fwd_nhwc_test(bool do_verification,
     else
     {
         if constexpr(std::is_same<InOutDataType, int8_t>::value)
+        {
             x.GenerateTensorValue(GeneratorTensor_2<InOutDataType>{-5, 5}, num_thread);
+        }
         else
+        {
             x.GenerateTensorValue(GeneratorTensor_3<InOutDataType>{-5.0f, 5.0f}, num_thread);
+        }
     };
 
     if(do_verification)
@@ -364,7 +380,9 @@ bool bnorm_fwd_nhwc_test(bool do_verification,
         std::cout << "Perf: " << avg_time << " ms, " << gb_per_sec << " GB/s" << std::endl;
     }
     else
+    {
         (void)invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+    }
 
     bool pass = true;
 
@@ -468,11 +486,14 @@ int main(int argc, char* argv[])
         BatchNormFwdArg arg;
 
         if(arg.processArgs(argc, argv) < 0)
+        {
             return (-1);
+        }
 
         if(arg.data_type == 0)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_fwd_nhwc_test<ck::half_t, float, true>(arg.do_verification,
                                                                     arg.init_method,
                                                                     arg.time_kernel,
@@ -481,7 +502,9 @@ int main(int argc, char* argv[])
                                                                     arg.saveMeanAndInvVariance,
                                                                     averageFactor,
                                                                     epsilon);
+            }
             else
+            {
                 pass = bnorm_fwd_nhwc_test<ck::half_t, float, false>(arg.do_verification,
                                                                      arg.init_method,
                                                                      arg.time_kernel,
@@ -490,10 +513,12 @@ int main(int argc, char* argv[])
                                                                      arg.saveMeanAndInvVariance,
                                                                      averageFactor,
                                                                      epsilon);
+            }
         }
         else if(arg.data_type == 1)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_fwd_nhwc_test<float, float, true>(arg.do_verification,
                                                                arg.init_method,
                                                                arg.time_kernel,
@@ -502,7 +527,9 @@ int main(int argc, char* argv[])
                                                                arg.saveMeanAndInvVariance,
                                                                averageFactor,
                                                                epsilon);
+            }
             else
+            {
                 pass = bnorm_fwd_nhwc_test<float, float, false>(arg.do_verification,
                                                                 arg.init_method,
                                                                 arg.time_kernel,
@@ -511,10 +538,12 @@ int main(int argc, char* argv[])
                                                                 arg.saveMeanAndInvVariance,
                                                                 averageFactor,
                                                                 epsilon);
+            }
         }
         else if(arg.data_type == 3)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_fwd_nhwc_test<int8_t, float, true>(arg.do_verification,
                                                                 arg.init_method,
                                                                 arg.time_kernel,
@@ -523,7 +552,9 @@ int main(int argc, char* argv[])
                                                                 arg.saveMeanAndInvVariance,
                                                                 averageFactor,
                                                                 epsilon);
+            }
             else
+            {
                 pass = bnorm_fwd_nhwc_test<int8_t, float, false>(arg.do_verification,
                                                                  arg.init_method,
                                                                  arg.time_kernel,
@@ -532,10 +563,12 @@ int main(int argc, char* argv[])
                                                                  arg.saveMeanAndInvVariance,
                                                                  averageFactor,
                                                                  epsilon);
+            }
         }
         else if(arg.data_type == 5)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_fwd_nhwc_test<ck::bhalf_t, float, true>(arg.do_verification,
                                                                      arg.init_method,
                                                                      arg.time_kernel,
@@ -544,7 +577,9 @@ int main(int argc, char* argv[])
                                                                      arg.saveMeanAndInvVariance,
                                                                      averageFactor,
                                                                      epsilon);
+            }
             else
+            {
                 pass = bnorm_fwd_nhwc_test<ck::bhalf_t, float, false>(arg.do_verification,
                                                                       arg.init_method,
                                                                       arg.time_kernel,
@@ -553,10 +588,12 @@ int main(int argc, char* argv[])
                                                                       arg.saveMeanAndInvVariance,
                                                                       averageFactor,
                                                                       epsilon);
+            }
         }
         else if(arg.data_type == 6)
         {
             if(arg.use_multiblock_welford)
+            {
                 pass = bnorm_fwd_nhwc_test<double, double, true>(arg.do_verification,
                                                                  arg.init_method,
                                                                  arg.time_kernel,
@@ -565,7 +602,9 @@ int main(int argc, char* argv[])
                                                                  arg.saveMeanAndInvVariance,
                                                                  averageFactor,
                                                                  epsilon);
+            }
             else
+            {
                 pass = bnorm_fwd_nhwc_test<double, double, false>(arg.do_verification,
                                                                   arg.init_method,
                                                                   arg.time_kernel,
@@ -574,6 +613,7 @@ int main(int argc, char* argv[])
                                                                   arg.saveMeanAndInvVariance,
                                                                   averageFactor,
                                                                   epsilon);
+            }
         }
     }
     else

@@ -200,7 +200,9 @@ struct AddRmsnorm2dRdquantFwd
                     tmp2_, make_tuple(number<Block_M>{}, number<Block_N>{}), {iM, 0});
             }
             else
+            {
                 return make_null_tile_window(make_tuple(number<Block_M>{}, number<Block_N>{}));
+            }
         }();
 
         auto yscale_window = [&]() {

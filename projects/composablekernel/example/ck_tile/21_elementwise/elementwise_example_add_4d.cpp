@@ -82,7 +82,9 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     ck_tile::index_t total_elements = 1;
     for(auto d : problem_shape)
+    {
         total_elements *= d;
+    }
 
     const ck_tile::index_t kBlockSize = Kernel::BlockSize();
 
@@ -161,7 +163,9 @@ int main(int argc, char* argv[])
     ck_tile::ArgParser arg_parser;
     std::tie(result, arg_parser) = create_args(argc, argv);
     if(!result)
+    {
         return -1;
+    }
 
     try
     {

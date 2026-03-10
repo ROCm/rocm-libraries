@@ -380,9 +380,13 @@ bool profile_gemm_universal_preshuffle_impl(int do_verification,
 
                 static constexpr index_t BPackedSize = []() {
                     if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                    {
                         return 2;
+                    }
                     else
+                    {
                         return 1;
+                    }
                 }();
 
                 std::size_t num_btype = sizeof(ADataType) * M * K +
@@ -456,7 +460,9 @@ bool profile_gemm_universal_preshuffle_impl(int do_verification,
               << " GB/s, " << best_op_name << std::endl;
 
     if(best_op_object_name)
+    {
         std::cout << best_op_object_name.value() << std::endl;
+    }
 
     return pass;
 }

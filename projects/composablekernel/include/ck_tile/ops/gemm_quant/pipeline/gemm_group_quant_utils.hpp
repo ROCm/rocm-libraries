@@ -31,7 +31,9 @@ CK_TILE_HOST_DEVICE static constexpr auto GetABQGlobalVectorLoadSize()
     for(const auto vec_size : candidates)
     {
         if(vec_size <= 0 || XPerTile % vec_size != 0 || elements_per_thread % vec_size != 0)
+        {
             continue;
+        }
         bool is_valid = (vec_size > 0) && (XPerTile % vec_size == 0) &&
                         (elements_per_thread % vec_size == 0) && vec_size != candidates[4];
         if(is_valid)

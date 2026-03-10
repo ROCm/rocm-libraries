@@ -41,9 +41,13 @@ struct DynamicBuffer
     // be divided by 2 to correctly represent the number of addressable elements.
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<T>, pk_i4_t>)
+        {
             return 2;
+        }
         else
+        {
             return 1;
+        }
     }();
 
     __host__ __device__ constexpr DynamicBuffer(T* p_data, ElementSpaceSize element_space_size)

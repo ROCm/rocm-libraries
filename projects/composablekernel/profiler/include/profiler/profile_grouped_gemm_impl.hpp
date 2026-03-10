@@ -318,7 +318,9 @@ bool profile_grouped_gemm_impl(int do_verification,
                 }
 
                 for(std::size_t i = 0; i < gemm_descs.size(); i++)
+                {
                     c_device_buf[i]->SetZero();
+                }
 
                 float ave_time = invoker_ptr->Run(argument_ptr.get(), stream_config);
 

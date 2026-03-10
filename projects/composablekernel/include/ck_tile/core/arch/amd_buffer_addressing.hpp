@@ -187,16 +187,20 @@ struct buffer_load<16, pre_nop>
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
 #else
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
         else
+        {
             asm volatile("buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
 #endif
     }
 };
@@ -221,16 +225,20 @@ struct buffer_load<8, pre_nop>
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
 #else
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "buffer_load_dwordx2 %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
         else
+        {
             asm volatile("buffer_load_dwordx2 %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
 #endif
     }
 };
@@ -256,16 +264,20 @@ struct buffer_load<4, pre_nop>
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
 #else
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "buffer_load_dword %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
         else
+        {
             asm volatile("buffer_load_dword %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
 #endif
     }
 };
@@ -291,16 +303,20 @@ struct buffer_load<2, pre_nop>
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
 #else
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "buffer_load_ushort %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
         else
+        {
             asm volatile("buffer_load_ushort %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
 #endif
     }
 };
@@ -325,16 +341,20 @@ struct buffer_load<1, pre_nop>
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
 #else
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "buffer_load_ubyte %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
         else
+        {
             asm volatile("buffer_load_ubyte %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
 #endif
     }
 };
@@ -377,6 +397,7 @@ struct buffer_load_if<16, pre_nop>
         using mbuf_t    = typename impl::buffer_load_trait<16, T>::payload_t;
         static_assert(sizeof(mbuf_t) == sizeof(T));
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
@@ -384,13 +405,16 @@ struct buffer_load_if<16, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
         else
+        {
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
     }
 };
 
@@ -410,6 +434,7 @@ struct buffer_load_if<8, pre_nop>
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<8, T>::payload_t;
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx2 %0, %1, %2, 0 offen offset:%3\n"
@@ -417,13 +442,16 @@ struct buffer_load_if<8, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
         else
+        {
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx2 %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
     }
 };
 
@@ -443,6 +471,7 @@ struct buffer_load_if<4, pre_nop>
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<4, T>::payload_t;
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dword %0, %1, %2, 0 offen offset:%3\n"
@@ -450,13 +479,16 @@ struct buffer_load_if<4, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
         else
+        {
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dword %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
     }
 };
 
@@ -476,6 +508,7 @@ struct buffer_load_if<2, pre_nop>
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<2, T>::payload_t;
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_ushort %0, %1, %2, 0 offen offset:%3\n"
@@ -483,13 +516,16 @@ struct buffer_load_if<2, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
         else
+        {
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_ushort %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
     }
 };
 
@@ -509,6 +545,7 @@ struct buffer_load_if<1, pre_nop>
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<1, T>::payload_t;
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_ubyte %0, %1, %2, 0 offen offset:%3\n"
@@ -516,13 +553,16 @@ struct buffer_load_if<1, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
         else
+        {
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_ubyte %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+        }
     }
 };
 #endif
@@ -1955,7 +1995,9 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
     // Set up v_offset:
     index_t v_offset = src_thread_addr_offset;
     if constexpr(oob_conditional_check)
+    {
         v_offset = flag ? v_offset : src_wave_buffer_resource[2];
+    }
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
@@ -2604,9 +2646,13 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
 #if CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK
     uint32_t src_addr_shift = [&]() {
         if constexpr(oob_conditional_check)
+        {
             return src_thread_element_valid ? 0 : 0x80000000;
+        }
         else
+        {
             return 0;
+        }
     }();
     return amd_buffer_load_impl<T, N, coherence>(
         src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
@@ -2871,9 +2917,13 @@ CK_TILE_DEVICE void amd_buffer_store(const thread_buffer<T, N>& src_thread_data,
 #if CK_TILE_EXPERIMENTAL_USE_BUFFER_STORE_OOB_CHECK_OFFSET_TRICK
     uint32_t dst_addr_shift = [&]() {
         if constexpr(oob_conditional_check)
+        {
             return dst_thread_element_valid ? 0 : 0x80000000;
+        }
         else
+        {
             return 0;
+        }
     }();
     amd_buffer_store_impl<T, N, coherence>(
         src_thread_data, dst_wave_buffer_resource, dst_addr_shift + dst_thread_addr_offset, 0);

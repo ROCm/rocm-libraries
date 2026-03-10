@@ -45,7 +45,9 @@ struct HipError : std::runtime_error
         std::stringstream msg;
         msg << user_msg << ": " << hipGetErrorString(code) << " (" << code << ")";
         if(src.function_name())
+        {
             msg << " in function '" << src.function_name();
+        }
         msg << "' at " << src.file_name() << ":" << src.line() << ":" << src.column();
         return msg.str();
     }
@@ -118,12 +120,18 @@ inline void check_hip(std::string_view msg,
     // the `default` label...
 
     if(code == hipSuccess)
+    {
         // When you beat the error allegations
         return;
+    }
     else if(code == hipErrorOutOfMemory)
+    {
         throw OutOfDeviceMemoryError(msg, src);
+    }
     else
+    {
         throw HipError(msg, code, src);
+    }
 }
 
 /// @brief Check HIP status for errors.
