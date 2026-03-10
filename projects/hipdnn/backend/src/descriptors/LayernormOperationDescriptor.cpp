@@ -35,6 +35,14 @@ void LayernormOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormOperationDescriptor::finalize() failed: forward_phase not set");
 
+    bool hasMean = _meanDesc != nullptr;
+    bool hasInvVariance = _invVarianceDesc != nullptr;
+    THROW_IF_TRUE(
+        hasMean != hasInvVariance,
+        HIPDNN_STATUS_BAD_PARAM,
+        "LayernormOperationDescriptor::finalize() failed: mean and inverse variance tensors must "
+        "both be set or both be null");
+
     HipdnnBackendDescriptorImpl<LayernormOperationDescriptor>::finalize();
 }
 
@@ -234,12 +242,9 @@ std::vector<std::shared_ptr<TensorDescriptor>>
 {
     std::vector<std::shared_ptr<TensorDescriptor>> result
         = {_xDesc, _scaleDesc, _biasDesc, _epsilonDesc, _yDesc};
-    if(_meanDesc)
+    if(_meanDesc && _invVarianceDesc)
     {
         result.push_back(_meanDesc);
-    }
-    if(_invVarianceDesc)
-    {
         result.push_back(_invVarianceDesc);
     }
     return result;
@@ -283,17 +288,9 @@ std::string LayernormOperationDescriptor::toString() const
     {
         str += ", mean_uid=" + std::to_string(_data.mean_tensor_uid.value());
     }
-    else
-    {
-        str += ", mean_uid=<not set>";
-    }
     if(_data.inv_variance_tensor_uid.has_value())
     {
         str += ", inv_variance_uid=" + std::to_string(_data.inv_variance_tensor_uid.value());
-    }
-    else
-    {
-        str += ", inv_variance_uid=<not set>";
     }
     str += ", forward_phase=" + std::to_string(static_cast<int>(_data.forward_phase));
     str += ", compute_data_type=";

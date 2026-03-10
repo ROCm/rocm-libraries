@@ -32,10 +32,6 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Attributes that must be set for finalize to succeed
-const std::vector<std::string> K_ALL_REQUIRED_ATTRIBUTES
-    = {"x", "scale", "bias", "epsilon", "y", "compute_type", "forward_phase"};
-
 class TestLayernormOperationDescriptor : public ::testing::Test
 {
 public:
@@ -44,54 +40,28 @@ public:
         return _wrapper->asDescriptor<LayernormOperationDescriptor>();
     }
 
-    void setAllAttributesExcept(const std::string& skip) const
+    void setAllAttributesExcept(std::initializer_list<hipdnnBackendAttributeName_t> skip = {}) const
     {
         auto desc = getDescriptor();
-        auto shouldSet = [&](const std::string& name) {
-            return std::find(
-                       K_ALL_REQUIRED_ATTRIBUTES.begin(), K_ALL_REQUIRED_ATTRIBUTES.end(), name)
-                       != K_ALL_REQUIRED_ATTRIBUTES.end()
-                   && name != skip;
+        auto setIf = [&](hipdnnBackendAttributeName_t attr, auto& tensor) {
+            if(std::find(skip.begin(), skip.end(), attr) == skip.end())
+            {
+                desc->setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensor);
+            }
         };
-
-        if(shouldSet("x"))
-        {
-            desc->setAttribute(
-                HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-        }
-        if(shouldSet("scale"))
-        {
-            desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT,
-                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                               1,
-                               &_scaleDesc);
-        }
-        if(shouldSet("bias"))
-        {
-            desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT,
-                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                               1,
-                               &_biasDesc);
-        }
-        if(shouldSet("epsilon"))
-        {
-            desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT,
-                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                               1,
-                               &_epsilonDesc);
-        }
-        if(shouldSet("y"))
-        {
-            desc->setAttribute(
-                HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc);
-        }
-        if(shouldSet("compute_type"))
+        setIf(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, _xDesc);
+        setIf(HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT, _scaleDesc);
+        setIf(HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT, _biasDesc);
+        setIf(HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT, _epsilonDesc);
+        setIf(HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT, _yDesc);
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT) == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
             desc->setAttribute(
                 HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         }
-        if(shouldSet("forward_phase"))
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT)
+           == skip.end())
         {
             auto forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
             desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
@@ -103,13 +73,12 @@ public:
 
     void setRequiredAttributes() const
     {
-        setAllAttributesExcept("");
+        setAllAttributesExcept({});
     }
 
     void makeFinalized() const
     {
         setRequiredAttributes();
-        // Also set optional tensors for full finalization test
         auto desc = getDescriptor();
         desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -200,46 +169,60 @@ TEST_F(TestLayernormOperationDescriptor, FinalizeSucceedsWithoutOptionalTensors)
     ASSERT_NO_THROW(getDescriptor()->finalize());
 }
 
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutXTensor)
+TEST_F(TestLayernormOperationDescriptor, DoubleFinalizeSucceeds)
 {
-    setAllAttributesExcept("x");
+    // LayernormOperationDescriptor::finalize() has no guard for already-finalized state.
+    // All required fields remain set after the first finalize, so the second call
+    // succeeds without throwing. This documents the current behavior.
+    makeFinalized();
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(desc->finalize());
+}
+
+// =============================================================================
+// Parameterized Finalize-fails-without Tests
+// =============================================================================
+
+class TestLayernormOperationDescriptorFinalizeFailsWithout
+    : public TestLayernormOperationDescriptor,
+      public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
+{
+};
+
+TEST_P(TestLayernormOperationDescriptorFinalizeFailsWithout, FinalizeFailsWithout)
+{
+    setAllAttributesExcept({GetParam()});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutScaleTensor)
+INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
+                         TestLayernormOperationDescriptorFinalizeFailsWithout,
+                         ::testing::Values(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
+                                           HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT,
+                                           HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT,
+                                           HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT,
+                                           HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT,
+                                           HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT,
+                                           HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT));
+
+TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithOnlyMean)
 {
-    setAllAttributesExcept("scale");
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    setRequiredAttributes();
+    auto desc = getDescriptor();
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_meanDesc);
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutBiasTensor)
+TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithOnlyInvVariance)
 {
-    setAllAttributesExcept("bias");
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutEpsilonTensor)
-{
-    setAllAttributesExcept("epsilon");
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutYTensor)
-{
-    setAllAttributesExcept("y");
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutComputeType)
-{
-    setAllAttributesExcept("compute_type");
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestLayernormOperationDescriptor, FinalizeFailsWithoutNormFwdPhase)
-{
-    setAllAttributesExcept("forward_phase");
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    setRequiredAttributes();
+    auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_invVarianceDesc);
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 // =============================================================================
@@ -393,12 +376,11 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseWrongElementCount)
     auto desc = getDescriptor();
     hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
-                           HIPDNN_TYPE_NORM_FWD_PHASE,
-                           2,
-                           &forwardPhase),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                                                  HIPDNN_TYPE_NORM_FWD_PHASE,
+                                                  2,
+                                                  &forwardPhase),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestLayernormOperationDescriptor, SetComputeDataType)
@@ -449,25 +431,65 @@ TEST_F(TestLayernormOperationDescriptor, SetAttributeUnsupported)
 }
 
 // =============================================================================
-// GetAttribute Tests - Tensor Descriptors
+// GetAttribute Tests - Tensor Descriptors (parameterized)
 // =============================================================================
 
-TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorDescriptor)
+struct TensorAttrCase
+{
+    hipdnnBackendAttributeName_t attr;
+    const char* name;
+    int64_t expectedUid;
+};
+
+class TestLayernormOperationDescriptorGetTensor
+    : public TestLayernormOperationDescriptor,
+      public ::testing::WithParamInterface<TensorAttrCase>
+{
+};
+
+TEST_P(TestLayernormOperationDescriptorGetTensor, GetAttributeTensorDescriptorReturnsCorrectTensor)
 {
     makeFinalized();
     auto desc = getDescriptor();
+    const auto& tc = GetParam();
 
-    HipdnnBackendDescriptor* retrievedX = nullptr;
+    // getAttribute packs the stored TensorDescriptor into a fresh HipdnnBackendDescriptor*.
+    // Ownership is transferred to the caller — delete after use.
+    HipdnnBackendDescriptor* retrieved = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &elementCount,
-                                       &retrievedX));
+    ASSERT_NO_THROW(
+        desc->getAttribute(tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(elementCount, 1);
-    ASSERT_NE(retrievedX, nullptr);
+    ASSERT_NE(retrieved, nullptr);
+
+    // Unpack the wrapper to inspect the underlying TensorDescriptor.
+    auto tensorImpl = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        retrieved, HIPDNN_STATUS_INTERNAL_ERROR, "Failed to unpack retrieved tensor descriptor");
+    delete retrieved;
+
+    ASSERT_NE(tensorImpl, nullptr);
+    EXPECT_EQ(tensorImpl->getData().uid, tc.expectedUid);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    AllTensors,
+    TestLayernormOperationDescriptorGetTensor,
+    ::testing::Values(
+        TensorAttrCase{HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT, "X", K_LAYERNORM_TENSOR_X_UID},
+        TensorAttrCase{
+            HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT, "Scale", K_LAYERNORM_TENSOR_SCALE_UID},
+        TensorAttrCase{
+            HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT, "Bias", K_LAYERNORM_TENSOR_BIAS_UID},
+        TensorAttrCase{
+            HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT, "Epsilon", K_LAYERNORM_TENSOR_EPSILON_UID},
+        TensorAttrCase{HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT, "Y", K_LAYERNORM_TENSOR_Y_UID},
+        TensorAttrCase{
+            HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT, "Mean", K_LAYERNORM_TENSOR_MEAN_UID},
+        TensorAttrCase{HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
+                       "InvVariance",
+                       K_LAYERNORM_TENSOR_INV_VARIANCE_UID}),
+    [](const ::testing::TestParamInfo<TensorAttrCase>& info) { return info.param.name; });
 
 // =============================================================================
 // GetAttribute Tests - Data Fields
@@ -478,7 +500,6 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeLayernormParams)
     makeFinalized();
     auto desc = getDescriptor();
 
-    // forward phase
     hipdnnNormFwdPhase_t forwardPhase = {};
     int64_t forwardPhaseCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
@@ -651,6 +672,19 @@ TEST_F(TestLayernormOperationDescriptor, ToStringContainsExpectedInfo)
               std::string::npos);
     ASSERT_NE(str.find("y_uid=" + std::to_string(K_LAYERNORM_TENSOR_Y_UID)), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
+    // Optional tensors not set — must not appear in toString output
+    ASSERT_EQ(str.find("mean_uid="), std::string::npos);
+    ASSERT_EQ(str.find("inv_variance_uid="), std::string::npos);
+}
+
+TEST_F(TestLayernormOperationDescriptor, ToStringIncludesOptionalTensorsWhenSet)
+{
+    makeFinalized();
+    std::string str = getDescriptor()->toString();
+    ASSERT_NE(str.find("mean_uid=" + std::to_string(K_LAYERNORM_TENSOR_MEAN_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("inv_variance_uid=" + std::to_string(K_LAYERNORM_TENSOR_INV_VARIANCE_UID)),
+              std::string::npos);
 }
 
 // =============================================================================
@@ -675,7 +709,6 @@ TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsWithoutOptional)
 {
-    // Finalize without optional tensors
     setRequiredAttributes();
     getDescriptor()->finalize();
 
