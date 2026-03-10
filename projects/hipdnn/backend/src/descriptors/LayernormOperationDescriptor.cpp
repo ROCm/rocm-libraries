@@ -94,29 +94,21 @@ void LayernormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                             "LayernormOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT:
-    {
-        int64_t meanUid = 0;
-        setTensorDescriptor(_meanDesc,
-                            meanUid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "LayernormOperationDescriptor::setAttribute()");
-        _data.mean_tensor_uid = meanUid;
+        setOptionalTensorDescriptor(_meanDesc,
+                                    _data.mean_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "LayernormOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT:
-    {
-        int64_t invVarianceUid = 0;
-        setTensorDescriptor(_invVarianceDesc,
-                            invVarianceUid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "LayernormOperationDescriptor::setAttribute()");
-        _data.inv_variance_tensor_uid = invVarianceUid;
+        setOptionalTensorDescriptor(_invVarianceDesc,
+                                    _data.inv_variance_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "LayernormOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT:
     {
         // Forward phase is passed as int64_t via void*; extract with memcpy via setScalar
@@ -206,20 +198,20 @@ void LayernormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                             "LayernormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT:
-        getTensorDescriptor(_meanDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "LayernormOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_meanDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "LayernormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT:
-        getTensorDescriptor(_invVarianceDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "LayernormOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_invVarianceDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "LayernormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT:
     {
@@ -282,22 +274,8 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
     attrs.y_tensor_uid = _data.y_tensor_uid;
     attrs.forward_phase = _data.forward_phase;
 
-    if(_meanDesc)
-    {
-        attrs.mean_tensor_uid = _data.mean_tensor_uid;
-    }
-    else
-    {
-        attrs.mean_tensor_uid = flatbuffers::Optional<int64_t>(flatbuffers::nullopt);
-    }
-    if(_invVarianceDesc)
-    {
-        attrs.inv_variance_tensor_uid = _data.inv_variance_tensor_uid;
-    }
-    else
-    {
-        attrs.inv_variance_tensor_uid = flatbuffers::Optional<int64_t>(flatbuffers::nullopt);
-    }
+    attrs.mean_tensor_uid = _data.mean_tensor_uid;
+    attrs.inv_variance_tensor_uid = _data.inv_variance_tensor_uid;
 
     node->attributes.Set(attrs);
     return node;
