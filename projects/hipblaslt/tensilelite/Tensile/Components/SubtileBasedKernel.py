@@ -832,7 +832,7 @@ def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
 
   # Emit number of buffer loads equal to number of loads needed to load a subtile
   for i in range(tileInfo.numGRPerSubtile):
-    module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr"), src1=(m0Offset + (grBaseId + i) * numBytesPerLoadWG)))
+    module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr"), src1=(m0Offset + (grBaseId + i) * numBytesPerLoadWG - offset)))
     mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=False, slc=False, nt=False, lds=True)
 
     # Check if the subtile specific registers is SGPR or VGPR
