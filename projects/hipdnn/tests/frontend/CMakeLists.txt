@@ -28,6 +28,7 @@ add_executable(
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )

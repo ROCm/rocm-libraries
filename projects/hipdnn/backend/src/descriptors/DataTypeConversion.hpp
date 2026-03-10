@@ -8,9 +8,11 @@
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
+#include "HipdnnNormFwdPhase.h"
 #include "HipdnnPointwiseMode.h"
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 
@@ -44,5 +46,9 @@ hipdnn_data_sdk::data_objects::AttentionImplementation
     toSdkAttentionImplementation(hipdnnAttentionImplementation_t mode);
 hipdnnAttentionImplementation_t
     fromSdkAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation mode);
+
+// Converts between C-API hipdnnNormFwdPhase_t and SDK NormFwdPhase enum values.
+hipdnn_data_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase_t phase);
+hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase phase);
 
 } // namespace hipdnn_backend
