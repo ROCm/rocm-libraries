@@ -132,7 +132,29 @@ template <auto SIGNATURE>
     return detail::run(conv,
                        args,
                        static_cast<const void*>(inputs.input),
-                       static_cast<void*>(outputs.weight),
+                       static_cast<const void*>(outputs.weight),
+                       static_cast<void*>(inputs.output),
+                       s_conf);
+}
+
+/// @brief `run()` specialization for backwards data convolution and CK Tile.
+///
+/// @tparam SIGNATURE Backwards data convolution signature.
+/// @returns RunResult about how the operation completed (or not).
+///
+/// @see run()
+template <auto SIGNATURE>
+    requires ConvDirectionIsBackwardData<SIGNATURE>
+[[nodiscard]] RunResult run(CkTileConvInstance<SIGNATURE> auto& conv,
+                            const Args<SIGNATURE>& args,
+                            const Inputs<SIGNATURE>& inputs,
+                            const Outputs<SIGNATURE>& outputs,
+                            const ck_tile::stream_config s_conf = {})
+{
+    return detail::run(conv,
+                       args,
+                       static_cast<void*>(outputs.input),
+                       static_cast<const void*>(inputs.weight),
                        static_cast<const void*>(inputs.output),
                        s_conf);
 }
