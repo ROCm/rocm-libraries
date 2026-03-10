@@ -56,12 +56,12 @@ BenchmarkProblems:
                     { type: uint32, semantic: StrideD0 },
                     { type: uint32, semantic: StrideD0 },
                     { type: uint32, semantic: SizeFree2 },
-                    { type: uint32, semantic: DebugPattern },
-                    { type: uint32, semantic: DebugPattern },
-                    { type: uint32, semantic: DebugPattern },
-                    { type: uint32, semantic: DebugPattern },
-                    { type: uint32, semantic: DebugPattern },
-                    { type: uint32, semantic: DebugPattern } ]
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding },
+                    { type: uint32, semantic: Padding } ]
             # args: [address AddressB, int64 AddressA, float8 AddressD, bfloat16 AddressD, uint64 SizeFree1, uint64 SizeFree0, boolean SizeSum, uint32 StrideB0, uint32 StrideA0, uint32 StrideD0, uint32 StrideD0, uint32 SizeFree2, pointer DebugPattern, pointer DebugPattern, int16 DebugPattern, int32 DebugPattern, uint32 DebugPattern, float64 DebugPattern]
             macrotile: [256, 256, 64]
             threads: [256, 1, 1]
