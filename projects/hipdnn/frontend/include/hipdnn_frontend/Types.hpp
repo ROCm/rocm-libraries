@@ -15,6 +15,7 @@
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
+#include <HipdnnNormFwdPhase.h>
 #include <HipdnnPointwiseMode.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
@@ -295,6 +296,28 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
         return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     case ConvolutionMode::CONVOLUTION:
         return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert frontend NormFwdPhase to backend hipdnnNormFwdPhase_t
+ *
+ * Maps frontend normalization forward phase to the backend C API enum type
+ * for use with HIPDNN_TYPE_NORM_FWD_PHASE attributes.
+ *
+ * @param type The frontend NormFwdPhase value
+ * @return The corresponding hipdnnNormFwdPhase_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case NormFwdPhase::INFERENCE:
+        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    case NormFwdPhase::TRAINING:
+        return HIPDNN_NORM_FWD_PHASE_TRAINING;
     default:
         return std::nullopt;
     }
