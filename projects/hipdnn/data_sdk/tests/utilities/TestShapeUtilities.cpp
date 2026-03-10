@@ -566,6 +566,77 @@ INSTANTIATE_TEST_SUITE_P(
         ExtractStrideOrderTestCase{
             {1, 4, 8, 8, 8, 1}, {1, 2, 5, 4, 3, 0}, true, {4, 2, 1, 1, 1, 1}}));
 
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisNchwAxis1)
+{
+    // NCHW input, make axis 1 (C) most packed
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 1);
+
+    // Sorted by stride ascending: [3,2,1,0], rotate axis=1 to front → [1,0,3,2]
+    // strideOrder=[1,0,3,2]: dim1 gets stride 1
+    EXPECT_EQ(strides, (std::vector<int64_t>{64, 1, 4096, 128}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisNhwcAxis3)
+{
+    // NHWC input, make axis 3 (W) most packed
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1, 2048, 64}, {2, 64, 32, 32}, {2, 64, 32, 32}, 3);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{1024, 2048, 32, 1}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisNoAxisPreservesOrder)
+{
+    // Without axis, stride ordering matches the reference layout
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32});
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisDifferentTargetDims)
+{
+    // Target dims differ from reference (e.g., scale tensor with reduced axis dim)
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 2, 32, 32}, 1);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{2, 1, 128, 4}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisSingletonTiebreaker)
+{
+    // Singletons with equal strides should sort before non-singletons
+    // dims {1, 4, 1, 4} with strides {4, 1, 4, 1}: dims 0 and 2 are singletons with stride 4
+    auto strides = generateStridesWithPackedAxis({4, 1, 4, 1}, {1, 4, 1, 4}, {1, 4, 1, 4}, 1);
+
+    // Sorted ascending: dim1(1), dim3(1), dim0(4,singleton), dim2(4,singleton)
+    // Rotate axis=1 to front: [1, 3, 0, 2]
+    // strideOrder: [2, 0, 3, 1] → dim1 gets stride 1
+    EXPECT_EQ(strides[1], 1); // axis dim is most packed
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxis3D)
+{
+    // 3D tensor, axis=0
+    auto strides = generateStridesWithPackedAxis({12, 4, 1}, {3, 3, 4}, {3, 3, 4}, 0);
+
+    // Sorted ascending: [2,1,0], rotate axis=0 to front: [0,2,1]
+    // strideOrder: [0,2,1] → dim0 gets stride 1
+    EXPECT_EQ(strides[0], 1);
+    EXPECT_EQ(strides, (std::vector<int64_t>{1, 12, 3}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisLastAxis)
+{
+    // Packing the last axis (already most packed in NCHW) preserves original layout
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 3);
+
+    // Sorted ascending: [3,2,1,0], rotate axis=3 (at position 0) to front → no change
+    EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
 TEST(TestShapeUtils, IsTensorPackedTrueForPackedTensor)
 {
     std::vector<int64_t> shape3D = {2, 3, 4};
