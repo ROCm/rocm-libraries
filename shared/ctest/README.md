@@ -281,7 +281,7 @@ add_test(
 )
 ```
 
-# Integration Guide
+## Integration Guide
 
 This guide walks through integrating the shared YAML-based test categorization into a GTest based ROCm library project, using MIOpen as the reference implementation.
 
