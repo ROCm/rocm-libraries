@@ -175,22 +175,22 @@ HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const fs::path&
 }
 
 HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const std::vector<char>& blob)
-    : program(program_name) ///, module(CreateModuleInMem(blob))
+    : program(program_name), binary(blob) // Store the binary data to prevent use-after-free
 {
     const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
         return;
-    module = CreateModuleInMem(blob);
+    module = CreateModuleInMem(binary); // Use stored binary instead of parameter
 }
 
-HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name,
-                                   const std::vector<uint8_t>& blob)
-    : program(program_name) ///, module(CreateModuleInMem(blob))
+HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const std::vector<uint8_t>& blob)
+    : program(program_name),
+      binary(blob.begin(), blob.end()) // Store the binary data to prevent use-after-free
 {
     const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
         return;
-    module = CreateModuleInMem(blob);
+    module = CreateModuleInMem(binary); // Use stored binary instead of parameter
 }
 
 HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name,
