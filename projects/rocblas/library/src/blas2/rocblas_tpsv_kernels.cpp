@@ -175,7 +175,7 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_backward_substitution_calc(bool is_unit_dia
                 else
                     val += (CONJ ? conj(A[indexA]) : A[indexA]) * xshared[p];
 
-                indexA -= is_transpose ? 1 : colA;
+                indexA += is_transpose ? 1 : colA;
             }
 
             x[(tx + j) * incx] -= val;
