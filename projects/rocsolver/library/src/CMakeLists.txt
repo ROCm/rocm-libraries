@@ -272,6 +272,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_stedcx.cpp
   auxiliary/rocauxiliary_stein.cpp
   auxiliary/rocauxiliary_latrd.cpp
+  auxiliary/rocauxiliary_latrd_forsytrd.cpp
   # symmetric matrices
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices

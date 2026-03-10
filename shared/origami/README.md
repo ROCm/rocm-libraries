@@ -253,23 +253,60 @@ cmake --install build/
 
 ## Origami Tests
 
+### Build and Run All Tests
+
+Build with both C++ and Python tests enabled:
+
 ```bash
 cd shared/origami
 
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-  -DORIGAMI_BUILD_TESTING=ON
+  -DORIGAMI_BUILD_TESTING=ON \
+  -DORIGAMI_ENABLE_PYTHON=ON
 
 cmake --build build/ --parallel
 
-# Run tests
+cd build/
 ctest --output-on-failure
 ```
 
 > [!NOTE]
 > Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
+
+### Running Specific Tests
+
+Run only C++ tests:
+
+```bash
+./build/tests/origami-tests
+```
+
+Run a specific C++ test by name:
+
+```bash
+./build/tests/origami-tests "Origami: select_config_mnk unit test"
+```
+
+Run only Python tests (from `shared/origami/python`):
+
+```bash
+pip install -e .
+python -m pytest tests/ -v
+```
+
+Run Python tests excluding slow tests:
+
+```bash
+python -m pytest tests/ -m "not slow"
+```
+
+Run selector tests (requires torch):
+
+```bash
+python -m pytest tests/test_selector.py -v
+```
 
 ## Contribute
 
