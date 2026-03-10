@@ -40,12 +40,12 @@ struct GPU_BNOCLFWDTrainLargeFusedActivation2DNew_FP16 : BNFwdTrainTestNew<half_
                                                                            float,
                                                                            double,
                                                                            BN2DTestCase,
-                                                                           double>
+                                                                           float>
 {
 };
 
 struct GPU_BNOCLFWDTrainLargeFusedActivation2DNew_BFP16
-    : BNFwdTrainTestNew<bfloat16, bfloat16, float, float, float, double, BN2DTestCase, double>
+    : BNFwdTrainTestNew<bfloat16, bfloat16, float, float, float, double, BN2DTestCase, float>
 {
 };
 

@@ -126,7 +126,8 @@ static TestReference GetNextREF(TestReference ref)
     case TestReference::naiveGPU: return TestReference::optimizedCPU;
     case TestReference::optimizedCPU: return TestReference::naiveCPU;
     case TestReference::naiveCPU: return TestReference::robustGPU;
-    default: return TestReference::robustCPU;
+    case TestReference::robustGPU: return TestReference::robustCPU;
+    default: return TestReference::naiveCPU;
     }
 }
 
@@ -402,13 +403,6 @@ public:
 protected:
     TestReference current_REF = REF;
 
-    // AdaptiveTest() : test_passed(true)
-    // {
-    //     failure_errors = std::unordered_map<std::string, TVerify>{};
-    //     info           = ErrorAnalysisInfo{};
-    //     current_REF    = REF;
-    // }
-
     /**
      * Invoking corresponding implementation. These should be able to be called several times
      * without invoking SetUp again.
@@ -501,6 +495,13 @@ protected:
 
         size_t block_cnt = (sz / 2 + verify_block_size - 1) / verify_block_size;
         block_cnt        = (block_cnt == 0) ? 1 : block_cnt;
+
+        if(res_dev == nullptr)
+        {
+            MIOPEN_THROW("Shared data used for verification is not allocated, invoke "
+                         "SetUpSharedVerifyData/TearDownSharedVerifyData in "
+                         "SetUpTestSuite/TearDownTestSuite.");
+        }
 
         *res_dev = ChecksResult{true, true, true, true};
 

@@ -123,9 +123,9 @@ __device__ __forceinline__ void CalculateRMS(const FLOAT_UUT* __restrict__ uut,
         __syncthreads();
     }
 
-    double local_res     = shared_data[tid] + shared_data[tid + warpSize];
-    double local_max_ref = fmax(shared_max_ref[tid], shared_max_ref[tid + warpSize]);
-    double local_max_uut = fmax(shared_max_uut[tid], shared_max_uut[tid + warpSize]);
+    float local_res     = shared_data[tid];
+    float local_max_ref = shared_max_ref[tid];
+    float local_max_uut = shared_max_uut[tid];
 
 #pragma unroll
     for(int i = warpSize / 2; i != 0; i >>= 1)
