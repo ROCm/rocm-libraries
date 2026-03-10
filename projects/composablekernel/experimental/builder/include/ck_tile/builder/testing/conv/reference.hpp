@@ -118,7 +118,7 @@ concept RefConvBwdWeightInstance =
     detail::RefConvInstance<Conv, SIGNATURE, const void*, void*, const void*> &&
     ConvDirectionIsBackwardWeight<SIGNATURE>;
 
-/// @brief `run()` specialization for forward convolution and the reference
+/// @brief `run()` specialization for backward weight convolution and the reference
 /// backward weight implementation.
 ///
 /// @tparam SIGNATURE The signature of the operation to perform. Must be backwards weight.

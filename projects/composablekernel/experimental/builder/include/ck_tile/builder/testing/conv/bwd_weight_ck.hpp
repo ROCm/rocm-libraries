@@ -10,9 +10,9 @@
 #include <array>
 
 /// This file contains the implementation details for invoking/testing
-/// bwd grouped convolution operations in old CK. The main item is the
-/// `run()` function, which is the main implementation used to invoke
-/// CK grouped forward convolution kernels.
+/// bwd weight grouped convolution operations in old CK. The main item
+/// is the `run()` function, which is the main implementation used to
+/// invoke CK backward weight grouped convolution kernels.
 
 namespace ck_tile::builder::test {
 
@@ -146,7 +146,7 @@ concept CkConvBwdWeightMultipleDInstance =
 
 /// @brief `run()` specialization for backward weight convolution and old CK.
 ///
-/// @tparam SIGNATURE Forward convolution signature.
+/// @tparam SIGNATURE Backward weight convolution signature.
 /// @returns RunResult about how the operation completed (or not).
 ///
 /// @see run()
@@ -210,7 +210,7 @@ template <auto SIGNATURE>
 ///
 /// This overload is specialized for Multiple-D.
 ///
-/// @tparam SIGNATURE Forward convolution signature.
+/// @tparam SIGNATURE Backward weight convolution signature.
 /// @returns RunResult about how the operation completed (or not).
 ///
 /// @see run()
