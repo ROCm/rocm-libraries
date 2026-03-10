@@ -31,7 +31,7 @@ python3 ../script/dependency-parser/main.py select \
   cmake_dependency_mapping.json \
   origin/develop \
   HEAD \
-  --test-prefix \
+  --ctest-only \
   --output tests_to_run.json
 
 # 4. Build only affected tests
@@ -151,18 +151,36 @@ python3 main.py select <depmap.json> <ref1> <ref2> [options]
 ```
 
 **Options:**
-- `--test-prefix` - Only include executables starting with `test_`
+- `--ctest-only` - Only include tests registered with CTest (excludes EXCLUDE_FROM_ALL targets like benchmarks)
+- `--test-prefix` - Only include executables starting with `test_` (basic name-based filtering)
 - `--all` - Include all executables (not just tests)
 - `--output FILE` - Output JSON file (default: `tests_to_run.json`)
+- `--build-dir DIR` - Build directory for CTest lookup (optional, default: inferred from depmap path)
 
 **Example:**
 ```bash
-# Compare current branch to develop
+# Compare current branch to develop (recommended: CTest-registered tests only)
+python3 main.py select deps.json origin/develop HEAD --ctest-only
+
+# Compare current branch to develop (legacy: name-based filtering)
 python3 main.py select deps.json origin/develop HEAD --test-prefix
 
-# Compare two specific commits
+# Compare two specific commits (include all executables)
 python3 main.py select deps.json abc123 def456 --all
 ```
+
+**Filtering Options Explained:**
+
+| Option | Behavior | Use Case |
+|--------|----------|----------|
+| `--ctest-only` | Uses `ctest -N` to get CTest-registered tests. Excludes targets marked with `EXCLUDE_FROM_ALL` (benchmarks, examples). | **Recommended** - Ensures only proper tests are run in CI |
+| `--test-prefix` | Filters executables by name pattern (`test_*`). Simple string matching. | Legacy option - less precise than `--ctest-only` |
+| `--all` | Includes all executables (tests, benchmarks, examples, profilers). | Debugging or when you need to build everything affected |
+
+**Important:** `--ctest-only` is the recommended option for CI pipelines as it:
+- Excludes benchmarks and examples that shouldn't run in CI
+- Respects CMake's test registration (targets with `add_test()`)
+- More precise than name-based filtering
 
 **Output Format:**
 ```json
@@ -214,13 +232,13 @@ stage('Selective Test') {
                     --output deps.json
             '''
 
-            // Select affected tests
+            // Select affected tests (CTest-registered only, excludes benchmarks)
             sh '''
                 python3 ../script/dependency-parser/main.py select \
                     deps.json \
                     origin/develop \
                     HEAD \
-                    --test-prefix \
+                    --ctest-only \
                     --output tests_to_run.json
             '''
 
@@ -254,7 +272,7 @@ stage('Selective Test') {
       deps.json \
       origin/${{ github.base_ref }} \
       HEAD \
-      --test-prefix
+      --ctest-only
 
 - name: Build and Test
   run: |
