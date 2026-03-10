@@ -1,3 +1,4 @@
+/*! \file */
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
@@ -34,7 +35,7 @@ extern "C" {
  *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting.
 *  \details
 *  \p rocsparse_spic0_buffer_size returns the size of the non-persistent buffer
-*  that is required by \p rocsparse_spic0, and must be allocated  by the user.
+*  that is required by \ref rocsparse_spic0, and must be allocated  by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -92,7 +93,7 @@ rocsparse_status rocsparse_spic0_buffer_size(rocsparse_handle            handle,
    *  \f[
    *    L_{ij} = \left\{
    *    \begin{array}{ll}
-   *        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \ \
+   *        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
    *        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
    *    \end{array}
    *    \right.

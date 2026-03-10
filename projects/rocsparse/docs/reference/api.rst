@@ -202,7 +202,43 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_spmv_descr`             |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_sptrsv_descr`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_destroy_sptrsv_descr`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsv_descr_create`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsv_descr_destroy`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spic0_descr_create`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spic0_descr_destroy`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spilu0_descr_create`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spilu0_descr_destroy`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_sptrsm_descr`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_destroy_sptrsm_descr`           |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmv_set_input`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsv_set_input`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsm_set_input`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spilu0_set_input`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spic0_set_input`                |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsv_get_output`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sptrsm_get_output`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spilu0_get_output`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spic0_get_output`               |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_get`                        |
 +-----------------------------------------------------+

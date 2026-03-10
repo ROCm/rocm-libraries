@@ -181,6 +181,16 @@ rocsparse_sptrsv_stage
 
 .. doxygenenum:: rocsparse_sptrsv_stage
 
+rocsparse_sptrsv_input
+----------------------
+
+.. doxygenenum:: rocsparse_sptrsv_input
+
+rocsparse_sptrsv_output
+-----------------------
+
+.. doxygenenum:: rocsparse_sptrsv_output
+
 rocsparse_spsm_alg
 ------------------
 
@@ -200,6 +210,16 @@ rocsparse_sptrsm_stage
 ----------------------
 
 .. doxygenenum:: rocsparse_sptrsm_stage
+
+rocsparse_sptrsm_input
+----------------------
+
+.. doxygenenum:: rocsparse_sptrsm_input
+
+rocsparse_sptrsm_output
+-----------------------
+
+.. doxygenenum:: rocsparse_sptrsm_output
 
 rocsparse_spilu0_alg
 --------------------

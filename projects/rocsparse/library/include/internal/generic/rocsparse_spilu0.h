@@ -1,3 +1,4 @@
+/*! \file */
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *

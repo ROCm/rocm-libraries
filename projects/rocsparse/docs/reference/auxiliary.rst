@@ -338,6 +338,61 @@ rocsparse_destroy_spmv_descr
 
 .. doxygenfunction:: rocsparse_destroy_spmv_descr
 
+
+rocsparse_create_sptrsv_descr
+-----------------------------
+
+.. doxygenfunction:: rocsparse_create_sptrsv_descr
+
+rocsparse_destroy_sptrsv_descr
+------------------------------
+
+.. doxygenfunction:: rocsparse_destroy_sptrsv_descr
+
+
+rocsparse_create_sptrsm_descr
+-----------------------------
+
+.. doxygenfunction:: rocsparse_create_sptrsm_descr
+
+rocsparse_destroy_sptrsm_descr
+------------------------------
+
+.. doxygenfunction:: rocsparse_destroy_sptrsm_descr
+
+
+rocsparse_spic0_descr_create
+----------------------------
+
+.. doxygenfunction:: rocsparse_spic0_descr_create
+
+rocsparse_spic0_descr_destroy
+-----------------------------
+
+.. doxygenfunction:: rocsparse_spic0_descr_destroy
+
+
+rocsparse_spilu0_descr_create
+-----------------------------
+
+.. doxygenfunction:: rocsparse_spilu0_descr_create
+
+rocsparse_spilu0_descr_destroy
+------------------------------
+
+.. doxygenfunction:: rocsparse_spilu0_descr_destroy
+
+
+rocsparse_sptrsv_descr_create
+-----------------------------
+
+.. doxygenfunction:: rocsparse_sptrsv_descr_create
+
+rocsparse_sptrsv_descr_destroy
+------------------------------
+
+.. doxygenfunction:: rocsparse_sptrsv_descr_destroy
+
 rocsparse_spmv_set_input
 ------------------------
 
