@@ -83,17 +83,12 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
         break;
     }
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT:
-    {
-        int64_t axisInt64 = 0;
-        setScalar(axisInt64,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "BlockScaleQuantizeOperationDescriptor::setAttribute()");
-        _data.axis = axisInt64;
+        setOptionalInt64(_data.axis,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT:
         setScalar(_data.transpose,
                   HIPDNN_TYPE_BOOLEAN,
@@ -170,17 +165,13 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
         break;
     }
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT:
-    {
-        int64_t axisInt64 = _data.axis.has_value() ? _data.axis.value() : 0;
-        getScalar(axisInt64,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        getOptionalInt64(_data.axis,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT:
         getScalar(_data.transpose,
                   HIPDNN_TYPE_BOOLEAN,
