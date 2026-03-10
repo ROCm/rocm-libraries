@@ -800,6 +800,9 @@ bool rocblas_internal_tensile_supports_ldc_ne_ldd(rocblas_handle handle);
 // We assume true if the value is between 942 to 1000
 ROCBLAS_INTERNAL_EXPORT bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode);
 
+// for internal use
+std::string rocblas_internal_get_arch_name(int device);
+
 // for internal use during testing, fetch arch name
 ROCBLAS_INTERNAL_EXPORT std::string rocblas_internal_get_arch_name();
 

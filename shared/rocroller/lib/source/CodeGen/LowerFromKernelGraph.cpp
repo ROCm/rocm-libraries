@@ -354,7 +354,14 @@ namespace rocRoller
                 auto conditionResult = m_context->brancher()->resultRegister(expr);
 
                 co_yield Expression::generate(conditionResult, expr, m_context);
-
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before branching into conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield m_context->brancher()->branchIfZero(
                     falseLabel,
                     conditionResult,
@@ -364,6 +371,14 @@ namespace rocRoller
                 co_yield m_context->brancher()->branch(
                     botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
 
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(falseLabel);
                 auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
                 if(!elseBody.empty())
@@ -371,6 +386,14 @@ namespace rocRoller
                     co_yield generate(elseBody);
                 }
 
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across branches
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before conditional label!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield Instruction::Label(botLabel);
                 co_yield Instruction::Unlock("Unlock Conditional");
             }
@@ -458,12 +481,6 @@ namespace rocRoller
                     concatenate("Condition: Bottom (jump to " + topLabel->toString()
                                 + " if true)"));
 
-                // TODO: Have deallocate nodes generate the proper wait count and remove this wait.
-                //       This is currently needed in case there are loads within a loop that are never
-                //       used within the loop. If there are, the wait count observer never releases
-                //       the registers.
-                co_yield Instruction::Wait(
-                    WaitCount::Zero(m_context->targetArchitecture(), "DEBUG: Wait after branch"));
                 co_yield Instruction::Unlock("Unlock DoWhile");
             }
 
@@ -483,11 +500,33 @@ namespace rocRoller
                 auto expr            = m_fastArith(op.condition);
                 auto conditionResult = m_context->brancher()->resultRegister(expr);
 
+                co_yield Instruction::Wait(WaitCount::SyncQueue(m_context->targetArchitecture(),
+                                                                GPUWaitQueueType::SMemQueue,
+                                                                "DEBUG: Wait for scalar queue"));
+
                 co_yield Expression::generate(conditionResult, expr, m_context);
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across loops
+                if(op.loopName == rocRoller::KLOOPTAIL)
+                {
+                    co_yield Instruction::Wait(WaitCount::Zero(
+                        m_context->targetArchitecture(),
+                        "REMOVEME: Wait before branching into Bottom of TailLoop!"));
+                }
+                // -------------------------------------------------------------------------------
                 co_yield m_context->brancher()->branchIfZero(
                     botLabel,
                     conditionResult,
                     concatenate("Condition: Top (jump to " + botLabel->toString() + " if false)"));
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across loops
+                if(op.loopName == rocRoller::KLOOPTAIL)
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before falling through to TailLoop!"));
+                }
+                // -------------------------------------------------------------------------------
 
                 co_yield Instruction::Label(topLabel);
 
@@ -507,14 +546,8 @@ namespace rocRoller
                     conditionResult,
                     concatenate("Condition: Bottom (jump to " + topLabel->toString()
                                 + " if true)"));
-
                 co_yield Instruction::Label(botLabel);
-                // TODO: Have deallocate nodes generate the proper wait count and remove this wait.
-                //       This is currently needed in case there are loads within a loop that are never
-                //       used within the loop. If there are, the wait count observer never releases
-                //       the registers.
-                co_yield Instruction::Wait(
-                    WaitCount::Zero(m_context->targetArchitecture(), "DEBUG: Wait after branch"));
+
                 co_yield Instruction::Unlock("Unlock For Loop");
             }
 

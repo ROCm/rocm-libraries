@@ -47,7 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 92ce23132a10477c0a2955b2dd902a628ac50428 # 2026-02-24 commit
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -157,6 +157,19 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && github.event_name == 'push' }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --project miopen \
+            --failure_stage build \
+            --platform windows \
+            --log-path "${{ env.BUILD_DIR }}/logs" \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --pr-title "${{ github.event.pull_request.title }}"
+
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-windows]
@@ -167,3 +180,4 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
       test_type: ${{ inputs.test_type }}
+    secrets: inherit

@@ -6,6 +6,7 @@
 #include "HipdnnException.hpp"
 #include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/DescriptorFactory.hpp"
+#include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/Handle.hpp"
 #include "handle/HandleFactory.hpp"
@@ -15,6 +16,8 @@
 
 #include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
+#include <cstring>
 
 using namespace hipdnn_backend;
 
@@ -244,6 +247,43 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph)
+{
+    LOG_API_ENTRY("descriptor={}, requestedByteSize={}, graphByteSize_ptr={:p}, "
+                  "serializedGraph_ptr={:p}",
+                  logPtr(descriptor),
+                  requestedByteSize,
+                  static_cast<void*>(graphByteSize),
+                  static_cast<void*>(serializedGraph));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(descriptor);
+        throwIfNull(graphByteSize);
+
+        auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        auto data = graphDesc->getSerializedGraph();
+
+        *graphByteSize = data.size;
+
+        if(serializedGraph != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        data.size,
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the serialized graph size ("
+                            + std::to_string(data.size) + ")");
+            std::memcpy(serializedGraph, data.ptr, data.size);
+        }
+
+        LOG_API_SUCCESS(apiName, "graphByteSize={}", *graphByteSize);
+    });
+}
+
 HIPDNN_BACKEND_EXPORT const char* hipdnnGetErrorString(hipdnnStatus_t status)
 {
     LOG_API_ENTRY("status={}", status);
@@ -297,7 +337,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
 
 HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, const char* msg)
 {
-    hipdnn_backend::logging::hipdnnLoggingCallback(severity, msg);
+    hipdnn_backend::logging::backendLoggingCallback(severity, msg);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -366,6 +406,39 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                         *numPluginPaths,
                         *maxStringLen);
     });
+}
+
+// NOLINTBEGIN(readability-identifier-naming) - C API function
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle)
+// NOLINTEND(readability-identifier-naming)
+{
+    return hipdnn_backend::logging::setUserLogCallback(callback, minLevel, mode, userHandle);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level)
+{
+    // Validate log level
+    if(level != HIPDNN_SEV_INFO && level != HIPDNN_SEV_WARN && level != HIPDNN_SEV_ERROR
+       && level != HIPDNN_SEV_FATAL && level != HIPDNN_SEV_OFF)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::setGlobalLogLevel(level);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level)
+{
+    if(level == nullptr)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::getGlobalLogLevel(*level);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
@@ -476,4 +549,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version)
         throwIfNull(version);
         *version = HIPDNN_BACKEND_VERSION_STRING;
     });
+}
+
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext()
+{
+    return HIPDNN_BACKEND_VERSION_STRING;
 }

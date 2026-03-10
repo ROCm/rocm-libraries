@@ -35,6 +35,7 @@
 // auxiliary
 #include "common/auxiliary/testing_bdsqr.hpp"
 #include "common/auxiliary/testing_bdsvdx.hpp"
+#include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
 #include "common/auxiliary/testing_lange.hpp"
@@ -46,6 +47,7 @@
 #include "common/auxiliary/testing_laswp.hpp"
 #include "common/auxiliary/testing_lasyf.hpp"
 #include "common/auxiliary/testing_latrd.hpp"
+#include "common/auxiliary/testing_latrd_forsytrd.hpp"
 #include "common/auxiliary/testing_lauum.hpp"
 #include "common/auxiliary/testing_orgbr_ungbr.hpp"
 #include "common/auxiliary/testing_orglx_unglx.hpp"
@@ -141,6 +143,8 @@ class rocsolver_dispatcher
             {"laswp", testing_laswp<T>},
             {"lange", testing_lange<T, rocblas_int>},
             {"lange_64", testing_lange<T, int64_t>},
+            {"gecon", testing_gecon<T, rocblas_int>},
+            {"gecon_64", testing_gecon<T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
@@ -149,6 +153,7 @@ class rocsolver_dispatcher
             {"larfb", testing_larfb<T>},
             {"lasr", testing_lasr<T>},
             {"latrd", testing_latrd<T>},
+            {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},
