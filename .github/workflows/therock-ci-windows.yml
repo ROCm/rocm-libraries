@@ -47,8 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          # Match other workflows for testing (Setup/build/test use same TheRock ref; revert before merge)
-          ref: 886f3ea69d7860dd26bd84fb98d7c4cc05dc9fd1 # users/todavis/ctest_rocblas_on_miopen_filters for testing
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
