@@ -54,14 +54,16 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(include)
 
     if(TENSILELITE_ENABLE_CLIENT)
-        # Add mxDataGenerator if it hasn't been added by clients build
-        if(NOT TARGET roc::mxDataGenerator)
-            if(NOT ROCM_LIBS_SUPERBUILD)
-                if(HIPBLASLT_ENABLE_THEROCK)
-                    find_package(mxDataGenerator REQUIRED)
-                else()
-                    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator"
-                                   "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
+        if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+            # Add mxDataGenerator if it hasn't been added by clients build
+            if(NOT TARGET roc::mxDataGenerator)
+                if(NOT ROCM_LIBS_SUPERBUILD)
+                    if(HIPBLASLT_ENABLE_THEROCK)
+                        find_package(mxDataGenerator REQUIRED)
+                    else()
+                        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator"
+                                       "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
+                    endif()
                 endif()
             endif()
         endif()
