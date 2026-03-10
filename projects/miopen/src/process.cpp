@@ -27,7 +27,6 @@
 #include <miopen/errors.hpp>
 #include <miopen/process.hpp>
 #include <string_view>
-#include <vector>
 
 namespace miopen {
 
@@ -55,10 +54,13 @@ public:
             MIOPEN_THROW("Capturing output not defined for Windows.");
         }
 
-        // CreateProcessA with non-NULL lpApplicationName requires explicit .exe extension
-        // Some callers (tests) derive the path from argv[0], which may lack .exe and cause
-        // WIN builds to fail and invoke MIOPEN_THROW when launched from Unix-like shells in
-        // CI (e.g. Git Bash, MSYS2).
+        if(!additionalEnvironmentVariables.empty())
+        {
+            MIOPEN_THROW("Overriding environment variables not defined for Windows.");
+        }
+
+        // CreateProcessA with non-NULL lpApplicationName requires explicit .exe extension.
+        // Some callers (tests) derive the path from argv[0], which may lack .exe on Windows.
         auto exePath = path;
         if(exePath.extension() != ".exe")
             exePath.replace_extension(".exe");
@@ -74,93 +76,38 @@ public:
         if(cmd.size() < BUFFER_CAPACITY)
             cmd.resize(BUFFER_CAPACITY, '\0');
 
-        // Temporarily set additional env vars in the parent process before CreateProcess
-        // then restore them after. This allows us to avoid building a custom env block (which can
-        // fail due to ANSI/Unicode issues or missing special entries like =C:=...)
-        // CreateProcess with lpEnvironment=nullptr inherits the parent's full environment, so we
-        // only need to set the additional/modified variables and then restore initial state.
-        std::vector<std::pair<std::string, std::string>> savedEnvVars;
-
-        if(!additionalEnvironmentVariables.empty())
-        {
-            for(const auto& [key, value] : additionalEnvironmentVariables)
-            {
-                char buf[32768];
-                DWORD len = GetEnvironmentVariableA(key.c_str(), buf, sizeof(buf));
-                if(len > 0 && len < sizeof(buf))
-                    savedEnvVars.emplace_back(key, std::string(buf, len));
-                else
-                    savedEnvVars.emplace_back(key, std::string{});
-
-                SetEnvironmentVariableA(key.c_str(), value.c_str());
-            }
-        }
-
-        const auto createProcessResult = CreateProcessA(exePath.string().c_str(),
-                                                        cmd.data(),
-                                                        nullptr,
-                                                        nullptr,
-                                                        FALSE,
-                                                        0,
-                                                        nullptr,
-                                                        cwd.empty() ? nullptr : cwd.data(),
-                                                        &info,
-                                                        &processInfo);
-        const auto createProcessError  = GetLastError();
-
-        // Restore original environment regardless of CreateProcess outcome
-        for(const auto& [key, originalValue] : savedEnvVars)
-        {
-            if(originalValue.empty())
-                SetEnvironmentVariableA(key.c_str(), nullptr);
-            else
-                SetEnvironmentVariableA(key.c_str(), originalValue.c_str());
-        }
-
-        if(createProcessResult == FALSE)
-            MIOPEN_THROW("CreateProcess error: " + std::to_string(createProcessError));
+        if(CreateProcess(exePath.string().c_str(),
+                         cmd.data(),
+                         nullptr,
+                         nullptr,
+                         FALSE,
+                         0,
+                         nullptr,
+                         cwd.empty() ? nullptr : cwd.data(),
+                         &info,
+                         &processInfo) == FALSE)
+            MIOPEN_THROW("CreateProcess error: " + std::to_string(GetLastError()));
     }
 
     int Wait()
     {
-        if(waited)
-            return lastStatus;
-
         WaitForSingleObject(processInfo.hProcess, INFINITE);
 
         DWORD status;
         const auto getExitCodeStatus = GetExitCodeProcess(processInfo.hProcess, &status);
-        const auto getExitCodeError  = GetLastError();
 
         CloseHandle(processInfo.hProcess);
         CloseHandle(processInfo.hThread);
-        processInfo.hProcess = nullptr;
-        processInfo.hThread  = nullptr;
-
-        waited     = true;
-        lastStatus = static_cast<int>(status);
 
         if(getExitCodeStatus == 0)
-            MIOPEN_THROW("GetExitCodeProcess error: " + std::to_string(getExitCodeError));
+            MIOPEN_THROW("GetExitCodeProcess error: " + std::to_string(GetLastError()));
 
-        return lastStatus;
-    }
-
-    ~ProcessImpl()
-    {
-        if(!waited && processInfo.hProcess != nullptr)
-        {
-            WaitForSingleObject(processInfo.hProcess, 5000);
-            CloseHandle(processInfo.hProcess);
-            CloseHandle(processInfo.hThread);
-        }
+        return status;
     }
 
 private:
     fs::path path;
     PROCESS_INFORMATION processInfo{};
-    bool waited    = false;
-    int lastStatus = 0;
 };
 
 #else

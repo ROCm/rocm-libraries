@@ -50,16 +50,8 @@
 #include <thread>
 #include <vector>
 
-namespace miopen::tests {
-// Declared in main_hip.cpp - provides access to command-line arguments
-extern int g_argc;
-extern char** g_argv;
-} // namespace miopen::tests
-
 namespace {
 using namespace miopen;
-using miopen::tests::g_argc;
-using miopen::tests::g_argv;
 
 #if MIOPEN_EMBED_DB
 struct TestRordbEmbedFsOverrideLock
@@ -1018,7 +1010,11 @@ public:
                 if(full_set())
                     args += " --all";
 
-                children.emplace_back(exe_path(), args);
+                // Override sharding so each child runs all its work, not a shard subset
+                ProcessEnvironmentMap env;
+                env["GTEST_TOTAL_SHARDS"] = "1";
+                env["GTEST_SHARD_INDEX"]  = "0";
+                children.emplace_back(exe_path(), args, "", nullptr, env);
             }
             // clang-format on
         }
@@ -1108,7 +1104,11 @@ public:
                     args += " --all";
 
                 MIOPEN_LOG_CUSTOM(LoggingLevel::Default, "Test", exe_path() + " " + args);
-                children.emplace_back(exe_path(), args);
+                // Override sharding so each child runs all its work, not a shard subset
+                ProcessEnvironmentMap env;
+                env["GTEST_TOTAL_SHARDS"] = "1";
+                env["GTEST_SHARD_INDEX"]  = "0";
+                children.emplace_back(exe_path(), args, "", nullptr, env);
             }
             // clang-format on
         }
@@ -1446,28 +1446,25 @@ public:
 
 std::string GetArg(const std::string& name)
 {
-    if(g_argv == nullptr || g_argc < 2)
-        return "";
+    const auto& args  = testing::internal::GetArgvs();
+    const auto target = "--" + name;
 
-    for(int i = 1; i < g_argc - 1; ++i)
+    for(size_t i = 1; i + 1 < args.size(); ++i)
     {
-        if(g_argv[i] != nullptr && std::string(g_argv[i]) == "--" + name)
-        {
-            if(g_argv[i + 1] != nullptr)
-                return g_argv[i + 1];
-        }
+        if(args[i] == target)
+            return args[i + 1];
     }
     return "";
 }
 
 bool HasFlag(const std::string& name)
 {
-    if(g_argv == nullptr || g_argc < 2)
-        return false;
+    const auto& args  = testing::internal::GetArgvs();
+    const auto target = "--" + name;
 
-    for(int i = 1; i < g_argc; ++i)
+    for(size_t i = 1; i < args.size(); ++i)
     {
-        if(g_argv[i] != nullptr && std::string(g_argv[i]) == "--" + name)
+        if(args[i] == target)
             return true;
     }
     return false;
@@ -1524,9 +1521,10 @@ protected:
     static void SetUpTestSuite()
     {
         // Save exe path for spawning child processes
-        if(g_argc > 0)
+        const auto& args = testing::internal::GetArgvs();
+        if(!args.empty())
         {
-            exe_path() = fs::absolute(g_argv[0]);
+            exe_path() = fs::absolute(args[0]);
         }
     }
 
