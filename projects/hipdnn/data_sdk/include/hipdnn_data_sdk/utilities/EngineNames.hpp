@@ -126,18 +126,19 @@ struct EngineRegistrar
 #define HIPDNN_REGISTER_ENGINE(name, value)                 \
     inline constexpr const char* name##_NAME = value;       \
     inline const int64_t name##_ID = engineNameToId(value); \
-    inline const EngineRegistrar name##_registrar{          \
-        value}; /* NOLINT(bugprone-throwing-static-initialization) collision detection requires throw */
+    inline const EngineRegistrar name##_registrar{value};
 
 //Note: Once an engine is named here, it should never be renamed.  Renaming an engine will
 // change the generated uint64_t ID.
 
 // Define all engines using the macro
+// NOLINTBEGIN(bugprone-throwing-static-initialization) collision detection requires throw
 HIPDNN_REGISTER_ENGINE(FUSILLI_ENGINE, "FUSILLI_ENGINE")
 
 HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE, "HIPBLASLT_ENGINE")
 
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC, "MIOPEN_ENGINE_DETERMINISTIC")
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 } // namespace hipdnn_data_sdk::utilities
