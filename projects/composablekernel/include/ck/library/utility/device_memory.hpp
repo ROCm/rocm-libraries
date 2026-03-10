@@ -9,6 +9,7 @@
 
 namespace ck {
 
+
 template <typename T>
 __global__ void set_buffer_value(T* p, T x, uint64_t buffer_element_size)
 {

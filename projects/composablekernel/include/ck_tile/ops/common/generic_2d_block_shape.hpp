@@ -50,6 +50,7 @@ struct Generic2dBlockShape
     static constexpr index_t Vector_M = Vector_::at(number<0>{});
     static constexpr index_t Vector_N = Vector_::at(number<1>{});
 
+    
     // num warps along seq<M, N>, within each block
     template <bool isHostWave32>
     static constexpr index_t GetWarpPerBlock_M()

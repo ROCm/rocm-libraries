@@ -8,6 +8,7 @@
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 namespace ck {
 
+    
 // StaticTensor for Scalar
 template <AddressSpaceEnum AddressSpace,
           typename T,
