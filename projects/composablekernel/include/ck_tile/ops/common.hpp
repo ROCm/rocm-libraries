@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-// Test change for dependency parser validation
 #include "ck_tile/ops/common/generic_2d_block_shape.hpp"
 #include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/ops/common/streamk_common.hpp"
