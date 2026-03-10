@@ -86,16 +86,61 @@ def load_depmap(depmap_json):
     return data, json_project
 
 
-def select_tests(file_to_executables, changed_files, filter_mode):
+def get_ctest_registered_tests(build_dir=None):
+    """Get list of tests registered with CTest (excludes EXCLUDE_FROM_ALL targets)."""
+    try:
+        cmd = ["ctest", "-N"]
+        if build_dir:
+            cmd.extend(["--test-dir", build_dir])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            return None
+
+        tests = set()
+        for line in result.stdout.splitlines():
+            if line.strip().startswith("Test #"):
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    test_name = parts[1].strip()
+                    tests.add(test_name)
+
+        return tests
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        return None
+
+
+def select_tests(file_to_executables, changed_files, filter_mode, ctest_only=False, build_dir=None):
     """Return a set of test executables affected by changed files."""
     affected = set()
+
+    ctest_tests = None
+    if ctest_only:
+        ctest_tests = get_ctest_registered_tests(build_dir)
+        if ctest_tests is None:
+            print("Warning: Could not get CTest test list, including all executables")
+        else:
+            print(f"Filtering to {len(ctest_tests)} CTest-registered tests (excluding EXCLUDE_FROM_ALL targets)")
+
     for f in changed_files:
         if f in file_to_executables:
             for exe in file_to_executables[f]:
-                if filter_mode == "all":
-                    affected.add(exe)
-                elif filter_mode == "test_prefix" and os.path.basename(exe).startswith("test_"):
-                    affected.add(exe)
+                if filter_mode == "test_prefix" and not os.path.basename(exe).startswith("test_"):
+                    continue
+
+                if ctest_only and ctest_tests is not None:
+                    test_name = exe.replace("bin/", "")
+                    if test_name not in ctest_tests:
+                        continue
+
+                affected.add(exe)
+
     return sorted(affected)
 
 
@@ -147,15 +192,31 @@ def main():
     ref2 = sys.argv[3]
     filter_mode = "all"
     output_json = "tests_to_run.json"
+    ctest_only = False
+    build_dir = None
 
     if "--test-prefix" in sys.argv:
         filter_mode = "test_prefix"
     if "--all" in sys.argv:
         filter_mode = "all"
+    if "--ctest-only" in sys.argv:
+        ctest_only = True
+    if "--build-dir" in sys.argv:
+        idx = sys.argv.index("--build-dir")
+        if idx + 1 < len(sys.argv):
+            build_dir = sys.argv[idx + 1]
     if "--output" in sys.argv:
         idx = sys.argv.index("--output")
         if idx + 1 < len(sys.argv):
             output_json = sys.argv[idx + 1]
+
+    # If build_dir not specified, try to infer from depmap_json path
+    if ctest_only and build_dir is None:
+        depmap_dir = os.path.dirname(os.path.abspath(depmap_json))
+        if os.path.basename(depmap_dir) in ["build", "."]:
+            build_dir = depmap_dir
+        elif os.path.exists(os.path.join(depmap_dir, "build.ninja")):
+            build_dir = depmap_dir
 
     if not os.path.exists(depmap_json):
         print(f"Dependency map JSON not found: {depmap_json}")
@@ -167,7 +228,7 @@ def main():
         print("No changed files detected.")
         tests = []
     else:
-        tests = select_tests(file_to_executables, changed_files, filter_mode)
+        tests = select_tests(file_to_executables, changed_files, filter_mode, ctest_only, build_dir)
 
     # Generate ctest regex from test names
     if tests:

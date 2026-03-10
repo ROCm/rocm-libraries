@@ -807,13 +807,13 @@ def cmake_build(Map conf=[:]){
                                     --output enhanced_dependency_mapping.json
                             """
 
-                            // Select affected tests
+                            // Select affected tests (CTest-registered only, excludes benchmarks)
                             sh """
                                 python3 ../script/dependency-parser/main.py select \
                                     enhanced_dependency_mapping.json \
                                     origin/develop \
                                     HEAD \
-                                    --test-prefix \
+                                    --ctest-only \
                                     --output tests_to_run.json
                             """
 
@@ -900,13 +900,13 @@ def cmake_build(Map conf=[:]){
                                     --output enhanced_dependency_mapping.json
                             """
 
-                            // Select affected tests
+                            // Select affected tests (CTest-registered only, excludes benchmarks)
                             sh """
                                 python3 ../script/dependency-parser/main.py select \
                                     enhanced_dependency_mapping.json \
                                     origin/develop \
                                     HEAD \
-                                    --test-prefix \
+                                    --ctest-only \
                                     --output tests_to_run.json
                             """
 

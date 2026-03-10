@@ -112,6 +112,15 @@ def main():
         help="Only include executables starting with 'test_'",
     )
     parser_test.add_argument(
+        "--ctest-only",
+        action="store_true",
+        help="Only include tests registered with CTest (excludes EXCLUDE_FROM_ALL targets like benchmarks)",
+    )
+    parser_test.add_argument(
+        "--build-dir",
+        help="Build directory for ctest lookup (optional, default: inferred from depmap_json path)",
+    )
+    parser_test.add_argument(
         "--output", help="Output JSON file", default="tests_to_run.json"
     )
 
@@ -151,6 +160,10 @@ def main():
             filter_args.append("--test-prefix")
         if args.all:
             filter_args.append("--all")
+        if args.ctest_only:
+            filter_args.append("--ctest-only")
+        if args.build_dir:
+            filter_args += ["--build-dir", args.build_dir]
         if args.output:
             filter_args += ["--output", args.output]
         run_selective_test_filter(filter_args)
