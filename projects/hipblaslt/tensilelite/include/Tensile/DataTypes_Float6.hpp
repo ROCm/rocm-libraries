@@ -30,16 +30,6 @@
 
 #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_HIP
-#include <hip/hip_runtime.h>
-#endif
-
-#define HIP_HOST_DEVICE __host__ __device__
-#define HIP_HOST __host__
-#define HIP_DEVICE __device__
-
-#include <hip/hip_ext_ocp.h>
-
 #include <cstdint>
 
 namespace TensileLite
