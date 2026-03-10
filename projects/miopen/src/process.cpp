@@ -59,13 +59,7 @@ public:
             MIOPEN_THROW("Overriding environment variables not defined for Windows.");
         }
 
-        // CreateProcessA with non-NULL lpApplicationName requires explicit .exe extension.
-        // Some callers (tests) derive the path from argv[0], which may lack .exe on Windows.
-        auto exePath = path;
-        if(exePath.extension() != ".exe")
-            exePath.replace_extension(".exe");
-
-        std::string cmd{exePath.string()};
+        std::string cmd{path.string()};
         if(!args.empty())
             cmd += " " + std::string{args};
 
@@ -76,7 +70,7 @@ public:
         if(cmd.size() < BUFFER_CAPACITY)
             cmd.resize(BUFFER_CAPACITY, '\0');
 
-        if(CreateProcess(exePath.string().c_str(),
+        if(CreateProcess(path.string().c_str(),
                          cmd.data(),
                          nullptr,
                          nullptr,

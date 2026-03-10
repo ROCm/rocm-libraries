@@ -1010,11 +1010,11 @@ public:
                 if(full_set())
                     args += " --all";
 
-                // Override sharding so each child runs all its work, not a shard subset
-                ProcessEnvironmentMap env;
-                env["GTEST_TOTAL_SHARDS"] = "1";
-                env["GTEST_SHARD_INDEX"]  = "0";
-                children.emplace_back(exe_path(), args, "", nullptr, env);
+                // Reset sharding for child processes so each child runs its
+                // assigned work instead of being filtered out by the parent's shard.
+                args += " --gtest_total_shards=1 --gtest_shard_index=0";
+
+                children.emplace_back(exe_path(), args);
             }
             // clang-format on
         }
@@ -1103,12 +1103,12 @@ public:
                 if(full_set())
                     args += " --all";
 
+                // Reset sharding for child processes so each child runs its
+                // assigned work instead of being filtered out by the parent's shard.
+                args += " --gtest_total_shards=1 --gtest_shard_index=0";
+
                 MIOPEN_LOG_CUSTOM(LoggingLevel::Default, "Test", exe_path() + " " + args);
-                // Override sharding so each child runs all its work, not a shard subset
-                ProcessEnvironmentMap env;
-                env["GTEST_TOTAL_SHARDS"] = "1";
-                env["GTEST_SHARD_INDEX"]  = "0";
-                children.emplace_back(exe_path(), args, "", nullptr, env);
+                children.emplace_back(exe_path(), args);
             }
             // clang-format on
         }
