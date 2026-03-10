@@ -4204,14 +4204,14 @@ class KernelWriterAssembly(KernelWriter):
               mxBlock = kernel["ProblemType"]["MXBlockB"]
               module.add(SLShiftRightB32(dst=sgpr(stmp), src=size, shiftHex=log2(mxBlock), comment="(size/%d-1)" %mxBlock))
               module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=0x1, comment="(size/%d-1)" %mxBlock))
+            elif tP["isSwizzled"]:
+              module.addModuleAsFlatItems(self.alignTo(stmp, "SizeL", tP["swizzleK"]))
+              module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=1, comment="SWZ-%s align: (sizeL-1)"%tc))
             else:
               module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
           else:
             if tP["isSwizzled"]:
-              if idx in kernel["ProblemType"]["IndicesSummation"]:
-                module.addModuleAsFlatItems(self.alignTo(stmp, "SizeL", tP["swizzleK"]))
-                module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=1, comment="SWZ-%s align: (sizeL-1)"%tc))
-              elif tP["isA"] and idx == kernel["ProblemType"]["Index0"]:
+              if tP["isA"] and idx == kernel["ProblemType"]["Index0"]:
                 module.addModuleAsFlatItems(self.alignTo(stmp, "SizeI", 16))
                 module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=1, comment="SWZ-%s align: (sizeM-1)"%tc))
               elif tP["isB"] and idx == kernel["ProblemType"]["Index1"]:
