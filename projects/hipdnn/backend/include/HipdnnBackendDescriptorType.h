@@ -208,4 +208,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT,
 
+    /**
+     * @brief RMSNorm operation descriptor
+     *
+     * Represents an RMS normalization forward operation with input (X),
+     * scale, epsilon, bias (optional), output (Y), and inverse RMS
+     * (optional, training only) tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT,
+
 } hipdnnBackendDescriptorType_t;
