@@ -21,6 +21,7 @@
 *
 * ************************************************************************ */
 
+#pragma once
 #include "auto_testing_bad_arg.hpp"
 #include "display.hpp"
 #include "flops.hpp"

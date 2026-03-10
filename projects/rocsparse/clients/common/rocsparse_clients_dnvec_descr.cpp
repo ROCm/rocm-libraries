@@ -60,8 +60,8 @@ void rocsparse_clients::dnvec_descr<T>::near_check_values(
     {
         if((symbolic[i] != -1) || (numeric[i] != -1))
         {
-            std::ignore
-                = hipMemset(&this->m_device[this->m_stride * i], 0, sizeof(T) * this->m_size);
+            CHECK_HIP_ERROR(
+                hipMemset(&this->m_device[this->m_stride * i], 0, sizeof(T) * this->m_size));
             for(int64_t j = 0; j < this->m_size; ++j)
             {
                 this->m_host[this->m_stride * i + j] = static_cast<T>(0);
