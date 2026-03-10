@@ -117,14 +117,16 @@ def sendFailureNotifications() {
     }
 
     // grep separates non-adjacent match blocks with '--'. Split on that to get
-    // one context block per match, then identify which pattern each block hit.
+    // one context block per match, then identify which patterns each block hit.
+    // Adjacent matches share one block (no '--' separator), so all patterns must
+    // be checked against every block. Deduplication prevents double-notifying on
+    // the same description if a pattern appears in multiple blocks.
     def foundPatterns = []
     def blocks = grepOutput.split('\n--\n')
     for (block in blocks) {
         for (patternMap in failurePatterns) {
-            if (block =~ patternMap.pattern) {
+            if ((block =~ patternMap.pattern) && !foundPatterns.any { it.description == patternMap.description }) {
                 foundPatterns.add([description: patternMap.description, context: block])
-                break
             }
         }
     }
