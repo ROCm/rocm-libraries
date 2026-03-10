@@ -181,10 +181,7 @@ class StoreState:
         # the address for each load.  Memops in same row can use offsets
         # and share a base register but Memops in different rows need
         # different registers or need to inteligently reset the SRD.
-        print("block value:", edge, atomic)
         if kernel["BufferStore"] and not edge and not atomic:
-            print("IN this codepath ")
-            #exit(1)
             if len(kernel["PackedC0IndicesX"]) > 1:
                 # packed mode needs a unique VGPR address calc for each column.
                 self.optSharedColVgpr = 1

@@ -7,7 +7,7 @@ from ..Common import printWarning, roundUp, print2, DebugConfig, DataDirection, 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
 from rocisa.label import LabelManager
 
-from rocisa.container import vgpr, sgpr, accvgpr, mgpr
+from rocisa.container import MUBUFModifiers, vgpr, sgpr, accvgpr, mgpr
 from rocisa.enum import InstType, SelectBit, CacheScope
 from rocisa.instruction import MFMAInstruction
 
@@ -29,9 +29,10 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
+  MFMAInstruction, SAddU32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpXEqU32, VCndMaskB32, VMovB64, VLShiftRightB32, VLShiftLeftB32, VMulLOU32, VAddU32, VAddCOU32, VAddCCOU32, SMovB32, SMulI32, FlatStoreB32, SWaitCnt, SMovB64, VSubU32, VPermlane16SwapB32
+  SLongBranchPositive, VAccvgprWrite, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpXEqU32, VCndMaskB32, VReadfirstlaneB32, \
+  VMovB64, VLShiftRightB32, VLShiftLeftB32, VMulLOU32, VAddU32, VAddCOU32, VAddCCOU32, SMovB32, SMulI32, FlatStoreB32, SWaitCnt, SMovB64, VSubU32, VPermlane16SwapB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 # Store various scheduling info
@@ -73,6 +74,9 @@ class TileInfo:
       for vals in self.regValues:
         yield vals
 
+    def __len__(self):
+      return len(self.regValues)
+
     def __str__(self):
       return str(self.regValues)
 
@@ -101,6 +105,11 @@ class TileInfo:
     tc: str = field(init=False)
     subtileId: List[int] = field(init=False)
 
+    # List of GR that loads this subtile
+    globalReadMap: List[int] = field(init=False)
+    # List of LR that loads this subtile
+    localReadMap: List[int] = field(init=False)
+
     # Store registers used for constant offsets
     useSgpr = field(init=False)
     regListId: int = -1
@@ -108,6 +117,8 @@ class TileInfo:
     def __init__(self, tc, subtileId):
       self.tc = tc
       self.subtileId = subtileId
+      self.globalReadMap = []
+      self.localReadMap = []
 
   tc: str = field(init=False)
 
@@ -129,7 +140,7 @@ class TileInfo:
   localSubtileGrid: List[int]  = field(init=False)
 
   localSubtiles: List[SubtileInfo] = field(init=False)
-  localSubtilesRegister: List[RegisterList] = field(init=False) 
+  localSubtilesRegister: List[RegisterList] = field(init=False)
 
   loadRatioGR: int = 0
   numGRPerSubtile: int = 0 # may not be needed
@@ -237,6 +248,13 @@ class TileInfo:
 
     self.subtileLocalTotalCount = self.localSubtileGrid[0] * self.localSubtileGrid[1]
 
+    # Allocate subtileInfo structs
+    self.localSubtiles = []
+    self.localSubtilesRegister = []
+    for sId0 in range(self.localSubtileGrid[0]):
+      for sId1 in range(self.localSubtileGrid[1]):
+        self.localSubtiles.append(TileInfo.SubtileInfo(tc, [sId0, sId1]))
+
     if isAB:
       # Compute load ratio
       # Represents the amount of subtiles fetched by a single global load across all waves
@@ -252,15 +270,22 @@ class TileInfo:
       self.numLRPerSubtile = int(math.ceil(1/self.loadRatioLR))
       self.numLRTotal = int((self.localSubtileGrid[0] * self.localSubtileGrid[1]) / self.loadRatioLR)
 
-    # Allocate subtileInfo structs
-    self.localSubtiles = []
-    self.localSubtilesRegister = []
-    for sId0 in range(self.localSubtileGrid[0]):
-      for sId1 in range(self.localSubtileGrid[1]):
-        self.localSubtiles.append(TileInfo.SubtileInfo(tc, [sId0, sId1]))
+      # Map subtiles to GR
+      for sId0 in range(self.localSubtileGrid[0]):
+        for sId1 in range(self.localSubtileGrid[1]):
+          linearId = self.getLocalSubtileLinearId(sId0, sId1)
+          subtileInfo = self.localSubtiles[linearId]
+          baseGR = math.floor(linearId / self.loadRatioGR)
+          for nGL in range(self.numGRPerSubtile):
+            subtileInfo.globalReadMap.append(baseGR + nGL)
+          baseLR = math.floor(linearId / self.loadRatioLR)
+          for nLL in range(self.numLRPerSubtile):
+            subtileInfo.localReadMap.append(baseLR + nLL)
+          #print("GR map", sId0, sId1, subtileInfo.globalReadMap)
+          #print("LR map", sId0, sId1, subtileInfo.localReadMap)
 
-  ####################################
-  # Given 2d local mma tile Id, return 2d id for local subtile containing that tile
+
+
   def __str__(self):
     lines = [
       f"TileInfo(tc={self.tc})",
@@ -288,6 +313,8 @@ class TileInfo:
     ]
     return "\n".join(lines)
 
+  ####################################
+  # Given 2d local mma tile Id, return 2d id for local subtile containing that tile
   def getLocalSubtileIdFromMMATile(self, mmaId0, mmaId1):
     return [mmaId0 // self.subtileShape[0], mmaId1 // self.subtileShape[1]]
 
@@ -318,33 +345,35 @@ class TileInfo:
     perpDimSize = (self.localSubtileGrid[1] if False else self.localSubtileGrid[0])
     if self.loadRatioGR == 2.0:
       perpDimSize = math.ceil(perpDimSize / self.loadRatioGR)
+
+    # TOBODS: Can this be done better
     for reg in range(perpDimSize):
-      # Increasing tmpSgprBuffer value to 30 to avoid Tensilelite failing on no solution error. 
-      # allocOffsetRegisters needs to be called before graTileAssignment is called. TODO: improve allocation logic to avoid this hack.
-      tmpSgprBuffer = 30 # Hardcoded for now, the amount of sgprs to use for temps
+      tmpSgprBuffer = 10 # Hardcoded for now, the amount of sgprs to use for temps
       sgprLimit = writer.states.regCaps["MaxSgpr"] - tmpSgprBuffer
       regPool = writer.sgprPool if writer.sgprPool.size() < sgprLimit else writer.vgprPool
       self.localSubtilesRegister.append(TileInfo.RegisterList(regPool))
       # No registers needed for perp 0
       if reg == 0:
         continue
-      for i in range(self.numGRPerSubtile):
+      if regPool == writer.sgprPool:
         # TODOBS: Need to prevent overflow here, better way to do it?
         self.localSubtilesRegister[-1].append(regPool.checkOut(1, preventOverflow=False))
+      else:
+        for i in range(self.numGRPerSubtile):
+          self.localSubtilesRegister[-1].append(regPool.checkOut(1, preventOverflow=False))
     # Iterate through subtiles and allocate vgpr/sgpr if needed
     linearId = 0
     for st in self.localSubtiles:
 
+      # Get 2D Id for subtile
       sId0, sId1 = self.getLocalSubtileIdFromLinearId(linearId)
       linearId += 1
 
       # TODOBS: Check TLU instead of hardcoding
       slowId = sId1 if False else sId0
-      # Only associate a SGPR to 1 other subtile when loadRatioGR == 2.0 
-      if self.loadRatioGR == 2.0 and slowId %2 == 0:
+      # Only associate a SGPR to 1 other subtile when loadRatioGR == 2.0
+      if self.loadRatioGR == 2.0:
         slowId = int(slowId // self.loadRatioGR)
-      else:
-        slowId = 0  
       st.regListId = slowId
       st.useSgpr = self.localSubtilesRegister[slowId].regPool == writer.sgprPool
 
@@ -522,7 +551,7 @@ def lraTileAssignment(writer, kernel):
 
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
-  
+
   # Input Parameters.
   depthU = kernel["DepthU"]
   bpeA = kernel["ProblemType"]["DataTypeA"].numBytes()
@@ -537,8 +566,8 @@ def lraTileAssignment(writer, kernel):
   assert tileInfoA.mmaTileShape == tileInfoB.mmaTileShape, "Expect same MMA tile shape for A and B"
 
   blockSize = depthUBytes // loadWidth
- 
-  tmpVgpr = writer.vgprPool.checkOut(8)                                                                                                                                                                                                                                           
+
+  tmpVgpr = writer.vgprPool.checkOut(8)
   lane16, lane16Group, rotation, rowOffset, colOffset, waveId, tmp, tmp1 = range(tmpVgpr, tmpVgpr + 8)
 
   # Calculate lane16 and lane16Group for current wave (used by MFMA layout)
@@ -558,7 +587,7 @@ def lraTileAssignment(writer, kernel):
     module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset % blockSize"))
     # Swizzle col
     setExecMask(module, writer, 0x33333333, 0x33333333)
-    module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))  
+    module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
     setExecMask(module, writer, -1, -1)
   else:
     module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group"))
@@ -619,13 +648,13 @@ def _grComputeOffset(module, writer, tileInfo, col_id, row_id, split_id):
   bpe = tileInfo.bpe
 
   assert len(tileInfo.sharedVgprGROffset)<=2, "Only support 2 GR offset vgpr for now, found %u"%(len(tileInfo.sharedVgprGROffset))
-  
+
   MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
   subtile_size = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
 
   tmpVgpr = writer.vgprPool.checkOut(2)
-  sHalfOffset = writer.sgprPool.checkOut(1)
+  sHalfOffset = writer.sgprPool.checkOut(1, preventOverflow=False)
 
   module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(row_id), comment="%s: row_id * stride"%tc))
   # TODO : handle FP4 (sub byte type once available)
@@ -653,7 +682,8 @@ def _grComputeOffset(module, writer, tileInfo, col_id, row_id, split_id):
 ##################################################
 # Compute subtile perpendicular offsets for a single matrix
 #
-def _grComputeSubtileOffsets(module, tileInfo):
+# TODO: need to generalize this to support TLU=1
+def _grComputeSubtileOffsets(writer, module, tileInfo):
   tc = tileInfo.tc
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
   subtile_size = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
@@ -665,8 +695,16 @@ def _grComputeSubtileOffsets(module, tileInfo):
   s_stride = rowOffset * tileInfo.bpe
 
   for regId in range(len(tileInfo.localSubtilesRegister)):
+    regPool = tileInfo.localSubtilesRegister[regId].regPool
     for reg in tileInfo.localSubtilesRegister[regId]:
-      module.add(SMulI32(dst=sgpr(reg), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
+      if regPool == writer.sgprPool:
+        module.add(SMulI32(dst=sgpr(reg), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
+      else:
+        stmp = writer.sgprPool.checkOut(1)
+        idx = tileInfo.localSubtilesRegister[regId].index(reg)
+        module.add(SMulI32(dst=sgpr(stmp), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
+        module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[idx]), src1=sgpr(stmp)))
+        writer.sgprPool.checkIn(stmp)
 
 ##################################################
 # Subroutine to generate GR offset calculation code
@@ -702,7 +740,7 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   new_serial = tmpVgpr + 4
   wave_id    = tmpVgpr + 5
   tmp = tmpVgpr + 6
-  
+
   # Compute newSerial
   module.add(VLShiftRightB32(dst=vgpr(wave_id), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
   module.add(VAndB32(dst=vgpr(new_serial), src0=vgpr("Serial"), src1=31, comment=""))
@@ -743,14 +781,70 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
   writer.vgprPool.checkIn(tmpVgpr)
 
- 
+
 
   # Compute subtile offsets for A and B
-  _grComputeSubtileOffsets(module, tileInfoA)
-  _grComputeSubtileOffsets(module, tileInfoB)
+  _grComputeSubtileOffsets(writer, module, tileInfoA)
+  _grComputeSubtileOffsets(writer, module, tileInfoB)
 
   return module
 
+
+##################################################
+# Subroutine to generate GR offset calculation code for scaleA/B
+#
+def graTileAssignmentScaleSwizzled(writer, kernel):
+  module = Module()
+  module.addComment0("Placeholder code to generate GR offset calculations for scaleA/B")
+  return module
+
+
+##################################################
+# Subroutine to generate LR offset calculation code for scaleA/B
+#
+def lraTileAssignmentScaleSwizzled(writer, kernel):
+  module = Module()
+  module.addComment0("Placeholder code to generate LR offset calculations for scaleA/B")
+  return module
+
+##################################################
+# Subroutine to generate GR load code
+#
+def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
+  module = Module()
+  sId0 = subtileId[0]
+  sId1 = subtileId[1]
+
+  loadWidth = 16
+  numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
+  numBytesPerLoad = loadWidth * kernel["WavefrontSize"]
+  numBytesPerLoadWG = numBytesPerLoad * numWaves
+
+  tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+  subtileInfo = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, sId1)]
+  regList = tileInfo.localSubtilesRegister[subtileInfo.regListId]
+
+  offset = sId1 * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe
+  ldsStartOffset = writer.ldsStartOffsetA if tc == 'A' else writer.ldsStartOffsetB
+  m0Offset = ldsStartOffset
+
+  grBaseId = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, sId1)].globalReadMap[0]
+
+  # Emit number of buffer loads equal to number of loads needed to load a subtile
+  for i in range(tileInfo.numGRPerSubtile):
+    module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr"), src1=(m0Offset + (grBaseId + i) * numBytesPerLoadWG)))
+    mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=False, slc=False, nt=False, lds=True)
+
+    # Check if the subtile specific registers is SGPR or VGPR
+    # For SGPR we can keep the same shared vgpr offset and use the soffset field for the subtile specific SGPR
+    # For VGPR we need to update the apply the subtile-specific constant offset to the VGPR
+    #   the shared VGPR offset is not used for that specific tile, soffset is also set to zero.
+    useSgpr = subtileInfo.useSgpr
+    soffset = sgpr(regList.regValues[0]) if len(regList) > 0 and useSgpr else 0
+    voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.regValues[i]
+    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment=""))
+
+  return module
 
 ##################################################
 # Subroutine to generate GR load code
@@ -761,10 +855,17 @@ def globalReadDoSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
 
+  grTracker = set()
   for i in range(tileInfo.localSubtileGrid[0]):
     for j in range(tileInfo.localSubtileGrid[1]):
-      for k in range(tileInfo.numGRPerSubtile):
-        module.addComment("Emit GR code for subtile %s(%u, %u) - %u"%(tc, i,j,k))
+      grIds = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(i ,j)].globalReadMap
+      if not set(grIds).issubset(grTracker):
+        for grId in grIds:
+          grTracker.add(grId)
+        module.addComment0("Emit load for %s subtile: [%u, %u]"%(tc, i, j))
+        module.add(emitSubtileBufferLoad(tc, writer, kernel, [i, j]))
+      else:
+        module.addComment0("Emit load for %s subtile: [%u, %u] - already covered"%(tc, i, j))
 
   return module
 
@@ -784,6 +885,26 @@ def localReadDoSubtile(tc, writer, kernel):
 
   return module
 
+
+##################################################
+# Subroutine to generate DTL M0 LDS buffer swap
+#
+def globalReadDTLInitCommonSgpr(writer, kernel):
+  module = Module()
+
+  loadWidth = 16 # dwordx4 loads only
+  wavesize = kernel["WavefrontSize"]
+  vgprWaveId = writer.vgprPool.checkOut(1)
+  module.addComment0("Compute shared offsets used by m0 in DTL loads")
+  module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
+  module.add(VLShiftLeftB32(dst=vgpr(vgprWaveId), shiftHex=hex(loadWidth * wavesize), src=vgpr(vgprWaveId), comment="Apply wave-specific offset of %u"%(loadWidth * wavesize)))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddr"), src=vgpr(vgprWaveId), comment="Store base LDS offset, will be modified"))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteDTLOffset"), src=vgpr(vgprWaveId), comment="Store DTL wave-specific offset, this will not be modified"))
+  writer.vgprPool.checkIn(vgprWaveId)
+  return module
+
+
+
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
 #
@@ -791,7 +912,7 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
   module = Module()
   module.addComment0("Emit code to swap %s GR vgpr offsets"%tc)
   return module
-  
+
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
 #
@@ -807,7 +928,6 @@ def globalReadPtrUpdates(tc, writer, kernel):
   module = Module()
   module.addComment0("Emit code to update %s pointers"%tc)
   return module
-
 
 ##################################################
 # Subroutine to generate MMA Instruction
@@ -870,23 +990,27 @@ def emitMfmaCode(writer, kernel):
 def mainLoopImpl(writer, kernel, isNLL = False):
   module = Module()
   module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based main loop impl")
-  module.add(emitMfmaCode(writer, kernel))
+
+
+
   if not isNLL:
+    #module.add(Label("testL", comment=""))
     module.add(globalReadDoSubtile('A', writer, kernel))
     module.add(globalReadDoSubtile('B', writer, kernel))
   module.add(localReadDoSubtile('A', writer, kernel))
   module.add(localReadDoSubtile('B', writer, kernel))
 
-  module.add(globalReadLDSBufferSwap('A', writer, kernel))
-  module.add(globalReadLDSBufferSwap('B', writer, kernel))
+  #module.add(globalReadLDSBufferSwap('A', writer, kernel))
+  #module.add(globalReadLDSBufferSwap('B', writer, kernel))
 
-  module.add(localReadLDSBufferSwap('A', writer, kernel))
-  module.add(localReadLDSBufferSwap('B', writer, kernel))
+  #module.add(localReadLDSBufferSwap('A', writer, kernel))
+  #module.add(localReadLDSBufferSwap('B', writer, kernel))
 
-  module.add(globalReadPtrUpdates('A', writer, kernel))
-  module.add(globalReadPtrUpdates('B', writer, kernel))
+  #module.add(globalReadPtrUpdates('A', writer, kernel))
+  #module.add(globalReadPtrUpdates('B', writer, kernel))
 
-  
+  module.add(emitMfmaCode(writer, kernel))
+
   return module
 
 
@@ -932,9 +1056,9 @@ def mainLoop(writer, kernel):
   module.add(mainLoopImpl(writer, kernel))
   module.addComment("")
 
-  module.addComment0("MAINLOOP-NLL")
-  isNLL = True
-  module.add(mainLoopImpl(writer, kernel, isNLL))
-  module.addComment("")
+  #module.addComment0("MAINLOOP-NLL")
+  #isNLL = True
+  #module.add(mainLoopImpl(writer, kernel, isNLL))
+  #module.addComment("")
 
   return module
