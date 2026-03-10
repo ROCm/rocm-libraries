@@ -525,14 +525,13 @@ Each test gets labels that enable flexible CTest filtering:
 ### `apply_test_category_labels(target_name yaml_file working_dir [install_test_file])`
 
 
-| Parameter           | Required | Description                                                      |
-| ------------------- | -------- | ---------------------------------------------------------------- |
-| `target_name`       | Yes      | Name of the GTest executable (must not be empty)                 |
-| `yaml_file`         | Yes      | Absolute path to `test_categories.yaml` (must exist)             |
-| `working_dir`       | Yes      | Working directory for test execution (must be a valid directory) |
-| `install_test_file` | No       | Not required for local project, but required for TheRock         |
-
-
+| Parameter           | Required | Description                                                                                         |
+| ------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `target_name`       | Yes      | Name of the GTest executable (must not be empty)                                                   |
+| `yaml_file`         | Yes      | Absolute path to `test_categories.yaml` (must exist)                                               |
+| `working_dir`       | Yes      | Working directory for test execution (must be a valid directory)                                   |
+| `install_test_file` | No       | Path to the generated install-time `CTestTestfile.cmake`. Not required for local builds, but      |
+|                     |          | required for install/package workflows (e.g., TheRock).                                            |
 **Validation:** The function validates all inputs before execution and emits `WARNING` messages if any check fails, returning early without generating tests.
 
 ## YAML Reference
