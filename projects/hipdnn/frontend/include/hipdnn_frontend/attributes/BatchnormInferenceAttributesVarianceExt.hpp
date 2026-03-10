@@ -1,5 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormInferenceAttributesVarianceExt.hpp
+ * @brief Attributes for batch normalization inference with variance and epsilon tensors
+ *
+ * This file defines the BatchnormInferenceAttributesVarianceExt class for
+ * configuring batch normalization during inference using raw variance and
+ * epsilon as separate input tensors (rather than pre-computed inverse variance).
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
@@ -10,6 +20,34 @@
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class BatchnormInferenceAttributesVarianceExt
+ * @brief Configuration for batch normalization inference with variance and epsilon
+ *
+ * Extended variant of BatchnormInferenceAttributes that accepts raw variance
+ * and an epsilon tensor instead of pre-computed inverse variance:
+ *
+ * y = scale * (x - mean) / sqrt(variance + epsilon) + bias
+ *
+ * **Required inputs:**
+ * - X: Input activation tensor
+ * - Mean: Pre-computed running mean
+ * - Variance: Pre-computed running variance
+ * - Scale: Scale (gamma) parameter
+ * - Bias: Bias (beta) parameter
+ * - Epsilon: Small constant for numerical stability (scalar tensor)
+ *
+ * **Outputs:**
+ * - Y: Normalized output tensor
+ *
+ * @code{.cpp}
+ * auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale,
+ *              bias, epsilon, BatchnormInferenceAttributesVarianceExt());
+ * @endcode
+ *
+ * @see Graph::batchnorm_inference_variance_ext(), BatchnormInferenceAttributes
+ */
 class BatchnormInferenceAttributesVarianceExt
     : public Attributes<BatchnormInferenceAttributesVarianceExt>
 {

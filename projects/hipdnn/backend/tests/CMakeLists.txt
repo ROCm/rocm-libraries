@@ -49,6 +49,8 @@ add_executable(
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
+    descriptors/TestGraphDescriptorRMSNorm.cpp
+    descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestVariantPackDescriptor.cpp
