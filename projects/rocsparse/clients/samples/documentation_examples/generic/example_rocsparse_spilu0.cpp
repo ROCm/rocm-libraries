@@ -208,8 +208,6 @@ int main()
                                                  rocsparse_spilu0_stage_analysis,
                                                  &non_persistent_buffer_size_in_bytes,
                                                  nullptr));
-    HIP_CHECK(hipStreamSynchronize(stream));
-
     HIP_CHECK(hipMalloc(&non_persistent_buffer, non_persistent_buffer_size_in_bytes));
 
     ROCSPARSE_CHECK(rocsparse_spilu0(handle,
@@ -220,8 +218,6 @@ int main()
                                      non_persistent_buffer_size_in_bytes,
                                      non_persistent_buffer,
                                      nullptr));
-
-    HIP_CHECK(hipStreamSynchronize(stream));
 
     //
     // Check for any singularities after analysis.
@@ -284,8 +280,6 @@ int main()
                                                  rocsparse_spilu0_stage_compute,
                                                  &non_persistent_buffer_size_in_bytes,
                                                  nullptr));
-    HIP_CHECK(hipStreamSynchronize(stream));
-
     HIP_CHECK(hipFree(non_persistent_buffer));
     non_persistent_buffer = nullptr;
     HIP_CHECK(hipMalloc(&non_persistent_buffer, non_persistent_buffer_size_in_bytes));

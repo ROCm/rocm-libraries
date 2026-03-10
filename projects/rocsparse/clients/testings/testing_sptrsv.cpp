@@ -769,7 +769,6 @@ void testing_sptrsv(const Arguments& arg)
         size_t buffer_size;
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(
             handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_compute, &buffer_size, p_error));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         device_dense_vector<char> buffer(buffer_size);
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));

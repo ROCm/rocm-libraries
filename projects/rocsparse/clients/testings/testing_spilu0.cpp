@@ -1088,7 +1088,6 @@ void testing_spilu0(const Arguments& arg_)
                                                            rocsparse_spilu0_stage_analysis,
                                                            &buffer_size_in_bytes,
                                                            p_error));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
 
@@ -1151,7 +1150,7 @@ void testing_spilu0(const Arguments& arg_)
                                                                rocsparse_spilu0_stage_compute,
                                                                &buffer_size_in_bytes,
                                                                p_error));
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
             device_dense_vector<char> buffer(buffer_size_in_bytes);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
             CHECK_ROCSPARSE_ERROR(rocsparse_spilu0(handle,
@@ -1163,8 +1162,6 @@ void testing_spilu0(const Arguments& arg_)
                                                    buffer,
                                                    p_error));
 
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-
             CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
             CHECK_ROCSPARSE_ERROR(
@@ -1174,8 +1171,6 @@ void testing_spilu0(const Arguments& arg_)
                                             host_numeric_pivot,
                                             sizeof(int64_t),
                                             p_error));
-
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
             CHECK_ROCSPARSE_ERROR(
                 rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
@@ -1226,7 +1221,6 @@ void testing_spilu0(const Arguments& arg_)
                                                            rocsparse_spilu0_stage_compute,
                                                            &buffer_size_in_bytes,
                                                            p_error));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
 

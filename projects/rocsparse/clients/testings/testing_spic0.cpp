@@ -672,7 +672,6 @@ void testing_spic0_bad_arg(const Arguments& arg)
             handle, spic0_descr, A, P, rocsparse_spic0_stage_analysis, &buffer_size, p_error));
         hipStream_t stream;
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         {
             device_dense_vector<char> buffer(buffer_size);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
@@ -775,7 +774,6 @@ void testing_spic0_bad_arg(const Arguments& arg)
         {
             CHECK_ROCSPARSE_ERROR(rocsparse_spic0_buffer_size(
                 handle, spic0_descr, A, P, rocsparse_spic0_stage_compute, &buffer_size, p_error));
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
             device_dense_vector<char> buffer(buffer_size);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
 
@@ -1018,8 +1016,6 @@ void testing_spic0(const Arguments& arg)
                                                           rocsparse_spic0_stage_analysis,
                                                           &buffer_size_in_bytes,
                                                           p_error));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
 
@@ -1082,7 +1078,6 @@ void testing_spic0(const Arguments& arg)
                                                               rocsparse_spic0_stage_compute,
                                                               &buffer_size_in_bytes,
                                                               p_error));
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
             device_dense_vector<char> buffer(buffer_size_in_bytes);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
@@ -1095,8 +1090,6 @@ void testing_spic0(const Arguments& arg)
                                                   buffer_size_in_bytes,
                                                   buffer,
                                                   p_error));
-
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
             CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
@@ -1156,7 +1149,6 @@ void testing_spic0(const Arguments& arg)
                                                           rocsparse_spic0_stage_compute,
                                                           &buffer_size_in_bytes,
                                                           p_error));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
