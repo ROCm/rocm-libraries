@@ -1451,6 +1451,18 @@ pipeline {
                     checkoutComposableKernel()
                     env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || shouldRunCICheck())
                     echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
+
+                    // TEST ONLY: Emit all failure patterns so sendFailureNotifications() can
+                    // detect and exercise every pattern branch, then force the build to fail.
+                    echo "login attempt to registry.example.com failed with status: 401 Unauthorized"
+                    echo "docker login failed"
+                    echo "HTTP request sent awaiting response... 404 Not Found"
+                    echo "cat: /dev/dri/renderD128: No such file or directory"
+                    echo "GPU not found"
+                    echo "Could not connect to Redis at 127.0.0.1:6379: Connection timed out"
+                    echo "unauthorized: your account must log in with a Personal Access Token"
+                    echo "sccache: error: Server startup failed: Address in use"
+                    error("TEST: Forcing stage failure to trigger sendFailureNotifications() and validate all failure pattern checks")
                 }
             }
         }
