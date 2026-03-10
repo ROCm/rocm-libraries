@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Configure and compile all discovered test_*conv* targets.
+# Configure and compile discovered convolution gtest targets.
 #
 # Usage:
 #   ./script/build_all_test_targets.sh [build_dir] [jobs]
@@ -24,7 +24,7 @@ mkdir -p "${BUILD_DIR}"
 echo "[INFO] Configuring CMake..."
 cmake -S "${SRC_DIR}" -B "${BUILD_DIR}"
 
-echo "[INFO] Discovering test_*conv* targets..."
+echo "[INFO] Discovering convolution gtest targets..."
 mapfile -t TARGETS < <(
     cmake --build "${BUILD_DIR}" --target help 2>/dev/null \
         | sed -n 's/^[.][.][.] //p' \
@@ -35,23 +35,7 @@ mapfile -t TARGETS < <(
 )
 
 if [[ "${#TARGETS[@]}" -eq 0 ]]; then
-    echo "[WARN] Could not discover targets via 'cmake --build --target help'."
-    echo "[WARN] Falling back to source-file-based target list (conv only)."
-    mapfile -t TARGETS < <(
-        {
-            for f in "${SRC_DIR}/test"/*.cpp "${SRC_DIR}/test/gtest"/*.cpp; do
-                [[ -f "${f}" ]] || continue
-                b="$(basename "${f}" .cpp)"
-                if [[ "test_${b}" == *conv* ]]; then
-                    echo "test_${b}"
-                fi
-            done
-        } | sort -u
-    )
-fi
-
-if [[ "${#TARGETS[@]}" -eq 0 ]]; then
-    echo "[ERROR] No test_*conv* targets found."
+    echo "[ERROR] No convolution gtest targets discovered via CMake target help."
     exit 2
 fi
 

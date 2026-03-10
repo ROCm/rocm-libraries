@@ -847,6 +847,8 @@ add_custom_test(smoke_solver_ConvMlirIgemm_W GFX900_DISABLED GFX908_DISABLED GFX
     COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 ${MIOPEN_TEST_FLAGS_ARGS}
 )
 
+# These custom conv_transposed checks invoke gtest-based binaries (`test_conv2d` / `test_conv2d_find2`).
+# They are not legacy conv test drivers.
 add_custom_test(conv_transposed_fwd
     COMMAND $<TARGET_FILE:test_conv2d> ${TEST_CONV_VERBOSE_F} --input 1 16 24 24 --weights 16 16 7 7 --pads_strides_dilations 3 3 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
 )
