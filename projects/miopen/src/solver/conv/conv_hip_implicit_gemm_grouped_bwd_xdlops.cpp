@@ -35,6 +35,10 @@
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <miopen/solver/ck_utility_common.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
@@ -50,6 +54,16 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace {
+
+// Maps architecture to solver name used in model file paths
+// gfx90a uses abbreviated name for old KTN models
+// gfx942/gfx950 use full name for new Candidate Selection models
+static std::string GetSolverNameForArch(const std::string& arch)
+{
+    if(arch == "gfx90a")
+        return "ConvHipIgemmGroupXdlops";
+    return "ConvHipImplicitGemmGroupBwdXdlops";
+}
 
 struct CKArgs
 {
@@ -217,30 +231,60 @@ struct CKArgs
 };
 } // namespace
 
-template <typename DataType>
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(const ProblemDescription& problem)
+template <typename DataType, typename ComputeType>
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(
+    const ProblemDescription& problem)
 {
-    if constexpr(std::is_same_v<DataType, float>)
+    if(valid_kernels.empty())
     {
+        valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType, ComputeType>, CKArgs>(problem);
+    }
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+    }
+}
+
+template <typename DataType>
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(
+    const ProblemDescription& problem)
+{
+    Init<DataType, DataType>(problem);
+}
+
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitValidKernels(
+    const ProblemDescription& problem)
+{
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat:
         if(problem.UseTF32())
         {
             use_tf32 = true;
-            valid_kernels =
-                FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+            Init<float, ck::tf32_t>(problem);
+            if(valid_kernels.empty())
+            {
+                use_tf32 = false;
+                Init<float>(problem);
+            }
         }
         else
         {
-            use_tf32      = false;
-            valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
+            use_tf32 = false;
+            Init<float>(problem);
         }
+        break;
+    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+    case miopenInt64:
+    case miopenInt32:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenDouble: break;
     }
-    else
-    {
-        valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
-    }
-    index     = 0;
-    split_k   = 1;
-    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
 template <typename DataType>
@@ -276,7 +320,11 @@ bool ConvHipImplicitGemmGroupBwdXdlops::CheckCKApplicability(
 }
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
+// ============================================================================
+// OLD KTN functions (kept for gfx90a backward compatibility)
+// ============================================================================
+
+static std::vector<std::string> GetKernelAsTokensKTN(const std::string& kernel)
 {
     std::vector<std::string> tokens;
     std::string token;
@@ -291,7 +339,7 @@ static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
     return tokens;
 }
 
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDsKTN()
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -299,12 +347,12 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
            std::string::npos)
         {
             heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            heuristic_kernels[i] = GetKernelAsTokensKTN(valid_kernels[i]);
         }
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
+bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyTokenKTN(
     int idx, std::string value, const std::string& arch, const ProblemDescription& /*problem*/)
 {
     if(arch == "gfx90a")
@@ -338,7 +386,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
 }
 
 static std::vector<float>
-GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std::string& arch)
+GetFeaturesKTN(const ProblemDescription& problem, std::size_t /*num_cu*/, const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -395,10 +443,9 @@ GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std
 }
 
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel(
+bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModelKTN(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    // filter valid_kernel ID's
     if constexpr(std::is_same_v<DataType, float>)
     {
         if(problem.UseTF32())
@@ -412,24 +459,25 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel
         valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
     }
 
-    InitHeuristicKernelIDs();
+    InitHeuristicKernelIDsKTN();
     static const std::string& arch = ctx.GetStream().GetDeviceName();
-    static std::string solver      = "ConvHipIgemmGroupBwdXdlops";
-    if(arch == "gfx90a")
-        solver = "ConvHipIgemmGroupXdlops";
-    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    if(ai::tuning::ModelSetParams(
-           arch, solver, problem.GetDirection(), features, true, [&](int idx, std::string value) {
-               return this->ModelApplyToken(idx, value, arch, problem);
-           }))
+    static const std::string solver = GetSolverNameForArch(arch);
+    
+    std::vector<float> features = GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    bool transform = (arch == "gfx90a") ? false : true;
+    if(ai::tuning::ModelSetParams(arch, solver, problem.GetDirection(), features, transform,
+                                  [&](int idx, const std::string& value) {
+                                      return this->ModelApplyTokenKTN(idx, value, arch, problem);
+                                  }))
     {
         index     = heuristic_indexes[0];
         kernel_id = valid_kernels[index] + "+1";
-        MIOPEN_LOG_I("Params set by AI: " << ToString());
+        MIOPEN_LOG_I("Params set by KTN: " << ToString());
         return true;
     }
     return false;
 }
+
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
@@ -457,54 +505,99 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
+    const std::string& arch = ctx.GetStream().GetDeviceName();
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR) &&
+       IsModelApplicable(ctx, problem))
     {
-        // Helper lambda to run AI model and enforce deterministic constraints
-        auto try_ai_model = [&](auto data_type_tag) -> bool {
-            using T = decltype(data_type_tag);
-            if(RunParameterPredictionModel<T>(ctx, problem))
+        if(arch == "gfx942" || arch == "gfx950")
+        {
+            MIOPEN_LOG_I2("Candidate Selection heuristics for " << arch);
+            std::string solver_name = GetSolverNameForArch(arch);
+            
+            auto run_cs = [&](auto data_type_tag) {
+                using T = decltype(data_type_tag);
+                if constexpr(std::is_same_v<T, float>)
+                {
+                    if(problem.UseTF32())
+                        valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<float, ck::tf32_t>, CKArgs>(problem);
+                }
+                if(valid_kernels.empty())
+                    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<T>, CKArgs>(problem);
+
+                auto fill_valid_kernels = [=](const ProblemDescription& problem) {
+                    if constexpr(std::is_same_v<T, float>)
+                    {
+                        if(problem.UseTF32())
+                            return FillValidKernelsIDs<DeviceOpGBwdPtrs<float, ck::tf32_t>, CKArgs>(problem);
+                    }
+                    return FillValidKernelsIDs<DeviceOpGBwdPtrs<T>, CKArgs>(problem);
+                };
+                // split_k validation: must be 1 in deterministic mode, otherwise 1-128 powers of 2
+                auto is_valid = [&](int ki, int sk) {
+                    if(ki < 0 || ki >= static_cast<int>(valid_kernels.size()))
+                        return false;
+                    if(is_deterministic)
+                        return sk == 1;
+                    return sk >= 1 && sk <= 128 && (sk & (sk - 1)) == 0; // power of 2
+                };
+                return miopen::solver::conv::RunParameterPredictionModel<T>(
+                    ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name, is_valid);
+            };
+
+            bool ai_success = false;
+            miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
+            switch(problem.GetInDataType())
+            {
+            case miopenHalf: std::tie(ai_success, result) = run_cs(ck::half_t{}); break;
+            case miopenFloat: std::tie(ai_success, result) = run_cs(float{}); break;
+            case miopenBFloat16: std::tie(ai_success, result) = run_cs(ck::bhalf_t{}); break;
+            default: break;
+            }
+            if(ai_success && !result.IsEmpty())
+            {
+                MIOPEN_LOG_I("Candidate Selection selected: " << kernel_id);
+                return;
+            }
+        }
+        else if(arch == "gfx90a")
+        {
+            MIOPEN_LOG_I2("KTN heuristics for gfx90a");
+            bool ktn_succeeded = false;
+            switch(problem.GetInDataType())
+            {
+            case miopenFloat: ktn_succeeded = RunParameterPredictionModelKTN<float>(ctx, problem); break;
+            case miopenBFloat16: ktn_succeeded = RunParameterPredictionModelKTN<ck::bhalf_t>(ctx, problem); break;
+            case miopenHalf: ktn_succeeded = RunParameterPredictionModelKTN<ck::half_t>(ctx, problem); break;
+            default: break;
+            }
+            if(ktn_succeeded)
             {
                 // Enforce split_k == 1 for deterministic mode
                 if(is_deterministic && split_k != 1)
                 {
-                    MIOPEN_LOG_I("Deterministic mode: Overriding AI-predicted split_k="
+                    MIOPEN_LOG_I("Deterministic mode: Overriding KTN-predicted split_k="
                                  << split_k << " to split_k=1");
                     split_k = 1;
                     if(!valid_kernels.empty())
                         kernel_id = valid_kernels[index] + "+1";
                 }
-                return true;
+                MIOPEN_LOG_I("KTN selected: " << kernel_id);
+                return;
             }
-            return false;
-        };
-
-        // Try AI prediction for the appropriate data type
-        bool ai_succeeded = false;
-        switch(problem.GetInDataType())
-        {
-        case miopenFloat: ai_succeeded = try_ai_model(float{}); break;
-        case miopenBFloat16: ai_succeeded = try_ai_model(ck::bhalf_t{}); break;
-        case miopenHalf: ai_succeeded = try_ai_model(ck::half_t{}); break;
-        default: break;
         }
-
-        if(ai_succeeded)
-            return;
     }
 #endif
-    switch(problem.GetInDataType())
+
+    MIOPEN_LOG_I2("Using default initialization");
+    InitValidKernels(problem);
+    if(!valid_kernels.empty())
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
-    case miopenInt8: Init<int8_t>(problem); break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
     }
 
     // Invariant: split_k must always be 1 in deterministic mode
@@ -517,18 +610,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf: Init<ck::half_t>(problem); break;
-        case miopenFloat: Init<float>(problem); break;
-        case miopenInt8: Init<int8_t>(problem); break;
-        case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-        case miopenInt64:
-        case miopenInt32:
-        case miopenFloat8_fnuz:
-        case miopenBFloat8_fnuz:
-        case miopenDouble: break;
-        }
+        InitValidKernels(problem);
         assert(!valid_kernels.empty());
         return true;
     }

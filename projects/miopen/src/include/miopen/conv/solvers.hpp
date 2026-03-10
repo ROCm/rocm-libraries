@@ -4790,17 +4790,23 @@ private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
+    
+    // OLD KTN functions (for gfx90a)
     template <typename DataType>
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs();
-    bool ModelApplyToken(int idx,
-                         std::string value,
-                         const std::string& arch,
-                         const miopen::conv::ProblemDescription& problem);
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+    void InitHeuristicKernelIDsKTN();
+    bool ModelApplyTokenKTN(int idx,
+                            std::string value,
+                            const std::string& arch,
+                            const miopen::conv::ProblemDescription& problem);
 #endif
+    
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
