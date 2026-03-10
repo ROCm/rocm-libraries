@@ -1929,6 +1929,16 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::VSwapB32& self, nb::dict&) { return new rocisa::VSwapB32(self); });
 
+    nb::class_<rocisa::VPermlane16SwapB32, rocisa::CommonInstruction>(m_common, "VPermlane16SwapB32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VPermlane16SwapB32& self, nb::dict&) { return new rocisa::VPermlane16SwapB32(self); });
+
     nb::class_<rocisa::VBfeI32, rocisa::CommonInstruction>(m_common, "VBfeI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

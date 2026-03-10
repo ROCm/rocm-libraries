@@ -62,8 +62,9 @@ def compute_expected_offset(thread_id, cfg, tileInfo):
     row = newSerial // blockSize
 
     if cfg.use_swizzling:
-        col = col + 1  if col % 2 ==0 else col - 1  # swap even/odd cols for initial swizzle
         rowLds = row // 2
+        if rowLds % 2 == 0:  # even rowLds: swap even/odd cols
+            col = col + 1  if col % 2 ==0 else col - 1  # swap even/odd cols for initial swizzle
         col = (col + (blockSize - (rowLds // 2) * 2))%blockSize  # rotation to avoid bank conflicts: blockSize - (lds_row_id//4)*2
 
     rowG = row + waveSplitId * rowOffset

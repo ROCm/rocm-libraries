@@ -53,9 +53,9 @@ class TileConfig:
     mt_a: int       # MacroTileA
     mt_b: int       # MacroTileB
     depth_u: int    # DepthU
-    stride_a: int   # StrideA0I (in elements)
-    stride_b: int   # StrideB1J (in elements)
-    use_swizzling: bool = False  # Whether to enable swizzling
+    stride_a: int = 0   # StrideA0I (in elements), only needed by GRA tests
+    stride_b: int = 0   # StrideB1J (in elements), only needed by GRA tests
+    use_swizzling: bool = False  # Whether to enable swizzling, only needed by GRA tests
 
     @property
     def label(self):
@@ -125,11 +125,15 @@ def create_writer_for_gpu(cfg):
       s0:s1        = kernarg_segment_ptr
       s2           = workgroup_id_x
       s3           = padding
-      s[4:5]       = output_ptr (loaded from kernargs in prologue)
-      s[6:7]       = free
-      s8           = StrideA0I (loaded from kernargs, mapped via .set)
-      s9           = StrideB1J (loaded from kernargs, mapped via .set)
-      s10+         = sgprPool for temps (sHalfOffset, subtile offsets, etc.)
+      s[4:5]       = input_A_ptr (integration) or output_ptr (export kernel)
+      s[6:7]       = input_B_ptr (integration) or free (export kernel)
+      s[8:9]       = output_ptr (integration) or strideA/B (export kernel)
+      s10          = strideA (integration, mapped via .set sgprStrideA0I)
+      s11          = strideB (integration, mapped via .set sgprStrideB1J)
+      s12+         = sgprPool for temps (sHalfOffset, subtile offsets, etc.)
+
+    Note: export kernel (test_graTileAssignment) uses .set sgprStrideA0I=8,
+    sgprStrideB1J=9, which is fine since those sgprs are still reserved.
     """
     writer = SimpleNamespace()
 
@@ -141,8 +145,10 @@ def create_writer_for_gpu(cfg):
     # Reserve v0 for Serial (hardware workitem_id)
     writer.vgprPool.checkOut(1)
 
-    # Reserve s0-s9 for hardware regs + kernarg loads
-    writer.sgprPool.checkOut(10)
+    # Reserve s0-s11 for hardware regs + kernarg loads
+    # s[0:1]=kernarg, s2=workgroup_id_x, s3=pad,
+    # s[4:5]=input_A, s[6:7]=input_B, s[8:9]=output, s10=strideA, s11=strideB
+    writer.sgprPool.checkOut(12)
 
     # Build kernel and TileInfo
     kernel = _create_kernel(cfg)
