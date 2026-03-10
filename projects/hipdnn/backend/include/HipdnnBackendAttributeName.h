@@ -45,6 +45,7 @@
  * - 2100-2199: Shared batchnorm backward ext attributes
  * - 2200-2299: Pointwise operation attributes
  * - 2300-2399: Shared pointwise descriptor attributes
+ * - 2400-2499: RMSNorm operation attributes
  * - 2500-2599: Matmul operation attributes
  * - 60000+: Extension attributes
  */
@@ -571,6 +572,40 @@ typedef enum
 
     /** @brief Axis index for pointwise operation */
     HIPDNN_ATTR_POINTWISE_AXIS = 2308,
+
+    /** @} */
+
+    /**
+     * @name RMSNorm Operation Attributes (2400-2499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for rmsnorm */
+    HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT = 2400,
+
+    /** @brief Scale tensor for rmsnorm */
+    HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT = 2401,
+
+    /** @brief Epsilon tensor for rmsnorm */
+    HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT = 2402,
+
+    /** @brief Output tensor (Y) for rmsnorm */
+    HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT = 2403,
+
+    /** @brief Bias tensor for rmsnorm (optional) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT = 2404,
+
+    /** @brief Inverse RMS tensor for rmsnorm (optional, training only) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT = 2405,
+
+    /** @brief Forward phase for rmsnorm (TRAINING or INFERENCE) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT = 2406,
+
+    /** @brief Compute data type for rmsnorm.
+     *  Note: intentionally omits OPERATION_ prefix to match the BatchNorm
+     *  inference convention (HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT). */
+    HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT = 2407,
 
     /** @} */
 

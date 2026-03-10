@@ -320,6 +320,8 @@ namespace rocRoller
          */
         hipFunction_t getHipFunction() const;
 
+        void generateKernelGraph();
+
     private:
         CommandPtr  m_command;
         std::string m_name;
@@ -332,7 +334,6 @@ namespace rocRoller
         CommandParametersPtr              m_commandParameters;
         CommandLaunchParametersPtr        m_launchParameters;
 
-        void generateKernelGraph(std::string name);
         void generateKernelSource();
 
         /**

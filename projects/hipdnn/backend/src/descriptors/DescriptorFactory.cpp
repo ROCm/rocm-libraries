@@ -18,6 +18,7 @@
 #include "KnobSettingDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "RMSNormOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -84,6 +85,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<MatmulOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<RMSNormOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
