@@ -1478,8 +1478,8 @@ namespace TensileLite
                             && problem.d().dataType() == value[3];
 
                     return ret &&
-                        validateComputeType(problem.computeInputTypeA(), true /* isComputeInputTypeA */) &&
-                        validateComputeType(problem.computeInputTypeB(), false /* isComputeInputTypeA */);
+                        validateComputeType(problem.computeInputTypeA(), true) &&
+                        validateComputeType(problem.computeInputTypeB(), false);
                 }
 
                 virtual std::string toString() const override
