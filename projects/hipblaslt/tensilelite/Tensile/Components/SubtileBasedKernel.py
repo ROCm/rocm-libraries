@@ -20,7 +20,7 @@ from collections import deque
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countDSStoreB256, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
-from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, vgpr, sgpr, DPPModifiers, EXEC
+from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, vgpr, sgpr, DPPModifiers, DSModifiers, EXEC
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
@@ -32,7 +32,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   MFMAInstruction, SAddU32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VAccvgprWrite, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpXEqU32, VCndMaskB32, VReadfirstlaneB32, \
-  VMovB64, VLShiftRightB32, VLShiftLeftB32, VMulLOU32, VAddU32, VAddCOU32, VAddCCOU32, SMovB32, SMulI32, FlatStoreB32, SWaitCnt, SMovB64, VSubU32, VPermlane16SwapB32
+  VMovB64, VLShiftRightB32, VLShiftLeftB32, VMulLOU32, VAddU32, VAddCOU32, VAddCCOU32, SMovB32, SMulI32, FlatStoreB32, SWaitCnt, SMovB64, VSubU32, VPermlane16SwapB32, MFMAInstruction
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 # Store various scheduling info
@@ -281,8 +281,8 @@ class TileInfo:
           baseLR = math.floor(linearId / self.loadRatioLR)
           for nLL in range(self.numLRPerSubtile):
             subtileInfo.localReadMap.append(baseLR + nLL)
-          #print("GR map", sId0, sId1, subtileInfo.globalReadMap)
-          #print("LR map", sId0, sId1, subtileInfo.localReadMap)
+          # print("GR map", sId0, sId1, subtileInfo.globalReadMap)
+          # print("LR map", sId0, sId1, subtileInfo.localReadMap)
 
 
 
@@ -326,6 +326,10 @@ class TileInfo:
     sId0 = linearId % self.localSubtileGrid[0]
     sId1 = linearId // self.localSubtileGrid[0]
     return [sId0, sId1]
+
+  def getSubtileShapeLinearId(self, k0, k1):
+    # Returns linear id within a subtile, col major
+    return k1 * self.subtileShape[0] + k0
 
   def getLocalMMATileLinearId(self, mmaId0, mmaId1):
     # Returns linear id for subtiles assumes block col major format
@@ -619,6 +623,59 @@ def lraTileAssignment(writer, kernel):
   return module
 
 
+def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
+  """Zero a contiguous register range using MFMA for blocks of 16, scalar writes for remainder."""
+  tileAlias = accvgpr if isAgpr else vgpr
+  tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
+  regsPerMfma = 16
+  numMfma = totalRegs // regsPerMfma
+
+  if numMfma > 0:
+    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
+    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
+    module.add(SNop(waitState=1, comment="wait for vgpr to be ready before MFMA"))
+    for i in range(numMfma):
+      r = firstReg + i * regsPerMfma
+      module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32,
+                                 variant=[32, 32, 16, 1], mfma1k=False,
+                                 acc=tileAlias(r, regsPerMfma),
+                                 a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
+                                 acc2=0,
+                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerMfma - 1)))
+    writer.vgprPool.checkIn(tmpVgpr)
+
+  for i in range(numMfma * regsPerMfma, totalRegs):
+    module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
+
+def initVgprTilesToZero(writer, kernel, tileInfo):
+  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder."""
+  module = Module()
+  module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
+
+  if not tileInfo.vgprTiles:
+    return module
+
+  # Group contiguous tiles by pool type (agpr vs vgpr) since D tiles can use both
+  firstReg = tileInfo.vgprTiles[0].regList.regValues[0]
+  totalRegs = 0
+  curPool = tileInfo.vgprTiles[0].regList.regPool
+
+  for tile in tileInfo.vgprTiles:
+    pool = tile.regList.regPool
+    numRegs = len(tile.regList.regValues)
+    if pool != curPool:
+      _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
+      firstReg = tile.regList.regValues[0]
+      totalRegs = numRegs
+      curPool = pool
+    else:
+      totalRegs += numRegs
+
+  _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
+
+  return module
+
+
 def localReadResetOffsetsSubtile(writer, kernel):
   module = Module()
   module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based LR offset reset code")
@@ -869,6 +926,28 @@ def globalReadDoSubtile(tc, writer, kernel):
 
   return module
 
+def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
+  
+  module = Module()
+  sId0 = subtileId[0]
+  sId1 = subtileId[1]
+
+  linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
+  subtileInfo = tileInfo.localSubtiles[linearId]
+
+  for mfmaC in range(tileInfo.subtileShape[1]):
+    for mfmaR in range(tileInfo.subtileShape[0]):
+      mfmaId = tileInfo.getSubtileShapeLinearId(mfmaC, mfmaR)
+      addrVgpr = tileInfo.sharedVgprLROffset[mfmaId]
+      dstTile = tileInfo.vgprTiles[subtileInfo.localReadMap[mfmaId]]
+      dstVgpr = dstTile.regList.regValues[0]
+      numRegs = len(dstTile.regList.regValues)
+      offset = sId0*2*tileInfo.subtileSize
+      module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegs), src=vgpr(addrVgpr), ds=DSModifiers(offset=offset),
+                            comment="Subtile%s[%u,%u] mfmaId=[%u,%u]"%(tileInfo.tc, sId0, sId1, mfmaR, mfmaC)))
+     
+  return module
+
 ##################################################
 # Subroutine to generate LR load code
 # Initial idea: maybe store asm in modules in a separate obj?
@@ -880,8 +959,7 @@ def localReadDoSubtile(tc, writer, kernel):
 
   for i in range(tileInfo.localSubtileGrid[0]):
     for j in range(tileInfo.localSubtileGrid[1]):
-      for k in range(tileInfo.numLRPerSubtile):
-        module.addComment("Emit LR code for subtile %s(%u, %u) - %u"%(tc, i,j,k))
+        module.add(emitSubtileDsRead(writer, kernel, tileInfo, [i, j]))
 
   return module
 
@@ -897,7 +975,8 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
   vgprWaveId = writer.vgprPool.checkOut(1)
   module.addComment0("Compute shared offsets used by m0 in DTL loads")
   module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
-  module.add(VLShiftLeftB32(dst=vgpr(vgprWaveId), shiftHex=hex(loadWidth * wavesize), src=vgpr(vgprWaveId), comment="Apply wave-specific offset of %u"%(loadWidth * wavesize)))
+  module.add(VLShiftLeftB32(dst=vgpr(vgprWaveId), shiftHex=hex((loadWidth * wavesize).bit_length()-1), src=vgpr(vgprWaveId), comment="Apply wave-specific offset of %u"%(loadWidth * wavesize)))
+  module.add(SNop(waitState=0, comment="Wait for VGPR to be ready"))
   module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddr"), src=vgpr(vgprWaveId), comment="Store base LDS offset, will be modified"))
   module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteDTLOffset"), src=vgpr(vgprWaveId), comment="Store DTL wave-specific offset, this will not be modified"))
   writer.vgprPool.checkIn(vgprWaveId)
@@ -997,8 +1076,13 @@ def mainLoopImpl(writer, kernel, isNLL = False):
     #module.add(Label("testL", comment=""))
     module.add(globalReadDoSubtile('A', writer, kernel))
     module.add(globalReadDoSubtile('B', writer, kernel))
+    module.add(SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all subtile GRs to complete"))
+    module.add(SBarrier(comment=""))
+
   module.add(localReadDoSubtile('A', writer, kernel))
   module.add(localReadDoSubtile('B', writer, kernel))
+  module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all subtile LRs to complete"))
+  
 
   #module.add(globalReadLDSBufferSwap('A', writer, kernel))
   #module.add(globalReadLDSBufferSwap('B', writer, kernel))

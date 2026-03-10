@@ -75,10 +75,15 @@ def compute_expected_offset(thread_id, cfg, tileInfo):
         return [base]
     return [base, base + (mt0//4) * stride * BPE]
 
-def compute_expected_subtile(subtileId0, stride, tileInfo):
-    """Compute expected subtile register value: subtileSize * bpe * subtileId0 * stride."""
+def compute_expected_subtile(regId, stride, tileInfo):
+    """Compute expected subtile register value: rowOffset * bpe * regId * stride.
+
+    The kernel uses regId (index into localSubtilesRegister) and rowOffset
+    which is 2*subtileSize when loadRatioGR==2.0, otherwise subtileSize.
+    """
     subtileSize = tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0]
-    return subtileSize * BPE * subtileId0 * stride
+    rowOffset = 2 * subtileSize if tileInfo.loadRatioGR == 2.0 else subtileSize
+    return rowOffset * BPE * regId * stride
 
 
 # Tile configs to test
@@ -140,36 +145,34 @@ class TestGraTileAssignmentGPU:
                 assert results[tid] == expected[idx], \
                     f"[{cfg.label}] B offset[{idx}] v{reg} mismatch at tid={tid}: got {results[tid]}, expected {expected[idx]}"
 
-    def test_subtile_registers_a(self, gra_env):
-        """Validate localSubtilesRegister values for matrix A."""
+    def _test_subtile_registers(self, gra_env, tc):
+        """Validate localSubtilesRegister values for matrix tc."""
         cfg = gra_env.cfg
-        tileInfo = gra_env.tileInfoA
+        tileInfo = gra_env.tileInfoA if tc == 'A' else gra_env.tileInfoB
+        stride = cfg.stride_a if tc == 'A' else cfg.stride_b
+        seen = set()
         for st in tileInfo.localSubtiles:
-            for reg in tileInfo.localSubtilesRegister[st.regListId]:
+            regId = st.regListId
+            if regId in seen:
+                continue
+            seen.add(regId)
+            for reg in tileInfo.localSubtilesRegister[regId]:
                 results = build_and_run(gra_env.gra_asm, reg, st.useSgpr, cfg,
                                         gra_env.tmp_path,
-                                        f"subtileA_s{reg}_{cfg.label}")
-                expected = compute_expected_subtile(st.subtileId[0], cfg.stride_a, tileInfo)
-                # sgpr is uniform: check thread 0
+                                        f"subtile{tc}_s{reg}_{cfg.label}")
+                expected = compute_expected_subtile(regId, stride, tileInfo)
                 actual = results[0]
                 assert actual == expected, \
-                    f"[{cfg.label}] A subtile s{reg} (subtileId0={st.subtileId[0]}): " \
+                    f"[{cfg.label}] {tc} subtile s{reg} (regId={regId}): " \
                     f"got {actual}, expected {expected}"
+
+    def test_subtile_registers_a(self, gra_env):
+        """Validate localSubtilesRegister values for matrix A."""
+        self._test_subtile_registers(gra_env, 'A')
 
     def test_subtile_registers_b(self, gra_env):
         """Validate localSubtilesRegister values for matrix B."""
-        cfg = gra_env.cfg
-        tileInfo = gra_env.tileInfoB
-        for st in tileInfo.localSubtiles:
-            for reg in tileInfo.localSubtilesRegister[st.regListId]:
-                results = build_and_run(gra_env.gra_asm, reg, st.useSgpr, cfg,
-                                        gra_env.tmp_path,
-                                        f"subtileB_s{reg}_{cfg.label}")
-                expected = compute_expected_subtile(st.subtileId[0], cfg.stride_b, tileInfo)
-                actual = results[0]
-                assert actual == expected, \
-                    f"[{cfg.label}] B subtile s{reg} (subtileId0={st.subtileId[0]}): " \
-                    f"got {actual}, expected {expected}"
+        self._test_subtile_registers(gra_env, 'B')
 
 
 if __name__ == "__main__":
@@ -250,14 +253,19 @@ if __name__ == "__main__":
                 # Subtile registers
                 for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
                                               ("B", tileInfoB, cfg.stride_b)]:
+                    seen = set()
                     for st in tileInfo.localSubtiles:
-                        for reg in tileInfo.localSubtilesRegister[st.regListId]:
+                        regId = st.regListId
+                        if regId in seen:
+                            continue
+                        seen.add(regId)
+                        for reg in tileInfo.localSubtilesRegister[regId]:
                             print("Regl",reg)
                             results = build_and_run(gra_asm, reg, st.useSgpr, cfg, tmp_path,
                                                     f"subtile{tc}_s{reg}_{cfg.label}")
-                            expected = compute_expected_subtile(st.subtileId[0], stride, tileInfo)
+                            expected = compute_expected_subtile(regId, stride, tileInfo)
                             actual = results[0]
                             status = "OK" if actual == expected else "FAIL"
-                            print(f"  Subtile {tc} s{reg} (id0={st.subtileId[0]}): {actual} (expected {expected}) {status}")
+                            print(f"  Subtile {tc} s{reg} (regId={regId}): {actual} (expected {expected}) {status}")
             else:
                 print("HIP not available - assembly generated but not executed")

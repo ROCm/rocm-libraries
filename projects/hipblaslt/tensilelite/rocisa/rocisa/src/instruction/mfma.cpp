@@ -107,7 +107,7 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::optional<InstructionInput>&,
                       bool,
                       const std::string&>(),
              nb::arg("instType"),
@@ -117,7 +117,7 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("acc"),
              nb::arg("a"),
              nb::arg("b"),
-             nb::arg("acc2")    = nullptr,
+             nb::arg("acc2")    = nb::none(),
              nb::arg("neg")     = false,
              nb::arg("comment") = "")
         .def_rw("a", &rocisa::MFMAInstruction::a)

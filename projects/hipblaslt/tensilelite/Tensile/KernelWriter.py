@@ -3837,15 +3837,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.a.tileInfo.allocVgprTileRegisters(self, kernel)
     self.states.b.tileInfo.allocVgprTileRegisters(self, kernel)
     self.states.d.tileInfo.allocVgprTileRegisters(self, kernel)
+    module.add(initVgprTilesToZero(self, kernel,self.states.d.tileInfo))
 
     self.states.scheduleInfo = ScheduleInfo(self.states.a.tileInfo, self.states.b.tileInfo)
 
     for vtiles in self.states.a.tileInfo.vgprTiles:
-      regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr"
+      regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr" # shouldn't this only be vgpr pool?
       module.addComment("%ss used for A mma tile %u: %s"%(regStr, self.states.a.tileInfo.vgprTiles.index(vtiles), str(vtiles)))
 
     for vtiles in self.states.b.tileInfo.vgprTiles:
-      regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr"
+      regStr = "Vgpr" if vtiles.regList.regPool == self.vgprPool else "Agpr" # shouldn't this only be vgpr pool?
       module.addComment("%ss used for B mma tile %u: %s"%(regStr, self.states.b.tileInfo.vgprTiles.index(vtiles), str(vtiles)))
 
     for vtiles in self.states.d.tileInfo.vgprTiles:

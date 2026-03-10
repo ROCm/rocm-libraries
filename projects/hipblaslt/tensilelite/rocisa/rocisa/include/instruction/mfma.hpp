@@ -23,6 +23,7 @@
 #pragma once
 #include "enum.hpp"
 #include "instruction/instruction.hpp"
+#include <optional>
 
 namespace rocisa
 {
@@ -73,8 +74,8 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> acc;
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
-        std::shared_ptr<RegisterContainer> acc2;
-        bool                               neg;
+        InstructionInput acc2;
+        bool             neg;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -83,7 +84,7 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& acc,
                         const std::shared_ptr<RegisterContainer>& a,
                         const std::shared_ptr<RegisterContainer>& b,
-                        const std::shared_ptr<RegisterContainer>& acc2    = nullptr,
+                        const std::optional<InstructionInput>&     acc2    = std::nullopt,
                         bool                                      neg     = false,
                         const std::string&                        comment = "")
             : Instruction(instType, comment)
@@ -93,7 +94,7 @@ namespace rocisa
             , acc(acc)
             , a(a)
             , b(b)
-            , acc2(acc2 ? acc2 : acc)
+            , acc2(acc2 ? *acc2 : InstructionInput(std::static_pointer_cast<Container>(acc)))
             , neg(neg)
         {
         }
@@ -106,7 +107,7 @@ namespace rocisa
             , acc(other.acc ? other.acc->clone2() : nullptr)
             , a(other.a ? other.a->clone2() : nullptr)
             , b(other.b ? other.b->clone2() : nullptr)
-            , acc2(other.acc2 ? other.acc2->clone2() : nullptr)
+            , acc2(copyInstructionInput(other.acc2))
             , neg(other.neg)
         {
         }
@@ -256,7 +257,7 @@ namespace rocisa
                 }
             }
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + acc2->toString() + negStr + inputPermuteStr;
+                   + InstructionInputToString(acc2) + negStr + inputPermuteStr;
         }
 
         std::string toString() const override
