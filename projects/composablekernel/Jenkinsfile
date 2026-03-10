@@ -82,54 +82,47 @@ def checkoutComposableKernel()
 }
 
 // Given a pattern, check if the log contains the pattern and return the context.
-def checkForPattern(pattern, log) {
-    def lines = log.split('\n')
-    for (int i = 0; i < lines.size(); i++) {
-        if (lines[i] =~ pattern) {
-            echo "Found pattern match in log for ${pattern}"
-            
-            // Get the two lines before and after failure.
-            def contextStart = Math.max(0, i - 2)
-            def contextEnd = Math.min(lines.size() - 1, i + 2)
-            def contextLines = []
-            for (int j = contextStart; j <= contextEnd; j++) {
-                contextLines.add(lines[j])
-            }
-            
-            return [found: true, matchedLine: lines[i], context: contextLines.join('\n')]
-        }
-    }
-    echo "No pattern match found in log for ${pattern}"
-    return [found: false, matchedLine: "", context: ""]
-}
-
 // Scan the build logs for failures and send notifications.
 def sendFailureNotifications() {
     // Error patterns to scan build logs for specific failure types and send detailed notifications.
+    // Patterns are plain strings so they can be passed directly to grep -E.
     def failurePatterns = [
-        [pattern: /login attempt to .* failed with status: 401 Unauthorized/, description: "Docker registry authentication failed"],
-        [pattern: /docker login failed/, description: "Docker login failed"],
-        [pattern: /HTTP request sent .* 404 Not Found/, description: "HTTP request failed with 404"],
-        [pattern: /cat: .* No such file or directory/, description: "GPU not found"],
-        [pattern: /GPU not found/, description: "GPU not found"],
-        [pattern: /Could not connect to Redis at .* Connection timed out/, description: "Redis connection timed out"],
-        [pattern: /unauthorized: your account must log in with a Personal Access Token/, description: "Docker login failed"],
-        [pattern: /sccache: error: Server startup failed: Address in use/, description: "Sccache Error"]
+        [pattern: 'login attempt to .* failed with status: 401 Unauthorized', description: "Docker registry authentication failed"],
+        [pattern: 'docker login failed', description: "Docker login failed"],
+        [pattern: 'HTTP request sent .* 404 Not Found', description: "HTTP request failed with 404"],
+        [pattern: 'cat: .* No such file or directory', description: "GPU not found"],
+        [pattern: 'GPU not found', description: "GPU not found"],
+        [pattern: 'Could not connect to Redis at .* Connection timed out', description: "Redis connection timed out"],
+        [pattern: 'unauthorized: your account must log in with a Personal Access Token', description: "Docker login failed"],
+        [pattern: 'sccache: error: Server startup failed: Address in use', description: "Sccache Error"]
     ]
-    
-    // Get the build log.
-    def buildLog = sh(script: 'wget -q --no-check-certificate -O - ' + BUILD_URL + 'consoleText', returnStdout: true)
+
+    // Build a single combined grep -E pattern and stream the log through it.
+    // grep does the scanning natively so the full log is never loaded into Groovy.
+    // -B 2 -A 2 captures 2 lines of context around each match.
+    // || true prevents a non-zero grep exit code (no matches) from failing the stage.
+    def combinedPattern = failurePatterns.collect { it.pattern }.join('|')
     echo "Checking for failure patterns..."
-    // Check for patterns in the log.
+    def grepOutput = sh(
+        script: "wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | grep -E -B 2 -A 2 '${combinedPattern}' || true",
+        returnStdout: true
+    ).trim()
+
+    if (!grepOutput) {
+        echo "No failure patterns found in build log"
+        return
+    }
+
+    // grep separates non-adjacent match blocks with '--'. Split on that to get
+    // one context block per match, then identify which pattern each block hit.
     def foundPatterns = []
-    for (patternMap in failurePatterns) {
-        def result = checkForPattern(patternMap.pattern, buildLog)
-        if (result.found) {
-            foundPatterns.add([
-                description: patternMap.description,
-                matchedLine: result.matchedLine,
-                context: result.context
-            ])
+    def blocks = grepOutput.split('\n--\n')
+    for (block in blocks) {
+        for (patternMap in failurePatterns) {
+            if (block =~ patternMap.pattern) {
+                foundPatterns.add([description: patternMap.description, context: block])
+                break
+            }
         }
     }
     echo "Done checking for failure patterns..."
