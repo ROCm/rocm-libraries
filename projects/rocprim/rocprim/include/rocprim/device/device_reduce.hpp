@@ -57,32 +57,6 @@ namespace detail
         std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
     }
 
-#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                               \
-    do                                                                                            \
-    {                                                                                             \
-        if(debug_synchronous)                                                                     \
-        {                                                                                         \
-            start = std::chrono::steady_clock::now();                                             \
-        }                                                                                         \
-                                                                                                  \
-        auto block_reduce_kernel = [=](auto target_config) mutable                                \
-        {                                                                                         \
-            block_reduce_kernel_impl<decltype(target_config),                                     \
-                                     WithInitialValue,                                            \
-                                     fit_larger,                                                  \
-                                     fit_items,                                                   \
-                                     result_type>(input, size, output, initial_value, reduce_op); \
-        };                                                                                        \
-                                                                                                  \
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,             \
-                                                                      block_reduce_kernel,        \
-                                                                      dim3(1),                    \
-                                                                      dim3(block_size),           \
-                                                                      0,                          \
-                                                                      stream));                   \
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);          \
-    }                                                                                             \
-    while(0)
 
 template<bool WithInitialValue, // true when inital_value should be used in reduction
          class Config,
@@ -162,10 +136,21 @@ inline hipError_t reduce_impl(void*               temporary_storage,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
+    const auto get_max_items_per_thread = [&](auto ipt)
+    {
+        return rocprim::max(
+            ipt,
+            rocprim::min(ipt * 16u,
+                         128u / static_cast<unsigned int>(sizeof(input_type) / sizeof(uint8_t))));
+    };
+
+    const unsigned int max_items_per_thread = get_max_items_per_thread(items_per_thread);
+    const unsigned int max_number_of_blocks = max_items_per_thread / items_per_thread;
+
     // We increase the items per thread with a maximum of 16.
     // This means if the number_of_blocks is larger than 16 it
     // will not fit in one kernel.
-    if(number_of_blocks > 16)
+    if(number_of_blocks > max_number_of_blocks)
     {
         const auto aligned_size_limit = number_of_blocks_limit * items_per_block;
 
@@ -236,126 +221,29 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             constexpr unsigned int config_items_per_thread
                 = decltype(target_config)::params.kernel_config.items_per_thread;
 
-            if(too_small > 1)
-            {
-                // Increase IPT for better utilisation
-                if(too_small <= 2)
+            constexpr unsigned int max_items_per_thread = get_max_items_per_thread(config_items_per_thread);
+
+            // for(int i = 1; i <= max_items_per_thread; i*2)
+            ::rocprim::detail::constexpr_for_lte<0, Log2<max_items_per_thread>::VALUE, 1>(
+                [&](auto i)
                 {
-                    constexpr unsigned int items_per_thread = config_items_per_thread * 2;
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else if(too_small <= 4)
-                {
-                    constexpr unsigned int items_per_thread = config_items_per_thread * 4;
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else if(too_small <= 8)
-                {
-                    constexpr unsigned int items_per_thread = config_items_per_thread * 8;
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else if(too_small <= 16)
-                {
-                    constexpr unsigned int items_per_thread = config_items_per_thread * 16;
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-            }
-            else
-            {
-                // Decrease IPT to prevent kernel launch
-                if(too_large >= 16u)
-                {
-                    constexpr unsigned int items_per_thread
-                        = ceiling_div(config_items_per_thread, 16u);
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else if(too_large >= 8)
-                {
-                    constexpr unsigned int items_per_thread
-                        = ceiling_div(config_items_per_thread, 8u);
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else if(too_large >= 4)
-                {
-                    constexpr unsigned int items_per_thread
-                        = ceiling_div(config_items_per_thread, 4u);
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else if(too_large >= 2)
-                {
-                    constexpr unsigned int items_per_thread
-                        = ceiling_div(config_items_per_thread, 2u);
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-                else
-                {
-                    constexpr unsigned int items_per_thread = config_items_per_thread;
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-                }
-            }
+                    constexpr unsigned ipt = 1 << i;
+                    const unsigned int needed_ipt = detail::next_power_of_two(
+                        too_large == 0 ? config_items_per_thread * too_small
+                                      : ceiling_div(config_items_per_thread, too_large));
+
+                    if(needed_ipt == ipt)
+                    {
+                        block_reduce_kernel_impl<decltype(target_config),
+                                                 WithInitialValue,
+                                                 result_type,
+                                                 ipt>(input,
+                                                      size,
+                                                      output,
+                                                      initial_value,
+                                                      reduce_op);
+                    }
+                });
         };
 
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
