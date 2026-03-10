@@ -106,7 +106,7 @@ int Driver::CaptureKernelCapturing(hipGraphFuncPtrType functPtr)
     he = hipStreamEndCapture(q, &hipGraph);
     if(rc != miopenStatusSuccess || he != hipSuccess)
     {
-        hipGraphDestroy(hipGraph);
+        (void)hipGraphDestroy(hipGraph);
         if(rc != miopenStatusSuccess)
             return rc;
         return miopenStatusInternalError;
@@ -115,7 +115,7 @@ int Driver::CaptureKernelCapturing(hipGraphFuncPtrType functPtr)
     he = hipGraphInstantiate(&hipGraphExec, hipGraph, nullptr, nullptr, 0);
     if(he != hipSuccess)
     {
-        hipGraphDestroy(hipGraph);
+        (void)hipGraphDestroy(hipGraph);
         return miopenStatusInternalError;
     }
 
@@ -135,21 +135,21 @@ int Driver::ExecuteKernel()
 
     if(use_hip_graph)
     {
-        hipEventCreate(&hipGraphStartEvent);
-        hipEventCreate(&hipGraphStopEvent);
-        hipEventRecord(hipGraphStartEvent, q);
+        (void)hipEventCreate(&hipGraphStartEvent);
+        (void)hipEventCreate(&hipGraphStopEvent);
+        (void)hipEventRecord(hipGraphStartEvent, q);
         hipError_t he = hipGraphLaunch(hipGraphExec, q);
-        hipEventRecord(hipGraphStopEvent, q);
-        hipEventSynchronize(hipGraphStopEvent);
-        hipEventElapsedTime(&hipGraphLastExecutionTime, hipGraphStartEvent, hipGraphStopEvent);
+        (void)hipEventRecord(hipGraphStopEvent, q);
+        (void)hipEventSynchronize(hipGraphStopEvent);
+        (void)hipEventElapsedTime(&hipGraphLastExecutionTime, hipGraphStartEvent, hipGraphStopEvent);
         if(he == hipSuccess)
         {
             return miopenStatusSuccess;
         }
         else
         {
-            hipGraphExecDestroy(hipGraphExec);
-            hipGraphDestroy(hipGraph);
+            (void)hipGraphExecDestroy(hipGraphExec);
+            (void)hipGraphDestroy(hipGraph);
             return miopenStatusInternalError;
         }
     }
@@ -167,17 +167,17 @@ void Driver::FinalizeKernel()
 
     if(use_hip_graph)
     {
-        hipStreamSynchronize(q);
-        hipGraphExecDestroy(hipGraphExec);
-        hipGraphDestroy(hipGraph);
+        (void)hipStreamSynchronize(q);
+        (void)hipGraphExecDestroy(hipGraphExec);
+        (void)hipGraphDestroy(hipGraph);
         if(hipGraphStartEvent != nullptr)
         {
-            hipEventDestroy(hipGraphStartEvent);
+            (void)hipEventDestroy(hipGraphStartEvent);
             hipGraphStartEvent = nullptr;
         }
         if(hipGraphStopEvent != nullptr)
         {
-            hipEventDestroy(hipGraphStopEvent);
+            (void)hipEventDestroy(hipGraphStopEvent);
             hipGraphStopEvent = nullptr;
         }
     }
