@@ -32,6 +32,7 @@ if(NOT BUILD_ADDRESS_SANITIZER)
     list(APPEND BASE_ARCHITECTURES
         "gfx803"
         "gfx900"
+        "gfx90c"
         "gfx906"
         "gfx908"
         "gfx90a"
