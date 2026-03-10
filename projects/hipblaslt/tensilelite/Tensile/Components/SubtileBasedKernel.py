@@ -29,8 +29,8 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, SAddU32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
-  SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
+  MFMAInstruction, SAddU32, SAddCU32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
+  SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SSubBU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VAccvgprWrite, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpXEqU32, VCndMaskB32, VReadfirstlaneB32, \
   VMovB64, VLShiftRightB32, VLShiftLeftB32, VMulLOU32, VAddU32, VAddCOU32, VAddCCOU32, SMovB32, SMulI32, FlatStoreB32, SWaitCnt, SMovB64, VSubU32, VPermlane16SwapB32, MFMAInstruction
 from rocisa.register import RegisterPool
@@ -927,7 +927,7 @@ def globalReadDoSubtile(tc, writer, kernel):
   return module
 
 def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
-  
+
   module = Module()
   sId0 = subtileId[0]
   sId1 = subtileId[1]
@@ -945,7 +945,7 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
       offset = sId0*2*tileInfo.subtileSize
       module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegs), src=vgpr(addrVgpr), ds=DSModifiers(offset=offset),
                             comment="Subtile%s[%u,%u] mfmaId=[%u,%u]"%(tileInfo.tc, sId0, sId1, mfmaR, mfmaC)))
-     
+
   return module
 
 ##################################################
@@ -1005,7 +1005,14 @@ def localReadLDSBufferSwap(tc, writer, kernel):
 #
 def globalReadPtrUpdates(tc, writer, kernel):
   module = Module()
-  module.addComment0("Emit code to update %s pointers"%tc)
+  tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+  inc = tileInfo.localSubtileGrid[1] * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe
+  module.add(SAddU32(dst=sgpr("Srd%s"%tc), src0=sgpr("Srd%s"%tc), src1=inc))
+  module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0))
+
+  module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=inc))
+  #module.add(SSubBU32(dst=sgpr("Srd%s+3"%tc), src0=sgpr("Srd%s+3"%tc), src1=0))
+
   return module
 
 ##################################################
@@ -1071,6 +1078,8 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based main loop impl")
 
 
+  label = Label("start", comment="")
+  module.add(label)
 
   if not isNLL:
     #module.add(Label("testL", comment=""))
@@ -1082,18 +1091,20 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module.add(localReadDoSubtile('A', writer, kernel))
   module.add(localReadDoSubtile('B', writer, kernel))
   module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all subtile LRs to complete"))
-  
 
+  module.add(emitMfmaCode(writer, kernel))
   #module.add(globalReadLDSBufferSwap('A', writer, kernel))
   #module.add(globalReadLDSBufferSwap('B', writer, kernel))
 
   #module.add(localReadLDSBufferSwap('A', writer, kernel))
   #module.add(localReadLDSBufferSwap('B', writer, kernel))
 
-  #module.add(globalReadPtrUpdates('A', writer, kernel))
-  #module.add(globalReadPtrUpdates('B', writer, kernel))
+  module.add(globalReadPtrUpdates('A', writer, kernel))
+  module.add(globalReadPtrUpdates('B', writer, kernel))
 
-  module.add(emitMfmaCode(writer, kernel))
+  module.add(SSubU32(dst=sgpr("LoopCounterL"), src0=sgpr("LoopCounterL"), src1=1))
+  module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0))
+  module.add(SCBranchSCC0(labelName=label.getLabelName()))
 
   return module
 
