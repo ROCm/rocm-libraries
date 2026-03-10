@@ -31,20 +31,19 @@ namespace rocRoller
             size_t valueCount = 1;
             for(auto operand : operands)
             {
-                size_t operandPacking    = operand.varType.dataType == DataType::None
-                                               ? 1
-                                               : DataTypeInfo::Get(operand.varType).packing;
-                size_t operandValueCount = operand.valueCount * operandPacking;
-                if(operandValueCount != 1)
+                size_t operandPacking = operand.varType.dataType == DataType::None
+                                            ? 1
+                                            : DataTypeInfo::Get(operand.varType).packing;
+                if(operand.valueCount != 1)
                 {
                     if(valueCount == 1)
-                        valueCount = operandValueCount;
+                        valueCount = operand.valueCount;
                     else
-                        AssertFatal(valueCount == operandValueCount,
+                        AssertFatal(valueCount == operand.valueCount,
                                     "Each operand's value count in an expression must either "
                                     "be 1 or equal to all other non-1 value counts\n",
                                     ShowValue(valueCount),
-                                    ShowValue(operandValueCount),
+                                    ShowValue(operand.valueCount),
                                     ShowValue(operandPacking));
                 }
             }
@@ -428,7 +427,10 @@ namespace rocRoller
                 if(expr == nullptr)
                     return {Register::Type::Count, DataType::Count, 0};
 
-                return {Register::Type::Literal, expr->variableType(), 1};
+                auto packing = expr->variableType().dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr->variableType()).packing;
+                return {Register::Type::Literal, expr->variableType(), packing};
             }
 
             ResultType operator()(AssemblyKernelArgumentPtr const& expr)
@@ -436,12 +438,18 @@ namespace rocRoller
                 if(expr == nullptr)
                     return {Register::Type::Count, DataType::Count, 0};
 
-                return {Register::Type::Scalar, expr->getVariableType(), 1};
+                auto packing = expr->getVariableType().dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr->getVariableType()).packing;
+                return {Register::Type::Scalar, expr->getVariableType(), packing};
             }
 
             ResultType operator()(CommandArgumentValue const& expr)
             {
-                return {Register::Type::Literal, variableType(expr), 1};
+                auto packing = variableType(expr).dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(variableType(expr)).packing;
+                return {Register::Type::Literal, variableType(expr), packing};
             }
 
             ResultType operator()(Register::ValuePtr const& expr)
@@ -449,18 +457,27 @@ namespace rocRoller
                 if(expr == nullptr)
                     return {Register::Type::Count, DataType::Count, 0};
 
-                m_context = expr->context();
-                return {expr->regType(), expr->variableType(), expr->valueCount()};
+                m_context    = expr->context();
+                auto packing = expr->variableType().dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr->variableType()).packing;
+                return {expr->regType(), expr->variableType(), expr->valueCount() * packing};
             }
 
             ResultType operator()(DataFlowTag const& expr)
             {
-                return {expr.regType, expr.varType, 1};
+                auto packing = expr.varType.dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr.varType).packing;
+                return {expr.regType, expr.varType, packing};
             }
 
             ResultType operator()(PositionalArgument const& expr)
             {
-                return {expr.regType, expr.varType, 1};
+                auto packing = expr.varType.dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(expr.varType).packing;
+                return {expr.regType, expr.varType, packing};
             }
 
             ResultType operator()(WaveTilePtr const& expr)
