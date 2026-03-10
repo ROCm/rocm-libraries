@@ -39,6 +39,11 @@ namespace CLI
             return true;
         }
 
+        inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::XYTuple& v)
+        {
+            return rocRoller::Client::GEMMClient::CLI::ParseXY(s, v);
+        }
+
         inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MNKTuple& v)
         {
             return rocRoller::Client::GEMMClient::CLI::ParseMNK(s, v);

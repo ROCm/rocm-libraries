@@ -848,3 +848,191 @@ TEST(PreSwizzleTest, PreSwizzleIntegerType)
     ASSERT_EQ(output.size(), input.size());
     EXPECT_EQ(output, expected);
 }
+
+// ============================================================================
+// Tests for roundUp() helper
+// ============================================================================
+
+TEST(PreSwizzleTest, RoundUpAlreadyAligned)
+{
+    EXPECT_EQ(roundUp(32, 32), 32);
+    EXPECT_EQ(roundUp(64, 32), 64);
+    EXPECT_EQ(roundUp(8, 8), 8);
+    EXPECT_EQ(roundUp(16, 8), 16);
+}
+
+TEST(PreSwizzleTest, RoundUpNotAligned)
+{
+    EXPECT_EQ(roundUp(1, 32), 32);
+    EXPECT_EQ(roundUp(31, 32), 32);
+    EXPECT_EQ(roundUp(33, 32), 64);
+    EXPECT_EQ(roundUp(50, 32), 64);
+    EXPECT_EQ(roundUp(1, 8), 8);
+    EXPECT_EQ(roundUp(7, 8), 8);
+    EXPECT_EQ(roundUp(9, 8), 16);
+    EXPECT_EQ(roundUp(13, 8), 16);
+}
+
+// ============================================================================
+// Tests for preSwizzleScalesGFX950PaddedSize()
+// ============================================================================
+
+TEST(PreSwizzleTest, PaddedSizeAligned)
+{
+    // Already aligned: 64 rows (mult of 32), 16 cols (mult of 8)
+    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(64, 16), 64 * 16);
+    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(32, 8), 32 * 8);
+}
+
+TEST(PreSwizzleTest, PaddedSizeUnalignedRows)
+{
+    // 50 rows -> padded to 64, 16 cols stays
+    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(50, 16), 64 * 16);
+}
+
+TEST(PreSwizzleTest, PaddedSizeUnalignedCols)
+{
+    // 64 rows stays, 13 cols -> padded to 16
+    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(64, 13), 64 * 16);
+}
+
+TEST(PreSwizzleTest, PaddedSizeBothUnaligned)
+{
+    // 50 rows -> 64, 13 cols -> 16
+    EXPECT_EQ(preSwizzleScalesGFX950PaddedSize(50, 13), 64 * 16);
+}
+
+// ============================================================================
+// Tests for preSwizzleScalesGFX950()
+// ============================================================================
+
+TEST(PreSwizzleScalesGFX950Test, AlignedSizes)
+{
+    // Basic test with aligned sizes: 64 rows, 16 cols
+    size_t numRows = 64;
+    size_t numCols = 16;
+    std::vector<uint8_t> input(numRows * numCols);
+    std::iota(input.begin(), input.end(), uint8_t(0));
+
+    auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    // Output size should equal input size (no padding needed)
+    ASSERT_EQ(output.size(), numRows * numCols);
+
+    // All elements should be present (permutation preserves data)
+    std::vector<uint8_t> sortedOutput = output;
+    std::vector<uint8_t> sortedInput  = input;
+    std::sort(sortedOutput.begin(), sortedOutput.end());
+    std::sort(sortedInput.begin(), sortedInput.end());
+    EXPECT_EQ(sortedOutput, sortedInput);
+}
+
+TEST(PreSwizzleScalesGFX950Test, UnalignedRows)
+{
+    // numRows = 50 (not divisible by 32), numCols = 16 (divisible by 8)
+    size_t numRows = 50;
+    size_t numCols = 16;
+    std::vector<uint8_t> input(numRows * numCols);
+    std::iota(input.begin(), input.end(), uint8_t(1));
+
+    auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    // Output should be padded: 64 * 16
+    size_t expectedSize = preSwizzleScalesGFX950PaddedSize(numRows, numCols);
+    ASSERT_EQ(expectedSize, 64 * 16);
+    ASSERT_EQ(output.size(), expectedSize);
+}
+
+TEST(PreSwizzleScalesGFX950Test, UnalignedCols)
+{
+    // numRows = 64 (divisible by 32), numCols = 13 (not divisible by 8)
+    size_t numRows = 64;
+    size_t numCols = 13;
+    std::vector<uint8_t> input(numRows * numCols);
+    std::iota(input.begin(), input.end(), uint8_t(1));
+
+    auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    // Output should be padded: 64 * 16
+    size_t expectedSize = preSwizzleScalesGFX950PaddedSize(numRows, numCols);
+    ASSERT_EQ(expectedSize, 64 * 16);
+    ASSERT_EQ(output.size(), expectedSize);
+}
+
+TEST(PreSwizzleScalesGFX950Test, BothUnaligned)
+{
+    // numRows = 50 (not divisible by 32), numCols = 13 (not divisible by 8)
+    size_t numRows = 50;
+    size_t numCols = 13;
+    std::vector<uint8_t> input(numRows * numCols);
+    std::iota(input.begin(), input.end(), uint8_t(1));
+
+    auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    // Output should be padded: 64 * 16
+    size_t expectedSize = preSwizzleScalesGFX950PaddedSize(numRows, numCols);
+    ASSERT_EQ(expectedSize, 64 * 16);
+    ASSERT_EQ(output.size(), expectedSize);
+}
+
+TEST(PreSwizzleScalesGFX950Test, PaddedMatchesManualPad)
+{
+    // Verify that calling preSwizzleScalesGFX950 with unaligned data gives
+    // the same result as manually padding the data and then calling with aligned sizes
+    size_t numRows = 50;
+    size_t numCols = 13;
+    size_t paddedRows = roundUp(numRows, 32); // 64
+    size_t paddedCols = roundUp(numCols, 8);  // 16
+
+    std::vector<float> input(numRows * numCols);
+    for(size_t i = 0; i < input.size(); ++i)
+        input[i] = static_cast<float>(i) * 0.5f;
+
+    // Method 1: Let preSwizzleScalesGFX950 handle padding internally
+    auto output1 = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    // Method 2: Manually pad and call with aligned sizes
+    std::vector<float> manualPadded(paddedRows * paddedCols, 0.0f);
+    for(size_t r = 0; r < numRows; ++r)
+    {
+        std::copy(input.begin() + r * numCols,
+                  input.begin() + r * numCols + numCols,
+                  manualPadded.begin() + r * paddedCols);
+    }
+    auto output2 = preSwizzleScalesGFX950(manualPadded, {paddedRows, paddedCols});
+
+    ASSERT_EQ(output1.size(), output2.size());
+    EXPECT_EQ(output1, output2);
+}
+
+TEST(PreSwizzleScalesGFX950Test, AlignedNoExtraPadding)
+{
+    // When sizes are already aligned, output should be same size as input
+    size_t numRows = 32;
+    size_t numCols = 8;
+    std::vector<float> input(numRows * numCols);
+    std::iota(input.begin(), input.end(), 0.0f);
+
+    auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    ASSERT_EQ(output.size(), input.size());
+
+    // All elements should be preserved
+    std::vector<float> sortedOutput = output;
+    std::vector<float> sortedInput  = input;
+    std::sort(sortedOutput.begin(), sortedOutput.end());
+    std::sort(sortedInput.begin(), sortedInput.end());
+    EXPECT_EQ(sortedOutput, sortedInput);
+}
+
+TEST(PreSwizzleScalesGFX950Test, InvalidSizesDimension)
+{
+    std::vector<uint8_t> input(100);
+    EXPECT_THROW(preSwizzleScalesGFX950(input, {10, 10, 1}), std::runtime_error);
+}
+
+TEST(PreSwizzleScalesGFX950Test, InputSizeMismatch)
+{
+    std::vector<uint8_t> input(100);
+    EXPECT_THROW(preSwizzleScalesGFX950(input, {64, 16}), std::runtime_error);
+}
