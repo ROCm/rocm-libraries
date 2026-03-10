@@ -90,7 +90,7 @@ def sendFailureNotifications() {
         [pattern: 'login attempt to .* failed with status: 401 Unauthorized', description: "Docker registry authentication failed"],
         [pattern: 'docker login failed', description: "Docker login failed"],
         [pattern: 'HTTP request sent .* 404 Not Found', description: "HTTP request failed with 404"],
-        [pattern: 'cat: .* No such file or directory', description: "GPU not found"],
+        [pattern: 'cat: .* No such file or directory', description: "Missing drivers"],
         [pattern: 'GPU not found', description: "GPU not found"],
         [pattern: 'Could not connect to Redis at .* Connection timed out', description: "Redis connection timed out"],
         [pattern: 'unauthorized: your account must log in with a Personal Access Token', description: "Docker login failed"],
@@ -1453,15 +1453,11 @@ pipeline {
                     // TEST ONLY: Generate a large volume of dummy output to simulate a real
                     // build log, then emit all failure patterns near the end to verify that
                     // sendFailureNotifications() correctly detects patterns in a large log.
-                    sh 'for i in $(seq 1 80000); do echo "Dummy build log line $i: compiling and processing..."; done'
-                    echo "login attempt to registry.example.com failed with status: 401 Unauthorized"
-                    echo "docker login failed"
-                    echo "HTTP request sent awaiting response... 404 Not Found"
+                    sh 'for i in $(seq 1 30000); do echo "Dummy build log line $i: compiling and processing..."; done'
                     echo "cat: /dev/dri/renderD128: No such file or directory"
+                    sh 'for i in $(seq 1 30000); do echo "Dummy build log line $i: compiling and processing..."; done'
                     echo "GPU not found"
-                    echo "Could not connect to Redis at 127.0.0.1:6379: Connection timed out"
-                    echo "unauthorized: your account must log in with a Personal Access Token"
-                    echo "sccache: error: Server startup failed: Address in use"
+                    sh 'for i in $(seq 1 20000); do echo "Dummy build log line $i: compiling and processing..."; done'
                     error("TEST: Forcing stage failure to trigger sendFailureNotifications() and validate all failure pattern checks")
                 }
             }
