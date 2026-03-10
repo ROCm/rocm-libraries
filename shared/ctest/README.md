@@ -368,7 +368,7 @@ test_categories:
 
 ### Adding GPU-Specific Exclusions
 
-Define GPU exclusions with hierarchical wildcard matching. The `X` wildcard matches any remaining characters in the architecture name.
+Define GPU exclusions with hierarchical matching using a naming convention for `exclude_gpu` keys. In this convention, an `X` suffix in the architecture portion of the key name (for example, `gfx11X`) stands for “all gfx11xx variants”; this is only a key-naming shorthand, not a glob or regex wildcard in `test_patterns`.
 
 ```yaml
 # Shared patterns using YAML anchors
