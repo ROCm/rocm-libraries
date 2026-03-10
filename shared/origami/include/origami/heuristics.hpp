@@ -32,6 +32,7 @@
 #include <unordered_map>
 
 #include "origami/hardware.hpp"
+#include "origami/math.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -201,21 +202,10 @@ struct hand_optimized_kernel_key_t {
   }
 
   std::size_t hash() const {
-    std::size_t seed                   = 0;
-    constexpr std::size_t golden_ratio = 0x9e3779b9;
-    auto hash_combine                  = [](std::size_t& seed, std::size_t value) {
-      seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
-    };
-
-    hash_combine(seed, std::hash<int>()(static_cast<int>(arch)));
-    hash_combine(seed, std::hash<int>()(static_cast<int>(mi_dtype)));
-    hash_combine(seed, std::hash<int>()(static_cast<int>(a_transpose)));
-    hash_combine(seed, std::hash<int>()(static_cast<int>(b_transpose)));
-    hash_combine(seed, std::hash<size_t>()(mt_m));
-    hash_combine(seed, std::hash<size_t>()(mt_n));
-    hash_combine(seed, std::hash<size_t>()(mt_k));
-
-    return seed;
+    return math::hash_combine(
+        static_cast<int>(arch), static_cast<int>(mi_dtype),
+        static_cast<int>(a_transpose), static_cast<int>(b_transpose),
+        mt_m, mt_n, mt_k);
   }
 };
 
