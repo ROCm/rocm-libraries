@@ -1452,7 +1452,14 @@ pipeline {
                     // build log, then emit all failure patterns near the end to verify that
                     // sendFailureNotifications() correctly detects patterns in a large log.
                     sh 'for i in $(seq 1 80000); do echo "Dummy build log line $i: compiling and processing..."; done'
+                    echo "login attempt to registry.example.com failed with status: 401 Unauthorized"
+                    echo "docker login failed"
+                    echo "HTTP request sent awaiting response... 404 Not Found"
                     echo "cat: /dev/dri/renderD128: No such file or directory"
+                    echo "GPU not found"
+                    echo "Could not connect to Redis at 127.0.0.1:6379: Connection timed out"
+                    echo "unauthorized: your account must log in with a Personal Access Token"
+                    echo "sccache: error: Server startup failed: Address in use"
                     error("TEST: Forcing stage failure to trigger sendFailureNotifications() and validate all failure pattern checks")
                 }
             }
