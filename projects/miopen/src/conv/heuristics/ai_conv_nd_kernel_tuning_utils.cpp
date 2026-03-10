@@ -126,10 +126,8 @@ GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::stri
     features["bias"] = static_cast<float>(problem.GetBias());
 
     // 24–26: in_layout, fil_layout, out_layout (as codes)
-     if ( is3d ) {
-        features["in_layout"] =
-            static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetInputLayout(problem),is3d));
-    }
+    features["in_layout"] =
+        static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetInputLayout(problem),is3d));
     features["fil_layout"] =
         static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetFilterLayout(problem),is3d));
     features["out_layout"] =
