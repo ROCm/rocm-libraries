@@ -28,7 +28,7 @@
 #include <iostream>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/convolution.hpp>
@@ -44,13 +44,24 @@ using namespace miopen::solver::conv;
 using namespace miopen::ai::tuning::candidate_selection;
 
 namespace {
-// Helper: layout string to code (must match GetFeatures3D)
-int LayoutStringToCode(const std::string& layout)
+
+// Helper: layout string to code for ND (must match GetFeaturesND)
+int LayoutStringToCode(const std::string& layout, bool is3d)
 {
-    if(layout == "NCDHW")
-        return 0;
-    if(layout == "NDHWC")
-        return 1;
+    if(is3d)
+    {
+        if(layout == "NCDHW")
+            return 0;
+        if(layout == "NDHWC")
+            return 1;
+    }
+    else
+    {
+        if(layout == "NCHW")
+            return 0;
+        if(layout == "NHWC")
+            return 1;
+    }
     return -1; // Unknown
 }
 
@@ -60,24 +71,6 @@ const std::vector<std::string> dummy_kernels = {
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>",
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,32,64,4,Default,4,1,2,1,2,4,4,1,1,4>",
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,256,128,4,Default,4,4,2,4,4,4,2,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,128,256,4,Default,4,2,4,4,2,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,128,4,Default,4,4,2,4,4,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,128,128,4,Default,4,2,2,4,2,4,2,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,64,4,Default,4,2,2,4,4,4,2,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,64,128,4,Default,4,2,2,4,2,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,4,4,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,128,64,4,Default,4,2,1,4,2,4,1,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,64,128,4,Default,4,1,2,4,1,4,2,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,4,1,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,32,128,4,Default,4,1,2,4,1,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,32,4,Default,4,2,1,4,4,4,2,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,32,64,4,Default,4,1,2,4,2,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,64,64,8,Default,8,1,1,4,4,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,64,64,8,Default,8,1,1,4,4,1,4,1,1,1>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,64,64,8,Default,8,1,1,1,4,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,64,64,8,Default,8,1,1,1,4,1,4,1,1,1>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<64,16,16,32,Default,8,1,1,1,4,1,4,1,1,2>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<64,16,16,32,Default,8,1,1,1,4,1,4,1,1,2>",
 };
 
 // Dummy fill_valid_kernels for testing
@@ -87,8 +80,32 @@ static std::function<std::vector<std::string>(const miopen::conv::ProblemDescrip
 // Default validation function: accepts all kernel/split_k combinations
 inline constexpr auto accept_all_combinations = [](int, int) { return true; };
 
-// Helper: reusable problem description
-miopen::conv::ProblemDescription GetReusableProblemDescription(
+// Helper: reusable 2D problem description
+miopen::conv::ProblemDescription GetReusable2DProblemDescription(
+    miopenDataType_t dataType         = miopenFloat,
+    miopen::conv::Direction direction = miopen::conv::Direction::BackwardWeights)
+{
+    std::vector<int> in_lengths      = {1, 512, 130, 66};
+    std::vector<int> weights_lengths = {256, 512, 3, 3};
+    std::vector<int> out_lengths     = {1, 256, 128, 64};
+
+    miopen::TensorDescriptor in_desc(dataType, in_lengths);
+    miopen::TensorDescriptor weights_desc(dataType, weights_lengths);
+    miopen::TensorDescriptor out_desc(dataType, out_lengths);
+
+    std::vector<int> pads              = {0, 0};
+    std::vector<int> strides           = {1, 1};
+    std::vector<int> dilations         = {1, 1};
+    std::vector<int> trans_output_pads = {0, 0};
+
+    miopen::ConvolutionDescriptor conv_desc(
+        2, miopenConvolution, miopenPaddingDefault, pads, strides, dilations, trans_output_pads);
+
+    return miopen::conv::ProblemDescription(in_desc, weights_desc, out_desc, conv_desc, direction);
+}
+
+// Helper: reusable 3D problem description
+miopen::conv::ProblemDescription GetReusable3DProblemDescription(
     miopenDataType_t dataType         = miopenFloat,
     miopen::conv::Direction direction = miopen::conv::Direction::BackwardWeights)
 {
@@ -111,59 +128,85 @@ miopen::conv::ProblemDescription GetReusableProblemDescription(
     return miopen::conv::ProblemDescription(in_desc, weights_desc, out_desc, conv_desc, direction);
 }
 
-// Helper: check GetFeatures3D map values
-void CheckGetFeatures3D_MapValues(const std::map<std::string, float>& features,
+// Helper: check GetFeaturesND map values
+void CheckGetFeaturesND_MapValues(const std::map<std::string, float>& features,
                                   const miopen::conv::ProblemDescription& problem,
-                                  miopen::conv::Direction direction)
+                                  miopen::conv::Direction direction,
+                                  bool is3d)
 {
     std::map<std::string, float> expected;
-    expected["spatial_dim"] = 3.0f;
+    expected["spatial_dim"] = is3d ? 3.0f : 2.0f;
     expected["in_channels"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetInputChannelC(problem));
-    expected["in_d"] =
-        static_cast<float>(miopen::solver::ProblemInterpreter::GetInputDepthDi(problem));
+
+    if(is3d)
+    {
+        expected["in_d"] =
+            static_cast<float>(miopen::solver::ProblemInterpreter::GetInputDepthDi(problem));
+    }
     expected["in_h"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetInputHeightHi(problem));
     expected["in_w"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetInputWidthWi(problem));
+
     expected["out_channels"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetOutputChannelK(problem));
-    expected["out_d"] =
-        static_cast<float>(miopen::solver::ProblemInterpreter::GetOutputDepthDo(problem));
+    if(is3d)
+    {
+        expected["out_d"] =
+            static_cast<float>(miopen::solver::ProblemInterpreter::GetOutputDepthDo(problem));
+    }
     expected["out_h"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetOutputHeightHo(problem));
     expected["out_w"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetOutputWidthWo(problem));
-    expected["fil_d"] =
-        static_cast<float>(miopen::solver::ProblemInterpreter::GetFilterDepthZ(problem));
+
+    if(is3d)
+    {
+        expected["fil_d"] =
+            static_cast<float>(miopen::solver::ProblemInterpreter::GetFilterDepthZ(problem));
+    }
     expected["fil_h"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetFilterHeightY(problem));
     expected["fil_w"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetFilterWidthX(problem));
-    expected["pad_d"] =
-        static_cast<float>(miopen::solver::ProblemInterpreter::GetInputLeftPadD(problem));
+
+    if(is3d)
+    {
+        expected["pad_d"] =
+            static_cast<float>(miopen::solver::ProblemInterpreter::GetInputLeftPadD(problem));
+    }
     expected["pad_h"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetInputLeftPadH(problem));
     expected["pad_w"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetInputLeftPadW(problem));
-    expected["conv_stride_d"] = static_cast<float>(
-        miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideD(problem));
+
+    if(is3d)
+    {
+        expected["conv_stride_d"] = static_cast<float>(
+            miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideD(problem));
+    }
     expected["conv_stride_h"] = static_cast<float>(
         miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideH(problem));
     expected["conv_stride_w"] = static_cast<float>(
         miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideW(problem));
-    expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
+
+    if(is3d)
+    {
+        expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
+    }
     expected["dilation_h"] = static_cast<float>(problem.GetDilationH());
     expected["dilation_w"] = static_cast<float>(problem.GetDilationW());
+
     expected["batchsize"] =
         static_cast<float>(miopen::solver::ProblemInterpreter::GetBatchN(problem));
     expected["bias"]      = static_cast<float>(problem.GetBias());
     expected["in_layout"] = static_cast<float>(
-        LayoutStringToCode(miopen::solver::ProblemInterpreter::GetInputLayout(problem)));
+        LayoutStringToCode(miopen::solver::ProblemInterpreter::GetInputLayout(problem), is3d));
     expected["fil_layout"] = static_cast<float>(
-        LayoutStringToCode(miopen::solver::ProblemInterpreter::GetFilterLayout(problem)));
+        LayoutStringToCode(miopen::solver::ProblemInterpreter::GetFilterLayout(problem), is3d));
     expected["out_layout"] = static_cast<float>(
-        LayoutStringToCode(miopen::solver::ProblemInterpreter::GetOutputLayout(problem)));
+        LayoutStringToCode(miopen::solver::ProblemInterpreter::GetOutputLayout(problem), is3d));
     expected["precision"] = static_cast<float>(problem.GetInDataType());
     expected["direction"] =
         static_cast<float>(direction == miopen::conv::Direction::Forward           ? 0.0f
@@ -192,36 +235,45 @@ bool CheckModelFilesExist(const std::string& arch, const std::string& solver_nam
            miopen::fs::exists(kernel_config_encoder);
 }
 
-struct Conv3DKernelTuningTestParam
+// Test parameters combining dimension and data type/direction
+struct ConvNDKernelTuningTestParam
 {
+    int spatial_dim;
     miopenDataType_t data_type;
     miopen::conv::Direction direction;
     std::string test_name;
 };
 
 // Test case generators
-std::vector<Conv3DKernelTuningTestParam> GenSmokeTestCases()
+std::vector<ConvNDKernelTuningTestParam> GenSmokeTestCases()
 {
     return {
-        {miopenFloat, miopen::conv::Direction::Forward, "Fwd"},
-        {miopenFloat, miopen::conv::Direction::BackwardWeights, "Wrw"},
+        {2, miopenFloat, miopen::conv::Direction::Forward, "Conv2D_Fwd"},
+        {2, miopenFloat, miopen::conv::Direction::BackwardWeights, "Conv2D_Wrw"},
+        {3, miopenFloat, miopen::conv::Direction::Forward, "Conv3D_Fwd"},
+        {3, miopenFloat, miopen::conv::Direction::BackwardWeights, "Conv3D_Wrw"},
     };
 }
 
-std::vector<Conv3DKernelTuningTestParam> GenFullTestCases()
+std::vector<ConvNDKernelTuningTestParam> GenFullTestCases()
 {
     return {
-        {miopenFloat, miopen::conv::Direction::Forward, "Fwd"},
-        {miopenFloat, miopen::conv::Direction::BackwardData, "Bwd"},
-        {miopenFloat, miopen::conv::Direction::BackwardWeights, "Wrw"},
-        {miopenHalf, miopen::conv::Direction::BackwardWeights, "Half"},
-        {miopenBFloat16, miopen::conv::Direction::BackwardWeights, "BFloat16"},
+        {2, miopenFloat, miopen::conv::Direction::Forward, "Conv2D_Fwd"},
+        {2, miopenFloat, miopen::conv::Direction::BackwardData, "Conv2D_Bwd"},
+        {2, miopenFloat, miopen::conv::Direction::BackwardWeights, "Conv2D_Wrw"},
+        {2, miopenHalf, miopen::conv::Direction::BackwardWeights, "Conv2D_Half"},
+        {2, miopenBFloat16, miopen::conv::Direction::BackwardWeights, "Conv2D_BFloat16"},
+        {3, miopenFloat, miopen::conv::Direction::Forward, "Conv3D_Fwd"},
+        {3, miopenFloat, miopen::conv::Direction::BackwardData, "Conv3D_Bwd"},
+        {3, miopenFloat, miopen::conv::Direction::BackwardWeights, "Conv3D_Wrw"},
+        {3, miopenHalf, miopen::conv::Direction::BackwardWeights, "Conv3D_Half"},
+        {3, miopenBFloat16, miopen::conv::Direction::BackwardWeights, "Conv3D_BFloat16"},
     };
 }
 
 // Test name generator
 std::string
-Conv3DKernelTuningTestName(const ::testing::TestParamInfo<Conv3DKernelTuningTestParam>& info)
+ConvNDKernelTuningTestName(const ::testing::TestParamInfo<ConvNDKernelTuningTestParam>& info)
 {
     return info.param.test_name;
 }
@@ -309,7 +361,6 @@ void ValidateMetadataEncoding(const std::string& solver_name,
         auto tokens = GetKernelAsTokens(typestring);
 
         // Check if this kernel type requires split_k to be appended
-        // by checking if the kernel_str_mapping includes a parameter with "splitk" in its name
         if(!tokens.empty())
         {
             const std::string& kernel_name = tokens[0];
@@ -386,17 +437,19 @@ void ValidateMetadataEncoding(const std::string& solver_name,
                             << " NaN encodings - indicates missing metadata entries";
 }
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
 } // anonymous namespace
 
 // ------------------- Base Test Fixture -------------------
 
-class GPU_Conv3DKernelTuning_Base : public ::testing::Test
+class GPU_ConvNDKernelTuning_Base : public ::testing::Test
 {
 protected:
     miopen::Handle handle;
     miopen::ExecutionContext ctx;
     std::string device_arch;
-    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+    int spatial_dim = 3;
+    std::string solver_name;
 
     void SetUp() override
     {
@@ -404,40 +457,69 @@ protected:
         device_arch = handle.GetDeviceName();
         ctx         = miopen::ExecutionContext(&handle);
 
-        // Check if this is an AI-dependent test that requires model files
-        if(RequiresAIModels() && !CheckModelFilesExist(device_arch, solver_name))
-        {
-            GTEST_SKIP() << "Test requires AI model files for " << device_arch
-                         << " (found device: " << device_arch
-                         << ", no compatible model files available)";
-        }
+        // Solver name will be set by derived classes
     }
 
     virtual bool RequiresAIModels() const { return false; }
+
+    // Get solver name based on spatial dimension and direction
+    std::string GetSolverName(int dim, miopen::conv::Direction dir) const
+    {
+        std::string prefix = (dim == 3) ? "ConvHipImplicitGemm3DGroup" : "ConvHipImplicitGemmGroup";
+        std::string suffix;
+        switch(dir)
+        {
+        case miopen::conv::Direction::Forward: suffix = "FwdXdlops"; break;
+        case miopen::conv::Direction::BackwardData: suffix = "BwdXdlops"; break;
+        case miopen::conv::Direction::BackwardWeights: suffix = "WrwXdlops"; break;
+        default: suffix = "UnknownXdlops"; break;
+        }
+        return prefix + suffix;
+    }
 };
 
 // ------------------- Platform-Agnostic Tests -------------------
 
-class GPU_Conv3DKernelTuning_FP32
-    : public GPU_Conv3DKernelTuning_Base,
-      public ::testing::WithParamInterface<Conv3DKernelTuningTestParam>
+// Non-parameterized utility tests
+class GPU_ConvNDKernelTuningUtils_FP32 : public GPU_ConvNDKernelTuning_Base
 {
 protected:
     bool RequiresAIModels() const override { return false; }
 };
 
-TEST_P(GPU_Conv3DKernelTuning_FP32, GetFeatures3D_Test)
+// Parameterized feature extraction tests
+class GPU_ConvNDKernelTuning_FP32
+    : public GPU_ConvNDKernelTuning_Base,
+      public ::testing::WithParamInterface<ConvNDKernelTuningTestParam>
+{
+protected:
+    bool RequiresAIModels() const override { return false; }
+
+    void SetUp() override
+    {
+        const auto& param = GetParam();
+        spatial_dim       = param.spatial_dim;
+        GPU_ConvNDKernelTuning_Base::SetUp();
+        solver_name = GetSolverName(spatial_dim, param.direction);
+    }
+};
+
+TEST_P(GPU_ConvNDKernelTuning_FP32, GetFeaturesND_Test)
 {
     const auto& param = GetParam();
-    auto problem      = GetReusableProblemDescription(param.data_type, param.direction);
+    auto problem      = (spatial_dim == 3)
+                            ? GetReusable3DProblemDescription(param.data_type, param.direction)
+                            : GetReusable2DProblemDescription(param.data_type, param.direction);
     int max_cu        = 304;
-    auto features     = GetFeatures3D(problem, max_cu, device_arch);
+    auto features     = GetFeaturesND(problem, max_cu, device_arch);
 
-    ASSERT_EQ(features.size(), 29u);
-    CheckGetFeatures3D_MapValues(features, problem, param.direction);
+    // 2D has 23 features, 3D has 29 features (6 depth-related features)
+    size_t expected_feature_count = (spatial_dim == 3) ? 29u : 23u;
+    ASSERT_EQ(features.size(), expected_feature_count);
+    CheckGetFeaturesND_MapValues(features, problem, param.direction, spatial_dim == 3);
 }
 
-TEST_F(GPU_Conv3DKernelTuning_FP32, GetKernelAsTokens_Test)
+TEST_F(GPU_ConvNDKernelTuningUtils_FP32, GetKernelAsTokens_Test)
 {
     auto tokens = GetKernelAsTokens("type<param1,param2>");
     ASSERT_EQ(tokens.size(), 3u);
@@ -449,14 +531,14 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, GetKernelAsTokens_Test)
     ASSERT_TRUE(empty.empty());
 }
 
-TEST_F(GPU_Conv3DKernelTuning_FP32, GenerateSplitK_Test)
+TEST_F(GPU_ConvNDKernelTuningUtils_FP32, GenerateSplitK_Test)
 {
     auto split_ks             = GenerateSplitK(8);
     std::vector<int> expected = {1, 2, 4, 8};
     ASSERT_EQ(split_ks, expected);
 }
 
-TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_Test)
+TEST_F(GPU_ConvNDKernelTuningUtils_FP32, ProcessExplicitXdlParams_Test)
 {
     // Test case matching the Python preprocessing logic
     std::vector<std::string> input = {"DeviceGroupedConvBwdWeight_Explicit_Xdl",
@@ -473,10 +555,6 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_Test)
 
     auto result = ProcessExplicitXdlParams(input);
 
-    // Expected output after processing:
-    // 1. First element unchanged
-    // 2. Remove parameter names (e.g., "BlkSize:256" -> "256")
-    // 3. Split on 'x' (e.g., "256x256x32" -> ["256", "256", "32"])
     std::vector<std::string> expected = {
         "DeviceGroupedConvBwdWeight_Explicit_Xdl",    // 0: unchanged
         "DeviceBatchedGemmXdlUniversal<Default,CRR>", // 1: unchanged (no colon)
@@ -506,14 +584,14 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_Test)
     }
 }
 
-TEST_F(GPU_Conv3DKernelTuning_FP32, ProcessExplicitXdlParams_EmptyInput_Test)
+TEST_F(GPU_ConvNDKernelTuningUtils_FP32, ProcessExplicitXdlParams_EmptyInput_Test)
 {
     std::vector<std::string> empty_input;
     auto result = ProcessExplicitXdlParams(empty_input);
     ASSERT_TRUE(result.empty());
 }
 
-TEST_F(GPU_Conv3DKernelTuning_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
+TEST_F(GPU_ConvNDKernelTuningUtils_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
 {
     // Test that FillHeuristicKernels applies ProcessExplicitXdlParams for Explicit_Xdl kernels
     std::vector<std::string> valid_kernels = {
@@ -531,7 +609,6 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
     ASSERT_EQ(kernels.size(), 2u);
 
     // First kernel should be processed by ProcessExplicitXdlParams
-    // Should have 16 parameters (0-15) after processing
     EXPECT_EQ(kernels[0].size(), 16u)
         << "Explicit_Xdl kernel should have 16 parameters after processing";
     EXPECT_EQ(kernels[0][0], "DeviceGroupedConvBwdWeight_Explicit_Xdl");
@@ -541,41 +618,61 @@ TEST_F(GPU_Conv3DKernelTuning_FP32, FillHeuristicKernels_WithExplicitXdl_Test)
     EXPECT_EQ(kernels[0][5], "32");  // Third part of BlkTile
 
     // Second kernel should NOT be processed (regular kernel)
-    // Should have its normal parameter count
     EXPECT_GT(kernels[1].size(), 0u);
     EXPECT_EQ(kernels[1][0], "DeviceGroupedConvBwdWeight_Xdl_CShuffle");
 }
 
 // ------------------- AI Model Tests (Architecture-Dependent) -------------------
 
-class GPU_Conv3DKernelTuningAI_FP32 : public GPU_Conv3DKernelTuning_Base
+class GPU_ConvNDKernelTuningAI_Base : public GPU_ConvNDKernelTuning_Base
 {
 protected:
     bool RequiresAIModels() const override { return true; }
 };
 
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, CandidateSelectionModel_Test)
+// Parameterized AI tests
+class GPU_ConvNDKernelTuningAI_FP32
+    : public GPU_ConvNDKernelTuningAI_Base,
+      public ::testing::WithParamInterface<ConvNDKernelTuningTestParam>
 {
+protected:
+    void SetUp() override
+    {
+        const auto& param = GetParam();
+        spatial_dim       = param.spatial_dim;
+        solver_name       = GetSolverName(spatial_dim, miopen::conv::Direction::BackwardWeights);
+        GPU_ConvNDKernelTuningAI_Base::SetUp();
+    }
+};
+
+TEST_P(GPU_ConvNDKernelTuningAI_FP32, CandidateSelectionModel_Test)
+{
+    std::string test_solver = GetSolverName(spatial_dim, miopen::conv::Direction::BackwardWeights);
+
     EXPECT_NO_THROW({
         miopen::ai::tuning::candidate_selection::CandidateSelectionModel model(device_arch,
-                                                                               solver_name);
+                                                                               test_solver);
     });
 
     auto& model = miopen::ai::tuning::candidate_selection::GetCandidateSelectionModel(device_arch,
-                                                                                      solver_name);
+                                                                                      test_solver);
     const auto& meta = model.metadata();
     ASSERT_FALSE(meta.input_params().empty());
     ASSERT_FALSE(meta.output_params().empty());
 }
 
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
+TEST_P(GPU_ConvNDKernelTuningAI_FP32, RunParameterPredictionModel_Test)
 {
     auto problem =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+        (spatial_dim == 3)
+            ? GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights)
+            : GetReusable2DProblemDescription(miopenFloat,
+                                              miopen::conv::Direction::BackwardWeights);
 
     int index = 0, split_k = 1;
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
+    std::string test_solver = GetSolverName(spatial_dim, miopen::conv::Direction::BackwardWeights);
 
     auto [ai_success, result] =
         miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
@@ -585,23 +682,27 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
                                                                  split_k,
                                                                  kernel_id,
                                                                  fill_valid_kernels,
-                                                                 solver_name,
+                                                                 test_solver,
                                                                  accept_all_combinations);
 
     ASSERT_TRUE(ai_success);
     ASSERT_FALSE(kernel_id.empty());
 }
 
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
+TEST_P(GPU_ConvNDKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
 {
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)> empty_kernels =
         [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
 
     auto problem =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+        (spatial_dim == 3)
+            ? GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights)
+            : GetReusable2DProblemDescription(miopenFloat,
+                                              miopen::conv::Direction::BackwardWeights);
     int index = 0, split_k = 1;
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
+    std::string test_solver = GetSolverName(spatial_dim, miopen::conv::Direction::BackwardWeights);
 
     auto [ai_success, result] =
         miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
@@ -611,7 +712,7 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
                                                                  split_k,
                                                                  kernel_id,
                                                                  empty_kernels,
-                                                                 solver_name,
+                                                                 test_solver,
                                                                  accept_all_combinations);
 
     ASSERT_FALSE(ai_success);
@@ -621,6 +722,47 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
 // ------------------- Metadata Encoding Validation Tests -------------------
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
+// Fixed fixture tests for specific directions (non-parameterized)
+class GPU_Conv2DKernelTuningAI_FP32 : public GPU_ConvNDKernelTuningAI_Base
+{
+protected:
+    void SetUp() override
+    {
+        spatial_dim = 2;
+        solver_name = "ConvHipImplicitGemmGroupWrwXdlops";
+        GPU_ConvNDKernelTuningAI_Base::SetUp();
+    }
+};
+
+class GPU_Conv3DKernelTuningAI_FP32 : public GPU_ConvNDKernelTuningAI_Base
+{
+protected:
+    void SetUp() override
+    {
+        spatial_dim = 3;
+        solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+        GPU_ConvNDKernelTuningAI_Base::SetUp();
+    }
+};
+
+TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
+{
+    ValidateMetadataEncoding(
+        "ConvHipImplicitGemmGroupWrwXdlops", GetAllWrwKernelTypeStrings(), device_arch);
+}
+
+TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Fwd_Test)
+{
+    ValidateMetadataEncoding(
+        "ConvHipImplicitGemmGroupFwdXdlops", GetAllFwdKernelTypeStrings(), device_arch);
+}
+
+TEST_F(GPU_Conv2DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Bwd_Test)
+{
+    ValidateMetadataEncoding(
+        "ConvHipImplicitGemmGroupBwdXdlops", GetAllBwdKernelTypeStrings(), device_arch);
+}
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_Wrw_Test)
 {
@@ -644,13 +786,94 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_
 
 // ------------------- Full Solver Tests -------------------
 
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Wrw_Test)
+class GPU_Conv2DKernelTuningSolver_FP32 : public GPU_ConvNDKernelTuningAI_Base
+{
+protected:
+    void SetUp() override
+    {
+        spatial_dim = 2;
+        solver_name = "ConvHipImplicitGemmGroupWrwXdlops";
+        GPU_ConvNDKernelTuningAI_Base::SetUp();
+    }
+};
+
+class GPU_Conv3DKernelTuningSolver_FP32 : public GPU_ConvNDKernelTuningAI_Base
+{
+protected:
+    void SetUp() override
+    {
+        spatial_dim = 3;
+        solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+        GPU_ConvNDKernelTuningAI_Base::SetUp();
+    }
+};
+
+TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
 #else
     auto problem =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+        GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+    ConvHipImplicitGemmGroupWrwXdlops solver;
+
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+    auto perf_cfg = solver.GetDefaultPerformanceConfig(ctx, problem);
+    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, perf_cfg));
+    auto solution = solver.GetSolution(ctx, problem, perf_cfg);
+
+    ASSERT_FALSE(solution.construction_params.empty());
+    ASSERT_TRUE(solution.invoker_factory);
+    ASSERT_GE(solution.workspace_sz, 0u);
+#endif
+}
+
+TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
+{
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
+    auto problem = GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
+    ConvHipImplicitGemmGroupFwdXdlops solver;
+
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+    auto perf_cfg = solver.GetDefaultPerformanceConfig(ctx, problem);
+    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, perf_cfg));
+    auto solution = solver.GetSolution(ctx, problem, perf_cfg);
+
+    ASSERT_FALSE(solution.construction_params.empty());
+    ASSERT_TRUE(solution.invoker_factory);
+    ASSERT_GE(solution.workspace_sz, 0u);
+#endif
+}
+
+TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
+{
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
+    auto problem =
+        GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
+    ConvHipImplicitGemmGroupBwdXdlops solver;
+
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+    auto perf_cfg = solver.GetDefaultPerformanceConfig(ctx, problem);
+    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, perf_cfg));
+    auto solution = solver.GetSolution(ctx, problem, perf_cfg);
+
+    ASSERT_FALSE(solution.construction_params.empty());
+    ASSERT_TRUE(solution.invoker_factory);
+    ASSERT_GE(solution.workspace_sz, 0u);
+#endif
+}
+
+TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
+{
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
+    auto problem =
+        GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
     ConvHipImplicitGemm3DGroupWrwXdlops solver;
 
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
@@ -664,12 +887,12 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Wrw_Test)
 #endif
 }
 
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Fwd_Test)
+TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
 #else
-    auto problem = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
+    auto problem = GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
     ConvHipImplicitGemm3DGroupFwdXdlops solver;
 
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
@@ -683,13 +906,13 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Fwd_Test)
 #endif
 }
 
-TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Bwd_Test)
+TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
 #else
     auto problem =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
+        GetReusable3DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
     ConvHipImplicitGemm3DGroupBwdXdlops solver;
 
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
@@ -705,35 +928,65 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Bwd_Test)
 
 // ------------------- Cross-Platform Diagnostic Tests -------------------
 
-class CPU_Conv3DKernelTuningDiagnostic_NONE : public GPU_Conv3DKernelTuning_Base
+class CPU_ConvNDKernelTuningDiagnostic_NONE : public GPU_ConvNDKernelTuning_Base
 {
 protected:
     bool RequiresAIModels() const override { return false; }
 };
 
-TEST_F(CPU_Conv3DKernelTuningDiagnostic_NONE, ArchitectureCompatibility_Test)
+TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_2D_Test)
 {
-    std::vector<std::string> test_architectures = {"gfx942", "gfx90a", "gfx908", "gfx1101"};
+    std::vector<std::string> test_architectures = {"gfx942", "gfx950", "gfx90a", "gfx908"};
+    std::string test_solver                     = "ConvHipImplicitGemmGroupWrwXdlops";
 
-    std::cout << "=== Architecture Compatibility Report ===" << std::endl;
+    std::cout << "=== 2D Architecture Compatibility Report ===" << std::endl;
     std::cout << "Current device: " << device_arch << std::endl;
 
     for(const auto& arch : test_architectures)
     {
-        bool files_exist = CheckModelFilesExist(arch, solver_name);
+        bool files_exist = CheckModelFilesExist(arch, test_solver);
         std::cout << arch << ": " << (files_exist ? "SUPPORTED" : "NOT SUPPORTED") << std::endl;
     }
 }
 
-TEST_F(CPU_Conv3DKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
+TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_3D_Test)
 {
-    auto problem                        = GetReusableProblemDescription();
+    std::vector<std::string> test_architectures = {"gfx942", "gfx950", "gfx90a", "gfx908"};
+    std::string test_solver                     = "ConvHipImplicitGemm3DGroupWrwXdlops";
+
+    std::cout << "=== 3D Architecture Compatibility Report ===" << std::endl;
+    std::cout << "Current device: " << device_arch << std::endl;
+
+    for(const auto& arch : test_architectures)
+    {
+        bool files_exist = CheckModelFilesExist(arch, test_solver);
+        std::cout << arch << ": " << (files_exist ? "SUPPORTED" : "NOT SUPPORTED") << std::endl;
+    }
+}
+
+TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures2D_CrossPlatform_Test)
+{
+    auto problem                        = GetReusable2DProblemDescription();
     int max_cu                          = 304;
-    std::vector<std::string> test_archs = {"gfx942", "gfx90a", "gfx908"};
+    std::vector<std::string> test_archs = {"gfx942", "gfx950", "gfx90a"};
 
     for(const auto& arch : test_archs)
     {
-        auto features = GetFeatures3D(problem, max_cu, arch);
+        auto features = GetFeaturesND(problem, max_cu, arch);
+        EXPECT_EQ(features.size(), 23u) << "Feature count inconsistent for " << arch;
+        EXPECT_EQ(features.at("spatial_dim"), 2.0f) << "Spatial dim incorrect for " << arch;
+    }
+}
+
+TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
+{
+    auto problem                        = GetReusable3DProblemDescription();
+    int max_cu                          = 304;
+    std::vector<std::string> test_archs = {"gfx942", "gfx950", "gfx90a"};
+
+    for(const auto& arch : test_archs)
+    {
+        auto features = GetFeaturesND(problem, max_cu, arch);
         EXPECT_EQ(features.size(), 29u) << "Feature count inconsistent for " << arch;
         EXPECT_EQ(features.at("spatial_dim"), 3.0f) << "Spatial dim incorrect for " << arch;
     }
@@ -742,18 +995,29 @@ TEST_F(CPU_Conv3DKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
 // ------------------- Test Instantiations -------------------
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv3DKernelTuning_FP32,
+                         GPU_ConvNDKernelTuning_FP32,
                          ::testing::ValuesIn(GenSmokeTestCases()),
-                         Conv3DKernelTuningTestName);
+                         ConvNDKernelTuningTestName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3DKernelTuning_FP32,
+                         GPU_ConvNDKernelTuning_FP32,
                          ::testing::ValuesIn(GenFullTestCases()),
-                         Conv3DKernelTuningTestName);
+                         ConvNDKernelTuningTestName);
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_ConvNDKernelTuningAI_FP32,
+    ::testing::Values(ConvNDKernelTuningTestParam{2,
+                                                  miopenFloat,
+                                                  miopen::conv::Direction::BackwardWeights,
+                                                  "Conv2D"},
+                      ConvNDKernelTuningTestParam{
+                          3, miopenFloat, miopen::conv::Direction::BackwardWeights, "Conv3D"}),
+    ConvNDKernelTuningTestName);
 
 #else
 // Dummy test when AI kernel tuning is disabled
-TEST(CPU_Conv3DKernelTuningDisabled_NONE, FeatureDisabled)
+TEST(CPU_ConvNDKernelTuningDisabled_NONE, FeatureDisabled)
 {
     GTEST_SKIP() << "AI kernel tuning features are disabled in this build";
 }

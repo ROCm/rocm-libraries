@@ -72,7 +72,7 @@ GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::stri
 
     const bool is3d = problem.Is3d();
     // 1: spatial_dim
-    features["spatial_dim"] = 3.0f;
+    features["spatial_dim"] = is3d ? 3.0f : 2.0f;
 
     // 2–5: in_channels, in_d, in_h, in_w
     features["in_channels"] = static_cast<float>(ProblemInterpreter::GetInputChannelC(problem));
