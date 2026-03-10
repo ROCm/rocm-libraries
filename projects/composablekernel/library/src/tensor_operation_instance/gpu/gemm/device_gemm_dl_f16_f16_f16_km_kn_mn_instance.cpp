@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// Test change for dependency parser validation
 #include <cstdlib>
 
 #include "ck/ck.hpp"
