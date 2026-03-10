@@ -542,11 +542,17 @@ struct GroupedGemmKernel
             cum_grid_size += TilePartitioner::GridSize(kargs.M, kargs.N) * k_batch;
 
             // Early exit if no work to do.
-            // If M or N would be zero then the TilePartitioner::GridSize(kargs.M, kargs.N) would
-            // return zero and block_id would be less than cum_grid_size.
+            // If M or N is zero, TilePartitioner::GridSize(kargs.M, kargs.N) returns zero,
+            // so this group contributes no blocks and cum_grid_size is unchanged. The group
+            // is naturally skipped by the block_id < cum_grid_size check below.
             if(kargs.K == 0)
             {
-                block_id = block_id + grid_size; // advance to next block
+                // Advance only if this workgroup was assigned to this group's range,
+                // matching the pattern of the normal while loop below.
+                while(block_id < cum_grid_size)
+                {
+                    block_id += grid_size;
+                }
                 continue;
             }
 
