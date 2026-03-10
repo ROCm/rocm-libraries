@@ -481,7 +481,6 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
-       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR) &&
        IsModelApplicable(ctx, problem))
     {
         if(arch == "gfx942" || arch == "gfx950")
