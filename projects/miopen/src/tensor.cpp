@@ -892,11 +892,12 @@ std::string TensorDescriptor::ToString() const
     if(this->lens.empty())
         return result;
 
-    auto b = this->lens.begin();
-    result = std::accumulate(
-        std::next(b), this->lens.end(), std::to_string(*b), [&](std::string x, std::size_t y) {
-            return std::move(x) + ", " + std::to_string(y);
-        });
+    for(auto i : this->lens)
+    {
+        result += std::to_string(i) + ", ";
+    }
+    result = result.substr(0, result.length() - 2);
+
     return result;
 }
 

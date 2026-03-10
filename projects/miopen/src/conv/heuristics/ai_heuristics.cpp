@@ -704,7 +704,6 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 
         cached_result =
             ProcessAndCachePredictions(problem, device, true, predictions, model->GetSolverMap());
-        return cached_result;
     }
     else
     {
@@ -720,8 +719,9 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 
         cached_result = ProcessAndCachePredictions(
             problem, device, false, predictions, model->metadata.solver_map);
-        return cached_result;
     }
+
+    return cached_result;
 }
 
 } // namespace immed_mode

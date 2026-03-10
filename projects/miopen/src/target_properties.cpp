@@ -55,7 +55,7 @@ static std::string GetDeviceNameFromMap(const std::string& in)
 
     const auto& dev_str = env::value(MIOPEN_DEBUG_ENFORCE_DEVICE);
     if(!dev_str.empty())
-        return std::string{dev_str};
+        return dev_str;
 
     std::string name = in.substr(0, in.find(':')); // str.substr(0, npos) returns str.
 
