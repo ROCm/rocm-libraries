@@ -4408,6 +4408,7 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupFwdXdlops>
 {
     int index             = 0;
+    int split_k           = 0; // not used for FWD, but required for AI heuristics interface
     std::string kernel_id = "";
     std::vector<std::string> valid_kernels;
 
@@ -4442,14 +4443,20 @@ private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
+    
+    // OLD KTN functions (for gfx90a)
     template <typename DataType>
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs(const std::string& type);
-    bool ModelApplyToken(int idx, std::string value, const std::string& arch);
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+    void InitHeuristicKernelIDsKTN(const std::string& type);
+    bool ModelApplyTokenKTN(int idx, std::string value, const std::string& arch);
 #endif
+    
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
