@@ -1,9 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-
-find_package(Boost COMPONENTS program_options filesystem REQUIRED)
-
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
@@ -13,8 +10,6 @@ set(COMMON_CLIENT_LIBS
     hip::host
     tensilelite::tensilelite-host
     rocisa::rocisa-cpp
-    Boost::program_options
-    Boost::filesystem
     OpenMP::OpenMP_CXX
 )
 

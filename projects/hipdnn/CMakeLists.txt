@@ -229,6 +229,32 @@ endif()
 # keep this after all the targets have been added that could use the HIP language compiler.
 add_clang_tidy_custom_target()
 
+# Doxygen documentation target (standalone builds only to avoid target name
+# collisions with other projects in the superbuild)
+if(PROJECT_IS_TOP_LEVEL)
+    find_package(Doxygen QUIET)
+    if(DOXYGEN_FOUND)
+        add_custom_target(
+            doxygen
+            COMMAND ${DOXYGEN_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Generating Doxygen documentation"
+            VERBATIM
+            USES_TERMINAL
+        )
+    else()
+        add_custom_target(
+            doxygen
+            COMMAND ${CMAKE_COMMAND} -E echo
+                    "Error: Doxygen not found. Please install it (e.g. sudo apt-get install doxygen)."
+            COMMAND ${CMAKE_COMMAND} -E false
+            COMMENT "Doxygen not found"
+            VERBATIM
+            USES_TERMINAL
+        )
+    endif()
+endif()
+
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 

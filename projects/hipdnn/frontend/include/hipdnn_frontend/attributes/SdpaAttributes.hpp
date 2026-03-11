@@ -1,5 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+/**
+ * @file SdpaAttributes.hpp
+ * @brief Attributes for scaled dot-product attention (SDPA) operation
+ *
+ * This file defines the SdpaAttributes class used to configure
+ * scaled dot-product attention operations, computing
+ * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
@@ -13,6 +23,42 @@
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class SdpaAttributes
+ * @brief Configuration attributes for scaled dot-product attention
+ *
+ * SdpaAttributes configures a scaled dot-product attention operation:
+ * @code
+ * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+ * @endcode
+ *
+ * **Required inputs:**
+ * - Q: Query tensor [B, H, S_q, D]
+ * - K: Key tensor [B, H, S_kv, D]
+ * - V: Value tensor [B, H, S_kv, D]
+ *
+ * **Outputs:**
+ * - O: Attention output tensor [B, H, S_q, D]
+ * - Stats: Softmax statistics (optional, when generate_stats is set)
+ *
+ * **Optional features:**
+ * - Causal masking and diagonal band bounds
+ * - Additive attention bias (attn_mask)
+ * - Dropout (probability + seed/offset tensors)
+ * - ALiBi positional encoding
+ * - Paged attention (page_table_k, page_table_v)
+ * - FP8 quantization (descale/scale tensors)
+ * - Attention scale override (attn_scale_value)
+ *
+ * @code{.cpp}
+ * SdpaAttributes attr;
+ * attr.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(d_k)))
+ *     .set_causal_mask(true);
+ *
+ * auto [o, stats] = graph.sdpa(q, k, v, attr);
+ * @endcode
+ */
 class SdpaAttributes : public Attributes<SdpaAttributes>
 {
 public:

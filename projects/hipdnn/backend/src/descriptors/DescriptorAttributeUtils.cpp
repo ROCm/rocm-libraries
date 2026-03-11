@@ -213,6 +213,51 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
     }
 }
 
+void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_NORM_FWD_PHASE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnNormFwdPhase_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkNormFwdPhase(tmp);
+}
+
+void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_NORM_FWD_PHASE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+    auto tmp = fromSdkNormFwdPhase(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+}
+
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
                          hipdnnBackendAttributeType_t attributeType,
