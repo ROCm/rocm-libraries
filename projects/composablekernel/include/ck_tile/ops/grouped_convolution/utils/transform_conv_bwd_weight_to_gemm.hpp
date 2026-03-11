@@ -518,7 +518,7 @@ struct TransformConvBwdWeightToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                make_tuple(make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)), false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
                            make_pass_through_transform(K_),
                            make_pass_through_transform(X_),
                            make_pass_through_transform(C_)),
@@ -652,7 +652,7 @@ struct TransformConvBwdWeightToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                make_tuple(make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)), false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
                            make_pass_through_transform(K_),
                            make_pass_through_transform(Y_ * X_),
                            make_pass_through_transform(C_)),
@@ -788,7 +788,7 @@ struct TransformConvBwdWeightToGemm
                           NumGroupsToMerge == 32 || NumGroupsToMerge == 64);
             const auto unmerged_padded_desc = transform_tensor_descriptor(
                 padded_desc,
-                make_tuple(make_xor_transform(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
+                make_tuple(make_xor_transform<decltype(make_tuple(NumGroupsToMerge, NumGroupsToMerge)), false>(make_tuple(NumGroupsToMerge, NumGroupsToMerge)),
                            make_pass_through_transform(K_),
                            make_pass_through_transform(Z_ * Y_ * X_),
                            make_pass_through_transform(C_)),
