@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -45,7 +46,7 @@ namespace hipdnn_frontend::detail
     HIPDNN_CHECK_ERROR(
         getDescriptorAttrCount(desc, attrName, HIPDNN_TYPE_INT64, count, errorContext));
 
-    if(count == 0)
+    if(count <= 0)
     {
         values.clear();
         return {};
@@ -57,6 +58,12 @@ namespace hipdnn_frontend::detail
         hipdnnBackend()->backendGetAttribute(
             desc, attrName, HIPDNN_TYPE_INT64, count, &actualCount, values.data()),
         "Failed to get " + errorContext);
+    if(actualCount != count)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Element count mismatch for " + errorContext + ": expected " + std::to_string(count)
+                    + " but got " + std::to_string(actualCount)};
+    }
     return {};
 }
 
@@ -72,6 +79,44 @@ template <typename T>
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 1, &actualCount, &value),
         "Failed to get " + errorContext);
+    return {};
+}
+
+/// Gets a string attribute (char array) from a backend descriptor.
+/// Queries the character count first, then retrieves the string value.
+/// If the attribute is not supported or the string is empty, sets value to empty and returns
+/// success.
+[[nodiscard]] inline Error getDescriptorAttrString(hipdnnBackendDescriptor_t desc,
+                                                   hipdnnBackendAttributeName_t attrName,
+                                                   std::string& value,
+                                                   const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto countStatus = hipdnnBackend()->backendGetAttribute(
+        desc, attrName, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    {
+        value.clear();
+        return {};
+    }
+    if(countStatus != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to get count for " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+
+    std::vector<char> buffer(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(
+            desc, attrName, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data()),
+        "Failed to get " + errorContext);
+
+    // The backend returns a null-terminated string; construct std::string from it
+    value = std::string(buffer.data());
     return {};
 }
 
@@ -123,7 +168,7 @@ template <typename T>
                                         + " Backend error: " + backendErrMsg.data()});
     }
 
-    if(count == 0)
+    if(count <= 0)
     {
         return std::make_pair(std::vector<ScopedHipdnnBackendDescriptor>{}, Error{});
     }
@@ -233,6 +278,11 @@ template <typename T>
                                                isVirtual,
                                                "tensor is_virtual"));
 
+    // Read tensor name (may be empty if not set)
+    std::string name;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrString(tensorDesc, HIPDNN_ATTR_TENSOR_NAME_EXT, name, "tensor name"));
+
     // Convert data type
     auto [dt, dtErr] = fromHipdnnDataType(dataType);
     if(dtErr.is_bad())
@@ -244,6 +294,7 @@ template <typename T>
     tensor = std::make_shared<graph::TensorAttributes>();
     tensor->set_uid(uid).set_data_type(dt).set_dim(dims).set_stride(strides).set_is_virtual(
         isVirtual);
+    tensor->set_name(name);
 
     return {};
 }

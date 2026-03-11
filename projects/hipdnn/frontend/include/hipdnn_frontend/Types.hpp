@@ -315,8 +315,14 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
     }
 }
 
-/// Converts a hipdnnConvolutionMode_t to the frontend ConvolutionMode enum.
-/// Returns an error if the mode is unknown.
+/**
+ * @brief Convert backend hipdnnConvolutionMode_t to frontend ConvolutionMode
+ *
+ * Maps the backend C API convolution mode enum to the frontend ConvolutionMode enum.
+ *
+ * @param mode The backend hipdnnConvolutionMode_t value
+ * @return A pair of the corresponding ConvolutionMode and an Error (set if the mode is unknown)
+ */
 inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMode_t mode)
 {
     switch(mode)
@@ -673,8 +679,14 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
     }
 }
 
-/// Converts a hipdnnDataType_t to the frontend DataType enum.
-/// Returns an error if the type is unknown.
+/**
+ * @brief Convert backend hipdnnDataType_t to frontend DataType
+ *
+ * Maps the backend C API data type enum to the frontend DataType enum.
+ *
+ * @param type The backend hipdnnDataType_t value
+ * @return A pair of the corresponding DataType and an Error (set if the type is unknown)
+ */
 inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
 {
     switch(type)

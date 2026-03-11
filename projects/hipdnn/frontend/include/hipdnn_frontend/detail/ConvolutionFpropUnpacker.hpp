@@ -74,13 +74,8 @@ namespace hipdnn_frontend::detail
     attributes.set_convolution_mode(mode);
 
     // Unpack compute data type
-    hipdnnDataType_t computeType{};
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
-                                               HIPDNN_TYPE_DATA_TYPE,
-                                               computeType,
-                                               "conv compute data type"));
-    auto [dt, dtErr] = fromHipdnnDataType(computeType);
+    auto [dt, dtErr]
+        = unpackGraphDataType(opDesc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "conv compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

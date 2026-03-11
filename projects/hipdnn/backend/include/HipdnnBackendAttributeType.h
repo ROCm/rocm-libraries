@@ -19,6 +19,7 @@
  * the data type of the value being passed. These constants identify the
  * expected type for proper marshalling.
  */
+// NOLINTNEXTLINE(readability-enum-initial-value)
 typedef enum
 {
     /** @brief hipDNN handle (hipdnnHandle_t) */

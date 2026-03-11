@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "HipdnnOperationType.h"
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
@@ -416,4 +417,90 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
     desc->getAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &modeCount, &convMode);
     ASSERT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+
+    // Verify getAttribute returns correct post_padding
+    std::vector<int64_t> postPadding(2);
+    int64_t postPadCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
+                       HIPDNN_TYPE_INT64,
+                       2,
+                       &postPadCount,
+                       postPadding.data());
+    ASSERT_EQ(postPadCount, 2);
+    EXPECT_EQ(postPadding, toVec(K_CONV_PADDING));
+
+    // Verify getAttribute returns correct filter strides
+    std::vector<int64_t> filterStrides(2);
+    int64_t filterStrideCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
+                       HIPDNN_TYPE_INT64,
+                       2,
+                       &filterStrideCount,
+                       filterStrides.data());
+    ASSERT_EQ(filterStrideCount, 2);
+    EXPECT_EQ(filterStrides, toVec(K_CONV_STRIDE));
+
+    // Verify getAttribute returns correct dilations
+    std::vector<int64_t> dilations(2);
+    int64_t dilationCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, 2, &dilationCount, dilations.data());
+    ASSERT_EQ(dilationCount, 2);
+    EXPECT_EQ(dilations, toVec(K_CONV_DILATION));
+
+    // Verify getAttribute returns correct X tensor descriptor
+    HipdnnBackendDescriptor* xTensorDesc = nullptr;
+    int64_t xCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &xCount,
+                       &xTensorDesc);
+    ASSERT_EQ(xCount, 1);
+    ASSERT_NE(xTensorDesc, nullptr);
+    int64_t xUid = 0;
+    int64_t xUidCount = 0;
+    xTensorDesc->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &xUidCount, &xUid);
+    EXPECT_EQ(xUid, K_TENSOR_X_UID);
+
+    // Verify getAttribute returns correct W tensor descriptor
+    HipdnnBackendDescriptor* wTensorDesc = nullptr;
+    int64_t wCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &wCount,
+                       &wTensorDesc);
+    ASSERT_EQ(wCount, 1);
+    ASSERT_NE(wTensorDesc, nullptr);
+    int64_t wUid = 0;
+    int64_t wUidCount = 0;
+    wTensorDesc->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &wUidCount, &wUid);
+    EXPECT_EQ(wUid, K_TENSOR_W_UID);
+
+    // Verify getAttribute returns correct Y tensor descriptor
+    HipdnnBackendDescriptor* yTensorDesc = nullptr;
+    int64_t yCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &yCount,
+                       &yTensorDesc);
+    ASSERT_EQ(yCount, 1);
+    ASSERT_NE(yTensorDesc, nullptr);
+    int64_t yUid = 0;
+    int64_t yUidCount = 0;
+    yTensorDesc->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &yUidCount, &yUid);
+    EXPECT_EQ(yUid, K_TENSOR_Y_UID);
+
+    // Verify getAttribute returns correct operation type
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    int64_t opTypeCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
+    ASSERT_EQ(opTypeCount, 1);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
 }

@@ -64,6 +64,18 @@ TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnWrongAttributeType)
                                HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST(TestDescriptorAttributeUtils, SetInt64VectorSuccess)
+{
+    std::vector<int64_t> target;
+    std::array<int64_t, 3> data = {10, 20, 30};
+
+    ASSERT_NO_THROW(setInt64Vector(target, HIPDNN_TYPE_INT64, 3, data.data(), "test"));
+    ASSERT_EQ(target.size(), 3u);
+    EXPECT_EQ(target[0], 10);
+    EXPECT_EQ(target[1], 20);
+    EXPECT_EQ(target[2], 30);
+}
+
 // --- getInt64Vector ---
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNegativeRequestedElementCount)
@@ -127,6 +139,19 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnWrongAttributeType)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST(TestDescriptorAttributeUtils, GetInt64VectorSuccess)
+{
+    std::vector<int64_t> source = {10, 20, 30};
+    std::array<int64_t, 3> output = {};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, output.data(), "test"));
+    ASSERT_EQ(count, 3);
+    EXPECT_EQ(output[0], 10);
+    EXPECT_EQ(output[1], 20);
+    EXPECT_EQ(output[2], 30);
+}
+
 // --- setScalar ---
 
 TEST(TestDescriptorAttributeUtils, SetScalarThrowsOnNullArrayOfElements)
@@ -166,6 +191,15 @@ TEST(TestDescriptorAttributeUtils, SetScalarThrowsOnWrongElementCount)
     ASSERT_THROW_HIPDNN_STATUS(
         setScalar(target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 2, &value, "test"),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetScalarSuccess)
+{
+    int64_t target = 0;
+    int64_t value = 42;
+
+    ASSERT_NO_THROW(setScalar(target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, &value, "test"));
+    ASSERT_EQ(target, 42);
 }
 
 // --- getScalar ---
@@ -222,6 +256,18 @@ TEST(TestDescriptorAttributeUtils, GetScalarThrowsOnWrongAttributeType)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST(TestDescriptorAttributeUtils, GetScalarSuccess)
+{
+    int64_t source = 42;
+    int64_t count = 0;
+    int64_t output = 0;
+
+    ASSERT_NO_THROW(
+        getScalar(source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(output, 42);
+}
+
 // --- setDataType ---
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnNullArrayOfElements)
@@ -261,6 +307,16 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnWrongElementCount)
 
     ASSERT_THROW_HIPDNN_STATUS(setDataType(target, HIPDNN_TYPE_DATA_TYPE, 2, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetDataTypeSuccess)
+{
+    using hipdnn_data_sdk::data_objects::DataType;
+    auto target = DataType::UNSET;
+    auto value = HIPDNN_DATA_FLOAT;
+
+    ASSERT_NO_THROW(setDataType(target, HIPDNN_TYPE_DATA_TYPE, 1, &value, "test"));
+    ASSERT_EQ(target, DataType::FLOAT);
 }
 
 // --- getDataType ---
@@ -315,6 +371,18 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnWrongAttributeType)
     ASSERT_THROW_HIPDNN_STATUS(
         getDataType(DataType::FLOAT, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, GetDataTypeSuccess)
+{
+    using hipdnn_data_sdk::data_objects::DataType;
+    int64_t count = 0;
+    hipdnnDataType_t output = {};
+
+    ASSERT_NO_THROW(
+        getDataType(DataType::FLOAT, HIPDNN_TYPE_DATA_TYPE, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
 }
 
 // --- setConvMode ---
