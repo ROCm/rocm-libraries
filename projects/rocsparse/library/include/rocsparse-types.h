@@ -983,7 +983,7 @@ typedef enum rocsparse_spgemm_alg_
 /*! \ingroup types_module
  *  \brief List of singularity types encountered in triangular solves and incomplete factorizations. *
  */
-typedef enum _rocsparse_singularity
+typedef enum rocsparse_singularity_
 {
     rocsparse_singularity_none, /**< No singularity detected. */
     rocsparse_singularity_symbolic, /**< The sparsity pattern inherently prevents a full rank, e.g. missing diagonal element. */
@@ -1103,7 +1103,7 @@ typedef enum rocsparse_sptrsm_output_
  *  This is a list of supported \ref rocsparse_spic0_alg types that are used to perform the incomplete Cholesky factorization
  *  of level 0.
  */
-typedef enum _rocsparse_spic0_alg
+typedef enum rocsparse_spic0_alg_
 {
     rocsparse_spic0_alg_default
 } rocsparse_spic0_alg;
@@ -1114,7 +1114,7 @@ typedef enum _rocsparse_spic0_alg
  *  \details
  *  This is a list of possible stages during SpIC0 computation.
  */
-typedef enum _rocsparse_spic0_stage
+typedef enum rocsparse_spic0_stage_
 {
     rocsparse_spic0_stage_analysis, /**< Analysis. */
     rocsparse_spic0_stage_compute /**< Performs the actual SpIC0 computation. */
@@ -1126,7 +1126,7 @@ typedef enum _rocsparse_spic0_stage
  *  \details
  *  This is a list of possible inputs to the SpIC0 descriptor.
  */
-typedef enum _rocsparse_spic0_input
+typedef enum rocsparse_spic0_input_
 {
     rocsparse_spic0_input_alg, /**< Select algorithm \ref rocsparse_spic0_alg for input on a SpIC0 descriptor. */
     rocsparse_spic0_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpIC0 descriptor */
@@ -1143,7 +1143,7 @@ typedef enum _rocsparse_spic0_input
  *  \details
  *  This is a list of possible outputs to the SpIC0 descriptor.
  */
-typedef enum _rocsparse_spic0_output
+typedef enum rocsparse_spic0_output_
 {
     rocsparse_spic0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpIC0 calculation for output from the SpIC0 descriptor. */
     rocsparse_spic0_output_singularity_position, /**< Get the singularity int64_t based position for output from the SpIC0 descriptor. */
@@ -1156,7 +1156,7 @@ typedef enum _rocsparse_spic0_output
  *  This is a list of supported \ref rocsparse_spilu0_alg types that are used to perform the incomplete LU factorization
  *  of level 0.
  */
-typedef enum _rocsparse_spilu0_alg
+typedef enum rocsparse_spilu0_alg_
 {
     rocsparse_spilu0_alg_default
 } rocsparse_spilu0_alg;
@@ -1167,7 +1167,7 @@ typedef enum _rocsparse_spilu0_alg
  *  \details
  *  This is a list of possible stages during SpILU0 computation.
  */
-typedef enum _rocsparse_spilu0_stage
+typedef enum rocsparse_spilu0_stage_
 {
     rocsparse_spilu0_stage_analysis, /**< Analysis. */
     rocsparse_spilu0_stage_compute, /**< Performs the actual SpILU0 computation. */
@@ -1179,7 +1179,7 @@ typedef enum _rocsparse_spilu0_stage
  *  \details
  *  This is a list of possible inputs to the SpILU0 descriptor.
  */
-typedef enum _rocsparse_spilu0_input
+typedef enum rocsparse_spilu0_input_
 {
     rocsparse_spilu0_input_alg, /**< Select algorithm \ref rocsparse_spilu0_alg for input on a SpILU0 descriptor. */
     rocsparse_spilu0_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpILU0 descriptor */
@@ -1196,7 +1196,7 @@ typedef enum _rocsparse_spilu0_input
  *  \details
  *  This is a list of possible outputs to the SpILU0 descriptor.
  */
-typedef enum _rocsparse_spilu0_output
+typedef enum rocsparse_spilu0_output_
 {
     rocsparse_spilu0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILU0 calculation for output from the SpILU0 descriptor. */
     rocsparse_spilu0_output_singularity_position, /**< Get the singularity int64_t based position for output from the SpILU0 descriptor. */

@@ -362,3 +362,14 @@ rocsparse_spitsv_stage
 ----------------------
 
 .. doxygenenum:: rocsparse_spitsv_stage
+
+rocsparse_itilu0_alg
+--------------------
+
+.. doxygenenum:: rocsparse_itilu0_alg
+
+rocsparse_itilu0_option
+-----------------------
+
+.. doxygenenum:: rocsparse_itilu0_option
+
