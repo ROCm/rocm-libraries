@@ -338,6 +338,11 @@ rocsparse_destroy_spmv_descr
 
 .. doxygenfunction:: rocsparse_destroy_spmv_descr
 
+rocsparse_spmv_set_input
+------------------------
+
+.. doxygenfunction:: rocsparse_spmv_set_input
+
 
 rocsparse_create_sptrsv_descr
 -----------------------------
@@ -349,6 +354,15 @@ rocsparse_destroy_sptrsv_descr
 
 .. doxygenfunction:: rocsparse_destroy_sptrsv_descr
 
+rocsparse_sptrsv_set_input
+--------------------------
+
+.. doxygenfunction:: rocsparse_sptrsv_set_input
+
+rocsparse_sptrsv_get_output
+---------------------------
+
+.. doxygenfunction:: rocsparse_sptrsv_get_output
 
 rocsparse_create_sptrsm_descr
 -----------------------------
@@ -359,6 +373,16 @@ rocsparse_destroy_sptrsm_descr
 ------------------------------
 
 .. doxygenfunction:: rocsparse_destroy_sptrsm_descr
+
+rocsparse_sptrsm_set_input
+--------------------------
+
+.. doxygenfunction:: rocsparse_sptrsm_set_input
+
+rocsparse_sptrsm_get_output
+---------------------------
+
+.. doxygenfunction:: rocsparse_sptrsm_get_output
 
 
 rocsparse_spic0_descr_create
@@ -371,6 +395,16 @@ rocsparse_spic0_descr_destroy
 
 .. doxygenfunction:: rocsparse_spic0_descr_destroy
 
+rocsparse_spic0_set_input
+-------------------------
+
+.. doxygenfunction:: rocsparse_spic0_set_input
+
+rocsparse_spic0_get_output
+--------------------------
+
+.. doxygenfunction:: rocsparse_spic0_get_output
+
 
 rocsparse_spilu0_descr_create
 -----------------------------
@@ -382,6 +416,16 @@ rocsparse_spilu0_descr_destroy
 
 .. doxygenfunction:: rocsparse_spilu0_descr_destroy
 
+rocsparse_spilu0_set_input
+--------------------------
+
+.. doxygenfunction:: rocsparse_spilu0_set_input
+
+rocsparse_spilu0_get_output
+---------------------------
+
+.. doxygenfunction:: rocsparse_spilu0_get_output
+
 
 rocsparse_sptrsv_descr_create
 -----------------------------
@@ -392,11 +436,6 @@ rocsparse_sptrsv_descr_destroy
 ------------------------------
 
 .. doxygenfunction:: rocsparse_sptrsv_descr_destroy
-
-rocsparse_spmv_set_input
-------------------------
-
-.. doxygenfunction:: rocsparse_spmv_set_input
 
 rocsparse_coo_get
 -----------------
