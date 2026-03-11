@@ -32,7 +32,15 @@ extern int                    mp_ranks;
 static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {256},
     {256, 256},
+    {256, 1},
+    {1, 256},
     {256, 256, 256},
+    {256, 256, 1},
+    {256, 1, 256},
+    {1, 256, 256},
+    {256, 1, 1},
+    {1, 1, 256},
+    {1, 256, 1},
 };
 static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
@@ -218,6 +226,15 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
             default:
                 throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
+
+            bool too_short_lengths = false;
+            for(size_t dim = 0; !too_short_lengths && dim < p.length.size(); dim++)
+                too_short_lengths
+                    |= p.length[dim] < input_grid[dim + 1] || p.length[dim] < output_grid[dim + 1];
+            if(too_short_lengths)
+                continue;
+            if(mp_lib == fft_params::fft_mp_lib_mpi && p_dist.is_real() && p.length.back() == 1)
+                continue; // known issues to fix in mpi_worker.h
 
             p_dist.mp_lib = mp_lib;
             p_dist.distribute_field<fft_io::fft_io_in>(

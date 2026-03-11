@@ -1,9 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import pathlib
 from itertools import product
-from typing import List
+from pathlib import Path
 
 from rrperf.problems import (
     CodeGenRun,
@@ -13,7 +12,7 @@ from rrperf.problems import (
 )
 from rrperf.utils import rocm_gfx
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 fp4fp4_fp32 = TypeParameters(
     type_A="fp4",
@@ -1192,7 +1191,7 @@ def add_wgm(mapping, suite):
         yield run
 
 
-def addSkipPermlane(suite: List[GEMMRun], value="PreSwizzleScale"):
+def addSkipPermlane(suite: list[GEMMRun], value="PreSwizzleScale"):
     for run in suite:
         run.types.scaleSkipPermlane = value
         yield run

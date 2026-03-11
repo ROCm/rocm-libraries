@@ -185,6 +185,7 @@ class TestLayoutAutoDetection:
         """Auto-detected layouts must match the previously hand-declared layouts for all existing schedules."""
         EXPECTED = {
             "_get_schedule_256x96x64_16bit": {"NN", "TN"},
+            "_get_schedule_256x96x64_16bit_DPLB": {"NT"},
             "_get_schedule_192x256x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_256x192x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_256x256x128_8bit": {"TN"},
@@ -212,7 +213,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_192x128x32_TF32": {"TN"},
             "_get_schedule_128x128x32_TF32": {"TN"},
             "_get_schedule_128x128x32_TF32_plr1": {"NN", "NT", "TN"},
-            "_get_schedule_128x128x64_TF32": {"NN", "TN"},
+            "_get_schedule_128x128x64_TF32": {"TN"}, # TODO/FIXME: re-enable NN once the underlying CMS kernel is fixed
             "_get_schedule_128x256x32_TF32": {"TN"},
             "_get_schedule_128x160x64_TF32": {"TN"},
             "_get_schedule_256x128x32_TF32": {"TN"},
