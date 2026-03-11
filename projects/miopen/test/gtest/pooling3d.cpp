@@ -199,9 +199,16 @@ class GPU_Pooling3d_FP16 : public testing::TestWithParam<PoolingTestCase>
     void SetUp() override { prng::reset_seed(); }
 };
 
+class GPU_Pooling3d_BFP16 : public testing::TestWithParam<PoolingTestCase>
+{
+    void SetUp() override { prng::reset_seed(); }
+};
+
 TEST_P(GPU_Pooling3d_FP32, Test) { RunPooling3dTest<float>(GetParam()); }
 
 TEST_P(GPU_Pooling3d_FP16, Test) { RunPooling3dTest<half_float::half>(GetParam()); }
+
+TEST_P(GPU_Pooling3d_BFP16, Test) { RunPooling3dTest<bfloat16>(GetParam()); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling3d_FP32,
@@ -210,5 +217,10 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling3d_FP16,
+                         testing::ValuesIn(GetPooling3dTestCases()),
+                         pooling2d_gtest::GetPoolingTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Pooling3d_BFP16,
                          testing::ValuesIn(GetPooling3dTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);

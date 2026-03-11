@@ -1,8 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <fstream>
-#include <iostream>
 #include <vector>
 #include <gtest/gtest.h>
 #include <half/half.hpp>
@@ -93,31 +91,6 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
     // via pooling2d_asymmetric.cpp and pooling2d_wide.cpp to maintain the same
     // structure as the original ctest implementation.
 
-    std::cerr << "\n=== Dataset 0 (Standard) Test Case Generation Summary ===\n";
-    std::cerr << "Total test cases generated: " << test_cases.size() << "\n";
-    std::cerr << "Input shapes: " << dataset0_inputs.size() << "\n";
-    std::cerr << "===========================================================\n\n";
-
-    // Log all test configurations to a file for comparison with ctest
-    // Format: input_dims[4] lens[2] pads[2] strides[2] index_type mode wsidx
-    std::ofstream log_file("pooling2d_gtest_configs.txt");
-    if(log_file.is_open())
-    {
-        log_file << "# Total test cases: " << test_cases.size() << "\n";
-        log_file << "# Format: input_dims[4] lens[2] pads[2] strides[2] index_type mode wsidx\n";
-        for(const auto& tc : test_cases)
-        {
-            log_file << tc.input_dims[0] << " " << tc.input_dims[1] << " " << tc.input_dims[2]
-                     << " " << tc.input_dims[3] << " ";
-            log_file << tc.lens[0] << " " << tc.lens[1] << " ";
-            log_file << tc.pads[0] << " " << tc.pads[1] << " ";
-            log_file << tc.strides[0] << " " << tc.strides[1] << " ";
-            log_file << static_cast<int>(tc.index_type) << " " << static_cast<int>(tc.mode) << " "
-                     << tc.wsidx << "\n";
-        }
-        log_file.close();
-    }
-
     // Cache the results
     cached_test_cases = test_cases;
     cached            = true;
@@ -136,9 +109,15 @@ class GPU_Pooling2d_FP16 : public pooling2d_gtest::Pooling2dCommon<half_float::h
 {
 };
 
+class GPU_Pooling2d_BFP16 : public pooling2d_gtest::Pooling2dCommon<bfloat16>
+{
+};
+
 TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { RunTest(); }
 
 TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunTest(); }
+
+TEST_P(GPU_Pooling2d_BFP16, BFloat16Test_pooling2d) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling2d_FP32,
@@ -147,5 +126,10 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_Pooling2d_FP16,
+                         testing::ValuesIn(GetPooling2dTestCases()),
+                         pooling2d_gtest::GetPoolingTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Pooling2d_BFP16,
                          testing::ValuesIn(GetPooling2dTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);
