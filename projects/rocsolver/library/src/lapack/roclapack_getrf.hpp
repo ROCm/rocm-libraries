@@ -504,7 +504,8 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
         if(pivot)
         {
             dimx = jb;
-            dimy = I(1024) / dimx;
+            constexpr int max_threads = ROCSOLVER_ASAN_VALUE(256, 1024);
+            dimy = std::max(I(1), I(max_threads) / dimx);
             blocks = (n - jb - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);

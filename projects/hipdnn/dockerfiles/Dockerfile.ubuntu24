@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y \
     texinfo \
     bison \
     flex \
+    gh \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -267,6 +268,7 @@ RUN apt-get update && apt-get install -y \
     clang-format-18 \
     clang-tidy-20 \
     clang-tools-20 \
+    doxygen \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 

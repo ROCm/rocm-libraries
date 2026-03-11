@@ -57,6 +57,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   int nta = config.cache_hints_a;
   int ntb = config.cache_hints_b;
 
+  // Early Exit: problem sizes are invalid
+  if(M < 1 || N < 1 || K < 1 || batch < 1)
+  {
+    return workgroup_mapping_t{0, 0, 0};
+  }
+
   // Default values
   size_t numCUs             = hardware.N_CU;
   size_t numXCD             = hardware.NUM_XCD;
@@ -155,8 +161,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   size_t out_wgmxcc = defaultWGMXCC;
 
   if (split_factor % numXCD == 0) out_wgmxcc = 0;
-  // Small GEMMs
-  else if (numMTs <= numXCD)
+  // Small output tiles with no split
+  else if (numMTs <= numXCD && split_factor == 1)
     out_wgmxcc = 0;
   else
     out_wgmxcc = defaultWGMXCC;
@@ -333,6 +339,12 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   int nta = config.cache_hints_a;
   int ntb = config.cache_hints_b;
+
+  // Early Exit: problem sizes are invalid
+  if(M < 1 || N < 1 || K < 1 || batch < 1)
+  {
+    return staggerU_t{0, 0, 0};
+  }
 
   // Default values
   size_t numCUs       = hardware.N_CU;
@@ -520,33 +532,38 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const std::vector<config_t>& configs) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
-  std::vector<prediction_result_t> results(configs.size());
+  struct prediction_result_wrapper_t {
+    double latency;
+    std::reference_wrapper<const config_t> config;
+  };
 
-  std::transform(configs.begin(),
-                 configs.end(),
-                 results.begin(),
-                 [&](const config_t& config) -> prediction_result_t {
-                   if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
-                     return {std::numeric_limits<double>::max(), config};
-                   }
-                   double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
-                   return {latency, config};
-                 });
+  std::vector<prediction_result_wrapper_t> latencies_configs;
+  latencies_configs.reserve(configs.size());
 
-  results.erase(std::remove_if(results.begin(),
-                               results.end(),
-                               [](const prediction_result_t& p) {
-                                 return p.latency == std::numeric_limits<double>::max();
-                               }),
-                results.end());
+  for (auto& config : configs) {
+    if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
+      continue;
+    double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
+    if (latency != std::numeric_limits<double>::max())
+      latencies_configs.push_back({latency, std::cref(config)});
+  }
 
-  std::stable_sort(results.begin(),
-                   results.end(),
-                   [](const prediction_result_t& a, const prediction_result_t& b) {
+  if (latencies_configs.empty()) { throw std::runtime_error("No valid configs found."); }
+
+  std::stable_sort(latencies_configs.begin(),
+                   latencies_configs.end(),
+                   [](const auto& a, const auto& b) {
                      return a.latency < b.latency;
                    });
 
-  if (results.empty()) { throw std::runtime_error("No valid configs found."); }
+  std::vector<prediction_result_t> results;
+  results.reserve(latencies_configs.size());
+  std::transform(latencies_configs.begin(),
+                 latencies_configs.end(),
+                 std::back_inserter(results),
+                 [&](const auto& r) -> prediction_result_t {
+                   return {r.latency, r.config.get()};
+                 });
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N

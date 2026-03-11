@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.3.0 for ROCm 7.12
+
+### Resolved issue
+
+* Fixed dynamic ordering support for threefry generators.
+
 ## rocRAND x.y.z for ROCm x.y.z
 
 ### Added

@@ -32,25 +32,41 @@ constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSize
         {32, 32, 128},   {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},
         {32, 16, 128},   {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
 
-template <rocRoller::DataType typeA, rocRoller::DataType typeB>
-std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreTile)
+constexpr size_t possibleSwizzleTileSizesCount = 34;
+
+constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleSwizzleTileSizes
+    = {{//{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128}, TODO: Add these in once rocRoller supports swizzleB
+        {32, 128, 128},  {32, 256, 128},  {32, 384, 128},  {32, 512, 128},  {32, 640, 128},
+        {32, 768, 128},  {32, 896, 128},  {32, 1024, 128}, {64, 128, 128},  {64, 256, 128},
+        {64, 384, 128},  {64, 512, 128},  {64, 640, 128},  {64, 768, 128},  {64, 896, 128},
+        {64, 1024, 128}, {96, 128, 128},  {96, 256, 128},  {96, 384, 128},  {96, 512, 128},
+        {96, 640, 128},  {128, 128, 128}, {128, 256, 128}, {128, 384, 128}, {128, 512, 128},
+        {160, 128, 128}, {160, 256, 128}, {160, 384, 128}, {192, 128, 128}, {192, 256, 128},
+        {224, 128, 128}, {224, 256, 128}, {256, 128, 128}, {256, 256, 128}}};
+
+// Helper to generate tile list from a compile-time known tile array
+template <rocRoller::DataType typeA,
+          rocRoller::DataType typeB,
+          size_t              TileCount,
+          const std::array<WorkGroupTileSize, TileCount>& TileArray>
+std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool hasPreTile)
 {
     std::vector<origami::config_t> tileList;
-    tileList.reserve(possibleTileSizesCount);
+    tileList.reserve(TileCount);
 
-    for(size_t i = 0; i < possibleTileSizesCount; ++i)
+    for(size_t i = 0; i < TileCount; ++i)
     {
-        const auto& wgt = possibleTileSizes[i];
+        const auto& wgt = TileArray[i];
         auto        MI  = pickMI(typeA, typeB, wgt);
 
         int wgtk = wgt.k;
-        if(typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16
-           || typeA == rocRoller::DataType::Float)
+        if constexpr(typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16
+                     || typeA == rocRoller::DataType::Float)
         {
             wgtk = 32;
         }
 
-        if (hasPreSwizzle && hasPreTile)
+        if(hasPreSwizzle && hasPreTile)
         {
             wgtk = 256;
         }
@@ -71,6 +87,22 @@ std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreT
     }
 
     return tileList;
+}
+
+// Standard tile list generator using possibleTileSizes
+template <rocRoller::DataType typeA, rocRoller::DataType typeB>
+std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreTile)
+{
+    return generateTileListImpl<typeA, typeB, possibleTileSizesCount, possibleTileSizes>(
+        hasPreSwizzle, hasPreTile);
+}
+
+// Swizzle tile list generator using possibleSwizzleTileSizes (FP4 only)
+template <rocRoller::DataType typeA, rocRoller::DataType typeB>
+std::vector<origami::config_t> generateSwizzleTileList(bool hasPreSwizzle, bool hasPreTile)
+{
+    return generateTileListImpl<typeA, typeB, possibleSwizzleTileSizesCount, possibleSwizzleTileSizes>(
+        hasPreSwizzle, hasPreTile);
 }
 
 using TileListGeneratorFn = std::vector<origami::config_t> (*)(bool, bool);
@@ -103,17 +135,30 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
                           INSTANTIATE_TILE_LIST_FOR(BF6),
                           INSTANTIATE_TILE_LIST_FOR(FP6)};
 
+// Pre-instantiated swizzle tile generator for FP4 x FP4 (compile-time optimized)
+static const TileListGeneratorFn fp4SwizzleTileGenerator
+    = &generateSwizzleTileList<rocRoller::DataType::FP4, rocRoller::DataType::FP4>;
+
 std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernelType)
 {
+    // Compute hasPreSwizzle and hasPreTile from ScaleType
+    bool hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                          && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
+    bool hasPreTile    = (kernelType.scaleTypeA.preTile.size() == 2
+                       && kernelType.scaleTypeB.preTile.size() == 2);
+
+    // Use swizzle tile sizes only for FP4 x FP4 with swizzleB enabled
+    if(kernelType.swizzleB && kernelType.typeA == rocRoller::DataType::FP4
+       && kernelType.typeB == rocRoller::DataType::FP4)
+    {
+        return fp4SwizzleTileGenerator(hasPreSwizzle, hasPreTile);
+    }
+
+    // Standard path: look up generator in map
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it  = tileListGenerators.find(key);
     if(it != tileListGenerators.end())
     {
-        // Compute hasPreSwizzle and hasPreTile from ScaleType
-        bool hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
-                              && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
-        bool hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
-                           && kernelType.scaleTypeB.preTile.size() == 2);
         return it->second(hasPreSwizzle, hasPreTile);
     }
     throw std::runtime_error("Unsupported DataType combination");
@@ -206,8 +251,6 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                     kernelType.typeB != rocRoller::DataType::FP4)
                     continue;
                 if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
-                    continue;
-                if (wgt.m == 96 || wgt.n == 96)
                     continue;
             }
 

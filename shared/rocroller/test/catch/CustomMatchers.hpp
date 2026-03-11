@@ -190,12 +190,10 @@ struct DeviceVectorMatcher : Catch::Matchers::MatcherGenericBase
             {
                 if(h_values[i] not_eq m_values[i])
                 {
-                    m_message += rocRoller::concatenate("Index: ",
-                                                        i,
-                                                        " (Device value: ",
-                                                        h_values[i],
-                                                        ")\nExpected Value: ",
-                                                        m_values[i]);
+                    m_message += fmt::format("\nIndex: {} Device value: {} Expected Value: {}",
+                                             i,
+                                             h_values[i],
+                                             m_values[i]);
                 }
             }
             return false;

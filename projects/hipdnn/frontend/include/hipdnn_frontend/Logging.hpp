@@ -1,5 +1,20 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+/**
+ * @file Logging.hpp
+ * @brief Frontend logging initialization and convenience macros
+ *
+ * hipDNN uses a callback-based logging system (similar to Python's
+ * `logging` module). The macros in this file — HIPDNN_FE_LOG_INFO,
+ * HIPDNN_FE_LOG_WARN, etc. — auto-initialize on first use and tag every
+ * message with "hipdnn_frontend" so you can filter frontend output from
+ * backend or plugin messages.
+ *
+ * Log verbosity is controlled by the `HIPDNN_LOG_LEVEL` environment
+ * variable (e.g. `HIPDNN_LOG_LEVEL=info`).
+ */
+
 #pragma once
 
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
@@ -9,9 +24,19 @@
 namespace hipdnn_frontend
 {
 
+/// @brief Component name used for all frontend log messages
 inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
 
-// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+/**
+ * @brief Initialize the frontend logging subsystem
+ *
+ * Registers a logging callback and reads the log level from the environment.
+ * Subsequent calls are no-ops (initialization happens at most once per
+ * shared object). The HIPDNN_FE_LOG_* macros call this automatically.
+ *
+ * @param fn Logging callback function (defaults to the backend-provided callback)
+ * @return 0 on success or if already initialized, -1 if fn is null
+ */
 HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
                                                        = hipdnnLoggingCallback_ext)
 {
@@ -41,13 +66,20 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
     return 0;
 }
 
-// ============================================================================
-// Frontend Logging Macros (HIPDNN_FE_LOG_*)
-// ============================================================================
-// These macros auto-initialize logging on first use, then log with "hipdnn_frontend"
-// as the component name.
-// Usage: HIPDNN_FE_LOG_INFO("Message " << value);
+/**
+ * @name Frontend Logging Macros
+ * @brief Auto-initializing logging macros for the hipDNN frontend
+ *
+ * These macros initialize logging on first use and emit messages with
+ * "hipdnn_frontend" as the component name. Supports streaming syntax:
+ * @code{.cpp}
+ * HIPDNN_FE_LOG_INFO("value = " << x);
+ * @endcode
+ * @{
+ */
 
+/** @def HIPDNN_FE_LOG_INFO
+ *  @brief Log an informational message */
 #define HIPDNN_FE_LOG_INFO(msg)                                                     \
     do                                                                              \
     {                                                                               \
@@ -55,6 +87,8 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
+/** @def HIPDNN_FE_LOG_WARN
+ *  @brief Log a warning message */
 #define HIPDNN_FE_LOG_WARN(msg)                                                     \
     do                                                                              \
     {                                                                               \
@@ -62,6 +96,8 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
+/** @def HIPDNN_FE_LOG_ERROR
+ *  @brief Log an error message */
 #define HIPDNN_FE_LOG_ERROR(msg)                                                     \
     do                                                                               \
     {                                                                                \
@@ -69,10 +105,105 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
+/** @def HIPDNN_FE_LOG_FATAL
+ *  @brief Log a fatal error message */
 #define HIPDNN_FE_LOG_FATAL(msg)                                                     \
     do                                                                               \
     {                                                                                \
         hipdnn_frontend::initializeFrontendLogging();                                \
         HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
+/** @} */ // end of Frontend Logging Macros group
+
+// === Logging Callback and Log Level APIs ===
+
+/**
+ * @brief User log callback modes (sync vs async).
+ */
+enum class LogCallbackMode
+{
+    SYNC = HIPDNN_LOG_CALLBACK_SYNC, ///< Callback invoked on logging thread (synchronous)
+    ASYNC = HIPDNN_LOG_CALLBACK_ASYNC ///< Callback invoked on worker thread (asynchronous)
+};
+
+/**
+ * @brief Set or update a user log callback.
+ *
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
+ *
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES callback
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - Callback will be atomically disabled and no further logs will be received
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param callback   The callback function to invoke
+ * @param minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ * the logs produced on this callback will be limited by the global log level set either by
+ * the HIPDNN_LOG_LEVEL environment variable or the setGlobalLogLevel() API function.
+ * @param mode       Sync or async invocation mode
+ * @param userHandle Non-null user data (also serves as unique callback ID)
+ * @return Error object indicating success or failure
+ */
+inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
+                                hipdnnSeverity_t minLevel,
+                                LogCallbackMode mode,
+                                hipdnnUserLogCallbackHandle_t userHandle)
+{
+    auto status = hipdnnSetUserLogCallback_ext(
+        callback, minLevel, static_cast<hipdnnLogCallbackMode_t>(mode), userHandle);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set user log callback"};
+    }
+    return {};
+}
+
+/**
+ * @brief Set the global log level.
+ *
+ * This controls which log messages are output to console/file AND to the global backend log output callback.
+ * Updates BOTH frontend and backend log levels.
+ *
+ * @param level   The severity level to set
+ * @return Error object indicating success or failure
+ */
+inline Error setGlobalLogLevel(hipdnnSeverity_t level)
+{
+    // Update frontend's cache (in user executable)
+    hipdnn_data_sdk::logging::setLogLevel(level);
+
+    // Update backend's cache (in backend shared library)
+    auto status = hipdnnBackendSetGlobalLogLevel_ext(level);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global log level"};
+    }
+    return {};
+}
+
+/**
+ * @brief Get the global log level.
+ *
+ * @param[out] level   The current severity level
+ * @return Error object indicating success or failure
+ */
+inline Error getGlobalLogLevel(hipdnnSeverity_t& level)
+{
+    auto status = hipdnnBackendGetGlobalLogLevel_ext(&level);
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to get global log level"};
+    }
+    return {};
+}
 } // namespace hipdnn_frontend

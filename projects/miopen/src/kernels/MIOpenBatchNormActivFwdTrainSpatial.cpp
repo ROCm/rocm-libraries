@@ -360,6 +360,22 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                     index          = nidx * mio_bn_config::chw + chwid + hwidx;
                     xhat[j]        = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                 }
+
+                // Synchronization is not required for correctness but enhances performance.
+                //
+                // Loop is memory bound as it iterates across all the batches in the tensor,
+                // and has memory access strides of CHW size once all the elements in a single
+                // sample have been processed, which may be large.
+                //
+                // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
+                // adjacent elements to its neighbours on the same loop iteration, leading to
+                // contiguous memory access across all the waves in a workgroup. By keeping all the
+                // waves on the same loop iteration it prevents waves on different loop iterations
+                // from stalling as they wait for memory.
+                //
+                // This can be seen by profiling the kernel with rocprofv3 and comparing the
+                // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+                // compute viewer and seeing the impact on occupancy.
                 __syncthreads();
                 for(unsigned int j = 0; j < max_read; j++)
                 {

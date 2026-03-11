@@ -10,6 +10,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Computation of different matrix norms
     * LANGE
     * LANGE_64
+* Computation of different matrix condition numbers
+    * GECON
+    * GECON_64
 * Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
     - CHOLQR (with batched and strided\_batched versions)
     - CHOLQR_64 (with batched and strided\_batched versions)
