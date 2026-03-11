@@ -466,44 +466,34 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
 }
 #endif
 
-// list of best guess kernel configurations
-// best average performance when selected by 1st applicable in list
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::string> ranked_gemm_3d_grp_bwd = {
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 16, 4, 4, Filter1x1Stride1Pad0, 16, 16, 1, 1, 4, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 4, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Default, 32, 32, 1, 1, 4, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 16, 32, 8, 8, Default, 16, 16, 4, 1, 8, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 16, 4, 4, Default, 16, 16, 1, 1, 4, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 16, 32, 8, 8, Default, 16, 16, 4, 1, 4, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Default, 32, 32, 1, 1, 4, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Default, 32, 32, 1, 2, 1, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>"
 };
 
 static const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 256, 64, Default, 8, 8, 8>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<32, 64, 32, 64, Default, 8, 8, 8>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>"
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>"
 };
 // clang-format on
 
