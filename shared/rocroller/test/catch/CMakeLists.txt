@@ -50,6 +50,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomMatcherTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypesTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Direct2LDSTileCopyTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ErrorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionContainsSubExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionIdenticalTest.cpp"
