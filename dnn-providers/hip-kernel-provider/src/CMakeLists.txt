@@ -24,7 +24,7 @@ target_include_directories(hip_kernel_plugin_impl PUBLIC
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/../kernels
 )
-target_link_libraries(hip_kernel_plugin_impl PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+target_link_libraries(hip_kernel_plugin_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
 target_compile_options(hip_kernel_plugin_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(hip_kernel_plugin_impl PROPERTIES
