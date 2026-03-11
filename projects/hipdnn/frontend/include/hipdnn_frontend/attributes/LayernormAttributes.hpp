@@ -48,9 +48,10 @@ namespace hipdnn_frontend::graph
  *
  * @code{.cpp}
  * LayernormAttributes attr;
- * attr.set_forward_phase(NormFwdPhase_t::INFERENCE);
+ * attr.set_forward_phase(NormFwdPhase::INFERENCE);
+ * attr.set_epsilon(epsilon);
  *
- * auto [y, mean, inv_variance] = graph.layernorm(x, scale, bias, epsilon, attr);
+ * auto [y, mean, inv_variance] = graph.layernorm(x, scale, bias, attr);
  * @endcode
  */
 class LayernormAttributes : public Attributes<LayernormAttributes>

@@ -258,6 +258,19 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
+std::shared_ptr<TensorDescriptor>
+    findTensorInMap(const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+                    int64_t uid,
+                    const char* context)
+{
+    auto it = tensorMap.find(uid);
+    THROW_IF_TRUE(it == tensorMap.end(),
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  std::string(context) + ": tensor UID " + std::to_string(uid)
+                      + " not found in tensor map");
+    return it->second;
+}
+
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
                          hipdnnBackendAttributeType_t attributeType,

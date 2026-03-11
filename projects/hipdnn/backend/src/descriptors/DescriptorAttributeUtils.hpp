@@ -19,6 +19,7 @@
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace hipdnn_backend
@@ -166,12 +167,6 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
                      void* arrayOfElements,
                      const char* errorPrefix);
 
-void setOptionalFloat(flatbuffers::Optional<float>& target,
-                      hipdnnBackendAttributeType_t attributeType,
-                      int64_t elementCount,
-                      const void* arrayOfElements,
-                      const char* context);
-
 template <hipdnnBackendAttributeType_t ExpectedType, typename T>
 void getOptionalScalar(const flatbuffers::Optional<T>& source,
                        hipdnnBackendAttributeType_t attributeType,
@@ -213,6 +208,11 @@ void getOptionalScalar(const flatbuffers::Optional<T>& source,
     auto value = source.value();
     std::memcpy(arrayOfElements, &value, sizeof(T));
 }
+
+std::shared_ptr<TensorDescriptor>
+    findTensorInMap(const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+                    int64_t uid,
+                    const char* context);
 
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
