@@ -3527,13 +3527,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"]:
             if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
               module.addComment1("prefetch local mxsa")
-              localReadCodeMXSA, packCodeMXSA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSA, iui*self.states.numReadsIterCoalescedMXSA, 0, tensorParametersA["MX"])
+              localReadCodeMXSA, packCodeMXSA, _ = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSA, iui*self.states.numReadsIterCoalescedMXSA, 0, tensorParametersA["MX"])
               module.add(localReadCodeMXSA)
               pack[plrIdx].add(packCodeMXSA)
           if kernel["ProblemType"]["MXBlockB"]:
             if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
               module.addComment1("prefetch local mxsb")
-              localReadCodeMXSB, packCodeMXSB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
+              localReadCodeMXSB, packCodeMXSB, _ = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
               module.add(localReadCodeMXSB)
               pack[plrIdx].add(packCodeMXSB)
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:

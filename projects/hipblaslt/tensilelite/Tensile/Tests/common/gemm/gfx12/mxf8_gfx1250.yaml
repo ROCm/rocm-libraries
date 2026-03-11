@@ -30,6 +30,7 @@ GlobalParameters:
   UseGPUTimer: False
   MaxLDS: 163840
   DeviceLDS: 163840
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 
 BenchmarkProblems:
