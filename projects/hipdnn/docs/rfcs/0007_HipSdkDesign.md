@@ -300,6 +300,8 @@ ensure that it's functionality hasn't regressed.
 
 ## Future Considerations
 
+If the multi-threaded scenario is important then this should be added to the requirements and the design iterated on.
+
 The kernel class is state due to the existence of the `setGrid` function which updates the execution dimensions.
 This was chosen due to the fact that this is a runtime parameter to the HIP kernel launch APIs. However,
 it would also be possible to remove this state and create duplicate kernel objects for different grid sizes if
