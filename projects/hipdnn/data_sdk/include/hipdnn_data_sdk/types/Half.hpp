@@ -20,6 +20,7 @@ template <Bfloat16RoundingMode>
 struct bfloat16_t;
 struct fp8_e4m3;
 struct fp8_e5m2;
+struct fp8_e8m0;
 // NOLINTEND(readability-identifier-naming)
 
 namespace detail
@@ -270,6 +271,7 @@ struct half
     inline explicit half(bfloat16_t<M> b) noexcept;
     inline explicit half(fp8_e4m3 f) noexcept;
     inline explicit half(fp8_e5m2 f) noexcept;
+    inline explicit half(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits
     // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
