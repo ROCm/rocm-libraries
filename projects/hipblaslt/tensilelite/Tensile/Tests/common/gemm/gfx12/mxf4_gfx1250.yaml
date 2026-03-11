@@ -26,7 +26,7 @@ GlobalParameters:
   CpuThreads: 1
   # KeepBuildTmp: True
   PrintLevel: 2
-  AMDGPUArchPath: rocm_agent_enumerator
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
   MaxLDS: 163840
   DeviceLDS: 163840
 

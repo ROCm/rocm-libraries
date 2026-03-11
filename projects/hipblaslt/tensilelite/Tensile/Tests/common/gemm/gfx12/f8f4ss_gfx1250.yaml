@@ -27,7 +27,7 @@ GlobalParameters:
   KeepBuildTmp: True
   PrintLevel: 2
   # UseGPUTimer: False
-  AMDGPUArchPath: rocm_agent_enumerator
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
