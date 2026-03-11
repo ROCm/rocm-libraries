@@ -34,6 +34,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
@@ -44,7 +45,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 /************** Kernels and device functions for small size*******************/
 /*****************************************************************************/
 
-#define SYEVJ_BDIM 1024 // Max number of threads per thread-block used in syevj_small kernel
+#define SYEVJ_BDIM \
+    ROCSOLVER_ASAN_VALUE(256, 1024) // Max number of threads per thread-block used in syevj_small kernel
 
 /** SYEVJ_SMALL_KERNEL/RUN_SYEVJ applies the Jacobi eigenvalue algorithm to matrices of size
     n <= SYEVJ_BLOCKED_SWITCH. For each off-diagonal element A[i,j], a Jacobi rotation J is

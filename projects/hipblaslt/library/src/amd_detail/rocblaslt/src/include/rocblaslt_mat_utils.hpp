@@ -36,7 +36,8 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
-       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16))
+       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
+       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32))
     {
         return false;
     }
@@ -433,60 +434,6 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
     {
         *((float*)onePtr) = 1.f;
         *dst              = onePtr;
-    }
-}
-
-inline std::complex<double> get_alpha_beta_scalar(hipDataType type, const void* ptr)
-{
-    if (!ptr) {
-        return {0.0, 0.0};
-    }
-
-    switch (type)
-    {
-        case HIP_R_32F:
-            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
-        case HIP_R_64F:
-            return {*(reinterpret_cast<const double*>(ptr)), 0.0};
-        case HIP_R_32I:
-            return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
-        
-        case HIP_R_16F:
-        case HIP_R_16BF:
-            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
-
-        case HIP_C_32F:
-        {
-            auto val = *(reinterpret_cast<const std::complex<float>*>(ptr));
-            return {static_cast<double>(val.real()), static_cast<double>(val.imag())};
-        }
-        case HIP_C_64F:
-        {
-            return *(reinterpret_cast<const std::complex<double>*>(ptr));
-        }
-            
-        default:
-            return {0.0, 0.0};
-    }
-}
-
-inline hipDataType get_alpha_beta_target_type(hipblasComputeType_t typeCompute, hipDataType typeA)
-{
-    if (typeA == HIP_C_32F || typeA == HIP_C_64F)
-    {
-        if (typeCompute == HIPBLAS_COMPUTE_64F)
-            return HIP_C_64F; 
-        else
-            return HIP_C_32F; 
-    }
-    else
-    {
-        if (typeCompute == HIPBLAS_COMPUTE_64F)
-            return HIP_R_64F;
-        else if (typeCompute == HIPBLAS_COMPUTE_32I)
-            return HIP_R_32I;
-        else 
-            return HIP_R_32F; 
     }
 }
 #endif

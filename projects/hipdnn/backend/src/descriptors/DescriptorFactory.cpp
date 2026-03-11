@@ -3,6 +3,9 @@
 
 #include "DescriptorFactory.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "BatchnormBackwardOperationDescriptor.hpp"
+#include "BatchnormInferenceOperationDescriptor.hpp"
+#include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
@@ -13,6 +16,9 @@
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "MatmulOperationDescriptor.hpp"
+#include "PointwiseOperationDescriptor.hpp"
+#include "RMSNormOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -59,11 +65,29 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionWrwOperationDescriptor>();
         break;
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BatchnormInferenceOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
         privateDesc = std::make_shared<KnobSettingDescriptor>();
         break;
+    case HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
+        privateDesc = std::make_shared<PointwiseOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BatchnormBackwardOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BatchnormInferenceVarianceExtOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<MatmulOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<RMSNormOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

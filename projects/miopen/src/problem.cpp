@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <miopen/problem.hpp>
@@ -563,39 +563,36 @@ Problem::FindSolutionsImpl(const Handle& handle,
     static solver::softmax::AttnSoftmax attnSoftmaxSolver;
     static solver::softmax::Softmax regularSoftmaxSolver;
 
-    std::vector<solver::softmax::SoftmaxSolver*> solvers;
+    auto check_solver = [&]<typename Solver>(const Solver* solver) {
+        if(ret.size() >= max_solutions)
+        {
+            return;
+        }
 
-    solvers.push_back(&attnSoftmaxSolver);
-    solvers.push_back(&regularSoftmaxSolver);
-
-    for(auto solver : solvers)
-    {
         if(!solver->IsApplicable(ctx, problem_description))
         {
             MIOPEN_LOG_I2(solver->SolverDbId() << ": Not applicable");
-            continue;
+            return;
         }
 
         auto solution = Solution();
 
         /// \todo time measurement will be done later. For now we set less time for attention
         /// softmax and slightly bigger for regular
-        solution.SetTime(solver == &attnSoftmaxSolver ? 1.0f : 2.0f);
+        solution.SetTime(std::is_same_v<Solver, solver::softmax::AttnSoftmax> ? 1.0f : 2.0f);
         solution.SetWorkspaceSize(solver->GetWorkspaceSize(ctx, problem_description));
         solution.SetSolver(solver->SolverDbId());
         solution.SetProblem({*this});
 
-        MIOPEN_LOG_I("Found solution: " << solution.GetSolver().ToString() << " , "
+        MIOPEN_LOG_I("Found solution: " << solution.GetSolver().ToString() << ", "
                                         << solution.GetWorkspaceSize() << ", "
                                         << solution.GetTime());
 
         ret.emplace_back(std::move(solution));
+    };
 
-        if(ret.size() >= max_solutions)
-        {
-            break;
-        }
-    }
+    check_solver(&attnSoftmaxSolver);
+    check_solver(&regularSoftmaxSolver);
 
     return ret;
 }
