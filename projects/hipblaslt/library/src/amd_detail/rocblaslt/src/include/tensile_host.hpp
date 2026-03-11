@@ -241,10 +241,6 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
         return rocisa::DataType::Int8;
     case HIP_R_32I:
         return rocisa::DataType::Int32;
-    case HIP_C_32F:
-        return rocisa::DataType::ComplexFloat;
-    case HIP_C_64F:
-        return rocisa::DataType::ComplexDouble;
     default:
         assert(!"hipDataType_to_tensile_type: non-supported type");
         return rocisa::DataType::None;

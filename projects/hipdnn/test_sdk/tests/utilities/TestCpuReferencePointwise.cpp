@@ -361,10 +361,10 @@ protected:
             }
         }
 
-        // Fill input2 with pattern: [100, 200, 300, 400]
+        // Fill input2 with pattern: [10, 20, 30, 40]
         for(int n = 0; n < 4; ++n)
         {
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>((n + 1) * 100)), n);
+            input2.setHostValue(static_cast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -377,7 +377,7 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 auto input1Val = static_cast<float>((m * 10) + n);
-                auto input2Val = static_cast<float>((n + 1) * 100);
+                auto input2Val = static_cast<float>((n + 1) * 10);
                 expected.setHostValue(static_cast<OutputType>(input1Val + input2Val), m, n);
             }
         }
