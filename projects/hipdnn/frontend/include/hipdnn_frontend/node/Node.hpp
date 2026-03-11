@@ -257,11 +257,3 @@ protected:
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
 } // namespace hipdnn_frontend::graph
-
-// Defined out-of-line now that INode is complete.
-inline hipdnn_frontend::detail::EngineOverrideDesc
-    hipdnn_frontend::detail::EngineOverrideAccess::getDesc(
-        const hipdnn_frontend::graph::INode& node)
-{
-    return node.getEngineOverrideDesc();
-}

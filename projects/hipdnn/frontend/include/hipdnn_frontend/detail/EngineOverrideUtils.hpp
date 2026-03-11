@@ -7,6 +7,13 @@
 
 #include <optional>
 
+inline hipdnn_frontend::detail::EngineOverrideDesc
+    hipdnn_frontend::detail::EngineOverrideAccess::getDesc(
+        const hipdnn_frontend::graph::INode& node)
+{
+    return node.getEngineOverrideDesc();
+}
+
 namespace hipdnn_frontend::engine_override
 {
 
