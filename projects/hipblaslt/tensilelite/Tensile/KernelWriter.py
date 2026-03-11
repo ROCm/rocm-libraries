@@ -4900,6 +4900,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # open unrolled summation loop
     module.addComment2("Unrolled Loop(s) - Begin")
+    if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
+      module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
     module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False))
 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
