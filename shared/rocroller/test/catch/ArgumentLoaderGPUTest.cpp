@@ -119,7 +119,7 @@ namespace ArgumentLoaderGPUTest
      * arguments, preloaded, eagerly loaded, and lazily loaded.
      *
      * The kernels optionally:
-     * 
+     *
      * - Shuffle the arguments to test the ArgumentLoader's ability to handle alignment padding.
      * - Preload a subset of the arguments to test that feature.
      * - Load the arguments lazily to test that feature.
@@ -276,11 +276,12 @@ namespace ArgumentLoaderGPUTest
 
             for(auto const& [value, valuePtr] : scalarArgsValues)
             {
-                auto visitor = [&](auto value) {
+                auto const& valuePtrRef = valuePtr;
+                auto        visitor     = [&](auto value) {
                     using T = typename std::decay_t<decltype(value)>;
                     if constexpr(CCommandArgumentValue<T*>)
                     {
-                        auto ptr = std::reinterpret_pointer_cast<T>(valuePtr);
+                        auto ptr = std::reinterpret_pointer_cast<T>(valuePtrRef);
                         CHECK_THAT(ptr, HasDeviceScalarEqualTo(value));
                     }
                 };
@@ -398,13 +399,14 @@ namespace ArgumentLoaderGPUTest
         for(int i = 0; i < scalarArgsValues.size(); i++)
         {
             auto const& [argValue, argValuePtr] = scalarArgsValues[i];
+            auto const& argValuePtrRef          = argValuePtr;
             auto const& scalarArg               = m_scalarArgs[i];
             commandArgs.setArgument(scalarArg.valueTag, ArgumentType::Value, argValue);
             auto visitor = [&](auto value) {
                 using T = typename std::decay_t<decltype(value)>;
                 if constexpr(CCommandArgumentValue<T*>)
                 {
-                    auto ptr = std::reinterpret_pointer_cast<T>(argValuePtr);
+                    auto ptr = std::reinterpret_pointer_cast<T>(argValuePtrRef);
                     commandArgs.setArgument(scalarArg.pointerTag, ArgumentType::Value, ptr.get());
                 }
                 else
