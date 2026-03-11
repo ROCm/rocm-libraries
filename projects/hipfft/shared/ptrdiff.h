@@ -78,9 +78,27 @@ static size_t compute_ptrdiff(const std::vector<size_t>& length,
                               const size_t               nbatch,
                               const size_t               dist)
 {
-    std::vector l = length;
+    auto l = length;
     l.push_back(nbatch);
-    std::vector s = stride;
+    auto s = stride;
     s.push_back(dist);
     return compute_ptrdiff(l, s);
+}
+
+
+static size_t compute_ptrdiff(const std::vector<size_t>& lowers,
+                              const std::vector<size_t>& uppers,
+                              const std::vector<size_t>& stride)
+{
+    if(lowers.size() != uppers.size())
+        throw std::runtime_error("Inconsistent length of lowers and uppers given to compute_ptrdiff");
+    const size_t dim = lowers.size();
+    std::vector<size_t> batchlength(lowers.size());
+    for(size_t idx = 0; idx < dim; ++idx)
+    {
+        if(uppers[idx] < lowers[idx])
+            throw std::runtime_error("Upper bounds lower than lower bounds given to compute_ptrdiff");
+        batchlength[idx] = uppers[idx] - lowers[idx];
+    }
+    return compute_ptrdiff(batchlength, stride);
 }

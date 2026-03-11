@@ -44,8 +44,6 @@ struct hipfft_brick
     std::vector<size_t> field_upper;
     std::vector<size_t> brick_stride;
 
-    size_t min_size = 0;
-
     // compute the length of this brick
     std::vector<size_t> length() const
     {
@@ -74,15 +72,6 @@ struct hipfft_brick
         // based on the brick's strides, return offset
         return std::inner_product(brick_idx.begin(), brick_idx.end(), brick_stride.begin(), 0);
     }
-
-    // set contiguous strides on this brick
-    void set_contiguous_stride()
-    {
-        brick_stride = {1};
-        auto len     = length();
-        for(size_t i = 0; i < len.size() - 1; ++i)
-            brick_stride.push_back(brick_stride[i] * len[i]);
-    }
 };
 
 
@@ -107,13 +96,7 @@ static void set_bricks(const std::vector<size_t>& length,
         brick.field_lower[split_dim] = split_len * i;
         if(i != bricks.size() - 1)
             brick.field_upper[split_dim] = brick.field_lower[split_dim] + split_len;
-        brick.set_contiguous_stride();
-
-        // work out how big a buffer we need to allocate
-        std::vector<size_t> brick_len(dim);
-        for(size_t d = 0; d < dim; ++d)
-            brick_len[d] = brick.field_upper[d] - brick.field_lower[d];
-        brick.min_size = std::max(brick.min_size, compute_ptrdiff(brick_len, brick.brick_stride));
+        //brick.set_contiguous_stride(); // FIXME
     }
 }
 

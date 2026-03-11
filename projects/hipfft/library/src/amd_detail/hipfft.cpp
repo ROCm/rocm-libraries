@@ -64,6 +64,9 @@ struct hipfftIOType
     hipDataType inputType  = HIP_C_32F;
     hipDataType outputType = HIP_C_32F;
 
+    // FIXME: add a member to determine if this struct has been initialzied, and throw exceptions if
+    // one asks for information about this struct before it has been initialized.
+    
     hipfftIOType() = default;
 
     // initialize from data types specified by hipfftType enum
@@ -290,7 +293,7 @@ struct hipfftHandle_t
 
     double scale_factor = 1.0;
 
-    // brick decomposition for multi-device transforms
+    // Brick decomposition for multi-device transforms
     std::vector<hipfft_brick> spaceBricks;
     std::vector<hipfft_brick> freqBricks;
     // hipFFT will decompose the problem across multiple devices in a
@@ -388,7 +391,7 @@ catch(...)
 static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                             size_t                     dim,
                                             size_t*                    rm_lengths,
-                                            hipfftIOType               iotype,
+                                            const hipfftIOType               &iotype,
                                             size_t                     number_of_transforms,
                                             hipfft_ionembed_t<size_t>* user_ionembed,
                                             size_t                     user_idist,
@@ -409,6 +412,11 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     };
     static rocfft_initializer init;
 
+    plan->type = iotype;
+    
+    
+    const bool isrealcomplex = !iotype.is_complex_to_complex();
+        
     if(!plan || plan->initialized())
     {
         // plan initialization can be done only once in the plan's lifetime
@@ -491,7 +499,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             }
         }
     }
-    
+
     if(plan->singleProcMultiDevice)
     {
         // Host buffer setup for hipfftXtMemcpy:
@@ -504,21 +512,94 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         std::vector<size_t> batchlength = {plan->batch};
         batchlength.insert(batchlength.end(), plan->lengths.begin(), plan->lengths.end());
         
-        const bool isrealcomplex = iotype.is_real_to_complex() || iotype.is_complex_to_real();
 
-        const hipfftXtSubFormat isubformat
+
+        // FIXME: do we really know the spacesubformat here?
+        const hipfftXtSubFormat spacesubformat
             = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPUT;
-        hipfftxt_bricks(batchlength, plan->spaceBricks, isrealcomplex, isubformat);
+        hipfftxt_bricks(batchlength, plan->spaceBricks, isrealcomplex, spacesubformat);
         
-        const hipfftXtSubFormat osubformat
+        const hipfftXtSubFormat freqsubformat
             = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED : HIPFFT_XT_FORMAT_OUTPUT;
-        hipfftxt_bricks(batchlength, plan->freqBricks, isrealcomplex, osubformat);
+        hipfftxt_bricks(batchlength, plan->freqBricks, isrealcomplex, freqsubformat);
 
         // TODO: what about in-place c2c?  Are the data layouts from enums actually just the same?
     }
 
     if(plan->singleProcMultiDevice)
     {
+        // FIXME: make sure we don't have a communicator.
+
+        // FIXME: is plan->type not set yet???
+        
+        std::cout << "realcomplex? " << isrealcomplex << std::endl;  // FIXME: why is this false?
+        
+        std::vector<size_t> batches = {plan->batch};
+        std::vector<size_t> batchlengths = batches;
+        batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
+
+        const size_t dim = batchlengths.size();
+        const size_t lastdim = batchlengths.size() - 1;
+
+        const size_t ngpus = plan->spaceBricks.size();
+        
+        // FIXME: check for 3D and output formats
+        const size_t spacesplitdim = lastdim - 1;
+        const size_t freqsplitdim = lastdim - 1;
+
+        auto sethipbricks = [&plan](std::vector<hipfft_brick> & hipBricks,
+                                    const std::vector<size_t> &batchlengths,
+                                    const size_t splitdim,
+                                    const bool space)
+            {
+                const size_t ngpus = hipBricks.size();
+                for(size_t igpu = 0; igpu < ngpus; ++igpu)
+                {
+                    hipBricks[igpu].field_lower.resize(batchlengths.size());
+                    std::fill(hipBricks[igpu].field_lower.begin(),
+                              hipBricks[igpu].field_lower.end(), 0);
+                    hipBricks[igpu].field_upper = batchlengths;
+                    if(igpu > 0)
+                    {
+                        hipBricks[igpu].field_lower[splitdim]
+                            = hipBricks[igpu - 1].field_upper[splitdim];
+                    }
+                    const auto l = batchlengths[splitdim];
+                    const auto splitlength = l / ngpus + ((igpu < l % ngpus) ? 1 : 0);
+                    hipBricks[igpu].field_upper[splitdim] =
+                        hipBricks[igpu].field_lower[splitdim] + splitlength;
+
+                    // FIXME: how do we get io?
+                    
+                    const auto dft_type
+                        = plan->type.is_complex_to_complex()
+                        ? fft_transform_type_complex_forward
+                        : fft_transform_type_real_forward;
+                    hipBricks[igpu].brick_stride = default_strides(dft_type,
+                                                                   fft_placement_inplace, // ???
+                                                                   fft_io_in, // ???
+                                                                   hipBricks[igpu].field_lower,
+                                                                   hipBricks[igpu].field_upper);
+                    std::cout << "brick_stride";
+                    for(auto val : hipBricks[igpu].brick_stride)
+                    {
+                        std::cout << " " << val;
+                    }
+                    std::cout << std::endl;
+                }                
+            };
+
+        std::vector<size_t> spacebatchlengths = batchlengths;
+        sethipbricks(plan->spaceBricks, spacebatchlengths, spacesplitdim, true);
+        std::vector<size_t> freqbatchlengths = batchlengths;
+        // FIXME: hard-coded for real-to-complex.
+        if(isrealcomplex) // FIXME: realcomplex isn't getting set correctly???
+        {
+            freqbatchlengths[freqbatchlengths.size() - 1]
+                = freqbatchlengths[freqbatchlengths.size() - 1] / 2 + 1;
+        }
+        sethipbricks(plan->freqBricks, freqbatchlengths, freqsplitdim, false);
+        
         // Lambda for converting hipfft-bricks to rocfft-bricks and adding them to a rocfft
         // description:
         auto hipBricks2Desc = [](std::vector<hipfft_brick> & hipBricks, rocfft_field& destField)
@@ -786,6 +867,9 @@ try
     hipfftIOType iotype;
     HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
 
+    
+    std::cout << "hipfftMakePlan2d: " << iotype.is_complex_to_complex() << std::endl;
+    
     return hipfftMakePlan_internal(plan,
                                    2,
                                    lengths,
@@ -1749,31 +1833,27 @@ try
     xt_desc->version = 0;
 
     std::vector<hipfft_brick>* bricks           = nullptr;
-    size_t                     bits_per_element = 0;
 
-    switch(format)
-    {
-    case HIPFFT_XT_FORMAT_INPUT:
-        bricks           = &plan->spaceBricks;
-        bits_per_element = hipDataType_bits(plan->type.inputType);
-        break;
-    case HIPFFT_XT_FORMAT_OUTPUT:
-        bricks           = &plan->freqBricks;
-        bits_per_element = hipDataType_bits(plan->type.outputType);
-        break;
-    case HIPFFT_XT_FORMAT_INPLACE:
-        bricks           = &plan->spaceBricks;
-        bits_per_element = std::max(hipDataType_bits(plan->type.inputType),
-                                    hipDataType_bits(plan->type.outputType));
-        break;
-    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-        bricks           = &plan->freqBricks;
-        bits_per_element = std::max(hipDataType_bits(plan->type.inputType),
-                                    hipDataType_bits(plan->type.outputType));
-        break;
-    default:
-        return HIPFFT_NOT_IMPLEMENTED;
-    }
+    // FIXME: deal with Hermitian-complex data split in the symmetrized dimension.
+
+    std::vector<size_t> batches = {plan->batch};
+    std::vector<size_t> batchlengths = batches;
+    batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
+    const size_t lastdim = batchlengths.size() - 1;
+    const bool isinput = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
+
+    // FIXME: check for 3D and output formats
+    const size_t splitdim = isinput ? lastdim - 1 : lastdim; 
+
+    const size_t bits_per_element
+        = hipDataType_bits(isinput ? plan->type.inputType : plan->type.outputType);
+
+    const bool realcomplex = !plan->type.is_complex_to_complex();
+
+    const bool isinplace
+        = format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+
+    bricks = isinput ? &plan->spaceBricks : &plan->freqBricks;
 
     xt_desc->nGPUs = static_cast<int>(bricks->size());
 
@@ -1782,9 +1862,19 @@ try
         auto& brick = (*bricks)[i];
 
         rocfft_scoped_device dev(brick.device);
-
+        
         xt_desc->GPUs[i] = brick.device;
-        xt_desc->size[i] = brick.min_size * bits_per_element / 8;
+
+        
+        auto bufsize = compute_ptrdiff(brick.field_lower, brick.field_upper, brick.brick_stride);
+        // FIXME: in-place
+        xt_desc->size[i] = bufsize  * bits_per_element / 8;
+
+        // FIXME: temp
+        std::cout << "xt_desc->size[i]: " << xt_desc->size[i] << std::endl;
+        
+        if(xt_desc->size[i] == 0)
+            return HIPFFT_INTERNAL_ERROR;
         if(hipMalloc(&(xt_desc->data[i]), xt_desc->size[i]) != hipSuccess)
             return HIPFFT_INTERNAL_ERROR;
     }
@@ -1830,6 +1920,7 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
        || (brick_length.size() != field_stride.size())
        ||  (brick_stride.size() != field_stride.size()))
     {
+        std::cout << "Inconsistent sadfasdfadsf\n";
         throw std::runtime_error("Inconsistent dimensions for collapse_contiguous_dims.\n"
                                  + paramstring());
     }
@@ -1983,7 +2074,9 @@ try
             
             rocfft_scoped_device dev(destDesc->descriptor->GPUs[idx]);
 
+            // space bricks of frequency bricks:
             const auto& brick = brick_layout(destDesc->subFormat)[idx];
+            
             auto brick_length = brick.length();
             if(realdata)
             {
@@ -2047,45 +2140,36 @@ try
                 }
                 if(!realdata)
                     valsize *= 2;
+                    
+                std::cout << "hipMemcpy2D:\n";
+                std::cout << "\tvalsize : " << valsize << std::endl;
 
-                std::cout << "valsize : " << valsize << std::endl;
+                size_t dpitch = valsize * brick_stride[0];
+                std::cout << "\tdpitch : " << dpitch << std::endl;
 
-                size_t dpitch = valsize * hostDataStride[0];
-                std::cout << "dpitch : " << dpitch << std::endl;
-
-                size_t spitch = valsize * brick_length[1];
-                std::cout << "spitch : " << spitch << std::endl;
+                size_t spitch = valsize * hostDataStride[0];
+                std::cout << "\tspitch : " << spitch << std::endl;
 
                 size_t width = valsize * brick_length[1];
-                std::cout << "width : " << width << std::endl;
+                std::cout << "\twidth : " << width << std::endl;
 
                 size_t height = brick_length[0];
-                std::cout << "height : " << height << std::endl;
-                
-                // if(hipMemcpy(destDesc->descriptor->data[idx],
-                //              src,//host_offset,
-                //              destDesc->descriptor->size[idx],
-                //              hipMemcpyHostToDevice)
-                //    != hipSuccess)
-                // {
-                //     std::cout << "asdf" << std::endl;
-                //     return HIPFFT_INTERNAL_ERROR;
-                // }
-                
-                // auto ret = hipMemcpy2D(
-                //     destDesc->descriptor->data[idx], // destination
-                //     dpitch,                          //  dpitch (bytes between starts of rows)
-                //     host_offset,                     // source
-                //     spitch,                          //  spitch (bytes between starts of rows)
-                //     width,                           // width  (bytes in a row)
-                //     height,                          // height (how many rows)
-                //     hipMemcpyHostToDevice);
-                // if(ret != hipSuccess)
-                // {
-                //     std::cout << hipGetErrorString(ret) << " " << ret << std::endl;
-                //     std::cout << "hipMemcpy2D failed" << std::endl;
-                //     return HIPFFT_INTERNAL_ERROR;
-                // }
+                std::cout << "\theight : " << height << std::endl;
+
+                auto ret = hipMemcpy2D(
+                    destDesc->descriptor->data[idx], // destination
+                    dpitch,                          //  dpitch (bytes between starts of rows)
+                    host_offset,                     // source
+                    spitch,                          //  spitch (bytes between starts of rows)
+                    width,                           // width  (bytes in a row)
+                    height,                          // height (how many rows)
+                    hipMemcpyHostToDevice);
+                if(ret != hipSuccess)
+                {
+                    std::cout << hipGetErrorString(ret) << " " << ret << std::endl;
+                    std::cout << "hipMemcpy2D failed" << std::endl;
+                    return HIPFFT_INTERNAL_ERROR;
+                }
                 
                 break;
             }

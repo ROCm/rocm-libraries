@@ -333,13 +333,21 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                  workSize.data());
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
                                          << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
-
+    std::cout << "plan created\n";
+    
     hipLibXtDesc*       mydesc = nullptr;
     hipfft_rt                     = hipfftXtMalloc(plan, &mydesc, format);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
-    std::cout << "plan allocated\n";
+    std::cout << "descriptor allocated\n";
+
+    for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
+    {
+        // TODO: handle case where some GPUs don't have data because there isn't enough to go
+        // around.
+        ASSERT_NE(mydesc->descriptor->size[igpu], 0) << "gpu buffer size is zero for gpu " << igpu;
+    }
     
     auto printhostbuf = [](const char* hostbuf,
                            const bool isreal,
@@ -441,9 +449,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
     // FIXME: document.  This is the per-gpu-buffer lengths.
     auto devbatchlength = [splitdim](const size_t ngpus,
                                      const std::vector<size_t> &hostbatchlengths,
-                                     const hipfftXtSubFormat format,
                                      const size_t igpu) -> std::vector<size_t>
-        
         {
             std::vector<size_t> batchlengths = hostbatchlengths;
             const auto l = batchlengths[splitdim];
@@ -533,7 +539,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
         
         if(isgood)
         {
-            EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
+           ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
                                                  << " failed with code "
                                                  << hipfft_rt
                                                  << " (" << hipfftResult_string(hipfft_rt) << "): "
@@ -541,7 +547,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
         }
         else
         {
-            EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy " <<  (h2d ? "H2D" : "D2H")
+            ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy " <<  (h2d ? "H2D" : "D2H")
                                                  << " should not have succeeded with code "
                                                  << hipfft_rt
                                                  << " (" << hipfftResult_string(hipfft_rt) << "): "
@@ -559,6 +565,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
             std::cout << "buffer " << igpu << " after xtmemcp\n";
             const auto device = mydesc->descriptor->GPUs[igpu];
             const auto bufsize = mydesc->descriptor->size[igpu];
+            ASSERT_NE(bufsize, 0) << "gpu buffer size is zero for gpu " << igpu;
             std::cout << "device: " << device << "\n";
             std::cout << "buffer size: " << bufsize << "\n";
             hostbufparts[igpu].resize(bufsize);
@@ -574,7 +581,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
 
         for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
         {
-            brick_batchlengths[igpu] = devbatchlength(ngpus, batchlengths, format, igpu);
+            brick_batchlengths[igpu] = devbatchlength(ngpus, batchlengths, igpu);
             std::vector<size_t> brick_batches;
             brick_batches.insert(brick_batches.end(),
                                  brick_batchlengths[igpu].begin(),
@@ -623,8 +630,8 @@ TEST_P(hipfftxtunitdesc, desccreation)
                 const auto bufidx = devidx(ngpus, hostidx, batchlengths, format);
 
                 // Just look at the first value for each buffer.
-                if(std::all_of(bufidx.begin() + 1, bufidx.end(),
-                               [](const size_t idx ) { return idx == 0; })) 
+                // if(std::all_of(bufidx.begin() + 1, bufidx.end(),
+                //                [](const size_t idx ) { return idx == 0; })) 
                 {
                     std::cout << hostidx[0]
                               << " " << hostidx[1]
@@ -634,7 +641,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
                               << " " << bufidx[1]
                               << " " << bufidx[2]
                               << " " << bufidx[3]
-                              << "\t";
+                              << "\t" << std::flush;
 
                     const size_t hostoffset = std::inner_product(std::begin(hostidx),
                                                                  std::end(hostidx),
@@ -648,10 +655,10 @@ TEST_P(hipfftxtunitdesc, desccreation)
                     {
                         const double* hostbufr = (double*) hostbuf.data();
                         const auto hostval = hostbufr[hostoffset];
-                        std::cout << hostoffset << " -> " << hostval << "\t";
+                        std::cout << hostoffset << " -> " << hostval << "\t" << std::flush;
                         const double* gpubufr = (double*) hostbufparts[igpu].data();
                         const auto gpuval = gpubufr[gpuoffset];
-                        std::cout << gpuoffset << " -> " << gpuval << "\n";
+                        std::cout << gpuoffset << " -> " << gpuval << "\n" << std::flush;
                     }
 
                 }
