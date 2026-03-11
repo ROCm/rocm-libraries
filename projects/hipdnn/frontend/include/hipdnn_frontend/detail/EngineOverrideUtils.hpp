@@ -3,23 +3,21 @@
 #pragma once
 
 #include <hipdnn_frontend/detail/EngineOverrideConfig.hpp>
-#include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
-#include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
-#include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/Node.hpp>
 
 #include <optional>
-#include <string>
 
 namespace hipdnn_frontend::engine_override
 {
 
-/// Walk the graph using the node visitor to find the first convolution
-/// operation and return the preferred engine ID from the lazily-loaded
-/// engine override config (pointed to by HIPDNN_ENGINE_OVERRIDE_FILE).
+/// Walk the graph using the node visitor to find the first operation
+/// that participates in engine override and return the preferred engine
+/// ID from the lazily-loaded engine override config (pointed to by
+/// HIPDNN_ENGINE_OVERRIDE_FILE).
 ///
 /// Returns nullopt when:
-/// - no convolution node is present in the graph,
-/// - no rule in the config matches the convolution's tensors, or
+/// - no participating node is present in the graph,
+/// - no rule in the config matches the operation's tensors, or
 /// - JSON support is compiled out (HIPDNN_FRONTEND_SKIP_JSON_LIB defined).
 inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INode& root)
 {
@@ -30,24 +28,10 @@ inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INod
         {
             return;
         }
-        auto opType = node.getOperationType();
-        if(opType == "conv_fprop")
+        auto desc = node.getEngineOverrideDesc();
+        if(desc.enabled)
         {
-            auto& conv = static_cast<const graph::ConvolutionFpropNode&>(node);
-            result = checkEngineOverride("conv_fprop",
-                                         {conv.attributes.get_x(), conv.attributes.get_w()});
-        }
-        else if(opType == "conv_dgrad")
-        {
-            auto& conv = static_cast<const graph::ConvolutionDgradNode&>(node);
-            result = checkEngineOverride("conv_dgrad",
-                                         {conv.attributes.get_dy(), conv.attributes.get_w()});
-        }
-        else if(opType == "conv_wgrad")
-        {
-            auto& conv = static_cast<const graph::ConvolutionWgradNode&>(node);
-            result = checkEngineOverride("conv_wgrad",
-                                         {conv.attributes.get_x(), conv.attributes.get_dy()});
+            result = checkEngineOverride(desc.name, desc.tensors);
         }
     });
 

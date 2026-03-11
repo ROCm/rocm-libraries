@@ -25,9 +25,9 @@ public:
     {
     }
 
-    std::string_view getOperationType() const override
+    EngineOverrideDesc getEngineOverrideDesc() const override
     {
-        return "conv_wgrad";
+        return {true, "conv_wgrad", {attributes.get_x(), attributes.get_dy()}};
     }
 
     Error pre_validate_node() const override

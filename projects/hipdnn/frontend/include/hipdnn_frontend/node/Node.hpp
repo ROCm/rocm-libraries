@@ -18,6 +18,16 @@
 namespace hipdnn_frontend::graph
 {
 
+/// Engine override descriptor returned by nodes that participate in engine
+/// override selection. Contains the operation name and ordered input tensors
+/// used for rule matching.
+struct EngineOverrideDesc
+{
+    bool enabled = false;
+    std::string_view name;
+    std::vector<std::shared_ptr<TensorAttributes>> tensors;
+};
+
 class INode
 {
 public:
@@ -53,8 +63,11 @@ public:
         return {};
     }
 
-    /// Returns the operation type tag for this node, or empty if not set.
-    virtual std::string_view getOperationType() const
+    /// Returns the engine override descriptor for this node.
+    /// Nodes that participate in engine override selection should override
+    /// this to return their operation name and ordered input tensors.
+    /// Default returns empty (node does not participate).
+    virtual EngineOverrideDesc getEngineOverrideDesc() const
     {
         return {};
     }

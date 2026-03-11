@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -452,7 +453,7 @@ private:
 /// which is useful for testing or when the caller manages the config lifetime.
 /// Returns nullopt when no rule matches or JSON support is compiled out.
 inline std::optional<int64_t>
-    checkEngineOverride(const std::string& op,
+    checkEngineOverride(std::string_view op,
                         const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors,
                         const EngineOverrideConfig* config = nullptr)
 {
@@ -464,7 +465,7 @@ inline std::optional<int64_t>
     {
         return std::nullopt;
     }
-    return config->matchOperation(op, tensors);
+    return config->matchOperation(std::string(op), tensors);
 }
 
 } // namespace hipdnn_frontend::engine_override

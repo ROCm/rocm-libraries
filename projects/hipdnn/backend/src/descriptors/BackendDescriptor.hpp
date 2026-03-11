@@ -159,6 +159,9 @@ struct HipdnnBackendDescriptor : public IBackendDescriptor
         {
             return nullptr;
         }
+        // The aliasing shared_ptr constructor shares ownership with _impl
+        // (increments its ref count) while pointing to the IGraphOperation
+        // subobject. This ensures proper lifetime management without dynamic_cast.
         return {_impl, graphOp};
     }
 

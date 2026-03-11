@@ -24,9 +24,9 @@ public:
     {
     }
 
-    std::string_view getOperationType() const override
+    EngineOverrideDesc getEngineOverrideDesc() const override
     {
-        return "conv_fprop";
+        return {true, "conv_fprop", {attributes.get_x(), attributes.get_w()}};
     }
 
     Error pre_validate_node() const override
