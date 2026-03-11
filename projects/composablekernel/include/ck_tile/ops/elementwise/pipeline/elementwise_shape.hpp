@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/host/concat.hpp"
 
 namespace ck_tile {
 

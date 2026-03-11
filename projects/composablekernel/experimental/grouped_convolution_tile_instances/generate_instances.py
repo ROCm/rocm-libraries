@@ -339,7 +339,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             num_groups_to_merge = 1
 
             # Block GEMM pipeline parameters
-            blk_gemm_pipeline_schduler = args[6]
+            block_gemm_pipeline_scheduler = args[6]
             blk_gemm_pipeline_version = args[7]
         else:
             spec = args[11]
@@ -369,29 +369,29 @@ def parse_bwd_weight_instances(instances, problem_name):
                 num_groups_to_merge = int(args[44])
 
                 # Block GEMM pipeline parameters
-                blk_gemm_pipeline_schduler = args[39]
+                block_gemm_pipeline_scheduler = args[39]
                 blk_gemm_pipeline_version = args[40]
             elif is_two_stage_instance:
                 if len(args) != 46:
-                    raise RuntimeError(f"Wrong number of parameters in the TwoStage instance string: {instance}" + 
+                    raise RuntimeError(f"Wrong number of parameters in the TwoStage instance string: {instance}\n" + 
                                        f"Expected 46 parameters for TwoStage instance. Found {len(args)} parameters.")
                 
                 num_groups_to_merge = args[41]
 
                 # Block GEMM pipeline parameters
-                blk_gemm_pipeline_schduler = args[39]
+                block_gemm_pipeline_scheduler = args[39]
                 blk_gemm_pipeline_version = args[40]
 
             else:
                 # Regular V1 XDL CShuffle instance
                 if len(args) != 43:
-                    raise RuntimeError(f"Wrong number of parameters in the XDL CShuffle instance string: {instance}" + 
+                    raise RuntimeError(f"Wrong number of parameters in the XDL CShuffle instance string: {instance}\n" + 
                                        f"Expected 43 parameters for V1 instance. Found {len(args)} parameters.")
                 
                 num_groups_to_merge = 1
 
                 # Block GEMM pipeline parameters
-                blk_gemm_pipeline_schduler = "Intrawave"
+                block_gemm_pipeline_scheduler = "Intrawave"
                 blk_gemm_pipeline_version = "v1"
 
         # Common part to all solvers.
@@ -399,15 +399,15 @@ def parse_bwd_weight_instances(instances, problem_name):
         # Sanity check for Block GEMM pipeline parameters
         # Scheduler must be either Intrawave or Interwave.
         # Version must be from v1 to v5
-        if blk_gemm_pipeline_schduler not in ["Intrawave", "Interwave"]:
-            raise RuntimeError(f"Invalid Block GEMM pipeline scheduler: {blk_gemm_pipeline_schduler} in instance: {instance}")
+        if block_gemm_pipeline_scheduler not in ["Intrawave", "Interwave"]:
+            raise RuntimeError(f"Invalid Block GEMM pipeline scheduler: {block_gemm_pipeline_scheduler} in instance: {instance}")
         if blk_gemm_pipeline_version not in ["v1", "v2", "v3", "v4", "v5"]:
             raise RuntimeError(f"Invalid Block GEMM pipeline version: {blk_gemm_pipeline_version} in instance: {instance}")
 
         split_image = instance.find("Large") != -1
         double_smem_buffer = blk_gemm_pipeline_version == "v4"
         num_wave_groups = 1
-        scheduler = blk_gemm_pipeline_schduler
+        scheduler = block_gemm_pipeline_scheduler
         pipeline_version = blk_gemm_pipeline_version.upper()
 
         # OLd CK pipeline version V5 maps to V6 for CK Tile
