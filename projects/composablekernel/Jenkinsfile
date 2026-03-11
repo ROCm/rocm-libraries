@@ -833,14 +833,31 @@ def cmake_build(Map conf=[:]){
                                 echo "Building affected targets: ${affectedTargets}"
                                 sh "ninja -j${nt} ${affectedTargets}"
 
-                                // Run affected tests
-                                def testRegex = sh(
-                                    script: 'jq -r ".regex" tests_to_run.json',
+                                // Run affected tests using regex_chunks to handle large test sets
+                                def numChunks = sh(
+                                    script: 'jq -r ".regex_chunks | length" tests_to_run.json',
                                     returnStdout: true
-                                ).trim()
+                                ).trim().toInteger()
 
-                                echo "Running affected tests matching: ${testRegex}"
-                                sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                                echo "Running ${numChunks} test chunk(s)"
+                                if (numChunks == 1) {
+                                    // Single chunk - simple case
+                                    def testRegex = sh(
+                                        script: 'jq -r ".regex_chunks[0]" tests_to_run.json',
+                                        returnStdout: true
+                                    ).trim()
+                                    sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                                } else {
+                                    // Multiple chunks - run separately to avoid regex length limits
+                                    for (int i = 0; i < numChunks; i++) {
+                                        def testRegex = sh(
+                                            script: "jq -r '.regex_chunks[${i}]' tests_to_run.json",
+                                            returnStdout: true
+                                        ).trim()
+                                        echo "Running test chunk ${i + 1}/${numChunks}"
+                                        sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                                    }
+                                }
                             } else {
                                 echo "✓ No tests affected by changes - skipping test execution"
                             }
@@ -926,14 +943,31 @@ def cmake_build(Map conf=[:]){
                                 echo "Building affected targets: ${affectedTargets}"
                                 sh "ninja -j${nt} ${affectedTargets}"
 
-                                // Run affected tests
-                                def testRegex = sh(
-                                    script: 'jq -r ".regex" tests_to_run.json',
+                                // Run affected tests using regex_chunks to handle large test sets
+                                def numChunks = sh(
+                                    script: 'jq -r ".regex_chunks | length" tests_to_run.json',
                                     returnStdout: true
-                                ).trim()
+                                ).trim().toInteger()
 
-                                echo "Running affected tests matching: ${testRegex}"
-                                sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                                echo "Running ${numChunks} test chunk(s)"
+                                if (numChunks == 1) {
+                                    // Single chunk - simple case
+                                    def testRegex = sh(
+                                        script: 'jq -r ".regex_chunks[0]" tests_to_run.json',
+                                        returnStdout: true
+                                    ).trim()
+                                    sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                                } else {
+                                    // Multiple chunks - run separately to avoid regex length limits
+                                    for (int i = 0; i < numChunks; i++) {
+                                        def testRegex = sh(
+                                            script: "jq -r '.regex_chunks[${i}]' tests_to_run.json",
+                                            returnStdout: true
+                                        ).trim()
+                                        echo "Running test chunk ${i + 1}/${numChunks}"
+                                        sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                                    }
+                                }
                             } else {
                                 echo "✓ No tests affected by changes - skipping test execution"
                             }

@@ -237,9 +237,20 @@ def main():
         tests = select_tests(file_to_executables, changed_files, filter_mode, ctest_only, build_dir)
 
     # Generate ctest regex from test names
+    # Split into chunks to avoid regex length limits in CTest
+    regex_chunks = []
+    chunk_size = 50  # Max tests per regex pattern
+
     if tests:
         # Extract basenames for regex (e.g., bin/test_gemm -> test_gemm)
         test_names = [os.path.basename(t) for t in tests]
+
+        # Split into chunks
+        for i in range(0, len(test_names), chunk_size):
+            chunk = test_names[i:i + chunk_size]
+            regex_chunks.append("|".join(chunk))
+
+        # Keep single regex for backward compatibility (but may be too long)
         regex = "|".join(test_names)
     else:
         regex = ""
@@ -248,11 +259,13 @@ def main():
     output = {
         "tests_to_run": tests,  # For backward compatibility and length check
         "executables": tests,  # Used by Jenkinsfile for ninja build
-        "regex": regex,  # Used by Jenkinsfile for ctest
+        "regex": regex,  # Used by Jenkinsfile for ctest (deprecated for large test sets)
+        "regex_chunks": regex_chunks,  # Multiple regex patterns for large test sets
         "changed_files": sorted(changed_files),
         "statistics": {
             "total_changed_files": len(changed_files),
             "total_affected_executables": len(tests),
+            "num_regex_chunks": len(regex_chunks),
         },
     }
 

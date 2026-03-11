@@ -187,13 +187,18 @@ python3 main.py select deps.json abc123 def456 --all
 {
   "executables": ["bin/test_gemm", "bin/test_conv"],
   "regex": "test_gemm|test_conv",
+  "regex_chunks": ["test_gemm|test_conv"],
   "changed_files": ["include/ck/ck.hpp", "test/test_gemm.cpp"],
   "statistics": {
     "total_changed_files": 2,
-    "total_affected_executables": 2
+    "total_affected_executables": 2,
+    "num_regex_chunks": 1
   }
 }
 ```
+
+**Note on regex_chunks:**
+For large test sets (>50 tests), the single `regex` field may exceed CTest's regex length limit. Use the `regex_chunks` array instead, which splits tests into chunks of up to 50 tests per regex pattern. Each chunk can be run separately with ctest.
 
 ### audit
 
@@ -245,8 +250,22 @@ stage('Selective Test') {
             // Build only affected tests
             sh 'ninja $(jq -r ".executables[]" tests_to_run.json | tr "\\n" " ")'
 
-            // Run affected tests
-            sh 'ctest -R "$(jq -r ".regex" tests_to_run.json)"'
+            // Run affected tests (handles large test sets with regex_chunks)
+            sh '''
+                NUM_CHUNKS=$(jq -r ".regex_chunks | length" tests_to_run.json)
+                if [ "$NUM_CHUNKS" -eq 0 ]; then
+                    echo "No tests to run"
+                elif [ "$NUM_CHUNKS" -eq 1 ]; then
+                    # Single chunk - use simple regex
+                    ctest -R "$(jq -r ".regex_chunks[0]" tests_to_run.json)" --output-on-failure
+                else
+                    # Multiple chunks - run separately to avoid regex length limits
+                    for i in $(seq 0 $((NUM_CHUNKS - 1))); do
+                        echo "Running test chunk $((i + 1))/$NUM_CHUNKS"
+                        ctest -R "$(jq -r ".regex_chunks[$i]" tests_to_run.json)" --output-on-failure
+                    done
+                fi
+            '''
         }
     }
 }
@@ -279,7 +298,19 @@ stage('Selective Test') {
     cd build
     TARGETS=$(jq -r '.executables[]' tests_to_run.json | tr '\n' ' ')
     ninja $TARGETS
-    ctest -R "$(jq -r '.regex' tests_to_run.json)"
+
+    # Run tests using regex_chunks to handle large test sets
+    NUM_CHUNKS=$(jq -r '.regex_chunks | length' tests_to_run.json)
+    if [ "$NUM_CHUNKS" -eq 0 ]; then
+      echo "No tests to run"
+    elif [ "$NUM_CHUNKS" -eq 1 ]; then
+      ctest -R "$(jq -r '.regex_chunks[0]' tests_to_run.json)" --output-on-failure
+    else
+      for i in $(seq 0 $((NUM_CHUNKS - 1))); do
+        echo "Running test chunk $((i + 1))/$NUM_CHUNKS"
+        ctest -R "$(jq -r ".regex_chunks[$i]" tests_to_run.json)" --output-on-failure
+      done
+    fi
 ```
 
 ### Jenkins Integration with Safety Checks
