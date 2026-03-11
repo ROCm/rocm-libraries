@@ -30,6 +30,7 @@ add_executable(
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
+    IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
 )
 

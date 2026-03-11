@@ -482,27 +482,39 @@ reference_gemm(const HostTensor<if_select_v<ADataType_, tf32_t, float, ADataType
         {
             AccDataType v_a;
             AccDataType v_b;
-            if constexpr(std::is_same_v<ADataTypeBuf, pk_int4_t>)
+            if constexpr(std::is_same_v<ADataTypeBuf, pk_fp4_t>)
             {
-                const pk_int4_t pk_val  = a_element_op(a_m_k(m, k));
+                const pk_fp4_t pk_val   = a_m_k(m, k);
+                const fp32x2_t fp32_val = pk_val.to_fp32x2(1.0f);
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_a = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<ADataTypeBuf, pk_int4_t>)
+            {
+                // HostTensor automatically handles packed indexing
+                const pk_int4_t pk_val  = a_m_k(m, k);
                 const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(pk_val);
-                if(k % 2 == 1)
-                    v_a = fp32_val.hi;
-                else
-                    v_a = fp32_val.lo;
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_a = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
             }
             else
             {
                 v_a = ck_tile::type_convert<AccDataType>(a_element_op(a_m_k(m, k)));
             }
-            if constexpr(std::is_same_v<BDataTypeBuf, pk_int4_t>)
+            if constexpr(std::is_same_v<BDataTypeBuf, pk_fp4_t>)
             {
-                const pk_int4_t pk_val  = b_element_op(b_k_n(k, n));
+                const pk_fp4_t pk_val   = b_k_n(k, n);
+                const fp32x2_t fp32_val = pk_val.to_fp32x2(1.0f);
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_b = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<BDataTypeBuf, pk_int4_t>)
+            {
+                // HostTensor automatically handles packed indexing
+                const pk_int4_t pk_val  = b_k_n(k, n);
                 const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(pk_val);
-                if(k % 2 == 1)
-                    v_b = fp32_val.hi;
-                else
-                    v_b = fp32_val.lo;
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_b = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
             }
             else
             {
@@ -711,7 +723,7 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
                 b_k_n_scaled(k, n)     = b_f4_lo * b_scale;
                 b_k_n_scaled(k + 1, n) = b_f4_hi * b_scale;
             }
-            else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            else if constexpr(std::is_same_v<BDataType, pk_fp6x16_t>)
             {
                 if(k % pk_fp6x16_t::packed_size != 0)
                     continue;
@@ -844,7 +856,7 @@ __global__ void naive_gemm_kernel(if_select_v<ADataType_, tf32_t, float, ADataTy
             }
             else if constexpr(std::is_same_v<ADataTypeBuf, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a]);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a], 1.0f);
                 if(k % 2 == 1)
                     v_a = fp32_val.hi;
                 else
@@ -864,7 +876,7 @@ __global__ void naive_gemm_kernel(if_select_v<ADataType_, tf32_t, float, ADataTy
             }
             else if constexpr(std::is_same_v<BDataTypeBuf, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b]);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b], 1.0f);
                 if(k % 2 == 1)
                     v_b = fp32_val.hi;
                 else
@@ -990,7 +1002,7 @@ __global__ void blockwise_gemm_kernel(if_select_v<ADataType_, tf32_t, float, ADa
             }
             else if constexpr(std::is_same_v<ADataTypeBuf, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a]);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a], 1.0f);
                 if(k % 2 == 1)
                     v_a = fp32_val.hi;
                 else

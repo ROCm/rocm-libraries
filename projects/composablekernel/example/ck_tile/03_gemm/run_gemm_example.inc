@@ -382,7 +382,9 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
 
     std::size_t flop = std::size_t(2) * M * N * K;
     std::size_t num_byte =
-        sizeof(ADataTypeBuf) * M * K + sizeof(BDataTypeBuf) * N * K + sizeof(CDataType) * M * N;
+        sizeof(ADataTypeBuf) * M * K / ck_tile::numeric_traits<ADataTypeBuf>::PackedSize +
+        sizeof(BDataTypeBuf) * N * K / ck_tile::numeric_traits<BDataTypeBuf>::PackedSize +
+        sizeof(CDataType) * M * N;
     float tflops     = static_cast<float>(flop) / 1.E9 / ave_time;
     float gb_per_sec = num_byte / 1.E6 / ave_time;
 
