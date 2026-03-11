@@ -237,7 +237,7 @@ public:
     void Run() { this->RunAdaptiveTest(); }
 };
 
-#define X_INSTANTIATE_CAST(                                                                  \
+#define X_INSTANTIATE_TEST(                                                                  \
     VER_DEVICE, T_DATA, T_DATA_NAME, T_VERIFY, T_VERIFY_NAME, VER, VER_NAME, CHECK_NUM)      \
     using VER_DEVICE##_Verify##_##VER_NAME##_##CHECK_NUM##_##T_DATA_NAME##_##T_VERIFY_NAME = \
         VerifyChecks##VER_DEVICE<T_DATA,                                                     \
@@ -259,87 +259,89 @@ public:
         testing::Values(8192));
 
 // RMS GPU
-X_INSTANTIATE_CAST(GPU, double, FP64, double, FP64, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(GPU, float, FP32, double, FP64, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(GPU, float, FP32, float, FP32, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(GPU, half, FP16, double, FP64, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(GPU, half, FP16, float, FP32, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(GPU, double, FP64, double, FP64, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(GPU, float, FP32, double, FP64, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(GPU, float, FP32, float, FP32, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(GPU, half, FP16, double, FP64, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(GPU, half, FP16, float, FP32, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(GPU, double, FP64, double, FP64, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(GPU, float, FP32, double, FP64, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(GPU, float, FP32, float, FP32, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(GPU, half, FP16, double, FP64, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(GPU, half, FP16, float, FP32, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(GPU, double, FP64, double, FP64, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(GPU, float, FP32, double, FP64, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(GPU, float, FP32, float, FP32, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(GPU, half, FP16, double, FP64, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(GPU, half, FP16, float, FP32, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, true);
 
 // MAE GPU
-X_INSTANTIATE_CAST(GPU, double, FP64, double, FP64, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(GPU, float, FP32, double, FP64, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(GPU, float, FP32, float, FP32, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(GPU, half, FP16, double, FP64, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(GPU, half, FP16, float, FP32, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(GPU, double, FP64, double, FP64, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(GPU, float, FP32, double, FP64, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(GPU, float, FP32, float, FP32, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(GPU, half, FP16, double, FP64, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(GPU, half, FP16, float, FP32, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(GPU, double, FP64, double, FP64, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(GPU, float, FP32, double, FP64, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(GPU, float, FP32, float, FP32, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(GPU, half, FP16, double, FP64, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(GPU, half, FP16, float, FP32, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(GPU, double, FP64, double, FP64, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(GPU, float, FP32, double, FP64, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(GPU, float, FP32, float, FP32, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(GPU, half, FP16, double, FP64, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(GPU, half, FP16, float, FP32, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, true);
 
 // Mismatch GPU
-X_INSTANTIATE_CAST(GPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(GPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(GPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(GPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(GPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(GPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(GPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(GPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(GPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(GPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(GPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(GPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(GPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(GPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(GPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(GPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(GPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(GPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(GPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(GPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(GPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
 
 // RMS CPU
-X_INSTANTIATE_CAST(CPU, double, FP64, double, FP64, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(CPU, float, FP32, double, FP64, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(CPU, float, FP32, float, FP32, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(CPU, half, FP16, double, FP64, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(CPU, half, FP16, float, FP32, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, false);
-X_INSTANTIATE_CAST(CPU, double, FP64, double, FP64, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(CPU, float, FP32, double, FP64, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(CPU, float, FP32, float, FP32, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(CPU, half, FP16, double, FP64, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(CPU, half, FP16, float, FP32, VerifyOption::rms, RMS, true);
-X_INSTANTIATE_CAST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(CPU, double, FP64, double, FP64, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(CPU, float, FP32, double, FP64, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(CPU, float, FP32, float, FP32, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(CPU, half, FP16, double, FP64, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, false);
+X_INSTANTIATE_TEST(CPU, double, FP64, double, FP64, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(CPU, float, FP32, double, FP64, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(CPU, float, FP32, float, FP32, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(CPU, half, FP16, double, FP64, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::rms, RMS, true);
+X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::rms, RMS, true);
 
 // MAE CPU
-X_INSTANTIATE_CAST(CPU, double, FP64, double, FP64, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(CPU, float, FP32, double, FP64, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(CPU, float, FP32, float, FP32, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(CPU, half, FP16, double, FP64, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(CPU, half, FP16, float, FP32, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, false);
-X_INSTANTIATE_CAST(CPU, double, FP64, double, FP64, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(CPU, float, FP32, double, FP64, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(CPU, float, FP32, float, FP32, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(CPU, half, FP16, double, FP64, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(CPU, half, FP16, float, FP32, VerifyOption::mae, MAE, true);
-X_INSTANTIATE_CAST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(CPU, double, FP64, double, FP64, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(CPU, float, FP32, double, FP64, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(CPU, float, FP32, float, FP32, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(CPU, half, FP16, double, FP64, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, false);
+X_INSTANTIATE_TEST(CPU, double, FP64, double, FP64, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(CPU, float, FP32, double, FP64, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(CPU, float, FP32, float, FP32, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(CPU, half, FP16, double, FP64, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::mae, MAE, true);
+X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mae, MAE, true);
 
 // Mismatch CPU
-X_INSTANTIATE_CAST(CPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(CPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(CPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(CPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(CPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
-X_INSTANTIATE_CAST(CPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(CPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(CPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(CPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(CPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
-X_INSTANTIATE_CAST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(CPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(CPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(CPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(CPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, false);
+X_INSTANTIATE_TEST(CPU, double, FP64, double, FP64, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(CPU, float, FP32, double, FP64, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(CPU, float, FP32, float, FP32, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(CPU, half, FP16, double, FP64, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
+X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
+
+#undef X_INSTANTIATE_TEST
 
 } // namespace
