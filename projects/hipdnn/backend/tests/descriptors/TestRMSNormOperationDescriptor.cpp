@@ -385,7 +385,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedX));
+                                       static_cast<void*>(&retrievedX)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
