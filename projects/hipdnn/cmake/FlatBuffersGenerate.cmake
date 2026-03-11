@@ -42,7 +42,11 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
     FetchContent_GetProperties(${_fc_name})
     if(NOT ${_fc_name}_POPULATED)
         message(STATUS "Downloading FlatBuffers v${_version} source...")
-        FetchContent_Populate(${_fc_name})
+        FetchContent_Populate(${_fc_name}
+            GIT_REPOSITORY https://github.com/google/flatbuffers.git
+            GIT_TAG "v${_version}"
+            GIT_SHALLOW TRUE
+        )
     endif()
 
     # Convert compiler paths to CMake-style (forward slashes) for ExternalProject
