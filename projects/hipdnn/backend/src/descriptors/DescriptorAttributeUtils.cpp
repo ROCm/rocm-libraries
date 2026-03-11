@@ -258,59 +258,6 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
-void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
-                         int64_t& uidTarget,
-                         hipdnnBackendAttributeType_t attributeType,
-                         int64_t elementCount,
-                         const void* arrayOfElements,
-                         const char* errorPrefix)
-{
-    checkSetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, arrayOfElements, errorPrefix);
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": elementCount is not 1");
-
-    auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
-        arrayOfElements,
-        HIPDNN_STATUS_BAD_PARAM,
-        std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
-    THROW_IF_FALSE(tensorDesc->isFinalized(),
-                   HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
-                   std::string(errorPrefix) + ": Tensor descriptor not finalized");
-
-    descTarget = tensorDesc;
-    uidTarget = tensorDesc->getData().uid;
-}
-
-void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
-                         hipdnnBackendAttributeType_t attributeType,
-                         int64_t requestedElementCount,
-                         int64_t* elementCount,
-                         void* arrayOfElements,
-                         const char* errorPrefix)
-{
-    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(errorPrefix) + ": elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedElementCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    HipdnnBackendDescriptor::packDescriptor(descSource, arrayOfElements);
-}
-
 void setOptionalFloat(flatbuffers::Optional<float>& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
@@ -419,6 +366,72 @@ void getOptionalInt64(const flatbuffers::Optional<int64_t>& source,
     }
     auto value = source.value();
     std::memcpy(arrayOfElements, &value, sizeof(int64_t));
+}
+
+std::shared_ptr<TensorDescriptor>
+    findTensorInMap(const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+                    int64_t uid,
+                    const char* context)
+{
+    auto it = tensorMap.find(uid);
+    THROW_IF_TRUE(it == tensorMap.end(),
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  std::string(context) + ": tensor UID " + std::to_string(uid)
+                      + " not found in tensor map");
+    return it->second;
+}
+
+void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
+                         int64_t& uidTarget,
+                         hipdnnBackendAttributeType_t attributeType,
+                         int64_t elementCount,
+                         const void* arrayOfElements,
+                         const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+
+    auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        arrayOfElements,
+        HIPDNN_STATUS_BAD_PARAM,
+        std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
+    THROW_IF_FALSE(tensorDesc->isFinalized(),
+                   HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                   std::string(errorPrefix) + ": Tensor descriptor not finalized");
+
+    descTarget = tensorDesc;
+    uidTarget = tensorDesc->getData().uid;
+}
+
+void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
+                         hipdnnBackendAttributeType_t attributeType,
+                         int64_t requestedElementCount,
+                         int64_t* elementCount,
+                         void* arrayOfElements,
+                         const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+    HipdnnBackendDescriptor::packDescriptor(descSource, arrayOfElements);
 }
 
 void setOptionalTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
