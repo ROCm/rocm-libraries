@@ -146,7 +146,8 @@ class MetadataND
 {
 private:
     std::string model_prefix;
-    bool is_valid; // Error handling flag
+    bool is_valid;   // Error handling flag
+    int spatial_dim; // 2 or 3 - dimension this model supports
 
     // Loaded data (const members like 2D pattern)
     std::vector<std::string> features;
@@ -165,6 +166,7 @@ private:
     std::unordered_map<std::string, int> out_layout_encodings;
 
     // Helper functions for construction
+    static std::optional<int> LoadSpatialDim(const std::string& arch);
     static std::optional<std::vector<std::string>> LoadFeatures(const std::string& arch);
     static std::optional<size_t> LoadNumInputs(const std::string& arch);
     static std::optional<size_t> LoadNumOutputs(const std::string& arch);
@@ -205,6 +207,12 @@ public:
      * @return Model prefix string used during construction/loading
      */
     const std::string& GetModelPrefix() const { return model_prefix; }
+
+    /**
+     * @brief Get the spatial dimension this model supports
+     * @return 2 for 2D models, 3 for 3D models
+     */
+    int GetSpatialDim() const { return spatial_dim; }
 
     /**
      * @brief Get list of feature names used by 3D model

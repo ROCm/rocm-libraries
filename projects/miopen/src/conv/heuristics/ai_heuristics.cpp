@@ -782,11 +782,29 @@ public:
     bool IsProblemSupported(const conv::ProblemDescription& problem,
                             const ExecutionContext& /*ctx*/) const override
     {
-        if(!problem.Is3d() && !problem.Is2d())
+        // Get the model's spatial dimension
+        const int model_dim = metadata.GetSpatialDim();
+
+        // Check if problem dimension matches model dimension
+        if(model_dim == 3 && !problem.Is3d())
         {
+            MIOPEN_LOG_I2("TunaNetND 3D model cannot handle 2D problem");
             return false;
         }
-        MIOPEN_LOG_I2("3D or 2D problem supported by TunaNetNDModel");
+        if(model_dim == 2 && !problem.Is2d())
+        {
+            MIOPEN_LOG_I2("TunaNetND 2D model cannot handle 3D problem");
+            return false;
+        }
+
+        // Reject problems that are neither 2D nor 3D
+        if(!problem.Is3d() && !problem.Is2d())
+        {
+            MIOPEN_LOG_I2("Problem is neither 2D nor 3D");
+            return false;
+        }
+
+        MIOPEN_LOG_I2("Problem dimension matches TunaNetND model dimension");
         return true;
     }
 

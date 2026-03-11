@@ -61,6 +61,23 @@ static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
 }
 
 // Static helper functions for loading individual components
+std::optional<int> MetadataND::LoadSpatialDim(const std::string& arch)
+{
+    auto json_opt = LoadJSONSafe(arch);
+    if(!json_opt)
+        return std::nullopt;
+
+    try
+    {
+        return json_opt->at("redundant_columns").at("spatial_dim").get<int>();
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_I2("Failed to load spatial_dim for " << arch << ": " << e.what());
+        return std::nullopt;
+    }
+}
+
 std::optional<std::vector<std::string>> MetadataND::LoadFeatures(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
@@ -266,7 +283,8 @@ MetadataND::LoadOutLayoutEncodings(const std::string& arch)
 // Constructor - loads all data immediately with error handling
 MIOPEN_INTERNALS_EXPORT
 MetadataND::MetadataND(const std::string& device, const int& dim)
-    : is_valid(false), // Initialize to false, will be set to true if all loads succeed
+    : is_valid(false),  // Initialize to false, will be set to true if all loads succeed
+      spatial_dim(dim), // Store the dimension this model supports
       features(),
       num_inputs(0),
       num_outputs(0),
@@ -292,6 +310,14 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     {
         MIOPEN_LOG_I2("Unsupported dimension " << dim << " for MetadataND, expected 2 or 3");
         return;
+    }
+
+    // Optional: Load spatial_dim from JSON to validate it matches expected dimension
+    auto spatial_dim_opt = LoadSpatialDim(model_prefix);
+    if(spatial_dim_opt && *spatial_dim_opt != dim)
+    {
+        MIOPEN_LOG_W("MetadataND: Spatial dimension mismatch for "
+                     << model_prefix << " - expected " << dim << ", found " << *spatial_dim_opt);
     }
     // Load all components using std::optional pattern (using full arch_name with "_3d")
     auto features_opt    = LoadFeatures(model_prefix);
