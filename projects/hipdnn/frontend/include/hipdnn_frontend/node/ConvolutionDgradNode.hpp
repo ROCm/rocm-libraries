@@ -25,7 +25,7 @@ public:
     {
     }
 
-    EngineOverrideDesc getEngineOverrideDesc() const override
+    hipdnn_frontend::detail::EngineOverrideDesc getEngineOverrideDesc() const override
     {
         return {true, "conv_dgrad", {attributes.get_dy(), attributes.get_w()}};
     }

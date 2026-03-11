@@ -28,7 +28,7 @@ inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INod
         {
             return;
         }
-        auto desc = node.getEngineOverrideDesc();
+        auto desc = hipdnn_frontend::detail::EngineOverrideAccess::getDesc(node);
         if(desc.enabled)
         {
             result = checkEngineOverride(desc.name, desc.tensors);

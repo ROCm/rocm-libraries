@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/detail/EngineOverrideDesc.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <memory>
 #include <string>
@@ -18,18 +19,10 @@
 namespace hipdnn_frontend::graph
 {
 
-/// Engine override descriptor returned by nodes that participate in engine
-/// override selection. Contains the operation name and ordered input tensors
-/// used for rule matching.
-struct EngineOverrideDesc
-{
-    bool enabled = false;
-    std::string_view name;
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-};
-
 class INode
 {
+    friend struct hipdnn_frontend::detail::EngineOverrideAccess;
+
 public:
     GraphAttributes graph_attributes; // NOLINT(readability-identifier-naming)
     INode(GraphAttributes attributes)
@@ -59,15 +52,6 @@ public:
         return {};
     }
     virtual std::string getNodeName() const
-    {
-        return {};
-    }
-
-    /// Returns the engine override descriptor for this node.
-    /// Nodes that participate in engine override selection should override
-    /// this to return their operation name and ordered input tensors.
-    /// Default returns empty (node does not participate).
-    virtual EngineOverrideDesc getEngineOverrideDesc() const
     {
         return {};
     }
@@ -144,6 +128,15 @@ public:
     }
 
 protected:
+    /// Returns the engine override descriptor for this node.
+    /// Nodes that participate in engine override selection should override
+    /// this to return their operation name and ordered input tensors.
+    /// Default returns empty (node does not participate).
+    virtual hipdnn_frontend::detail::EngineOverrideDesc getEngineOverrideDesc() const
+    {
+        return {};
+    }
+
     std::vector<std::shared_ptr<INode>> _sub_nodes;
 
     Error validateSubtree()
@@ -264,3 +257,11 @@ protected:
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
 } // namespace hipdnn_frontend::graph
+
+// Defined out-of-line now that INode is complete.
+inline hipdnn_frontend::detail::EngineOverrideDesc
+    hipdnn_frontend::detail::EngineOverrideAccess::getDesc(
+        const hipdnn_frontend::graph::INode& node)
+{
+    return node.getEngineOverrideDesc();
+}

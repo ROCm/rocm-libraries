@@ -24,7 +24,7 @@ public:
     {
     }
 
-    EngineOverrideDesc getEngineOverrideDesc() const override
+    hipdnn_frontend::detail::EngineOverrideDesc getEngineOverrideDesc() const override
     {
         return {true, "conv_fprop", {attributes.get_x(), attributes.get_w()}};
     }
