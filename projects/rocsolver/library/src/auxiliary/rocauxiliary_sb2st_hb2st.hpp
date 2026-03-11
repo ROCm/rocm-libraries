@@ -323,7 +323,7 @@ __device__ void sb2st_hb2st_task(
     //         (I.e., `jn` is right + 1 col of current diagonal tile.)
     rocblas_int jc = sweep + 1 + task*kd;
     rocblas_int jn = std::min( jc + kd, n );
-    rocblas_int nc = jn -jc;
+    rocblas_int nc = jn - jc;
     assert( nc > 0 );
 
     if (task == 0)
@@ -531,9 +531,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     rocblas_int sweep = last_sweep - sid;
     rocblas_int task = round - (2 * sweep);
     assert( task >= 0 );
-
-    if (sweep < 0)
-        return;
+    assert( sweep >= 0 );
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
@@ -658,7 +656,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     rocblas_stride shiftV = 0;
     laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
            batch_count );
-    print_matrix( "V=0", ldv, nv, V, ldv );
+    print_matrix( "V=0", ldv, nv, V, ldv, 4 );
 
     // rocblas_pointer_mode old_mode;
     // rocblas_get_pointer_mode( handle, &old_mode );
@@ -690,19 +688,21 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     // execute sweeps
     for (rocblas_int round = 0; round < num_rounds; ++round)
     {
-        #if 0
+        //#define ONLY_SWEEP_0 1
+        #define ONLY_TASK_0 1
+        #if ONLY_SWEEP_0
+            // Run just sweep 0.
+            rocblas_int sweep_end = 1;
+        #elif ONLY_TASK_0
+            // Run all sweeps, task 0. See also below.
+            rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
+            sweep_begin = sweep_end - 1;
+        #else
             // Run sweeps in half-open interval [begin, ..., end).
             // Near the end, there are kd - 1 empty rounds, where a sweep has
             // finished but the next sweep hasn't started per these formulas;
             // skip those rounds.
             rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
-        #elif 0
-            // Run just sweep 0.
-            rocblas_int sweep_end = 1;
-        #else
-            // Run all sweeps, task 0. See also below.
-            rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
-            sweep_begin = sweep_end - 1;
         #endif
         rocblas_int parallel_sweeps = sweep_end - sweep_begin;
         printf( "round %d, sweeps %d : %d, parallel sweeps %d\n",
@@ -724,10 +724,10 @@ rocblas_status rocsolver_sb2st_hb2st_template(
             sweep_begin_finishes
                 = 2*sweep_begin + ceildiv( n - sweep_begin - 1, kd ) - 1;
         }
-        print_matrix( "A", ldab, n, Aband, ldab );
-        print_matrix( "V", ldv, nv, V, ldv );
+        print_matrix( "A", ldab, n, Aband, ldab, 4 );
+        print_matrix( "V", ldv, nv, V, ldv, 4 );
 
-        #if 1
+        #if ONLY_TASK_0
             // Run all sweeps, task 0. See also above.
             // Skip odd rounds.
             ++round;
