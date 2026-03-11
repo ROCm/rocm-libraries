@@ -367,9 +367,9 @@ __device__ void sb2st_hb2st_task(
             {
                 // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
                 // Using ldab-1 adjusts for band format.
-                #if 1
+                #if 0
                     sb2st_helarf( xid, yid, nc, s_housev, s_tau,
-                                Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+                                  Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
                 #else
                     sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
                                 Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
@@ -452,9 +452,9 @@ __device__ void sb2st_hb2st_task(
                     __syncthreads();
 
                     // Apply vc on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
-                    #if 1
+                    #if 0
                         sb2st_helarf( xid, yid, nc, s_housev, s_tau,
-                                    Aband + idiag + jc*ldab, ldab-1, s_work );
+                                      Aband + idiag + jc*ldab, ldab-1, s_work );
                     #else
                         sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
                                     Aband + idiag + jc*ldab, ldab-1, s_work );
@@ -659,8 +659,10 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
            batch_count );
 
-    print_matrix( "dA_in", ldab, n, Aband, ldab, 6 );
-    print_matrix( "dV_init", ldv, nv, V, ldv, 6 );
+    #ifdef PRINT
+        print_matrix( "dA_in", ldab, n, Aband, ldab, 6 );
+        print_matrix( "dV_init", ldv, nv, V, ldv, 6 );
+    #endif
 
     // rocblas_pointer_mode old_mode;
     // rocblas_get_pointer_mode( handle, &old_mode );
@@ -699,8 +701,10 @@ rocblas_status rocsolver_sb2st_hb2st_template(
         rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
 
         rocblas_int parallel_sweeps = sweep_end - sweep_begin;
-        printf( "# round %d, sweeps %d : %d, parallel sweeps %d\n",
-                round, sweep_begin, sweep_end, parallel_sweeps );
+        #ifdef PRINT
+            printf( "# round %d, sweeps %d : %d, parallel sweeps %d\n",
+                    round, sweep_begin, sweep_end, parallel_sweeps );
+        #endif
         if (parallel_sweeps > 0)
         {
             ROCSOLVER_LAUNCH_KERNEL(
@@ -712,11 +716,13 @@ rocblas_status rocsolver_sb2st_hb2st_template(
                 E, strideE,
                 V, ldv, strideV );
 
-            std::string lbl = "dA" + std::to_string( round );
-            print_matrix( lbl.c_str(), ldab, n, Aband, ldab, 6 );
+            #ifdef PRINT
+                std::string lbl = "dA" + std::to_string( round );
+                print_matrix( lbl.c_str(), ldab, n, Aband, ldab, 6 );
 
-            lbl = "dV" + std::to_string( round );
-            print_matrix( lbl.c_str(), ldv, nv, V, ldv, 6 );
+                lbl = "dV" + std::to_string( round );
+                print_matrix( lbl.c_str(), ldv, nv, V, ldv, 6 );
+            #endif
         }
         if (round == sweep_begin_finishes)
         {

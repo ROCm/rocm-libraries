@@ -142,7 +142,7 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
             }
         #endif
     }
-print_matrix( "hAband", ldab, n, hAband[0], ldab );
+//print_matrix( "hAband", ldab, n, hAband[0], ldab );
 
     if (GPU)
     {
@@ -175,30 +175,36 @@ printf( "%s:%d\n", __func__, __LINE__ );
     using S = decltype( std::real( T{} ) );
     using std::abs, std::imag, std::real, std::max;
 
+    hipStream_t stream;
+    CHECK_ROCBLAS_ERROR(
+        rocblas_get_stream( handle, &stream ) );
+
     rocblas_int idiag = kd - 1;
 
     // input data initialization
     sb2st_hb2st_initData<true, true, T>(
         handle, uplo, n, kd, dAband, ldab, hAband );
 
-print_matrix( "dAband_in", ldab, n, dAband.data(), ldab );
-
 printf( "%s:%d error call\n", __func__, __LINE__ );
     // execute computations
     // GPU lapack
+    double start, time;
+    start = get_time_us_sync(stream);
     CHECK_ROCBLAS_ERROR(
         rocsolver_sb2st_hb2st(
             handle, uplo, n, kd,
             dAband.data(), ldab,
             dD.data(), dE.data(),
             dV.data(), ldv ) );
+    time = get_time_us_sync(stream) - start;
+    printf( "n %d, kd %d, getError time %.4f\n", n, kd, time );
     CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
     CHECK_HIP_ERROR( hDRes.transfer_from( dD ) );
     CHECK_HIP_ERROR( hERes.transfer_from( dE ) );
 
-print_matrix( "dAband_out", ldab, n, hAbandRes.data(), ldab );
-print_matrix( "D", 1, n,   hDRes.data(), 1 );
-print_matrix( "E", 1, n-1, hERes.data(), 1 );
+// print_matrix( "dAband_out", ldab, n, hAbandRes.data(), ldab );
+// print_matrix( "D", 1, n,   hDRes.data(), 1 );
+// print_matrix( "E", 1, n-1, hERes.data(), 1 );
 
     S err = 0;
     S max_err_ = 0;
@@ -242,7 +248,10 @@ print_matrix( "E", 1, n-1, hERes.data(), 1 );
 
     #if 1
         // Compute eigenvalues of tridiagonal matrix
+        start = get_time_us_sync(stream);
         cpu_sterf( n, hDRes.data(), hERes.data() );
+        time = get_time_us_sync(stream) - start;
+        printf( "n %d, CPU sterf time %.4f\n", n, time );
 
         printf( "eig_rocsol = [" );
         for (int i = 0; i < std::min( 5, n ); ++i)
@@ -267,9 +276,12 @@ print_matrix( "E", 1, n-1, hERes.data(), 1 );
         std::vector<S> work_real( worksize_real, S( 0 ) );
         T dummy;  // for Z
         // todo: assuming lower
+        start = get_time_us_sync(stream);
         cpu_sbev_hbev( rocblas_evect_none, uplo, n, kd, &hAband[0][idiag], ldab,
                        hW.data(), &dummy, 1,
                        work.data(), work_real.data(), &info );
+        time = get_time_us_sync(stream) - start;
+        printf( "n %d, kd %d, CPU hbev time %.4f\n", n, kd, time );
 
         printf( "eig_lapack = [" );
         for (int i = 0; i < std::min( 5, n ); ++i)
@@ -318,6 +330,10 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const bool perf)
 {
 printf( "%s:%d\n", __func__, __LINE__ );
+    hipStream_t stream;
+    CHECK_ROCBLAS_ERROR(
+        rocblas_get_stream( handle, &stream ) );
+
     if (! perf)
     {
         // cpu-lapack performance (only if not in perf mode)
@@ -328,25 +344,25 @@ printf( "%s:%d\n", __func__, __LINE__ );
         handle, uplo, n, kd, dAband, ldab, hAband);
 
     // cold calls
+    double start, time;
     for (int iter = 0; iter < 2; iter++)
     {
 printf( "%s:%d cold call %d ----------\n", __func__, __LINE__, iter );
         sb2st_hb2st_initData<false, true, T>(
             handle, uplo, n, kd, dAband, ldab, hAband );
 
+        start = get_time_us_sync(stream);
         CHECK_ROCBLAS_ERROR(
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
                 dV.data(), ldv ) );
+        time = get_time_us_sync(stream) - start;
+        printf( "n %d, kd %d, cold iter %d, time %.4f\n", n, kd, iter, time );
     }
 
     // gpu-lapack performance
-    hipStream_t stream;
-    CHECK_ROCBLAS_ERROR( rocblas_get_stream( handle, &stream ) );
-    double start;
-
     if (profile > 0)
     {
         if (profile_kernels)
@@ -370,8 +386,9 @@ printf( "%s:%d hot call %d ----------\n", __func__, __LINE__, iter );
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
                 dV.data(), ldv ) );
-        *gpu_time_used += get_time_us_sync( stream ) - start;
-        // todo: print time
+        time = get_time_us_sync(stream) - start;
+        *gpu_time_used += time;
+        printf( "n %d, kd %d, hot  iter %d, time %.4f\n", n, kd, iter, time );
     }
     *gpu_time_used /= hot_calls;
 printf( "%s:%d end\n", __func__, __LINE__ );
