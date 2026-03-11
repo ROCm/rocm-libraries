@@ -122,26 +122,6 @@ void default_deallocator(void*, void* mem)
 
 } // namespace
 
-// MIOPEN_INTERNALS_EXPORT set here because the function isn't present in headers
-// but called from test/gtest/handle_hip_device.cpp
-MIOPEN_INTERNALS_EXPORT int get_device_id() // Get random device
-{
-    int device;
-    auto status = hipGetDevice(&device);
-    if(status != hipSuccess)
-        MIOPEN_THROW_HIP_STATUS(status, "No device");
-    return device;
-}
-
-// MIOPEN_INTERNALS_EXPORT set here because the function isn't present in headers
-// but called from test/gtest/handle_hip_device.cpp
-MIOPEN_INTERNALS_EXPORT void set_device(int id)
-{
-    auto status = hipSetDevice(id);
-    if(status != hipSuccess)
-        MIOPEN_THROW_HIP_STATUS(status, "Error setting device " + std::to_string(id));
-}
-
 #if MIOPEN_BUILD_DEV
 int set_default_device()
 {

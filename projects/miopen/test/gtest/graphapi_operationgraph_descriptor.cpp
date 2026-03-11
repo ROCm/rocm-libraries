@@ -81,18 +81,18 @@ private:
 
 public:
     GMockBackendOperationDescriptor(bool finalized) { mFinalized = finalized; }
-    void setAttribute(miopenBackendAttributeName_t attributeName,
-                      miopenBackendAttributeType_t attributeType,
-                      int64_t elementCount,
-                      void* arrayOfElements) override
+    void setAttribute(miopenBackendAttributeName_t /*attributeName*/,
+                      miopenBackendAttributeType_t /*attributeType*/,
+                      int64_t /*elementCount*/,
+                      void* /*arrayOfElements*/) override
     {
     }
     void finalize() override {}
-    void getAttribute(miopenBackendAttributeName_t attributeName,
-                      miopenBackendAttributeType_t attributeType,
-                      int64_t requestedElementCount,
-                      int64_t* elementCount,
-                      void* arrayOfElements) override
+    void getAttribute(miopenBackendAttributeName_t /*attributeName*/,
+                      miopenBackendAttributeType_t /*attributeType*/,
+                      int64_t /*requestedElementCount*/,
+                      int64_t* /*elementCount*/,
+                      void* /*arrayOfElements*/) override
     {
     }
     OpNode* getOperation() override { return &mNode; }
@@ -107,8 +107,8 @@ using miopen::graphapi::GTestGraphApiExecute;
 
 TEST(CPU_GraphApiOperationGraphDescriptor_NONE, CFunctions)
 {
-    miopenHandle_t handle = nullptr;
-    auto status           = miopenCreate(&handle);
+    miopenHandle_t handle{nullptr};
+    auto status = miopenCreate(&handle);
     ASSERT_EQ(status, miopenStatusSuccess) << "Handle wasn't obtained, cannot continue";
 
     GTestDescriptorSingleValueAttribute<miopenHandle_t, char> handleAttribute{

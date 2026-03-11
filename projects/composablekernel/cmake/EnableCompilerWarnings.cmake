@@ -76,6 +76,7 @@ else()
                 -Wno-unsafe-buffer-usage
                 -Wno-unused-lambda-capture
                 -Wno-nvcc-compat
+-Wno-deprecated-declarations
             )
             if(CK_CXX_STANDARD GREATER_EQUAL 20)
                 list(APPEND CMAKE_COMPILER_WARNINGS -Wno-c++20-compat)

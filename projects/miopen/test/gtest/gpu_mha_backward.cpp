@@ -421,7 +421,7 @@ class GPU_Bwd_Mha_FP8 : public Test_Bwd_Mha<float8_fnuz>
     }
 };
 
-TEST_P(GPU_Bwd_Mha_FP32, Test_float) { return Test_Bwd_Mha<float>::TestBody(); };
+TEST_P(GPU_Bwd_Mha_FP32, Test_float) { return Test_Bwd_Mha<float>::TestBody(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Bwd_Mha_FP32, testing::ValuesIn(GetSmokeCases()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Bwd_Mha_FP32, testing::ValuesIn(GetFullTestCases()));
@@ -433,7 +433,7 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(GPU_Bwd_Mha_FP32);
 #define MHA_FP8_TEST_NAME Test_float8
 #endif
 
-TEST_P(GPU_Bwd_Mha_FP8, MHA_FP8_TEST_NAME) { return Test_Bwd_Mha<float8_fnuz>::TestBody(); };
+TEST_P(GPU_Bwd_Mha_FP8, MHA_FP8_TEST_NAME) { return Test_Bwd_Mha<float8_fnuz>::TestBody(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Bwd_Mha_FP8, testing::ValuesIn(GetSmokeCases()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Bwd_Mha_FP8, testing::ValuesIn(GetFullTestCases()));
