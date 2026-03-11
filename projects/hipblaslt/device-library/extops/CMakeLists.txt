@@ -7,7 +7,7 @@
 
 set(ops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
-string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
+string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${HIPBLASLT_DIST_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 message(STATUS "Architectures to process: ${archs}")
 

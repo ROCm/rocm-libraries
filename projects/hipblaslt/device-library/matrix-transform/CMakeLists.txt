@@ -23,7 +23,7 @@
 
 # Need to support Release/Debug
 
-string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
+string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${HIPBLASLT_DIST_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 
 # Create separate --offload-arch flags for each architecture
