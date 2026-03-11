@@ -263,12 +263,12 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 #endif
 
     /*
-       The HIP compiler doesn doesn't automatically unroll this nested loop so we need to
-       use pragma unroll to encourage that for better performance. Additionaly, when access is not
+       The HIP compiler doesn't automatically unroll this nested loop so we need to
+       use pragma unroll to encourage that for better performance. Additionally, when access is not
        aligned in the horizontal or vertical access we lift the if condition out of the loop
        termination if the height/width is a multiple of the vert/horiz pixels, enabling SIMD
        vectorizatiom of the loop body.
-       These optimizations were being done automically by the OpenCL compiler prior to porting to
+       These optimizations were being done automatically by the OpenCL compiler prior to porting to
        HIP.
     */
     constexpr bool is_vert_aligned        = (VERT_ALIGNED == 1);
@@ -344,20 +344,21 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
         ReadType prv_in(0);
         if(!low_channel_count || c_i < N_INPUTS)
         {
+            const auto offset =
+                BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i + (pix_id * READ_UNIT);
             // if the last one
             if(C1x1_PIXLEFT > 0 && (pix_id == MAP_SZ_4 - 1))
             {
                 for(int j = 0; j < C1x1_PIXLEFT; ++j)
                 {
-                    ((FLOAT*)&prv_in)[j] =
-                        bottom[BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i +
-                               (pix_id * READ_UNIT) + j];
+                    FLOAT* prv_in_as_scalar = reinterpret_cast<FLOAT*>(&prv_in);
+                    prv_in_as_scalar[j]     = bottom[offset + j];
                 }
             }
             else
             {
-                prv_in = *(ReadType*)&bottom[BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i +
-                                             (pix_id * READ_UNIT)];
+                const FLOAT* bottom_offset = bottom + offset;
+                prv_in                     = *reinterpret_cast<const ReadType*>(bottom_offset);
             }
         }
 
@@ -371,19 +372,20 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
         ReadType prv_in(0);
         if(!low_channel_count || c_i < N_INPUTS)
         {
+            const auto offset =
+                BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i + (pix_id * READ_UNIT);
             if(C1x1_PIXLEFT > 0 && (pix_id == MAP_SZ_4 - 1))
             {
                 for(int j = 0; j < C1x1_PIXLEFT; ++j)
                 {
-                    ((FLOAT*)&prv_in)[j] =
-                        bottom[BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i +
-                               (pix_id * READ_UNIT) + j];
+                    FLOAT* prv_in_as_scalar = reinterpret_cast<FLOAT*>(&prv_in);
+                    prv_in_as_scalar[j]     = bottom[offset + j];
                 }
             }
             else
             {
-                prv_in = *(ReadType*)&bottom[BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i +
-                                             (pix_id * READ_UNIT)];
+                const FLOAT* bottom_offset = bottom + offset;
+                prv_in                     = *reinterpret_cast<const ReadType*>(bottom_offset);
             }
         }
 
@@ -407,18 +409,22 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
             {
                 for(int j = 0; j < C1x1_PIXLEFT; ++j)
                 {
-                    top[top_off + j] = ((FLOAT*)&out_val)[j];
+                    const FLOAT* out_val_as_scalar = reinterpret_cast<const FLOAT*>(&out_val);
+                    top[top_off + j]               = out_val_as_scalar[j];
 #if DO_SCALE
-                    scale[scale_off + j] = ((FLOAT*)&prv_scale)[j];
+                    const FLOAT* prv_scale_as_scalar = reinterpret_cast<const FLOAT*>(&prv_scale);
+                    scale[scale_off + j]             = prv_scale_as_scalar[j];
 #endif
                 }
             }
             else
             {
+                FLOAT* top_offset                        = top + top_off;
+                *reinterpret_cast<ReadType*>(top_offset) = out_val;
 
-                *((ReadType*)&top[top_off]) = out_val;
 #if DO_SCALE
-                *((ReadType*)&scale[scale_off]) = prv_scale;
+                FLOAT* scale_offset                        = scale + top_off;
+                *reinterpret_cast<ReadType*>(scale_offset) = prv_scale;
 #endif
             }
         }
@@ -427,20 +433,20 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
     for(; c_i < N_INPUTS; c_i++, c_o++)
     {
         ReadType prv_in(0);
-
+        auto offset = BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i + (pix_id * READ_UNIT);
         // if the last one
         if(C1x1_PIXLEFT > 0 && (pix_id == MAP_SZ_4 - 1))
         {
             for(int j = 0; j < C1x1_PIXLEFT; ++j)
             {
-                ((FLOAT*)&prv_in)[j] = bottom[BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i +
-                                              (pix_id * READ_UNIT) + j];
+                FLOAT* prv_in_as_scalar = reinterpret_cast<FLOAT*>(&prv_in);
+                prv_in_as_scalar[j]     = bottom[offset + j];
             }
         }
         else
         {
-            prv_in = *(ReadType*)&bottom[BOT_BATCH_STRIDE * batch + BOT_CHANNEL_STRIDE * c_i +
-                                         (pix_id * READ_UNIT)];
+            const FLOAT* bottom_offset = bottom + offset;
+            prv_in                     = *reinterpret_cast<const ReadType*>(bottom_offset);
         }
 
         const ReadType prv_bot_in2 = prv_in * prv_in;
@@ -471,18 +477,22 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
             {
                 for(int j = 0; j < C1x1_PIXLEFT; ++j)
                 {
-                    top[top_off + j] = ((FLOAT*)&out_val)[j];
+                    const FLOAT* out_val_as_scalar = reinterpret_cast<const FLOAT*>(&out_val);
+                    top[top_off + j]               = out_val_as_scalar[j];
 #if DO_SCALE
-                    scale[scale_off + j] = ((FLOAT*)&prv_scale)[j];
+                    const FLOAT* prv_scale_as_scalar = reinterpret_cast<const FLOAT*>(&prv_scale);
+                    scale[scale_off + j]             = prv_scale_as_scalar[j];
 #endif
                 }
             }
             else
             {
+                FLOAT* top_offset                        = top + top_off;
+                *reinterpret_cast<ReadType*>(top_offset) = out_val;
 
-                *((ReadType*)&top[top_off]) = out_val;
 #if DO_SCALE
-                *((ReadType*)&scale[scale_off]) = prv_scale;
+                FLOAT* scale_offset                        = scale + top_off;
+                *reinterpret_cast<ReadType*>(scale_offset) = prv_scale;
 #endif
             }
         }
@@ -513,17 +523,21 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
             {
                 for(int j = 0; j < C1x1_PIXLEFT; ++j)
                 {
-                    top[top_off + j] = ((FLOAT*)&out_val)[j];
+                    const FLOAT* out_val_as_scalar = reinterpret_cast<const FLOAT*>(&out_val);
+                    top[top_off + j]               = out_val_as_scalar[j];
 #if DO_SCALE
-                    scale[scale_off + j] = ((FLOAT*)&prv_scale)[j];
+                    const FLOAT* prv_scale_as_scalar = reinterpret_cast<const FLOAT*>(&prv_scale);
+                    scale[scale_off + j]             = prv_scale_as_scalar[j];
 #endif
                 }
             }
             else
             {
-                *((ReadType*)&top[top_off]) = out_val;
+                FLOAT* top_offset                        = top + top_off;
+                *reinterpret_cast<ReadType*>(top_offset) = out_val;
 #if DO_SCALE
-                *((ReadType*)&scale[scale_off]) = prv_scale;
+                FLOAT* scale_offset                        = scale + top_off;
+                *reinterpret_cast<ReadType*>(scale_offset) = prv_scale;
 #endif
             }
         }

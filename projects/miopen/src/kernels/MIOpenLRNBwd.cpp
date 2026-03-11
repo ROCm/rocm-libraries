@@ -65,7 +65,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
   To enable unrolling the last loop iteration is manually peeled. As this is the
   iteration that may not be uniformly executed by all work-items in a work-group.
 
-  Unfortunately there is code duplication in the body is the loop/if statments, as
+  Unfortunately there is code duplication in the body is the loop/if statements, as
   refactoring it into a __alwaysinline__ free function seems inhibits compiler
   optimizations.
 */
@@ -142,7 +142,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
   To enable unrolling the last loop iteration is manually peeled. As this is the
   iteration that may not be uniformly executed by all work-items in a work-group.
 
-  Unfortunately there is code duplication in the body is the loop/if statments, as
+  Unfortunately there is code duplication in the body is the loop/if statements, as
   refactoring it into a __alwaysinline__ free function seems inhibits compiler
   optimizations.
 */
