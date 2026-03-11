@@ -39,7 +39,7 @@ following requirements:
 
 ## Current System Overview
 
-The plugin SDK defines an `ICompilablePlan` interface for device specific compilation of an execution plan. This should be used
+The plugin SDK defines a interfaces for device specific compilation of an execution plan. This should be used
 by plugins as part of plan creation in the `hipdnnEnginePluginCreateExecutionContext` call by the hipDNN backend. Resulting in
 a compiled binary that is ready to execute when the hipDNN backend calls `hipdnnEnginePluginExecuteOpGraph`. To achieve this
 the compiled binary will be embedded in the execution plan handle that the plugin returns, such that if the hipDNN backend
@@ -76,7 +76,7 @@ for common stream operations and queries of the target device.
  in hipdnnEnginePluginCreateImpl and free in hipdnnEnginePluginDestroyImpl();
 */
 class HipHandle {
-
+public:
 // @brief Destructor
 // @detail Frees underlying resources which have handles returned to the user, e.g Programs and Kernels.
 ~HipHandle();
@@ -97,44 +97,77 @@ class HipHandle {
 // * finish() 
 // * memcpy host->device, device->host
 
+// Give plan builder access to the kernel cache
+KernelCache getKernelCache() { return _kernelCache.get(); }
+
+private:
+  // RAII owned allocation, which the .get() element is returned to users as handles.
+  // Constructed with handle instance is created.
+  std::unique_ptr<KernelCacheImpl> _kernelCache;
+};
+```
+
+### Program / Kernels
+
+Define classes for working with HIP program & kernel objects.
+
+#### Kernel Cache class
+
+A dedicated kernel cache object is used to manage the creation of HIP kernels,
+this separates the concerns from the more general HIP functionality in the HIP
+handle. A kernel cache is created per HIP handle and therefore per-thread in a
+multi-threaded scenario.
+
+Program and Kernel objects are therefore kept under same ownership for consistent
+lifetimes. As the hip module a kernel is created from shouldn't be unloaded while
+the kernel is in use.
+
+```cpp
+// User works with a handle to the created object, but doesn't own it
+using KernelCache = KernelCacheImpl *;
+
+class KernelCacheImpl {
+public:
 /*
   @brief Creates program object and returns pointer to the user
   @detail Checks if Program can be found in the cache before building new object
   @param program_name Name of the program file
+  @param kernel_src Source string for program.
+  @param target_device Identifies the architecture to compile the binary for.
   @param params Compilation options
   @return Handle to allocated program object owned by this HipHandle object
 */
 Program AddProgram(const std::string& program_name,
                    const std::string& kernel_src,
+                   hipDeviceProp_t target_device,
                    const std::string& params);
 
 /*
   @brief Creates a kernel object matching an algorithm and config
   @detail Checks if Kernel can be found in the cache before creating new object
   @param name Name of the kernel entry-point in program
-  @param algorithm Name of the algorithm the kernel is used to implement
-  @param network_config Configuration of the algorithm for the particular shape.
+  @param algorithm_config Configuration uniquely identifying an algorithm for a particular shape.
   @return Handle to allocated kernel object owned by this HipHandle object
 */
 Kernel AddKernel(Program program,
                  const std::string& name,
-                 const std::string& algorithm,
-                 const std::string& network_config);
+                 const std::string& algorithm_config);
 
 /*
    @brief Finds the list of kernels that have been added to the handle matching
    the algorithm and config.
-   @param algorithm Name of the algorithm the kernel is used to implement
-   @param network_config Configuration of the algorithm for the particular shape.
+   @param target_device Identifies the architecture the binary was compliled for.
+   @param algorithm_config Configuration uniquely identifying an algorithm for a particular shape.
    @return list of kernels
 */
 std::vector<Kernel> GetKernels(const std::string& algorithm,
-                               const std::string& network_config) const;
+                               hipDeviceProp_t target_device,
+                               const std::string& algorithm_config) const;
                                
 private:
   // RAII owned allocations, which the .get() element is returned to users as handles.
-  std::vector<unique_ptr<KernelImpl>> _kernels;
-  std::vector<unique_ptr<Program>> _programs;
+  std::vector<std::unique_ptr<KernelCacheImpl>> _kernels;
+  std::vector<std::unique_ptr<Program>> _programs;
   
   // Cache to check before going to DB for queries, see MIOpen kernel_cache.cpp
   using Key = std::pair<std::string, std::string>; // program-name, params
@@ -150,14 +183,11 @@ private:
  std::unordered_map<Key, std::vector<Kernel>, SimpleHash> _kernel_map
  // Key represnts <program_name, compile params>
  std::unordered_map<Key, Program, SimpleHash> _program_map
+
 };
 ```
 
-### Program / Kernels
-
-Define classes for working with HIP program & kernel objects.
-
-#### Program classes
+#### Program class
 
 See `hipoc_program.cpp` in MIOpen
 
@@ -192,7 +222,7 @@ public:
 };
 ```
 
-#### Kernel classes
+#### Kernel class
 
 See `hipoc_kernel.cpp` in MIOpen
 
@@ -269,6 +299,11 @@ Additionally as the SDK API is adopted by the direct HIP plugin testing will be 
 ensure that it's functionality hasn't regressed.
 
 ## Future Considerations
+
+The kernel class is state due to the existence of the `setGrid` function which updates the execution dimensions.
+This was chosen due to the fact that this is a runtime parameter to the HIP kernel launch APIs. However,
+it would also be possible to remove this state and create duplicate kernel objects for different grid sizes if
+that was deemed a better trade off.
 
 This design is primarily focused on refactoring out common functionality for managing HIP kernel JIT
 compilation in way that leaves SDK components decoupled enough for AOT/serialization/device-less requirements
