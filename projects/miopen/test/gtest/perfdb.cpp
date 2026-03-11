@@ -1010,10 +1010,6 @@ public:
                 if(full_set())
                     args += " --all";
 
-                // Reset sharding for child processes so each child runs its
-                // assigned work instead of being filtered out by the parent's shard.
-                args += " --gtest_total_shards=1 --gtest_shard_index=0";
-
                 children.emplace_back(exe_path(), args);
             }
             // clang-format on
@@ -1102,10 +1098,6 @@ public:
 
                 if(full_set())
                     args += " --all";
-
-                // Reset sharding for child processes so each child runs its
-                // assigned work instead of being filtered out by the parent's shard.
-                args += " --gtest_total_shards=1 --gtest_shard_index=0";
 
                 MIOPEN_LOG_CUSTOM(LoggingLevel::Default, "Test", exe_path() + " " + args);
                 children.emplace_back(exe_path(), args);
