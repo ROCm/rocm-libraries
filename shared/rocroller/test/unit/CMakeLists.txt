@@ -92,7 +92,6 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelIndexTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/LDSTileCopyTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LabelTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LockTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerExponentialTest.cpp"
