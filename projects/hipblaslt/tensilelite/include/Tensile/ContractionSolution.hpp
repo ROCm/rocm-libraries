@@ -568,11 +568,11 @@ namespace TensileLite
             std::vector<int>              biasSrcWhiteList;
             std::vector<rocisa::DataType> biasDataTypeWhiteList;
 
-            int                    sparse                     = 0;
-            bool                   stochasticRounding         = false;
-            bool                   supportDeviceUserArguments = false;
-            bool                   swizzleTensorA             = false;
-            bool                   swizzleTensorB             = false;
+            int  sparse                     = 0;
+            bool stochasticRounding         = false;
+            bool supportDeviceUserArguments = false;
+            bool swizzleTensorA             = false;
+            bool swizzleTensorB             = false;
         };
 
         struct LinearModel

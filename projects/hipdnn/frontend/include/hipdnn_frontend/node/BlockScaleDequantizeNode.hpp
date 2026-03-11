@@ -39,6 +39,12 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleDequantizeNode missing y for pre-validation");
 
+        // Dequantize output must be a virtual tensor — it is consumed by downstream
+        // operations in a fused graph rather than written to user memory.
+        HIPDNN_RETURN_IF_FALSE(attributes.get_y()->get_is_virtual(),
+                               ErrorCode::INVALID_VALUE,
+                               "BlockScaleDequantizeNode output tensor y must be virtual");
+
         HIPDNN_RETURN_IF_FALSE(!attributes.get_block_size().empty(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleDequantizeNode block_size must not be empty");

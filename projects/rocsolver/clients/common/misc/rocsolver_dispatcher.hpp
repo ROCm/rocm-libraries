@@ -47,6 +47,7 @@
 #include "common/auxiliary/testing_laswp.hpp"
 #include "common/auxiliary/testing_lasyf.hpp"
 #include "common/auxiliary/testing_latrd.hpp"
+#include "common/auxiliary/testing_latrd_forsytrd.hpp"
 #include "common/auxiliary/testing_lauum.hpp"
 #include "common/auxiliary/testing_orgbr_ungbr.hpp"
 #include "common/auxiliary/testing_orglx_unglx.hpp"
@@ -152,6 +153,7 @@ class rocsolver_dispatcher
             {"larfb", testing_larfb<T>},
             {"lasr", testing_lasr<T>},
             {"latrd", testing_latrd<T>},
+            {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},

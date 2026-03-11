@@ -27880,7 +27880,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     Use64bShadowLimit: true
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: true
     UseDirect32XEmulationInterleaveTreg: false
     UseDot2F32XEmulation: false
