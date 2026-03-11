@@ -4614,7 +4614,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         pack_a1 =[                                                            15,15,16,16, # swap instructions, must come after LR and before other packs
                                                                                 17,17,17,17, 20,20, 21,21,21,21,
                                                                                  18,18,18,18, 20,20, 21,21,21,21]
-        syncs.add(                                                                19, dscnt=0, comment="wait for the first 2 LRBs before the packing them")
+        syncs.add(                                                                19, dscnt=0, comment="wait for LRBs before the packing them")
         pack_b1= [                                                                19,19,19,19, # swap instructions, must come after LR and before other packs
                                                                                   19,19,19,19, 20,20, 22,22,22,22,
                                                                                    20,20,20,20, 20,20, 22,22,22,22]
