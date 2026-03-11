@@ -744,17 +744,6 @@ struct is_generic_attention_mask<GenericAttentionMask<IsMasking, IsLocal>> : std
 template <typename Mask>
 static constexpr bool is_generic_attention_mask_v = is_generic_attention_mask<Mask>::value;
 
-template <typename>
-struct is_simplified_attention_mask : std::false_type
-{
-};
-template <bool IsMasking>
-struct is_simplified_attention_mask<SimplifiedGenericAttentionMask<IsMasking>> : std::true_type
-{
-};
-template <typename Mask>
-static constexpr bool is_simplified_attention_mask_v = is_simplified_attention_mask<Mask>::value;
-
 // TODO: prefer use this function in host code
 // can convert from the FA style left/right to our generic coordinate
 // if left_size < 0 && right_size = 0, it is normal causal mask
