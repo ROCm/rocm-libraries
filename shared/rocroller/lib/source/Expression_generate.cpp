@@ -110,9 +110,8 @@ namespace rocRoller
 
             using RegisterValue = std::variant<Register::ValuePtr>;
 
-            Register::ValuePtr resultPlaceholder(ResultType const&    resType,
-                                                 bool                 allowSpecial = true,
-                                                 std::optional<float> packingRatio = std::nullopt)
+            Register::ValuePtr resultPlaceholder(ResultType const& resType,
+                                                 bool              allowSpecial = true)
             {
                 auto regType = resType.regType;
                 if(IsWriteableSpecial(regType))
@@ -122,17 +121,11 @@ namespace rocRoller
                     regType = MapSPRTypeToGPRType(regType);
                 }
 
-                // Calculate the register count of this result, starting with the value count of the result type
-                size_t count = resType.valueCount;
-                // Divide the value count by its packing to obtain the number of registers
-                count /= resType.varType.dataType == DataType::None
-                             ? 1
-                             : DataTypeInfo::Get(resType.varType).packing;
-                // If given a specific packing/unpacking ratio, multiply the value count by this ratio
-                if(packingRatio.has_value())
-                {
-                    count *= packingRatio.value();
-                }
+                // Obtain the register count by dividing the value count of the result type by its packing
+                size_t count = resType.valueCount
+                               / (resType.varType.dataType == DataType::None
+                                      ? 1
+                                      : DataTypeInfo::Get(resType.varType).packing);
 
                 return Register::Value::Placeholder(m_context,
                                                     regType,
@@ -142,8 +135,9 @@ namespace rocRoller
             }
 
             // A special case of resultPlaceholder, for use when the value count in resType should be ignored
-            // and the placeholder should be created with a count of one
-            Register::ValuePtr resultPlaceholderCountOne(ResultType const& resType,
+            // and the placeholder should be created with a given count
+            Register::ValuePtr resultPlaceholderWithCount(ResultType const& resType,
+                                                         size_t            count,
                                                          bool              allowSpecial = true)
             {
                 auto regType = resType.regType;
@@ -157,7 +151,7 @@ namespace rocRoller
                 return Register::Value::Placeholder(m_context,
                                                     regType,
                                                     resType.varType,
-                                                    1,
+                                                    count,
                                                     Register::AllocationOptions::FullyContiguous());
             }
 
@@ -434,7 +428,7 @@ namespace rocRoller
                     int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
                                        / std::min(lhsInfo.packing, rhsInfo.packing);
 
-                    auto conversion = resultPlaceholder(resType, true, packingRatio);
+                    auto conversion = resultPlaceholderWithCount(resType, packingRatio, true);
 
                     for(size_t i = 0; i < resType.valueCount; i += packingRatio)
                     {
@@ -477,7 +471,7 @@ namespace rocRoller
                                     || rhs->variableType() == resType.varType,
                                 "Only one floating point argument can be converted");
 
-                    auto conversion = resultPlaceholderCountOne(resType, true);
+                    auto conversion = resultPlaceholderWithCount(resType, 1, true);
 
                     for(size_t k = 0; k < resType.valueCount; ++k)
                     {
@@ -564,7 +558,7 @@ namespace rocRoller
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
 
                 // Convert one value at a time
-                dest = resultPlaceholder(resultType(expr), true);
+                dest = resultPlaceholderWithCount(resultType(expr), results[0]->valueCount(), true);
 
                 // Assume the seed is a single scalar value. Consider allowing a
                 // vector of seeds?
@@ -795,11 +789,11 @@ namespace rocRoller
                     if(isUnpacking)
                     {
                         // unpacking args into (multiple registers) dest
-                        dest = resultPlaceholder(destType, true, packingRatio);
+                        dest = resultPlaceholderWithCount(destType, results[0]->valueCount() * packingRatio, true);
                     }
                     else
                     {
-                        dest = resultPlaceholder(destType, true, 1.f / packingRatio);
+                        dest = resultPlaceholderWithCount(destType, results[0]->valueCount() / packingRatio, true);
                     }
                 }
 

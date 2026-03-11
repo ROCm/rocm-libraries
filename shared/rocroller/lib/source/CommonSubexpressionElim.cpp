@@ -716,21 +716,13 @@ namespace rocRoller
             }
 
             Register::ValuePtr resultPlaceholder(ResultType const&    resType,
-                                                 bool                 allowSpecial = true,
-                                                 std::optional<float> packingRatio
-                                                 = std::nullopt) const
+                                                 bool                 allowSpecial = true) const
             {
-                // Calculate the register count of this result, starting with the value count of the result type
-                size_t count = resType.valueCount;
-                // Divide the value count by its packing to obtain the number of registers
-                count /= resType.varType.dataType == DataType::None
-                             ? 1
-                             : DataTypeInfo::Get(resType.varType).packing;
-                // If given a specific packing/unpacking ratio, multiply the value count by this ratio
-                if(packingRatio.has_value())
-                {
-                    count *= packingRatio.value();
-                }
+                // Obtain the register count by dividing the value count of the result type by its packing
+                size_t count = resType.valueCount
+                               / (resType.varType.dataType == DataType::None
+                                      ? 1
+                                      : DataTypeInfo::Get(resType.varType).packing);
 
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
