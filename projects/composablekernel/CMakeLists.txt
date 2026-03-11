@@ -48,7 +48,7 @@ include(CTest)
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
-option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
+option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" ON)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
 option(FORCE_DISABLE_XDL "Skip compiling XDL specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
 option(FORCE_DISABLE_WMMA "Skip compiling WMMA specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
@@ -744,7 +744,7 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
         LIBRARY_NAME composablekernel
         PACKAGE_NAME tutorials
    )
-   add_subdirectory(tile_engine)
+#    add_subdirectory(tile_engine)
    if(BUILD_TESTING)
        add_subdirectory(test)
    endif()
