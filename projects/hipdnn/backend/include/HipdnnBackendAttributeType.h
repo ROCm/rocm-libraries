@@ -96,6 +96,9 @@ typedef enum
     /** @brief Convolution mode enumeration (hipdnnConvolutionMode_t) */
     HIPDNN_TYPE_CONVOLUTION_MODE,
 
+    /** @brief Pointwise mode enumeration (hipdnnPointwiseMode_t) */
+    HIPDNN_TYPE_POINTWISE_MODE,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types
