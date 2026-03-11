@@ -147,6 +147,12 @@ def sendFailureNotifications() {
     echo "Done checking for failure patterns..."
     // Send a notification for each matched failure pattern.
     for (patternMap in foundPatterns) {
+        // Escape the context string for safe embedding in a JSON value:
+        // backslashes first, then quotes, then convert real newlines to \n.
+        def escapedContext = patternMap.context
+            .replace('\\', '\\\\')
+            .replace('"', '\\"')
+            .replace('\n', '\\n')
         withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
         sh '''
             # Create JSON payload with base64 data
@@ -157,7 +163,7 @@ def sendFailureNotifications() {
                 printf '    "buildNumber": "%s",\n' "''' + env.BUILD_NUMBER + '''"
                 printf '    "jobUrl": "%s",\n' "''' + env.RUN_DISPLAY_URL + '''"
                 printf '    "detectedIssue": "%s",\n' "''' + patternMap.description + '''"
-                printf '    "logContext": "%s",\n' "''' + patternMap.context + '''"
+                printf '    "logContext": "%s",\n' "''' + escapedContext + '''"
                 printf '    "nodeName": "%s",\n' "''' + (patternMap.nodeName ? patternMap.nodeName : "") + '''"
                 printf '}\n'
             } > webhook_payload.json
