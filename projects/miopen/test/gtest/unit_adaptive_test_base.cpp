@@ -237,6 +237,8 @@ public:
     void Run() { this->RunAdaptiveTest(); }
 };
 
+} // namespace
+
 #define X_INSTANTIATE_TEST(                                                                  \
     VER_DEVICE, T_DATA, T_DATA_NAME, T_VERIFY, T_VERIFY_NAME, VER, VER_NAME, CHECK_NUM)      \
     using VER_DEVICE##_Verify##_##VER_NAME##_##CHECK_NUM##_##T_DATA_NAME##_##T_VERIFY_NAME = \
@@ -343,5 +345,3 @@ X_INSTANTIATE_TEST(CPU, half, FP16, float, FP32, VerifyOption::mismatch, Mismatc
 X_INSTANTIATE_TEST(CPU, bfloat16, BFP16, float, FP32, VerifyOption::mismatch, Mismatch, true);
 
 #undef X_INSTANTIATE_TEST
-
-} // namespace
