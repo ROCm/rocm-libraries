@@ -547,11 +547,28 @@ dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t coun
   const size_t last_slab  = last_slow / slab_width;
   if (first_slab == last_slab) {
     unique_fast = last_fast - first_fast + 1;
-    unique_slow = (unique_fast > 1) ? slab_width : (last_slow - first_slow + 1);
+    const size_t actual_slab_w = std::min((first_slab + 1) * slab_width, g_n) - first_slab * slab_width;
+    unique_slow = (unique_fast > 1) ? actual_slab_w : (last_slow - first_slow + 1);
   } else {
-    unique_fast =
-        (last_slab - first_slab > 1) ? g_m : std::min(g_m, (g_m - first_fast) + (last_fast + 1));
-    unique_slow = std::min((last_slab + 1) * slab_width, g_n) - first_slab * slab_width;
+    unique_fast = (last_slab - first_slab > 1)
+        ? g_m
+        : std::min(g_m, (g_m - first_fast) + (last_fast + 1));
+
+    // Account for partial slab occupancy at boundaries instead of taking the
+    // full bounding-box span from first_slab start to last_slab end.
+    const size_t first_slab_w  = std::min((first_slab + 1) * slab_width, g_n) - first_slab * slab_width;
+    const size_t last_slab_w   = std::min((last_slab + 1) * slab_width, g_n) - last_slab * slab_width;
+    const size_t first_in_slab = first_slow - first_slab * slab_width;
+    const size_t last_in_slab  = last_slow - last_slab * slab_width;
+
+    // First slab: if >1 M-row remains, all N columns are visited; otherwise only the tail.
+    const size_t n_first = (first_fast < g_m - 1) ? first_slab_w : (first_slab_w - first_in_slab);
+    // Last slab: if >1 M-row is used, all N columns are visited; otherwise only the head.
+    const size_t n_last  = (last_fast > 0) ? last_slab_w : (last_in_slab + 1);
+    // Middle slabs are fully covered.
+    const size_t n_mid   = (last_slab > first_slab + 1) ? (last_slab - first_slab - 1) * slab_width : 0;
+
+    unique_slow = std::min(n_first + n_mid + n_last, g_n);
   }
 
   unique_fast = std::min(unique_fast, g_m);
@@ -1135,37 +1152,26 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   double b_cl_factor = std::min(1.0, problem.size.n * b_bytes / cl);
 
   // Spatial Reuse:
-  // Raw spatial reuse (per-MN, K-splits access independent ranges)
-  double l2_unique     = l2_tiles.m * a_tile * a_cl_factor + l2_tiles.n * b_tile * b_cl_factor;
-  double l2_requested  = static_cast<double>(l2_tiles.m) * l2_tiles.n * total_tile;
-  double spatial_reuse = (l2_requested > 0) ? (1.0 - l2_unique / l2_requested) : 0.0;
+  const size_t rectangular_mn = l2_tiles.m * l2_tiles.n;
+  const size_t tiles_on_xcd   = std::min(cus_per_xcd, tiles_per_xcd);
+  const size_t kb              = std::max(l2_tiles.k * l2_tiles.b, static_cast<size_t>(1));
+  const size_t actual_mn       = std::min(math::safe_ceil_div(tiles_on_xcd, kb), rectangular_mn);
+
+  double l2_unique    = l2_tiles.m * a_tile * a_cl_factor + l2_tiles.n * b_tile * b_cl_factor;
+  double l2_requested = static_cast<double>(actual_mn) * total_tile;
+  double spatial_reuse = (l2_requested > 0) ? std::max(1.0 - l2_unique / l2_requested, 0.0) : 0.0;
 
   // K-split alignment penalty for round-robin dispatch:
   // In round-robin, different MN tiles land on different K-split offsets when
   // grid.k is not a multiple of num_xcd. Only MN tiles at the SAME K-split
   // share A/B data. If they're at different K-splits, no sharing occurs.
   if (wgm.wgmxcc <= 1 && grid.k >= num_xcd) {
-    // Round-robin: K-split misalignment between MN tiles.
-    const size_t g                 = std::gcd(context.splitting_factor, num_xcd);
+    const size_t g = std::gcd(context.splitting_factor, num_xcd);
     const size_t mn_sharing_period = num_xcd / g;
     const size_t mn_on_xcd         = l2_tiles.m * l2_tiles.n;
     if (mn_sharing_period > 1 && mn_on_xcd > 1) {
       const size_t sharing_group = std::max(mn_on_xcd / mn_sharing_period, static_cast<size_t>(1));
       spatial_reuse *= static_cast<double>(sharing_group - 1) / static_cast<double>(mn_on_xcd - 1);
-    }
-  }
-
-  // Rectangular fill deflation: l2_tiles.m × l2_tiles.n is the bounding box,
-  // but tiles may not fill the full rectangle (slab boundary, round-robin scatter).
-  // Deflate spatial by the actual fill ratio.
-  {
-    const size_t rectangular_mn   = l2_tiles.m * l2_tiles.n;
-    const size_t tiles_on_xcd     = std::min(cus_per_xcd, tiles_per_xcd);
-    const size_t kb               = std::max(l2_tiles.k * l2_tiles.b, static_cast<size_t>(1));
-    const size_t actual_mn_per_kb = tiles_on_xcd / kb;
-    if (rectangular_mn > 1 && actual_mn_per_kb < rectangular_mn) {
-      double deflate_factor = static_cast<double>(actual_mn_per_kb) / rectangular_mn;
-      spatial_reuse *= deflate_factor;
     }
   }
 
@@ -1207,7 +1213,7 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   // Request amplification (batched GEMMs only):
   // When the per-iteration working set fits in L2, intra-tile multi-wavefront
   // L1 misses all hit L2 (nothing evicts them), lifting the effective rate
-  // toward ~0.8 regardless of spatial sharing.
+  // toward ~0.9 regardless of spatial sharing.
   bool enable_batched_amp = (problem.batch > 1);
   if (enable_batched_amp && concurrent_load < l2_cap) {
     const double headroom  = 1.0 - concurrent_load / l2_cap;
@@ -1217,13 +1223,41 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
 
   // Request amplification (small-tile split-K GEMMs only):
   // When the per-iteration working set fits in L2, intra-tile multi-wavefront
-  // L1 misses all hit L2 (nothing evicts them), lifting the effective rate by
-  // ~0.25 regardless of spatial sharing.
+  // L1 misses all hit L2 (nothing evicts them), lifting the effective rate
+  // toward ~0.4 regardless of spatial sharing.
   bool enable_split_k_amp = (l2_tiles.k > 1 && l2_tiles.m * l2_tiles.n < 5);
   if (enable_split_k_amp && concurrent_load < l2_cap) {
     const double headroom  = 1.0 - concurrent_load / l2_cap;
     const double amp_boost = headroom;
     l2_rate += amp_boost * std::max(heuristic.l2_amp_ceiling_k_split - l2_rate, 0.0);
+  }
+
+  // Request amplification (skinny-dimension GEMMs):
+  // When one grid dimension is very small (less than 2 tiles), the shared operand's
+  // per-iteration working set is tiny and fits easily in L2. Multiple
+  // wavefronts per CU issue overlapping loads for this shared data, creating
+  // intra-CU L2 hits beyond what cross-CU spatial reuse captures.
+  bool enable_skinny_amp = (context.grid_m <= 2 && context.grid_n > context.grid_m * 8) || 
+                           (context.grid_n <= 2 && context.grid_m > context.grid_n * 8);
+  enable_skinny_amp &= (splitting_factor == 1) && (problem.batch == 1);
+  if (enable_skinny_amp && concurrent_load < l2_cap) {
+      constexpr double amp_ceiling = 0.6;
+      const double headroom = 1.0 - concurrent_load / l2_cap;
+      l2_rate += headroom * std::max(amp_ceiling - l2_rate, 0.0);
+  }
+
+  // Request amplification (skinny-dimension GEMMs):
+  // When one grid dimension is very small (less than 2 tiles), the shared operand's
+  // per-iteration working set is tiny and fits easily in L2. Multiple
+  // wavefronts per CU issue overlapping loads for this shared data, creating
+  // intra-CU L2 hits beyond what cross-CU spatial reuse captures.
+  bool enable_skinny_amp = (context.grid_m <= 2 && context.grid_n > context.grid_m * 8) || 
+                           (context.grid_n <= 2 && context.grid_m > context.grid_n * 8);
+  enable_skinny_amp &= (splitting_factor == 1) && (problem.batch == 1);
+  if (enable_skinny_amp && concurrent_load < l2_cap) {
+      constexpr double amp_ceiling = 0.6;
+      const double headroom = 1.0 - concurrent_load / l2_cap;
+      l2_rate += headroom * std::max(amp_ceiling - l2_rate, 0.0);
   }
 
   l2_rate = clamp01(l2_rate);

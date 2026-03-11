@@ -363,6 +363,24 @@ void heuristics_database_t::initialize_defaults() {
       add_entry(key, params);
     }
 
+    // BF16 TN configurations
+    std::vector<cms_config> bf16_tt_configs = {
+      {256, 256, 64, 1.0 / 1.10},
+    };
+
+    for (const auto& cfg : bf16_tt_configs) {
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::BFloat16,
+                                                transpose_t::T,
+                                                transpose_t::T,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
     // TF32 NN
     std::vector<cms_config> tf32_nn_configs = {
         {192, 256, 32, 1.0 / 1.23},
