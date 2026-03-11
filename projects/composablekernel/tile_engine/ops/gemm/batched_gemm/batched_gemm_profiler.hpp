@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "ck_tile/host/device_prop.hpp"
-#include "ck_tile/ops/batched_gemm.hpp"
+#include "ck_tile/ops/gemm.hpp"
 #include "batched_gemm_benchmark.hpp"
 
 class GemmProfiler
@@ -138,7 +138,7 @@ class GemmProfiler
         c_b_m_n_dev_buf.SetZero();
         c_b_m_n_dev_result.SetZero();
 
-        ck_tile::BatchedGemmHostArgs gemm_args = {
+        ck_tile::BatchedGemmHostArgs gemm_args{
             a_b_m_k_dev_buf.GetDeviceBuffer(),
             b_b_k_n_dev_buf.GetDeviceBuffer(),
             c_b_m_n_dev_buf.GetDeviceBuffer(),
