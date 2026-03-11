@@ -1925,6 +1925,9 @@ namespace TensileLite
                     case rocisa::DataType::BFloat8_fnuz:
                         prop.value = getValue<BFloat8_fnuz>(prop.init, prop.freeValue);
                         break;
+                    case rocisa::DataType::MXScale:
+                        prop.value = getValue<MXScale>(prop.init, prop.freeValue);
+                        break;
                     case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
                     case rocisa::DataType::Count:
@@ -1934,8 +1937,7 @@ namespace TensileLite
                     case rocisa::DataType::BFloat8Float8_fnuz:
                     case rocisa::DataType::Float6:
                     case rocisa::DataType::BFloat6:
-                    case rocisa::DataType::Float4:
-                    case rocisa::DataType::MXScale:;
+                    case rocisa::DataType::Float4:;
                     }
                 }
                 if(Debug::Instance().printTensorInfo() && prop.dataType != rocisa::DataType::None)

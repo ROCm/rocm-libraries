@@ -437,6 +437,9 @@ namespace TensileLite
                     initArray<BFloat8_fnuz>(
                         initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
+                case rocisa::DataType::MXScale:
+                    initArray<MXScale>(initMode, static_cast<MXScale*>(array), descriptor);
+                    break;
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
@@ -453,8 +456,7 @@ namespace TensileLite
                 case rocisa::DataType::BFloat8Float8_fnuz:
                 case rocisa::DataType::Float6:
                 case rocisa::DataType::BFloat6:
-                case rocisa::DataType::Float4:
-                case rocisa::DataType::MXScale:;
+                case rocisa::DataType::Float4:;
                 }
             }
 
@@ -2166,6 +2168,12 @@ namespace TensileLite
         {
             return std::numeric_limits<int8_t>::min();
         }
+
+        template <>
+        inline MXScale DataInitialization::getValue<MXScale, InitMode::Zero>()
+        {
+            throw std::runtime_error("Zero not available for MXScale.");
+        }
         template <>
         inline MXScale DataInitialization::getValue<MXScale, InitMode::One>()
         {
@@ -2298,6 +2306,12 @@ namespace TensileLite
         inline bool DataInitialization::isBadInput<int8_t>(int8_t value)
         {
             return value == DataInitialization::getValue<int8_t, InitMode::BadInput>();
+        }
+
+        template <>
+        inline bool DataInitialization::isBadInput<MXScale>(MXScale value)
+        {
+            return value.data == 0xff;
         }
 
         template <>
@@ -2434,6 +2448,12 @@ namespace TensileLite
             DataInitialization::getTrigValue<BFloat8_fnuz>(int idx, bool useCos, bool useAbs)
         {
             return static_cast<BFloat8_fnuz>(getTrigValue<float>(idx, useCos, useAbs));
+        }
+
+        template <>
+        inline MXScale DataInitialization::getTrigValue<MXScale>(int idx, bool useCos, bool useAbs)
+        {
+            return MXScale(getTrigValue<float>(idx, useCos, useAbs));
         }
 
         template <>
@@ -2721,6 +2741,12 @@ namespace TensileLite
             return getValue<int8_t, InitMode::Random>();
         }
 
+        template <>
+        inline MXScale DataInitialization::getValue<MXScale, InitMode::RandomNarrow>()
+        {
+            return getValue<MXScale, InitMode::Random>();
+        }
+
         template <typename T>
         inline T getValueWithUpperLowerBoundFP(double upper = 1.0, double lower = -1.0)
         {
@@ -2824,6 +2850,12 @@ namespace TensileLite
         inline int8_t DataInitialization::getValue<int8_t, InitMode::RandomNegPosLimited>()
         {
             return getValueWithUpperLowerBoundInteger<int8_t>();
+        }
+
+        template <>
+        inline MXScale DataInitialization::getValue<MXScale, InitMode::RandomNegPosLimited>()
+        {
+            return MXScale(getValueWithUpperLowerBoundFP<float>());
         }
 
         template <>
@@ -2991,6 +3023,12 @@ namespace TensileLite
         inline BFloat8_fnuz DataInitialization::convertDoubleTo<BFloat8_fnuz>(double value)
         {
             return static_cast<BFloat8_fnuz>(value);
+        }
+
+        template <>
+        inline MXScale DataInitialization::convertDoubleTo<MXScale>(double value)
+        {
+            return MXScale(float(value));
         }
     } // namespace Client
 } // namespace TensileLite
