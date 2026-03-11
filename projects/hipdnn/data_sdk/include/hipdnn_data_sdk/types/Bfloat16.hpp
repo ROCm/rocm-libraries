@@ -18,6 +18,7 @@ namespace hipdnn_data_sdk::types
 struct half;
 struct fp8_e4m3;
 struct fp8_e5m2;
+struct fp8_e8m0;
 // NOLINTEND(readability-identifier-naming)
 
 // ============================================================================
@@ -266,6 +267,7 @@ struct bfloat16_t
     inline explicit bfloat16_t(half h) noexcept;
     inline explicit bfloat16_t(fp8_e4m3 f) noexcept;
     inline explicit bfloat16_t(fp8_e5m2 f) noexcept;
+    inline explicit bfloat16_t(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits
     // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
