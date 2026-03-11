@@ -125,7 +125,6 @@ def worker_lock_instance(worker_lock_path):
 @pytest.fixture
 def tensile_args(pytestconfig, builddir, worker_lock_path):
     rv = []
-    disable_client_lock = pytestconfig.getoption("--disable-client-lock")
     if worker_lock_path:
         rv += ["--client-lock", str(worker_lock_path)]
 
