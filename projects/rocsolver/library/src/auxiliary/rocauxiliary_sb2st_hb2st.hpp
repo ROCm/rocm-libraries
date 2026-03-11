@@ -534,7 +534,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     assert( task >= 0 );
     assert( sweep >= 0 );
 
-    #define ONLY_SWEEP_0 1
+    //#define ONLY_SWEEP_0 1  // passes
     #if ONLY_SWEEP_0
         if (sweep > 0)
             return;
