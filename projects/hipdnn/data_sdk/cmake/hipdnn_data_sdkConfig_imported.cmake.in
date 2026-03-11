@@ -83,7 +83,7 @@ if(flatbuffers_VERSION)
     list(PREPEND _existing_includes
         "${_hipdnn_sdk_prefix}/@HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR@/hipdnn_data_sdk/data_objects/v${_hipdnn_fb_version_tag}")
     set_property(TARGET hipdnn_data_sdk PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${_existing_includes})
-    message(STATUS "hipDNN Data SDK: Using FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
+    message(STATUS "hipDNN Data SDK: Using imported FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
 endif()
 
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
