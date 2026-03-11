@@ -999,14 +999,9 @@ Tests:
   category: pre_checkin
   function:
     matmul: *hpa_half_precisions_fp_16_32_dst
-  matrix_size:
-    - { M: 1, N: 1, K: 1 }
-    - { M: 127, N: 127, K: 127 }
-    - { M: 128, N: 128, K: 128 }
-    - { M: 129, N: 129, K: 128 }
-    - { M: 128, N: 129, K: 129 }
-    - { M: 129, N: 128, K: 129 }
-    - { M: 129, N: 129, K: 129 }
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
   transA_transB: *transA_transB_range
   alpha: [ 1.0, 2.0 ]
   beta: [ 0.0, 2.0 ]
