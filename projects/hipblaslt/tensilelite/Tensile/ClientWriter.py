@@ -23,12 +23,10 @@
 ################################################################################
 
 import inspect
-import logging
 import os
 import subprocess
 import shlex
 import shutil
-import sys
 
 from pathlib import Path
 from enum import Enum
@@ -46,18 +44,11 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
+from Tensile.Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
-
-_timing_logger = logging.getLogger("tensile.timing")
-if not _timing_logger.handlers:
-    _h = logging.StreamHandler(sys.stderr)
-    _h.setFormatter(logging.Formatter("%(message)s"))
-    _timing_logger.addHandler(_h)
-    _timing_logger.setLevel(logging.INFO)
-    _timing_logger.propagate = False
 
 class DataInitName(Enum):
   Zero = 0
@@ -225,8 +216,6 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
 
 
 def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
-  import time
-
   buildPath = ensurePath(outputPath / "build")
   timingEnabled = globalParameters.get("TimingInstrumentation", False)
   parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
@@ -245,23 +234,17 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
   else:
     numGpus = parallelGpus
 
-  # Use parallel execution only for benchmarking with multiple GPUs
-  if numGpus > 1 and forBenchmark:
-    return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
+  with timing_context("python_client_execution"):
+    # Use parallel execution only for benchmarking with multiple GPUs
+    if numGpus > 1 and forBenchmark:
+      return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
 
-  # Original single-GPU path
-  runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+    # Original single-GPU path
+    runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
-  # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
-  startTime = time.time_ns()
-
-  with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-    process = subprocess.Popen(runScriptName, cwd=buildPath)
-    process.communicate()
-
-  if timingEnabled:
-    elapsed = (time.time_ns() - startTime) / 1_000_000
-    _timing_logger.info(f"TIMING:python_client_execution:{elapsed:.3f}")
+    with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+      process = subprocess.Popen(runScriptName, cwd=buildPath)
+      process.communicate()
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
@@ -708,7 +691,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("use-user-args",            globalParameters["UseUserArgs"])
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
-
+        if globalParameters["RocProfCounter"]:
+            for counter in globalParameters["RocProfCounter"]:
+                param("rocprof-counter", counter)
 
 def writeClientConfig(
       forBenchmark,

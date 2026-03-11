@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -243,7 +244,7 @@ rocblas_status rocblas_internal_sbmv_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int sbmv_DIM_X = 64;
-    static constexpr int sbmv_DIM_Y = 16;
+    static constexpr int sbmv_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     rocblas_int          blocks     = (n - 1) / (sbmv_DIM_X) + 1;
     dim3                 grid(blocks, 1, batches);
     dim3                 threads(sbmv_DIM_X, sbmv_DIM_Y);

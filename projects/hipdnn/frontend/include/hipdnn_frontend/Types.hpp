@@ -5,9 +5,17 @@
  * @file Types.hpp
  * @brief Core type definitions and enumerations for the hipDNN Frontend API
  *
- * This file contains all the fundamental types used throughout the hipDNN Frontend,
- * including data types, convolution modes, pointwise operation modes, and utility
- * functions for type conversion between frontend and SDK types.
+ * Defines the fundamental enums that configure hipDNN operations:
+ *
+ * | hipDNN enum | Concept | Purpose |
+ * |-------------|---------|---------|
+ * | DataType | Numeric precision | fp32, fp16, bf16, fp8, etc. |
+ * | PointwiseMode | Activation / element-wise op | relu, gelu, add, mul, etc. |
+ * | ConvolutionMode | Filter application method | Cross-correlation vs mathematical convolution |
+ * | NormFwdPhase | Training vs inference | Whether to save stats for backward pass |
+ *
+ * This file also contains conversion utilities between frontend types and
+ * the internal SDK/backend types.
  */
 
 #pragma once
@@ -15,6 +23,8 @@
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
+#include <HipdnnNormFwdPhase.h>
+#include <HipdnnPointwiseMode.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -264,6 +274,7 @@ DataType getDataTypeEnumFromType()
     }
 }
 
+/// @brief Convert frontend ConvolutionMode to SDK ConvMode
 inline hipdnn_data_sdk::data_objects::ConvMode toSdkType(const ConvolutionMode& type)
 {
     switch(type)
@@ -299,6 +310,141 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
     }
 }
 
+/**
+ * @brief Convert frontend NormFwdPhase to backend hipdnnNormFwdPhase_t
+ *
+ * Maps frontend normalization forward phase to the backend C API enum type
+ * for use with HIPDNN_TYPE_NORM_FWD_PHASE attributes.
+ *
+ * @param type The frontend NormFwdPhase value
+ * @return The corresponding hipdnnNormFwdPhase_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case NormFwdPhase::INFERENCE:
+        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    case NormFwdPhase::TRAINING:
+        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert frontend PointwiseMode to backend hipdnnPointwiseMode_t
+ *
+ * Maps frontend pointwise mode enum to the backend C API enum type for use
+ * with HIPDNN_TYPE_POINTWISE_MODE attributes.
+ *
+ * @param type The frontend PointwiseMode value
+ * @return The corresponding hipdnnPointwiseMode_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnPointwiseMode_t> toBackendPointwiseMode(const PointwiseMode& type)
+{
+    switch(type)
+    {
+    case PointwiseMode::ABS:
+        return HIPDNN_POINTWISE_ABS;
+    case PointwiseMode::ADD:
+        return HIPDNN_POINTWISE_ADD;
+    case PointwiseMode::ADD_SQUARE:
+        return HIPDNN_POINTWISE_ADD_SQUARE;
+    case PointwiseMode::BINARY_SELECT:
+        return HIPDNN_POINTWISE_BINARY_SELECT;
+    case PointwiseMode::CEIL:
+        return HIPDNN_POINTWISE_CEIL;
+    case PointwiseMode::CMP_EQ:
+        return HIPDNN_POINTWISE_CMP_EQ;
+    case PointwiseMode::CMP_GE:
+        return HIPDNN_POINTWISE_CMP_GE;
+    case PointwiseMode::CMP_GT:
+        return HIPDNN_POINTWISE_CMP_GT;
+    case PointwiseMode::CMP_LE:
+        return HIPDNN_POINTWISE_CMP_LE;
+    case PointwiseMode::CMP_LT:
+        return HIPDNN_POINTWISE_CMP_LT;
+    case PointwiseMode::CMP_NEQ:
+        return HIPDNN_POINTWISE_CMP_NEQ;
+    case PointwiseMode::DIV:
+        return HIPDNN_POINTWISE_DIV;
+    case PointwiseMode::ELU_BWD:
+        return HIPDNN_POINTWISE_ELU_BWD;
+    case PointwiseMode::ELU_FWD:
+        return HIPDNN_POINTWISE_ELU_FWD;
+    case PointwiseMode::ERF:
+        return HIPDNN_POINTWISE_ERF;
+    case PointwiseMode::EXP:
+        return HIPDNN_POINTWISE_EXP;
+    case PointwiseMode::FLOOR:
+        return HIPDNN_POINTWISE_FLOOR;
+    case PointwiseMode::GELU_APPROX_TANH_BWD:
+        return HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD;
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
+        return HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD;
+    case PointwiseMode::GELU_BWD:
+        return HIPDNN_POINTWISE_GELU_BWD;
+    case PointwiseMode::GELU_FWD:
+        return HIPDNN_POINTWISE_GELU_FWD;
+    case PointwiseMode::GEN_INDEX:
+        return HIPDNN_POINTWISE_GEN_INDEX;
+    case PointwiseMode::IDENTITY:
+        return HIPDNN_POINTWISE_IDENTITY;
+    case PointwiseMode::LOG:
+        return HIPDNN_POINTWISE_LOG;
+    case PointwiseMode::LOGICAL_AND:
+        return HIPDNN_POINTWISE_LOGICAL_AND;
+    case PointwiseMode::LOGICAL_NOT:
+        return HIPDNN_POINTWISE_LOGICAL_NOT;
+    case PointwiseMode::LOGICAL_OR:
+        return HIPDNN_POINTWISE_LOGICAL_OR;
+    case PointwiseMode::MAX:
+        return HIPDNN_POINTWISE_MAX;
+    case PointwiseMode::MIN:
+        return HIPDNN_POINTWISE_MIN;
+    case PointwiseMode::MUL:
+        return HIPDNN_POINTWISE_MUL;
+    case PointwiseMode::NEG:
+        return HIPDNN_POINTWISE_NEG;
+    case PointwiseMode::RECIPROCAL:
+        return HIPDNN_POINTWISE_RECIPROCAL;
+    case PointwiseMode::RELU_BWD:
+        return HIPDNN_POINTWISE_RELU_BWD;
+    case PointwiseMode::RELU_FWD:
+        return HIPDNN_POINTWISE_RELU_FWD;
+    case PointwiseMode::RSQRT:
+        return HIPDNN_POINTWISE_RSQRT;
+    case PointwiseMode::SIGMOID_BWD:
+        return HIPDNN_POINTWISE_SIGMOID_BWD;
+    case PointwiseMode::SIGMOID_FWD:
+        return HIPDNN_POINTWISE_SIGMOID_FWD;
+    case PointwiseMode::SIN:
+        return HIPDNN_POINTWISE_SIN;
+    case PointwiseMode::SOFTPLUS_BWD:
+        return HIPDNN_POINTWISE_SOFTPLUS_BWD;
+    case PointwiseMode::SOFTPLUS_FWD:
+        return HIPDNN_POINTWISE_SOFTPLUS_FWD;
+    case PointwiseMode::SQRT:
+        return HIPDNN_POINTWISE_SQRT;
+    case PointwiseMode::SUB:
+        return HIPDNN_POINTWISE_SUB;
+    case PointwiseMode::SWISH_BWD:
+        return HIPDNN_POINTWISE_SWISH_BWD;
+    case PointwiseMode::SWISH_FWD:
+        return HIPDNN_POINTWISE_SWISH_FWD;
+    case PointwiseMode::TAN:
+        return HIPDNN_POINTWISE_TAN;
+    case PointwiseMode::TANH_BWD:
+        return HIPDNN_POINTWISE_TANH_BWD;
+    case PointwiseMode::TANH_FWD:
+        return HIPDNN_POINTWISE_TANH_FWD;
+    default:
+        return std::nullopt;
+    }
+}
+
+/// @brief Convert SDK ConvMode to frontend ConvolutionMode
 inline hipdnn_frontend::ConvolutionMode
     fromSdkType(const hipdnn_data_sdk::data_objects::ConvMode& type)
 {
@@ -313,6 +459,7 @@ inline hipdnn_frontend::ConvolutionMode
     }
 }
 
+/// @brief Convert frontend DataType to SDK DataType
 inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
 {
     switch(type)
@@ -340,6 +487,7 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
     }
 }
 
+/// @brief Convert SDK DataType to frontend DataType
 inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects::DataType& type)
 {
     switch(type)
@@ -426,6 +574,7 @@ inline hipdnn_frontend::AttentionImplementation
     }
 }
 
+/// @brief Convert frontend DataType to backend hipdnnDataType_t
 inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
 {
     switch(type)
@@ -454,6 +603,7 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
     }
 }
 
+/// @brief Convert frontend PointwiseMode to SDK PointwiseMode
 inline hipdnn_data_sdk::data_objects::PointwiseMode toSdkType(const PointwiseMode& type)
 {
     switch(type)
@@ -557,6 +707,7 @@ inline hipdnn_data_sdk::data_objects::PointwiseMode toSdkType(const PointwiseMod
     }
 }
 
+/// @brief Convert SDK PointwiseMode to frontend PointwiseMode
 inline hipdnn_frontend::PointwiseMode
     fromSdkType(const hipdnn_data_sdk::data_objects::PointwiseMode& type)
 {
@@ -661,6 +812,7 @@ inline hipdnn_frontend::PointwiseMode
     }
 }
 
+/// @brief Convert frontend HeuristicMode to backend heuristic mode
 inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
@@ -698,6 +850,7 @@ inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
     return os << to_string(mode);
 }
 
+/// @brief Get a human-readable string for a DataType value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const DataType& type)
 {
@@ -726,11 +879,13 @@ inline const char* to_string(const DataType& type)
     }
 }
 
+/// @brief Stream insertion operator for DataType
 inline std::ostream& operator<<(std::ostream& os, const DataType& type)
 {
     return os << to_string(type);
 }
 
+/// @brief Get a human-readable string for a BuildPlanPolicy value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const BuildPlanPolicy& policy)
 {
@@ -745,11 +900,13 @@ inline const char* to_string(const BuildPlanPolicy& policy)
     }
 }
 
+/// @brief Stream insertion operator for BuildPlanPolicy
 inline std::ostream& operator<<(std::ostream& os, const BuildPlanPolicy& policy)
 {
     return os << to_string(policy);
 }
 
+/// @brief Get a human-readable string for a HeuristicMode value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const HeuristicMode& mode)
 {
@@ -762,11 +919,13 @@ inline const char* to_string(const HeuristicMode& mode)
     }
 }
 
+/// @brief Stream insertion operator for HeuristicMode
 inline std::ostream& operator<<(std::ostream& os, const HeuristicMode& mode)
 {
     return os << to_string(mode);
 }
 
+/// @brief Convert frontend KnobValueType to SDK KnobValue
 inline hipdnn_data_sdk::data_objects::KnobValue toSdkType(const KnobValueType& type)
 {
     switch(type)
@@ -782,6 +941,7 @@ inline hipdnn_data_sdk::data_objects::KnobValue toSdkType(const KnobValueType& t
     }
 }
 
+/// @brief Convert SDK KnobValue to frontend KnobValueType
 inline hipdnn_frontend::KnobValueType
     fromSdkType(const hipdnn_data_sdk::data_objects::KnobValue& type)
 {
@@ -798,6 +958,7 @@ inline hipdnn_frontend::KnobValueType
     }
 }
 
+/// @brief Convert frontend NormFwdPhase to SDK NormFwdPhase
 inline hipdnn_data_sdk::data_objects::NormFwdPhase toSdkType(const NormFwdPhase& type)
 {
     switch(type)
@@ -811,6 +972,7 @@ inline hipdnn_data_sdk::data_objects::NormFwdPhase toSdkType(const NormFwdPhase&
     }
 }
 
+/// @brief Convert SDK NormFwdPhase to frontend NormFwdPhase
 inline hipdnn_frontend::NormFwdPhase
     fromSdkType(const hipdnn_data_sdk::data_objects::NormFwdPhase& type)
 {
@@ -825,6 +987,7 @@ inline hipdnn_frontend::NormFwdPhase
     }
 }
 
+/// @brief Get a human-readable string for a KnobValueType value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const KnobValueType& type)
 {
@@ -841,11 +1004,13 @@ inline const char* to_string(const KnobValueType& type)
     }
 }
 
+/// @brief Stream insertion operator for KnobValueType
 inline std::ostream& operator<<(std::ostream& os, const KnobValueType& type)
 {
     return os << to_string(type);
 }
 
+/// @brief Get a human-readable string for a NormFwdPhase value
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const NormFwdPhase& phase)
 {
@@ -860,12 +1025,18 @@ inline const char* to_string(const NormFwdPhase& phase)
     }
 }
 
+/// @brief Stream insertion operator for NormFwdPhase
 inline std::ostream& operator<<(std::ostream& os, const NormFwdPhase& phase)
 {
     return os << to_string(phase);
 }
 
-// Helper function to get KnobValueType from a variant
+/**
+ * @brief Determine the KnobValueType from a variant's active alternative
+ * @tparam Ts Variant alternative types
+ * @param value The variant to inspect
+ * @return The KnobValueType matching the currently held type
+ */
 template <typename... Ts>
 inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& value)
 {
@@ -917,17 +1088,19 @@ inline bool isTernaryPointwiseMode(PointwiseMode mode)
     return hipdnn_data_sdk::utilities::isTernaryPointwiseMode(toSdkType(mode));
 }
 
-// Expose SDK bitset functions for compatibility (delegate to SDK)
+/// @brief Get the bitset of all unary pointwise modes
 inline const auto& getUnaryModesBitset()
 {
     return hipdnn_data_sdk::utilities::getUnaryModesBitset();
 }
 
+/// @brief Get the bitset of all binary pointwise modes
 inline const auto& getBinaryModesBitset()
 {
     return hipdnn_data_sdk::utilities::getBinaryModesBitset();
 }
 
+/// @brief Get the bitset of all ternary pointwise modes
 inline const auto& getTernaryModesBitset()
 {
     return hipdnn_data_sdk::utilities::getTernaryModesBitset();

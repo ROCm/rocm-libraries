@@ -1,63 +1,86 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
+
+#include <string_view>
+
+namespace hipdnn_data_sdk
+{
+namespace rmsnorm_json_keys
+{
+constexpr std::string_view INPUTS = "inputs";
+constexpr std::string_view OUTPUTS = "outputs";
+constexpr std::string_view X_TENSOR_UID = "x_tensor_uid";
+constexpr std::string_view SCALE_TENSOR_UID = "scale_tensor_uid";
+constexpr std::string_view EPSILON_TENSOR_UID = "epsilon_tensor_uid";
+constexpr std::string_view Y_TENSOR_UID = "y_tensor_uid";
+constexpr std::string_view BIAS_TENSOR_UID = "bias_tensor_uid";
+constexpr std::string_view INV_RMS_TENSOR_UID = "inv_rms_tensor_uid";
+constexpr std::string_view FORWARD_PHASE = "forward_phase";
+} // namespace rmsnorm_json_keys
+} // namespace hipdnn_data_sdk
 
 namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& rmsnormJson, const RMSNormAttributes& rms)
 {
-    auto& inputs = rmsnormJson["inputs"] = {};
+    namespace keys = hipdnn_data_sdk::rmsnorm_json_keys;
 
-    inputs["x_tensor_uid"] = rms.x_tensor_uid();
-    inputs["scale_tensor_uid"] = rms.scale_tensor_uid();
-    inputs["epsilon_tensor_uid"] = rms.epsilon_tensor_uid();
+    auto& inputs = rmsnormJson[keys::INPUTS] = {};
+
+    inputs[keys::X_TENSOR_UID] = rms.x_tensor_uid();
+    inputs[keys::SCALE_TENSOR_UID] = rms.scale_tensor_uid();
+    inputs[keys::EPSILON_TENSOR_UID] = rms.epsilon_tensor_uid();
     if(rms.bias_tensor_uid().has_value())
     {
-        inputs["bias_tensor_uid"] = rms.bias_tensor_uid().value();
+        inputs[keys::BIAS_TENSOR_UID] = rms.bias_tensor_uid().value();
     }
 
-    auto& outputs = rmsnormJson["outputs"] = {};
-    outputs["y_tensor_uid"] = rms.y_tensor_uid();
+    auto& outputs = rmsnormJson[keys::OUTPUTS] = {};
+    outputs[keys::Y_TENSOR_UID] = rms.y_tensor_uid();
     if(rms.inv_rms_tensor_uid().has_value())
     {
-        outputs["inv_rms_tensor_uid"] = rms.inv_rms_tensor_uid().value();
+        outputs[keys::INV_RMS_TENSOR_UID] = rms.inv_rms_tensor_uid().value();
     }
 
     if(rms.forward_phase() != data_objects::NormFwdPhase::NOT_SET)
     {
-        rmsnormJson["forward_phase"] = EnumNameNormFwdPhase(rms.forward_phase());
+        rmsnormJson[keys::FORWARD_PHASE] = EnumNameNormFwdPhase(rms.forward_phase());
     }
 }
 
-}
+} // namespace hipdnn_data_sdk::data_objects
 namespace hipdnn_data_sdk::json
 {
 template <>
 inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                 const nlohmann::json& entry)
 {
-    auto& inputs = entry["inputs"];
+    namespace keys = hipdnn_data_sdk::rmsnorm_json_keys;
+
+    auto& inputs = entry[keys::INPUTS];
 
     flatbuffers::Optional<int64_t> invRmsUid = flatbuffers::nullopt;
-    if(entry.contains("outputs") && entry["outputs"].contains("inv_rms_tensor_uid"))
+    if(entry.contains(keys::OUTPUTS) && entry[keys::OUTPUTS].contains(keys::INV_RMS_TENSOR_UID))
     {
-        invRmsUid = entry["outputs"]["inv_rms_tensor_uid"].get<int64_t>();
+        invRmsUid = entry[keys::OUTPUTS][keys::INV_RMS_TENSOR_UID].get<int64_t>();
     }
 
     flatbuffers::Optional<int64_t> biasUid = flatbuffers::nullopt;
-    if(inputs.contains("bias_tensor_uid"))
+    if(inputs.contains(keys::BIAS_TENSOR_UID))
     {
-        biasUid = inputs["bias_tensor_uid"].get<int64_t>();
+        biasUid = inputs[keys::BIAS_TENSOR_UID].get<int64_t>();
     }
 
     auto forwardPhase = data_objects::NormFwdPhase::NOT_SET;
-    if(entry.contains("forward_phase"))
+    if(entry.contains(keys::FORWARD_PHASE))
     {
-        auto phaseStr = entry["forward_phase"].get<std::string>();
+        auto phaseStr = entry[keys::FORWARD_PHASE].get<std::string>();
         if(phaseStr == "INFERENCE")
         {
             forwardPhase = data_objects::NormFwdPhase::INFERENCE;
@@ -70,13 +93,13 @@ inline auto to<data_objects::RMSNormAttributes>(flatbuffers::FlatBufferBuilder& 
 
     return data_objects::CreateRMSNormAttributes(
         builder,
-        inputs.at("x_tensor_uid").get<int64_t>(),
-        inputs.at("scale_tensor_uid").get<int64_t>(),
-        inputs.at("epsilon_tensor_uid").get<int64_t>(),
-        entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
+        inputs.at(keys::X_TENSOR_UID).get<int64_t>(),
+        inputs.at(keys::SCALE_TENSOR_UID).get<int64_t>(),
+        inputs.at(keys::EPSILON_TENSOR_UID).get<int64_t>(),
+        entry.at(keys::OUTPUTS).at(keys::Y_TENSOR_UID).get<int64_t>(),
         biasUid,
         invRmsUid,
         forwardPhase);
 }
 
-}
+} // namespace hipdnn_data_sdk::json

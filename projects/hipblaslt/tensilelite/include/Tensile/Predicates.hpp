@@ -158,7 +158,7 @@ namespace TensileLite
             virtual bool operator()(Object const& obj) const
             {
                 return std::all_of(
-                    value.begin(), value.end(), [&obj](std::shared_ptr<Predicate<Object>> pred) {
+                    value.begin(), value.end(), [&obj](const auto& pred) {
                         return (*pred)(obj);
                     });
             }
@@ -208,7 +208,7 @@ namespace TensileLite
             virtual bool operator()(Object const& obj) const
             {
                 return std::any_of(
-                    value.begin(), value.end(), [&obj](std::shared_ptr<Predicate<Object>> pred) {
+                    value.begin(), value.end(), [&obj](const auto& pred) {
                         return (*pred)(obj);
                     });
             }
