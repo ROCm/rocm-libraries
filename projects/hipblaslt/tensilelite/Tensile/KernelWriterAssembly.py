@@ -4414,7 +4414,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if lrvwOther >= 2 and (not tluOther) and tP["tlu"]:
         # DirectToVgpr + LocalReadVectorWidth>=2 case, multiply qReg by lrvwOther
-        dtvKInterval = lrvwOther
+        dtvKInterval = int(lrvwOther)
       if  tluOther and tP["tlu"]:
         # DirectToVgpr + both TLU case, multiply qReg by kernel["MIInputPerThread"]
         dtvKInterval = kernel["MIInputPerThread"]
