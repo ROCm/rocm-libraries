@@ -207,23 +207,9 @@ protected:
     // Helper to check if required model files exist for a device
     bool ModelFilesExist(const std::string& device, int dim)
     {
-        std::string arch;
-        if(dim == 3)
-        {
-            arch = device + "_3d";
-        }
-        else
-        {
-            // For 2D, we need to check if any of the 2D solver model files exist
-            // Check for any of the 2D grouped conv solvers
-            std::vector<std::string> solver_names = {"ConvHipImplicitGemmGroupFwdXdlops",
-                                                     "ConvHipImplicitGemmGroupBwdXdlops",
-                                                     "ConvHipImplicitGemmGroupWrwXdlops"};
-            // For 2D TunaNet models, we don't have a unified model like 3D
-            // Instead, we should skip this check for 2D as it's not implemented yet
-            // or return false to skip 2D tests for now
-            return false; // TODO: Implement 2D TunaNet support
-        }
+        // For 3D: use device_3d (e.g., "gfx942_3d")
+        // For 2D: use device (e.g., "gfx942")
+        std::string arch = (dim == 3) ? device + "_3d" : device;
 
         auto model_path    = GetSystemDbPath() / (arch + ".tn.model");
         auto metadata_path = GetSystemDbPath() / (arch + "_metadata.tn.model");
@@ -239,12 +225,12 @@ protected:
 // --- MetadataND tests ---
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_LoadValidArchitecture)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D metadata currently supported";
-
     convnd::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
-    EXPECT_EQ(metadata.GetModelPrefix(), device_name + "_3d");
+    
+    // Expected model prefix depends on dimension
+    std::string expected_prefix = (spatial_dim == 3) ? device_name + "_3d" : device_name;
+    EXPECT_EQ(metadata.GetModelPrefix(), expected_prefix);
     EXPECT_GT(metadata.GetNumInputs(), 0);
     EXPECT_GT(metadata.GetNumOutputs(), 0);
     EXPECT_GT(metadata.GetNumSolvers(), 0);
@@ -254,9 +240,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_LoadValidArchitecture)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeDirection)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D metadata currently supported";
-
     convnd::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
     auto fwd_encoded = metadata.EncodeDirection(miopen::conv::Direction::Forward);
@@ -269,9 +252,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeDirection)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodePrecision)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D metadata currently supported";
-
     convnd::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
     auto fp32_encoded = metadata.EncodePrecision(miopenFloat);
@@ -284,9 +264,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodePrecision)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeLayouts)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D metadata currently supported";
-
     convnd::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
 
@@ -315,18 +292,12 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeLayouts)
 // --- ModelND tests ---
 TEST_P(GPU_ConvNDAIHeuristics_FP32, GetNDModel_SupportedDevice)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D models currently supported";
-
     auto model = convnd::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
 }
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_CorrectDimension)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D models currently supported";
-
     auto model = convnd::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
     auto problem = CreateProblem();
@@ -335,9 +306,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_CorrectDimension)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_WrongDimension)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D models currently supported";
-
     auto model = convnd::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
 
@@ -349,16 +317,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_WrongDimension)
     }
     else
     {
-        miopen::TensorDescriptor inputTensor2D(miopenFloat, {1, 4, 8, 8});
-        miopen::TensorDescriptor weightsTensor2D(miopenFloat, {8, 4, 3, 3});
-        miopen::TensorDescriptor outputTensor2D(miopenFloat, {1, 8, 6, 6});
-        miopen::ConvolutionDescriptor convDesc2D(
-            2, miopenConvolution, miopenPaddingDefault, {0, 0}, {1, 1}, {1, 1});
-        wrong_dim_problem = miopen::conv::ProblemDescription(inputTensor2D,
-                                                             weightsTensor2D,
-                                                             outputTensor2D,
-                                                             convDesc2D,
-                                                             miopen::conv::Direction::Forward);
+        wrong_dim_problem = Create2DProblem();
     }
 
     EXPECT_FALSE(model->IsProblemSupported(wrong_dim_problem, ctx));
@@ -366,9 +325,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_WrongDimension)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_Forward_ReturnsValidPredictions)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D models currently supported";
-
     auto model = convnd::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
     auto problem = CreateProblem();
@@ -385,9 +341,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_Forward_ReturnsValidPredictions)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, PredictSolver_ReturnsSolvers)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D immed_mode currently supported";
-
     auto problem = CreateProblem();
     auto solvers = immed_mode::PredictSolver(problem, ctx, device_name);
     EXPECT_FALSE(solvers.empty());
@@ -397,9 +350,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, PredictSolver_ReturnsSolvers)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, PredictSolver_UsesCaching)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D immed_mode currently supported";
-
     auto problem  = CreateProblem();
     auto solvers1 = immed_mode::PredictSolver(problem, ctx, device_name);
     auto solvers2 = immed_mode::PredictSolver(problem, ctx, device_name);
@@ -408,9 +358,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, PredictSolver_UsesCaching)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_DifferentProblemSizes)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D models currently supported";
-
     auto model = convnd::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
 
@@ -446,9 +393,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_DifferentProblemSizes)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_OptionalPattern)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D metadata currently supported";
-
     convnd::MetadataND invalid_metadata("nonexistent", spatial_dim);
     EXPECT_FALSE(invalid_metadata.IsValid());
     EXPECT_EQ(invalid_metadata.GetNumInputs(), 0);
@@ -463,9 +407,6 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_OptionalPattern)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, TestMIOpenDriverEquivalent)
 {
-    if(spatial_dim != 3)
-        GTEST_SKIP() << "Only 3D immed_mode currently supported";
-
     miopen::conv::ProblemDescription problem;
     if(spatial_dim == 3)
     {
