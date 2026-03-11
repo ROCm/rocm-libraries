@@ -45,8 +45,6 @@ def pytest_addoption(parser):
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
-    parser.addoption("--disable-client-lock", action="store_true", default=False,
-                     help="Disable automatic client lock for parallel test execution")
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
@@ -128,7 +126,7 @@ def worker_lock_instance(worker_lock_path):
 def tensile_args(pytestconfig, builddir, worker_lock_path):
     rv = []
     disable_client_lock = pytestconfig.getoption("--disable-client-lock")
-    if worker_lock_path and not disable_client_lock:
+    if worker_lock_path:
         rv += ["--client-lock", str(worker_lock_path)]
 
     extraOptions = pytestconfig.getoption("--tensile-options")
