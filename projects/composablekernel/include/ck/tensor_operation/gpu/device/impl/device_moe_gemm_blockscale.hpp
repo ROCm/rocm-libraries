@@ -273,9 +273,9 @@ struct DeviceMoeGemmBlockScale
                 }
                 else
                 {
-                    if(arg_.KBatch > 1)
+                    if(arg.KBatch > 1)
                         hipGetErrorString(
-                            hipMemsetAsync(arg_.p_c_grid,
+                            hipMemsetAsync(arg.p_c_grid,
                                            0,
                                            arg.NumTokens * arg.TopK * arg.N * sizeof(CDataType) *
                                                (IsInputGemm && IsSplitK ? 2 : 1),
