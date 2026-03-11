@@ -128,7 +128,7 @@ int CountOccurrences(const std::string& filepath, const std::string& search_stri
     return count;
 }
 
-class GPU_HipGraphExistTest_NONE : public testing::TestWithParam<HipGraphTestCase>
+class GPU_HipGraphExistTest_FP32 : public testing::TestWithParam<HipGraphTestCase>
 {
 protected:
     std::string temp_dir;
@@ -332,10 +332,10 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
 
 using namespace hip_graph_exist;
 
-TEST_P(GPU_HipGraphExistTest_NONE, HipGraphExist)
+TEST_P(GPU_HipGraphExistTest_FP32, HipGraphExist)
 {
     const auto& test_case = GetParam();
     RunHipGraphTest(test_case, temp_dir);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipGraphExistTest_NONE, testing::ValuesIn(GenSmokeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipGraphExistTest_FP32, testing::ValuesIn(GenSmokeTestCases()));
