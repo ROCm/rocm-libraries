@@ -277,7 +277,7 @@ struct DeviceMoeGemmBlockScale
                         hipGetErrorString(
                             hipMemsetAsync(arg_.p_c_grid,
                                            0,
-                                           arg_.NumTokens * arg_.TopK * arg_.N * sizeof(CDataType) *
+                                           arg.NumTokens * arg.TopK * arg.N * sizeof(CDataType) *
                                                (IsInputGemm && IsSplitK ? 2 : 1),
                                            stream_config.stream_id_));
                     ave_time = launch_and_time_kernel(
