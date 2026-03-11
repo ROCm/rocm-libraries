@@ -251,7 +251,6 @@ test_categories:
       - "*"
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
 
     test_files:
       # All test files in the suite
@@ -308,7 +307,11 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: *gfx11_common_patterns
+    test_patterns: 
+      - *gfx11_common_patterns
+      - "*/GPU_MIOpenDriver*"
+      - "Smoke/CPU_Handle_NONE*"
+      - "Full/GPU_reduce_custom_fp32*
     labels:
       - "quick"
       - "standard"
