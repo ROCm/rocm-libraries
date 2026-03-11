@@ -1251,9 +1251,9 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   // per-iteration working set is tiny and fits easily in L2. Multiple
   // wavefronts per CU issue overlapping loads for this shared data, creating
   // intra-CU L2 hits beyond what cross-CU spatial reuse captures.
-  bool enable_skinny_amp = (context.grid_m <= 2 && context.grid_n > context.grid_m * 8) || 
-                           (context.grid_n <= 2 && context.grid_m > context.grid_n * 8);
-  enable_skinny_amp &= (splitting_factor == 1) && (problem.batch == 1);
+  bool enable_skinny_amp = (grid.m <= 2 && grid.n > grid.m * 8) || 
+                           (grid.n <= 2 && grid.m > grid.n * 8);
+  enable_skinny_amp &= (grid.k == 1) && (grid.b == 1);
   if (enable_skinny_amp && concurrent_load < l2_cap) {
       constexpr double amp_ceiling = 0.6;
       const double headroom = 1.0 - concurrent_load / l2_cap;
