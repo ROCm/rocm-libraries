@@ -78,9 +78,13 @@ def load_depmap(depmap_json):
         elif "workspace_root" in data["repo"]:
             # Extract project from workspace_root path
             workspace_root = data["repo"]["workspace_root"]
+            # Convert relative path to absolute if needed
+            if not os.path.isabs(workspace_root):
+                depmap_dir = os.path.dirname(os.path.abspath(depmap_json))
+                workspace_root = os.path.abspath(os.path.join(depmap_dir, workspace_root))
             # If workspace_root is like /path/to/projects/composablekernel, extract composablekernel
             if "/projects/" in workspace_root:
-                json_project = workspace_root.split("/projects/")[1].rstrip("/")
+                json_project = workspace_root.split("/projects/")[1].rstrip("/").split("/")[0]
     if "file_to_executables" in data:
         return data["file_to_executables"], json_project
     return data, json_project
