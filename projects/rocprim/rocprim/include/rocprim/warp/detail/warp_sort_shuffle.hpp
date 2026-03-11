@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,63 +73,91 @@ struct warp_shuffle_sort_impl
 
     /// Compares the value between pairs of lanes, where the pairs are selected via
     /// a XOR-masks. Then sorts the keys and values according to the passed direction.
-    template<bool = false, class K, class V, class BinaryFunction>
+    template<bool = false, bool = false, class K, class V, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void
-        wlev_cas(bool dir, BinaryFunction compare_function, unsigned int xor_mask, K& k, V& v)
+        wlev_cas(bool is_upper, BinaryFunction compare_function, unsigned int xor_mask, K& k, V& v)
     {
-        const K    k1   = lane_xor_swap(k, xor_mask);
-        const bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
-        if(swap)
-        {
-            k = k1;
-            v = lane_xor_swap(v, xor_mask);
-        }
+        K k1 = lane_xor_swap(k, xor_mask);
+        V v1 = lane_xor_swap(v, xor_mask);
+
+        const bool swap = compare_function(is_upper ? k : k1, is_upper ? k1 : k);
+
+        swap_if<swap_method::ternary>(swap, k, k1);
+        swap_if<swap_method::ternary>(swap, v, v1);
     }
 
     /// Compares multiple values between pairs of lanes, where the pairs are selected via
     /// a XOR-masks. Then sorts the keys and values according to the passed direction.
-    template<bool try_pack = false, class K, class V, class BinaryFunction>
+    template<bool is_first_step = false,
+             bool try_pack      = false,
+             class K,
+             class V,
+             class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void wlev_cas(bool           dir,
+    static void wlev_cas(bool           is_upper,
                          BinaryFunction compare_function,
                          unsigned int   xor_mask,
                          K (&k)[ItemsPerThread],
                          V (&v)[ItemsPerThread])
     {
-        // for(unsigned int item = 0; item < ItemsPerThread; item++)
-        ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread, 1>(
-            [&](auto item)
-            {
-                const K&   k0   = k[item];
-                const V&   v0   = v[item];
-                const K    k1   = lane_xor_swap(k0, xor_mask);
-                const bool swap = compare_function(dir ? k0 : k1, dir ? k1 : k0);
-
-                if(swap)
+        if constexpr(is_first_step && ItemsPerThread > 1)
+        {
+            ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread / 2, 1>(
+                [&](auto i)
                 {
-                    k[item] = k1;
-                    v[item] = lane_xor_swap(v0, xor_mask);
-                }
-            });
+                    constexpr auto item1 = i;
+                    constexpr auto item2 = ItemsPerThread - 1 - i;
+
+                    K k1_1 = lane_xor_swap(k[item2], xor_mask);
+                    K k1_2 = lane_xor_swap(k[item1], xor_mask);
+                    V v1_1 = lane_xor_swap(v[item2], xor_mask);
+                    V v1_2 = lane_xor_swap(v[item1], xor_mask);
+
+                    const bool swap1
+                        = compare_function(is_upper ? k[item1] : k1_1, is_upper ? k1_1 : k[item1]);
+                    const bool swap2
+                        = compare_function(is_upper ? k[item2] : k1_2, is_upper ? k1_2 : k[item2]);
+
+                    swap_if<swap_method::ternary>(swap1, k[item1], k1_1);
+                    swap_if<swap_method::ternary>(swap1, v[item1], v1_1);
+                    swap_if<swap_method::ternary>(swap2, k[item2], k1_2);
+                    swap_if<swap_method::ternary>(swap2, v[item2], v1_2);
+                });
+        }
+        else
+        {
+            ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread, 1>(
+                [&](auto item)
+                {
+                    K k1 = lane_xor_swap(k[item], xor_mask);
+                    V v1 = lane_xor_swap(v[item], xor_mask);
+
+                    const bool swap = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
+
+                    swap_if<swap_method::ternary>(swap, k[item], k1);
+                    swap_if<swap_method::ternary>(swap, v[item], v1);
+                });
+        }
     }
 
     /// Compares the value between pairs of lanes, where the pairs are selected via
     /// a XOR-masks. Then sorts the keys according to the passed direction.
-    template<bool = false, class K, class BinaryFunction>
+    template<bool = false, bool = false, class K, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void wlev_cas(bool dir, BinaryFunction compare_function, unsigned int xor_mask, K& k)
+    static void
+        wlev_cas(bool is_upper, BinaryFunction compare_function, unsigned int xor_mask, K& k)
     {
         const K    k1   = lane_xor_swap(k, xor_mask);
-        const bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
+        const bool swap = compare_function(is_upper ? k : k1, is_upper ? k1 : k);
         k               = swap ? k1 : k;
     }
 
     /// Compares multiple values between pairs of lanes, where the pairs are selected via
     /// a XOR-masks. Then sorts the keys according to the passed direction.
-    template<bool try_pack = false, class K, class BinaryFunction>
+    template<bool is_first_step = false, bool try_pack = false, class K, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void wlev_cas(bool           dir,
+    static void wlev_cas(bool           is_upper,
                          BinaryFunction compare_function,
                          unsigned int   xor_mask,
                          K (&k)[ItemsPerThread])
@@ -146,9 +174,32 @@ struct warp_shuffle_sort_impl
             ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread, 1>(
                 [&](auto item)
                 {
-                    K          k1   = other_items[item];
-                    const bool swap = compare_function(dir ? k[item] : k1, dir ? k1 : k[item]);
+                    constexpr auto other_item = is_first_step ? (ItemsPerThread - 1 - item) : item;
+
+                    K          k1 = other_items[other_item];
+                    const bool swap
+                        = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
                     swap_if<swap_method::ternary>(swap, k[item], k1);
+                });
+        }
+        else if constexpr(is_first_step)
+        {
+            ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread / 2, 1>(
+                [&](auto i)
+                {
+                    constexpr auto item1 = i;
+                    constexpr auto item2 = ItemsPerThread - 1 - i;
+
+                    K k1_1 = lane_xor_swap(k[item2], xor_mask);
+                    K k1_2 = lane_xor_swap(k[item1], xor_mask);
+
+                    const bool swap1
+                        = compare_function(is_upper ? k[item1] : k1_1, is_upper ? k1_1 : k[item1]);
+                    const bool swap2
+                        = compare_function(is_upper ? k[item2] : k1_2, is_upper ? k1_2 : k[item2]);
+
+                    swap_if<swap_method::ternary>(swap1, k[item1], k1_1);
+                    swap_if<swap_method::ternary>(swap2, k[item2], k1_2);
                 });
         }
         else
@@ -158,7 +209,8 @@ struct warp_shuffle_sort_impl
                 [&](auto item)
                 {
                     K          k1   = lane_xor_swap(k[item], xor_mask);
-                    const bool swap = compare_function(dir ? k[item] : k1, dir ? k1 : k[item]);
+                    const bool swap
+                        = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
                     swap_if<swap_method::ternary>(swap, k[item], k1);
                 });
         }
@@ -166,9 +218,7 @@ struct warp_shuffle_sort_impl
 
     template<int i_l, int i_r, class BinaryFunction, class K>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_cas_single(const bool&    local_dir,
-                                BinaryFunction compare_function,
-                                K (&k)[ItemsPerThread])
+    static void tlev_cas_single(BinaryFunction compare_function, K (&k)[ItemsPerThread])
     {
         // Using v_cndmask (ternary) is faster than v_mov (branched).
         //
@@ -180,14 +230,13 @@ struct warp_shuffle_sort_impl
         //     = sizeof(K) <= 4 ? swap_method::ternary : swap_method::branched;
         constexpr swap_method method = swap_method::ternary;
 
-        const bool swap = compare_function(k[i_l], k[i_r]) == local_dir;
+        const bool swap = compare_function(k[i_r], k[i_l]);
         swap_if<method>(swap, k[i_l], k[i_r]);
     }
 
     template<int i_l, int i_r, class BinaryFunction, class K, class V>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_cas_single(const bool&    local_dir,
-                                BinaryFunction compare_function,
+    static void tlev_cas_single(BinaryFunction compare_function,
                                 K (&k)[ItemsPerThread],
                                 V (&v)[ItemsPerThread])
     {
@@ -195,15 +244,19 @@ struct warp_shuffle_sort_impl
         constexpr swap_method method
             = (sizeof(K) <= 4 || sizeof(V) <= 4) ? swap_method::ternary : swap_method::branched;
 
-        const bool swap = compare_function(k[i_l], k[i_r]) == local_dir;
+        const bool swap = compare_function(k[i_r], k[i_l]);
         swap_if<method>(swap, k[i_l], k[i_r]);
         swap_if<method>(swap, v[i_l], v[i_r]);
     }
 
     /// Applies the thread-level compare and swaps.
-    template<unsigned int group_size, unsigned int offset, class BinaryFunction, class... KeyValue>
+    template<unsigned int group_size,
+             unsigned int offset,
+             bool         flip,
+             class BinaryFunction,
+             class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_cas(unsigned int group_dir, BinaryFunction compare_function, KeyValue&... kv)
+    static void tlev_cas(BinaryFunction compare_function, KeyValue&... kv)
     {
         // Note: we're storing 'group_dir' as unsigned int s.t. the compiler is more
         // inclined to re-use the results from '__builtin_amdgcn_ubfe'.
@@ -212,82 +265,51 @@ struct warp_shuffle_sort_impl
         ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread, 2 * offset>(
             [&](auto base)
             {
-                // The local direction must change every group_size items
-                // and is flipped if dir is true
-                const bool local_dir = ((base & group_size) > 0) != (group_dir > 0);
-
                 // for(unsigned i = 0; i < offset; ++i)
                 ::rocprim::detail::constexpr_for_lt<0, offset, 1>(
                     [&](auto i)
                     {
                         constexpr unsigned int i_l = base + i;
-                        constexpr unsigned int i_r = base + i + offset;
-                        tlev_cas_single<i_l, i_r>(local_dir, compare_function, kv...);
+
+                        constexpr unsigned int i_r
+                            = flip ? (base + group_size - 1 - i)
+                                   : (base + i + offset);
+
+                        tlev_cas_single<i_l, i_r>(compare_function, kv...);
                     });
             });
     }
 
     template<class BinaryFunction,
-             int group_size = ItemsPerThread,
-             int offset     = group_size / 2,
+             int  group_size      = ItemsPerThread,
+             int  offset          = group_size / 2,
+             bool first_step_flip = false,
              class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_pass(unsigned int group_dir, BinaryFunction compare_function, KeyValue&... kv)
+    static void tlev_pass(BinaryFunction compare_function, KeyValue&... kv)
     {
-        // Note: we're storing 'group_dir' as unsigned int s.t. the compiler is more
-        // inclined to re-use the results from '__builtin_amdgcn_ubfe'.
-
         // Implement the following loop using recursion:
         //   for(unsigned int offset = group_size / 2; offset > 0; offset /= 2)
         if constexpr(offset > 0)
         {
-            tlev_cas<group_size, offset>(group_dir, compare_function, kv...);
-            // Recurse...
-            tlev_pass<BinaryFunction, group_size, offset / 2>(group_dir, compare_function, kv...);
+            constexpr bool do_flip = first_step_flip && (offset == group_size / 2);
+            tlev_cas<group_size, offset, do_flip>(compare_function, kv...);
+
+            tlev_pass<BinaryFunction, group_size, offset / 2, false>(compare_function, kv...);
         }
     }
 
     template<class BinaryFunction, int group_size = 2, class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_sort(unsigned int group_dir, BinaryFunction compare_function, KeyValue&... kv)
+    static void tlev_sort(BinaryFunction compare_function, KeyValue&... kv)
     {
-        // Note: we're storing 'group_dir' as unsigned int s.t. the compiler is more
-        // inclined to re-use the results from '__builtin_amdgcn_ubfe'.
-
         // Implement the following loop using recursion:
         //   for(unsigned int group_size = 2; group_size <= ItemsPerThread; group_size *= 2)
         if constexpr(group_size <= ItemsPerThread)
         {
-            tlev_pass<BinaryFunction, group_size>(group_dir, compare_function, kv...);
+            tlev_pass<BinaryFunction, group_size, group_size / 2, true>(compare_function, kv...);
             // Recurse...
-            tlev_sort<BinaryFunction, group_size * 2, KeyValue...>(group_dir,
-                                                                   compare_function,
-                                                                   kv...);
-        }
-    }
-
-    template<class K>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_reverse(K (&k)[ItemsPerThread])
-    {
-        ROCPRIM_UNROLL
-        for(int i = 0; i < ItemsPerThread / 2; ++i)
-        {
-            int j = ItemsPerThread - 1 - i;
-            rocprim::swap(k[i], k[j]);
-        }
-    }
-
-    template<class K, class V>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    static void tlev_reverse(K (&k)[ItemsPerThread], V (&v)[ItemsPerThread])
-    {
-        ROCPRIM_UNROLL
-        for(int i = 0; i < ItemsPerThread / 2; ++i)
-        {
-            int j = ItemsPerThread - 1 - i;
-            rocprim::swap(k[i], k[j]);
-            rocprim::swap(v[i], v[j]);
+            tlev_sort<BinaryFunction, group_size * 2, KeyValue...>(compare_function, kv...);
         }
     }
 
@@ -330,17 +352,7 @@ struct warp_shuffle_sort_impl
         // invoke thread-level algorithms if we have multiple items per thread.
         if constexpr(ItemsPerThread > 1)
         {
-            tlev_sort(id_bits[0], compare_function, kv...);
-            // To get bitonic sequences on the thread-level sort we require
-            // a dependency on 'id_bits[0]'. But this is quite costly:
-            //   wlev::tlev_sort(id_bits[0], compare_function, kv...);
-            // Instead we can sort normally and then reverse the results
-            // on uneven threads.
-            // tlev_sort(0, compare_function, kv...);
-            // if(id_bits[0])
-            // {
-            //     tlev_reverse(kv...);
-            // }
+            tlev_sort(compare_function, kv...);
         }
 
         // Now we have bitonic sequences over our thread-level items, we need to
@@ -370,9 +382,12 @@ struct warp_shuffle_sort_impl
                         // to use the reverse direction of self vs other comparison.
                         // E.g. lane 0: v[0] (self ) < v[1] (other)
                         //      lane 1: v[0] (other) < v[1] (self )
-                        constexpr unsigned int offset    = 1u << offset_bit;
-                        const unsigned int     local_dir = id_bits[group_bit] ^ id_bits[offset_bit];
-                        wlev_cas(local_dir, compare_function, offset, kv...);
+                        constexpr bool         is_first_step = (offset_bit == group_bit - 1);
+                        constexpr unsigned int xor_mask
+                            = is_first_step ? ((1u << group_bit) - 1u) : (1u << offset_bit);
+                        const unsigned int is_upper = id_bits[offset_bit];
+
+                        wlev_cas<is_first_step>(is_upper, compare_function, xor_mask, kv...);
                     });
 
                 // Don't forget that we need to also do a pass (not a full sort) over
@@ -380,7 +395,7 @@ struct warp_shuffle_sort_impl
                 // items per thread.
                 if constexpr(ItemsPerThread > 1)
                 {
-                    tlev_pass(id_bits[group_bit], compare_function, kv...);
+                    tlev_pass(compare_function, kv...);
                 }
             });
     }
