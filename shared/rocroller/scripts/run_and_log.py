@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
-import pathlib
 import re
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 
 def runAndLog(args):
-    fname = pathlib.Path(args.output_file)
+    fname = Path(args.output_file)
     output = subprocess.check_output(args.command, cwd=args.working_directory).decode()
     print(output)
     if args.regex:

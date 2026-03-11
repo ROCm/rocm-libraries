@@ -43,6 +43,9 @@ add_executable( rocblas-example-hip-complex-her2 example_hip_complex_her2.cpp )
 add_executable( rocblas-example-gemv-graph-capture example_gemv_graph_capture.cpp )
 add_executable( rocblas-example-header-check example_header_check.cpp)
 
+# test deprecated API without warnings until they are removed. Then this entire example can be deleted TODO
+target_compile_options( rocblas-example-solver PRIVATE -Wno-deprecated )
+
 set( sample_list_base rocblas-example-sscal rocblas-example-scal-template rocblas-example-scal-multiple-strided-batch rocblas-example-solver rocblas-example-hip-complex-her2 rocblas-example-gemv-graph-capture rocblas-example-header-check)
 
 
