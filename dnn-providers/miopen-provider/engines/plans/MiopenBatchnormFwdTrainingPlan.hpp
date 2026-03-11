@@ -3,14 +3,16 @@
 
 #pragma once
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanBuilderInterface.hpp"
-#include "PlanInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdTrainingParams
@@ -77,10 +79,11 @@ private:
     std::optional<MiopenTensor> _activationOut;
 };
 
-class BatchnormFwdTrainingPlan : public IPlan
+class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
-    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams);
+    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
+                             const HipdnnMiopenSettings& executionSettings);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -88,15 +91,16 @@ public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingPlan&&) = default;
     BatchnormFwdTrainingPlan& operator=(BatchnormFwdTrainingPlan&&) = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
+    HipdnnMiopenSettings _executionSettings;
 };
 
 }

@@ -8,11 +8,12 @@
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwiseSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_sdk_test_utils;
@@ -113,8 +114,8 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
                                    TensorLayout::NCHW);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
@@ -155,8 +156,8 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
                                     TensorLayout::NCHW);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

@@ -1,29 +1,7 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
@@ -44,7 +22,7 @@ rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
-option(ORIGAMI_BUILD_TESTING "Enable Python binding tests." OFF)
+option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
@@ -60,7 +38,10 @@ rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
-set_target_properties(origami PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(origami PROPERTIES 
+    POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
 target_compile_features(origami PUBLIC cxx_std_17)
 
 add_library(origami-headers INTERFACE)
@@ -76,10 +57,14 @@ target_sources(
     origami-headers
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp>
 )
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
@@ -88,9 +73,13 @@ target_sources(
     origami
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/logger.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
 )
 
 target_link_libraries(origami PUBLIC hip::host)
@@ -101,32 +90,7 @@ endif()
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
-
     add_subdirectory(tests)
-
-    if(ORIGAMI_ENABLE_PYTHON)
-        find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
-        add_test(NAME origami_python_test COMMAND "${Python3_EXECUTABLE}" "origami_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
-        )
-
-        add_test(NAME origami_python_grid_test COMMAND "${Python3_EXECUTABLE}"
-                                                       "origami_grid_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
-        )
-
-        set_tests_properties(
-            origami_python_test origami_python_grid_test
-            PROPERTIES
-                ENVIRONMENT
-                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python:${CMAKE_CURRENT_SOURCE_DIR}/python:$ENV{PYTHONPATH}"
-        )
-
-        set_tests_properties(
-            origami_python_test origami_python_grid_test PROPERTIES DEPENDS origami_python
-        )
-    endif()
 endif()
 
 if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
@@ -145,7 +109,6 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
 
     if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         rocm_install(TARGETS origami-tests COMPONENT tests)
-
     endif()
 
     rocm_install(
@@ -179,7 +142,7 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
 
     rocm_create_package(
         NAME origami
-        DESCRIPTION "Origami C++ library for analytical GEMM computations"
+        DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
         MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
         LDCONFIG
         LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}

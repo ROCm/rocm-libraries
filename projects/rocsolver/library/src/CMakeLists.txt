@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -237,6 +237,9 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_larf.cpp
   auxiliary/rocauxiliary_larft.cpp
   auxiliary/rocauxiliary_larfb.cpp
+  # norm and condition number
+  auxiliary/rocauxiliary_lange.cpp
+  auxiliary/rocauxiliary_gecon.cpp
   # plane rotations
   auxiliary/rocauxiliary_lasr.cpp
   # orthonormal/unitary matrices
@@ -269,6 +272,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_stedcx.cpp
   auxiliary/rocauxiliary_stein.cpp
   auxiliary/rocauxiliary_latrd.cpp
+  auxiliary/rocauxiliary_latrd_forsytrd.cpp
   # symmetric matrices
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
@@ -553,3 +557,4 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
+

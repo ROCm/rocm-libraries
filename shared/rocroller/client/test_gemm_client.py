@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Test basic functionality of rocRoller's GEMM client."""
 
@@ -31,19 +9,19 @@ import contextlib
 import functools
 import itertools
 import os
-import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
-import yaml 
-import shutil
+import yaml
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
-build = pathlib.Path(__file__).parent.parent / "build"
+build = Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
-    build = pathlib.Path(os.getenv("ROCROLLER_BUILD_DIR"))
+    build = Path(os.getenv("ROCROLLER_BUILD_DIR"))
 
 gemm = (build / "client" / "rocroller-gemm").resolve()
 
@@ -246,11 +224,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -275,11 +253,10 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
-matchMemoryAccess: true
+  scaleSkipPermlane: None
+  pretileB: []
+tailLoops: true
+streamK: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -311,11 +288,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -323,7 +300,7 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -341,7 +318,8 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
+  pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -351,9 +329,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -375,11 +351,11 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-storeLDS_D: true
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
+store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -387,7 +363,7 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -405,7 +381,8 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
+  pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -415,9 +392,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -476,7 +451,7 @@ def build_solution_params():
         # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
         # streamk gemm, float, params from command line
-        ["--streamk"],
+        ["--streamK", "Standard"],
     ]
 
     for type, prefetch, scaleA, scaleB in itertools.product(
@@ -654,6 +629,54 @@ def test_gemm_options(tmp_path):
             check=True,
         )
 
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--wgs=128x2",
+                "--workgroup_size_x=256",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires pretileScale; client must assert and exit non-zero
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=32x8/32x8",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires swizzleTileSize (m=32, n=32, k=8); wrong sts must fail
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=64x8/64x8",
+                "--pretileScale",
+            ],
+            check=True,
+        )
+
     # setting tile size via shortcut
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--wgts=1024x2048x4096"]
@@ -661,6 +684,13 @@ def test_gemm_options(tmp_path):
     assert post["mac_m"] == 1024
     assert post["mac_n"] == 2048
     assert post["mac_k"] == 4096
+
+    # setting wg size via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--wgs=64x4"]
+    )
+    assert post["workgroup_size_x"] == 64
+    assert post["workgroup_size_y"] == 4
 
     # setting mi via shortcut
     post = run_and_load_example_yaml(
@@ -685,14 +715,14 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDSViaVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert not post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryWithBuffer"
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
     )
     assert post["load_A"] == "BufferToVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"]
+    assert post["store"] == "VGPRToGlobalMemoryViaLDSWithBuffer"
 
     # setting d2l options
     post = run_and_load_example_yaml(
@@ -706,6 +736,19 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDS"
     assert post["load_B"] == "BufferToVGPR"
+
+    post = run_and_load_example_yaml(
+        [
+            gemm,
+            "example",
+            example,
+            "--arch=gfx950",
+            "--padLDS_A=22,33",
+            "--padLDS_B=44,55",
+        ]
+    )
+    assert post["padLDS_A"] == [22, 33]
+    assert post["padLDS_B"] == [44, 55]
 
     # setting mxlds options
     post = run_and_load_example_yaml(
@@ -743,6 +786,12 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["k"] == 7
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
+
+    # pretileB
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--wgts=256x256x256", "--pretileB=64x128"]
+    )
+    assert post["types"]["pretileB"] == [64, 128]
 
     # setting data initialization modes
     post = run_and_load_example_problem_yaml(
@@ -919,6 +968,7 @@ def test_gemm_wgm(tmp_path, solution_params, problem_params):
 
     gemm_validate_single_stage(tmp_path, solution_params, problem_params)
 
+
 def test_kernel_graph_dot_truncation(tmp_path):
     """Validate Graphviz DOT rendering succeeds when node labels are truncated.
     - With truncation enabled (small max label length), kgraph.py should succeed and produce non-empty outputs.
@@ -931,7 +981,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
     if not gemm.exists():
         pytest.skip("rocroller-gemm binary not found")
 
-    kgraph = (pathlib.Path(__file__).parent.parent / "scripts" / "kgraph.py").resolve()
+    kgraph = (Path(__file__).parent.parent / "scripts" / "kgraph.py").resolve()
     if not kgraph.exists():
         pytest.skip("kgraph.py script not found")
 
@@ -941,11 +991,11 @@ def test_kernel_graph_dot_truncation(tmp_path):
     def run_cmd(cmd, env=None, cwd=None):
         return subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True)
 
-    def assert_non_empty(path: pathlib.Path):
+    def assert_non_empty(path: Path):
         assert path.exists(), f"Expected file to exist: {path}"
         assert path.stat().st_size > 0, f"Expected file to be non-empty: {path}"
 
-    def generate_asm(asm_path: pathlib.Path, extra_env: dict):
+    def generate_asm(asm_path: Path, extra_env: dict):
         env = os.environ.copy()
         env.update(extra_env)
 
@@ -971,13 +1021,13 @@ def test_kernel_graph_dot_truncation(tmp_path):
         )
         assert_non_empty(asm_path)
 
-    def run_kgraph(asm_path: pathlib.Path, pdf_path: pathlib.Path):
+    def run_kgraph(asm_path: Path, pdf_path: Path):
         cmd = [str(kgraph), str(asm_path), "-o", str(pdf_path)]
         p = run_cmd(cmd, env=os.environ.copy(), cwd=tmp_path)
         combined = (p.stdout or "") + "\n" + (p.stderr or "")
         return p, combined
 
-    #Case 1 : truncation enabled(should succeed)
+    # Case 1 : truncation enabled(should succeed)
     asm_trunc = tmp_path / "workgroupmapping_truncated5.s"
     pdf_trunc = tmp_path / "workgroupmapping_truncated5.pdf"
 
@@ -1001,9 +1051,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
     assert_non_empty(pdf_trunc)
     assert_non_empty(norm_trunc)
 
-
-
-    #Case 2 : truncation disabled(should error in kgraph parse)
+    # Case 2 : truncation disabled(should error in kgraph parse)
     asm_untrunc = tmp_path / "workgroupmapping_untruncated.s"
     pdf_untrunc = tmp_path / "workgroupmapping_untruncated.pdf"
 
@@ -1029,8 +1077,14 @@ def test_kernel_graph_dot_truncation(tmp_path):
 
     dot_untrunc = pdf_untrunc.with_suffix(".dot")
     assert_non_empty(dot_untrunc)
-    max_line2 = max(len(line) for line in dot_untrunc.read_text(errors="ignore").splitlines() or [""])
-    assert max_line2 >= 16384, f"Expected an extremely long DOT line without truncation, got max {max_line2}"
+    max_line2 = max(
+        len(line)
+        for line in dot_untrunc.read_text(errors="ignore").splitlines() or [""]
+    )
+    assert (
+        max_line2 >= 16384
+    ), f"Expected an extremely long DOT line without truncation, got max {max_line2}"
+
 
 if __name__ == "__main__":
     print("Solution params")

@@ -8,11 +8,17 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 // keep sync with BlockAttentionQuantScaleEnum
 enum class quant_scale_enum
 {
-    no_scale  = 0,
-    pertensor = 1,
+    no_scale      = 0,
+    pertensor     = 1,
+    blockscale    = 2,
+    kv_blockscale = 3, // Q per-tensor, K/V per-page block scale
+    mx            = 4, // Microscaling (MX)
 };
 
 struct quant_scale_info
@@ -25,6 +31,12 @@ struct quant_scale_info
             os << "n";
         else if(type == quant_scale_enum::pertensor)
             os << "pt";
+        else if(type == quant_scale_enum::blockscale)
+            os << "bs";
+        else if(type == quant_scale_enum::kv_blockscale)
+            os << "kvbs";
+        else if(type == quant_scale_enum::mx)
+            os << "mx";
     }
 
     static quant_scale_info decode(std::string str)
@@ -37,6 +49,18 @@ struct quant_scale_info
         else if(str == "pt" || str == "1")
         {
             info.type = quant_scale_enum::pertensor;
+        }
+        else if(str == "bs" || str == "2")
+        {
+            info.type = quant_scale_enum::blockscale;
+        }
+        else if(str == "kvbs" || str == "3")
+        {
+            info.type = quant_scale_enum::kv_blockscale;
+        }
+        else if(str == "mx" || str == "4")
+        {
+            info.type = quant_scale_enum::mx;
         }
         else
         {
@@ -51,3 +75,4 @@ struct quant_scale_info
         return os;
     }
 };
+#pragma clang diagnostic pop

@@ -124,6 +124,13 @@ struct FmhaBwdDQDKDVKernel
         #undef _TS_
         // clang-format on
     }
+    CK_TILE_HOST static index_t GetDqAccSplits(index_t seqlen_k)
+    {
+        if constexpr(kIsDeterministic)
+            return integer_divide_ceil(seqlen_k, FmhaPipeline::BlockFmhaShape::kN0);
+        else
+            return 1;
+    }
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
                                   // arg
@@ -171,7 +178,7 @@ struct FmhaBwdDQDKDVKernel
         ck_tile::index_t nhead_stride_v;
         ck_tile::index_t nhead_stride_do;
         ck_tile::index_t nhead_stride_lsed;
-        ck_tile::index_t nhead_stride_dq_acc;
+        ck_tile::long_index_t nhead_stride_dq_acc;
         ck_tile::index_t nhead_stride_dk;
         ck_tile::index_t nhead_stride_dv;
     };
@@ -294,7 +301,7 @@ struct FmhaBwdDQDKDVKernel
         ck_tile::index_t batch_stride_v;
         ck_tile::index_t batch_stride_do;
         ck_tile::index_t batch_stride_lsed;
-        ck_tile::index_t batch_stride_dq_acc;
+        ck_tile::long_index_t batch_stride_dq_acc;
         ck_tile::index_t batch_stride_dk;
         ck_tile::index_t batch_stride_dv;
     };
@@ -377,7 +384,7 @@ struct FmhaBwdDQDKDVKernel
                   ck_tile::index_t nhead_stride_randval,
                   ck_tile::index_t nhead_stride_do,
                   ck_tile::index_t nhead_stride_lsed,
-                  ck_tile::index_t nhead_stride_dq_acc,
+                  ck_tile::long_index_t nhead_stride_dq_acc,
                   ck_tile::index_t nhead_stride_dk,
                   ck_tile::index_t nhead_stride_dv,
                   ck_tile::index_t nhead_stride_dbias,
@@ -388,7 +395,7 @@ struct FmhaBwdDQDKDVKernel
                   ck_tile::index_t batch_stride_randval,
                   ck_tile::index_t batch_stride_do,
                   ck_tile::index_t batch_stride_lsed,
-                  ck_tile::index_t batch_stride_dq_acc,
+                  ck_tile::long_index_t batch_stride_dq_acc,
                   ck_tile::index_t batch_stride_dk,
                   ck_tile::index_t batch_stride_dv,
                   ck_tile::index_t batch_stride_dbias,
@@ -549,7 +556,7 @@ struct FmhaBwdDQDKDVKernel
                   ck_tile::index_t nhead_stride_randval,
                   ck_tile::index_t nhead_stride_do,
                   ck_tile::index_t nhead_stride_lsed,
-                  ck_tile::index_t nhead_stride_dq_acc,
+                  ck_tile::long_index_t nhead_stride_dq_acc,
                   ck_tile::index_t nhead_stride_dk,
                   ck_tile::index_t nhead_stride_dv,
                   ck_tile::index_t nhead_stride_dbias,
@@ -1181,7 +1188,7 @@ struct FmhaBwdDQDKDVKernel
                                                              scale_rp_undrop,
                                                              dropout);
 
-#if defined(__gfx12__)
+#if defined(__gfx11__) || defined(__gfx12__)
             // Workaround for a compiler bug (SWDEV-559729): v_wmma instructions can be incorrectly
             // placed in divergent branches used to store padded tensors (when some lanes are
             // inactive due to padding). Inline asm with dummy dependencies on VGPRs of the tensors
@@ -1574,7 +1581,7 @@ struct FmhaBwdConvertQGradKernel
         ck_tile::index_t stride_dq;
         ck_tile::index_t stride_dq_acc;
         ck_tile::index_t nhead_stride_dq;
-        ck_tile::index_t nhead_stride_dq_acc;
+        ck_tile::long_index_t nhead_stride_dq_acc;
     };
 
     struct FmhaBwdConvertQGradDeterministicKargs
@@ -1589,7 +1596,7 @@ struct FmhaBwdConvertQGradKernel
                              FmhaBwdConvertQGradEmptyKargs<0>>
     {
         ck_tile::index_t batch_stride_dq;
-        ck_tile::index_t batch_stride_dq_acc;
+        ck_tile::long_index_t batch_stride_dq_acc;
     };
 
     struct FmhaBwdConvertQGradGroupModeKargs
@@ -1620,9 +1627,9 @@ struct FmhaBwdConvertQGradKernel
               ck_tile::index_t stride_dq,
               ck_tile::index_t stride_dq_acc,
               ck_tile::index_t nhead_stride_dq,
-              ck_tile::index_t nhead_stride_dq_acc,
+              ck_tile::long_index_t nhead_stride_dq_acc,
               ck_tile::index_t batch_stride_dq,
-              ck_tile::index_t batch_stride_dq_acc,
+              ck_tile::long_index_t batch_stride_dq_acc,
               ck_tile::index_t split_stride_dq_acc)
     {
         Kargs kargs{{dq_acc_ptr,
@@ -1660,7 +1667,7 @@ struct FmhaBwdConvertQGradKernel
               ck_tile::index_t stride_dq,
               ck_tile::index_t stride_dq_acc,
               ck_tile::index_t nhead_stride_dq,
-              ck_tile::index_t nhead_stride_dq_acc,
+              ck_tile::long_index_t nhead_stride_dq_acc,
               ck_tile::index_t split_stride_dq_acc)
     {
         Kargs kargs{{dq_acc_ptr,

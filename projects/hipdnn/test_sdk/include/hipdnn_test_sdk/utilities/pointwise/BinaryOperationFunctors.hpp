@@ -1,58 +1,68 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <cmath>
 #include <cstdint>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/UnaryOperationFunctors.hpp>
 #include <type_traits>
 
 namespace hipdnn_test_sdk::utilities::pointwise
 {
 
+// Binary arithmetic operations with explicit ComputeType and OutputType
+// ComputeType: The type used for intermediate calculations
+// OutputType: The type returned from the operation
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct Add
 {
     template <typename X0, typename X1>
-    auto operator()(const X0& x0, const X1& x1) const -> decltype(x0 + x1)
+    OutputType operator()(const X0& x0, const X1& x1) const
     {
-        return x0 + x1;
+        auto result = static_cast<ComputeType>(x0) + static_cast<ComputeType>(x1);
+        return static_cast<OutputType>(result);
     }
 };
 
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct Subtract
 {
     template <typename X0, typename X1>
-    auto operator()(const X0& x0, const X1& x1) const -> decltype(x0 - x1)
+    OutputType operator()(const X0& x0, const X1& x1) const
     {
-        return x0 - x1;
+        auto result = static_cast<ComputeType>(x0) - static_cast<ComputeType>(x1);
+        return static_cast<OutputType>(result);
     }
 };
 
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct Multiply
 {
     template <typename X0, typename X1>
-    auto operator()(const X0& x0, const X1& x1) const -> decltype(x0 * x1)
+    OutputType operator()(const X0& x0, const X1& x1) const
     {
-        return x0 * x1;
+        auto result = static_cast<ComputeType>(x0) * static_cast<ComputeType>(x1);
+        return static_cast<OutputType>(result);
     }
 };
 
 // Backward activation operations: dx = dy * local_gradient
 // Takes input x and upstream gradient dy, returns downstream gradient dx
 
-template <typename ComputeType = float>
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct ReluBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> ComputeType
+    OutputType operator()(const X& x, const Dy& dy) const
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
         auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
-        return dyCompute * localGradient;
+        return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
 
@@ -69,22 +79,24 @@ struct ReluBackward
 // f'(x) = 1, if x > 0
 // f'(x) = lowerSlope, if x < 0
 // Again, the derivative at 0 is technically undefined, but we follow convention of treating f'(0) = lowerSlope.
-template <typename ComputeType = float>
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct ParameterizedReluBackward
 {
     ComputeType lowerClip;
     ComputeType upperClip;
     ComputeType lowerSlope;
 
-    ParameterizedReluBackward(ComputeType lowerClip, ComputeType upperClip, ComputeType lowerSlope)
-        : lowerClip(lowerClip)
-        , upperClip(upperClip)
-        , lowerSlope(lowerSlope)
+    ParameterizedReluBackward(ComputeType lowerClipVal,
+                              ComputeType upperClipVal,
+                              ComputeType lowerSlopeVal)
+        : lowerClip(lowerClipVal)
+        , upperClip(upperClipVal)
+        , lowerSlope(lowerSlopeVal)
     {
     }
 
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> ComputeType
+    OutputType operator()(const X& x, const Dy& dy) const
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
@@ -103,37 +115,39 @@ struct ParameterizedReluBackward
             localGradient = ComputeType{1};
         }
 
-        return dyCompute * localGradient;
+        return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
 
-template <typename ComputeType = float>
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct SigmoidBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> ComputeType
+    OutputType operator()(const X& x, const Dy& dy) const
     {
+        using hipdnn_data_sdk::types::exp;
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
 
-        ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
+        ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + exp(-xCompute));
         auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
-        return dyCompute * localGradient;
+        return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
 
-template <typename ComputeType = float>
+template <typename ComputeType = float, typename OutputType = ComputeType>
 struct TanhBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> ComputeType
+    OutputType operator()(const X& x, const Dy& dy) const
     {
+        using hipdnn_data_sdk::types::tanh;
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
 
-        ComputeType tanhVal = std::tanh(xCompute);
+        ComputeType tanhVal = tanh(xCompute);
         auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
-        return dyCompute * localGradient;
+        return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
 

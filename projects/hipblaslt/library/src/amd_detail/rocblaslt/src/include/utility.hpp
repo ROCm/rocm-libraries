@@ -322,6 +322,8 @@ inline bool is_grad_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
+    case ROCBLASLT_EPILOGUE_DRELU:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         return true;
     default:
         return false;
@@ -343,6 +345,8 @@ inline bool is_e_enabled(rocblaslt_epilogue value_)
     // backward pass:
     case ROCBLASLT_EPILOGUE_DGELU:
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
+    case ROCBLASLT_EPILOGUE_DRELU:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         return true;
     default:
         return false;
@@ -361,6 +365,7 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
@@ -384,6 +389,8 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
     case ROCBLASLT_EPILOGUE_DGELU:
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
+    case ROCBLASLT_EPILOGUE_DRELU:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:
@@ -433,6 +440,30 @@ inline std::vector<size_t> preSwizzleSizeForScale(RocblasltContractionProblem::S
     case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         // MI instruction is forced to 16x16x128, so the third element is 4 (i.e., 128/scaleBlockSize)
         return {32, 8, 4};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleA(RocblasltContractionProblem::ScalingFormat s)
+{
+    // Returns preTile for scale A: {tileM, tileK}
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return {32, 8};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleB(RocblasltContractionProblem::ScalingFormat s)
+{
+    // Returns preTile for scale B: {tileK, tileN}
+    switch(s)
+    {
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return {8, 32};
     default:
         return {};
     }

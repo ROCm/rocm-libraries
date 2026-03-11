@@ -20,10 +20,62 @@
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_data.hpp"
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_bwd_data_gpu.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp"
-#include "profiler/gpu_verification.hpp"
+#include "ck/library/utility/gpu_verification.hpp"
 
 namespace ck {
 namespace profiler {
+
+namespace bwd_data {
+template <ck::index_t NDimSpatial,
+          typename InLayout,
+          typename WeiLayout,
+          typename OutLayout,
+          typename InDataType,
+          typename WeiDataType,
+          typename OutDataType,
+          typename InElementOp,
+          typename WeiElementOp,
+          typename OutElementOp,
+          typename ComputeDataType>
+void print_instances()
+{
+    using DeviceOp =
+        ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<NDimSpatial,
+                                                                        OutLayout,
+                                                                        WeiLayout,
+                                                                        ck::Tuple<>,
+                                                                        InLayout,
+                                                                        OutDataType,
+                                                                        WeiDataType,
+                                                                        ck::Tuple<>,
+                                                                        InDataType,
+                                                                        OutElementOp,
+                                                                        WeiElementOp,
+                                                                        InElementOp,
+                                                                        ComputeDataType,
+                                                                        ComputeDataType>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    for(const auto& op_ptr : op_ptrs)
+    {
+#ifdef CK_EXPERIMENTAL_BUILDER
+        const auto& instance_str = op_ptr->GetInstanceString();
+        if(!instance_str.empty())
+        {
+            std::cout << instance_str << std::endl;
+        }
+        else
+        {
+            std::cout << op_ptr->GetTypeString() << std::endl;
+        }
+#else
+        std::cout << op_ptr->GetTypeString() << std::endl;
+#endif
+    }
+}
+} // namespace bwd_data
 
 template <ck::index_t NDimSpatial,
           typename OutLayout,
@@ -39,7 +91,8 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
                                         bool time_kernel,
                                         const ck::utils::conv::ConvParam& conv_param,
                                         ck::index_t split_k    = 1,
-                                        index_t instance_index = -1)
+                                        index_t instance_index = -1,
+                                        bool list_instances    = false)
 {
     using OutElementOp = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
@@ -58,37 +111,82 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     const auto in_g_n_c_wis_desc =
         ck::utils::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
 
+    std::cout << "out: " << out_g_n_k_wos_desc << std::endl;
+    std::cout << "wei: " << wei_g_k_c_xs_desc << std::endl;
+    std::cout << "in: " << in_g_n_c_wis_desc << std::endl;
+
+    // Create host tensors
     Tensor<OutDataType> out(out_g_n_k_wos_desc);
     Tensor<WeiDataType> wei(wei_g_k_c_xs_desc);
     Tensor<InDataType> in_host(in_g_n_c_wis_desc);
     Tensor<InDataType> in_device(in_g_n_c_wis_desc);
 
-    std::cout << "out: " << out.mDesc << std::endl;
-    std::cout << "wei: " << wei.mDesc << std::endl;
-    std::cout << "in: " << in_host.mDesc << std::endl;
+    // Get element space sizes for allocation
+    const auto out_element_space_size = out_g_n_k_wos_desc.GetElementSpaceSize();
+    const auto wei_element_space_size = wei_g_k_c_xs_desc.GetElementSpaceSize();
+    const auto in_element_space_size  = in_g_n_c_wis_desc.GetElementSpaceSize();
 
-    switch(init_method)
+    // Allocate GPU buffers
+    DeviceMem out_device_buf(sizeof(OutDataType) * out_element_space_size);
+    DeviceMem wei_device_buf(sizeof(WeiDataType) * wei_element_space_size);
+    DeviceMem in_device_buf(sizeof(InDataType) * in_element_space_size);
+
+    // Don't create reference if we're only listing instances
+    if(list_instances)
+        do_verification = 0;
+
+    // Initialize tensors based on do_verification:
+    // - do_verification=2: GPU-side initialization
+    // - do_verification=0,1: CPU-side initialization
+    if(do_verification == 2)
     {
-    case 0: break;
-    case 1:
-        out.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
-        wei.GenerateTensorValue(GeneratorTensor_2<WeiDataType>{-5, 5});
-        break;
-    case 2:
-        out.GenerateTensorValue(GeneratorTensor_3<OutDataType>{0.0, 1.0});
-        wei.GenerateTensorValue(GeneratorTensor_3<WeiDataType>{-0.5, 0.5});
-        break;
-    default:
-        out.GenerateTensorValue(GeneratorTensor_1<OutDataType>{1});
-        wei.GenerateTensorValue(GeneratorTensor_1<WeiDataType>{1});
+        // GPU-side initialization for GPU verification workflow
+        switch(init_method)
+        {
+        case 0:
+            // Zero initialization
+            out_device_buf.SetZero();
+            wei_device_buf.SetZero();
+            break;
+        case 1:
+            // Discrete integer values in range [-5, 5]
+            out_device_buf.FillUniformRandInteger<OutDataType>(-5, 5);
+            wei_device_buf.FillUniformRandInteger<WeiDataType>(-5, 5);
+            break;
+        case 2:
+            // Continuous float values
+            out_device_buf.FillUniformRandFp<OutDataType>(0.0f, 1.0f);
+            wei_device_buf.FillUniformRandFp<WeiDataType>(-0.5f, 0.5f);
+            break;
+        default:
+            // Constant value 1
+            out_device_buf.SetValue<OutDataType>(ck::type_convert<OutDataType>(1));
+            wei_device_buf.SetValue<WeiDataType>(ck::type_convert<WeiDataType>(1));
+        }
     }
+    else
+    {
+        // CPU-side initialization for do_verification=0,1
+        switch(init_method)
+        {
+        case 0: break; // Tensors are already zero-initialized by default
+        case 1:
+            out.GenerateTensorValue(GeneratorTensor_2<OutDataType>{-5, 5});
+            wei.GenerateTensorValue(GeneratorTensor_2<WeiDataType>{-5, 5});
+            break;
+        case 2:
+            out.GenerateTensorValue(GeneratorTensor_3<OutDataType>{0.0, 1.0});
+            wei.GenerateTensorValue(GeneratorTensor_3<WeiDataType>{-0.5, 0.5});
+            break;
+        default:
+            out.GenerateTensorValue(GeneratorTensor_1<OutDataType>{1});
+            wei.GenerateTensorValue(GeneratorTensor_1<WeiDataType>{1});
+        }
 
-    DeviceMem out_device_buf(sizeof(OutDataType) * out.mDesc.GetElementSpaceSize());
-    DeviceMem wei_device_buf(sizeof(WeiDataType) * wei.mDesc.GetElementSpaceSize());
-    DeviceMem in_device_buf(sizeof(InDataType) * in_device.mDesc.GetElementSpaceSize());
-
-    out_device_buf.ToDevice(out.mData.data());
-    wei_device_buf.ToDevice(wei.mData.data());
+        // Copy initialized host data to device
+        out_device_buf.ToDevice(out.mData.data());
+        wei_device_buf.ToDevice(wei.mData.data());
+    }
 
     // Allocate GPU reference buffer (used only if do_verification == 2)
     DeviceMem gpu_ref_in_buf(
@@ -157,15 +255,17 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     }
 
     std::string best_op_name;
-    float best_avg_time      = 0;
-    float best_tflops        = 0;
-    float best_gb_per_sec    = 0;
-    ck::index_t best_split_k = 1;
+    float best_avg_time             = 0;
+    float best_tflops               = 0;
+    float best_gb_per_sec           = 0;
+    ck::index_t best_split_k        = 1;
+    ck::index_t best_instance_index = 0;
 
     // profile device op instances
-    bool pass          = true;
-    index_t num_kernel = 0;
-    auto run_impl      = [&](auto& op_ptr, auto& argument_ptr, const index_t& split_k_for_run) {
+    bool pass               = true;
+    index_t num_kernel      = 0;
+    index_t valid_instances = 0;
+    auto run_impl = [&](auto& op_ptr, auto& argument_ptr, const index_t& split_k_for_run) {
         // workspace_sz will be equal to 0 for other layout than NGCHW
         const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
         DeviceMem workspace_dev(workspace_sz);
@@ -174,11 +274,23 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
         if(op_ptr->IsSupportedArgument(argument_ptr.get()))
         {
             num_kernel++;
-            if((instance_index != -1) && (instance_index + 1 != num_kernel))
+
+            // List instances mode - just print and continue
+            if(list_instances)
             {
-                // skip test if instance_index is specified
+                std::cout << "[" << (num_kernel - 1) << "] " << op_ptr->GetTypeString()
+                          << " (SplitK=" << split_k_for_run << ")" << std::endl;
                 return;
             }
+
+            // Skip if a specific instance was requested and this isn't it
+            const bool running_specific_instance = (instance_index != -1);
+            const bool current_is_target         = (num_kernel - 1 == instance_index);
+            if(running_specific_instance && !current_is_target)
+            {
+                return;
+            }
+            valid_instances++;
             std::string op_name = op_ptr->GetTypeString();
 
             auto invoker_ptr = op_ptr->MakeInvokerPointer();
@@ -199,11 +311,12 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
 
             if(tflops > best_tflops)
             {
-                best_op_name    = op_name;
-                best_tflops     = tflops;
-                best_avg_time   = avg_time;
-                best_gb_per_sec = gb_per_sec;
-                best_split_k    = split_k_for_run;
+                best_op_name        = op_name;
+                best_tflops         = tflops;
+                best_avg_time       = avg_time;
+                best_gb_per_sec     = gb_per_sec;
+                best_split_k        = split_k_for_run;
+                best_instance_index = num_kernel - 1;
             }
 
             // Synchronize before verification to ensure kernel has completed
@@ -216,12 +329,12 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
             {
                 // GPU verification path
                 using ComputeType_ = std::conditional_t<sizeof(OutDataType) < sizeof(WeiDataType),
-                                                             OutDataType,
-                                                             WeiDataType>;
+                                                        OutDataType,
+                                                        WeiDataType>;
                 using ComputeType =
                     std::conditional_t<sizeof(ComputeType_) < sizeof(ComputeDataType),
-                                            ComputeType_,
-                                            ComputeDataType>;
+                                       ComputeType_,
+                                       ComputeDataType>;
                 using AccDataType =
                     std::conditional_t<std::is_same_v<ComputeType, int8_t>, int32_t, float>;
 
@@ -237,52 +350,24 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
 
                 // Perform GPU verification (max value computed internally on GPU)
                 const std::size_t tensor_size = in_device.mDesc.GetElementSpaceSize();
-                bool gpu_passed = ck::profiler::gpu_verify<InDataType, ComputeType, AccDataType>(
+                auto gpu_result = ck::profiler::gpu_verify<InDataType, ComputeType, AccDataType>(
                     in_device_buf.GetDeviceBuffer(),
                     gpu_ref_in_buf.GetDeviceBuffer(),
                     total_accums,
                     tensor_size);
 
-                if(!gpu_passed)
+                if(!gpu_result)
                 {
-                    // GPU verification failed - fall back to CPU for detailed diagnostics
-                    std::cout << "GPU verification failed, running CPU verification for details..."
-                              << std::endl;
-
-                    // Copy both buffers to host
-                    in_device_buf.FromDevice(in_device.mData.data());
-                    gpu_ref_in_buf.FromDevice(in_host.mData.data());
-
-                    // Recalculate tolerances for CPU verification with original logic
-                    auto rtol =
-                        ck::utils::get_relative_threshold<ComputeType, InDataType, AccDataType>(
-                            num_accums);
-                    auto atol =
-                        ck::utils::get_absolute_threshold<ComputeType, InDataType, AccDataType>(
-                            max_accumulated_value / split_k_for_run, num_accums);
-
-                    if(split_k_for_run > 1)
-                    {
-                        auto rtol_split_k =
-                            ck::utils::get_relative_threshold<InDataType, InDataType, InDataType>(
-                                split_k_for_run);
-                        auto atol_split_k =
-                            ck::utils::get_absolute_threshold<InDataType, InDataType, InDataType>(
-                                max_accumulated_value, split_k_for_run);
-                        rtol = std::max(rtol, rtol_split_k);
-                        atol = std::max(atol, atol_split_k);
-                    }
-
-                    // Run CPU verification for detailed error messages
-                    ck::utils::check_err(
-                        in_device, in_host, "Error: Incorrect results!", rtol, atol);
+                    // GPU verification failed - print detailed error summary
+                    gpu_result.print_error_summary();
                     pass = false;
-
-                    std::cout << "Relative error threshold: " << rtol
-                              << " Absolute error threshold: " << atol << std::endl;
 
                     if(do_log)
                     {
+                        // Copy buffers to host for logging
+                        in_device_buf.FromDevice(in_device.mData.data());
+                        gpu_ref_in_buf.FromDevice(in_host.mData.data());
+
                         LogRangeAsType<float>(std::cout << "output : ", out.mData, ",")
                             << std::endl;
                         LogRangeAsType<float>(std::cout << "weight: ", wei.mData, ",") << std::endl;
@@ -299,12 +384,12 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
                 in_device_buf.FromDevice(in_device.mData.data());
 
                 using ComputeType_ = std::conditional_t<sizeof(OutDataType) < sizeof(WeiDataType),
-                                                             OutDataType,
-                                                             WeiDataType>;
+                                                        OutDataType,
+                                                        WeiDataType>;
                 using ComputeType =
                     std::conditional_t<sizeof(ComputeType_) < sizeof(ComputeDataType),
-                                            ComputeType_,
-                                            ComputeDataType>;
+                                       ComputeType_,
+                                       ComputeDataType>;
                 using AccDataType =
                     std::conditional_t<std::is_same_v<ComputeType, int8_t>, int32_t, float>;
                 const index_t num_accums = conv_param.K_;
@@ -346,7 +431,7 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
                 }
             }
         }
-        else
+        else if(list_instances || instance_index == -1)
         {
             std::cout << op_ptr->GetTypeString() << " does not support this problem" << std::endl;
         }
@@ -404,6 +489,11 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
         split_k_list = {split_k};
     }
 
+    if(list_instances)
+    {
+        std::cout << "\nValid instances for this problem:" << std::endl;
+    }
+
     for(auto& op_ptr : op_ptrs)
     {
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)
@@ -434,9 +524,25 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
         }
     }
 
-    std::cout << "Best configuration parameters:" << "\nname: " << best_op_name
-              << "\navg_time: " << best_avg_time << "\ntflops: " << best_tflops
-              << "\nGB/s: " << best_gb_per_sec << ", SplitK " << best_split_k << std::endl;
+    if(list_instances)
+    {
+        std::cout << "\nTotal: " << num_kernel << " valid instances" << std::endl;
+        return true;
+    }
+
+    printf("\033[36mvalids: %ld\033[0m\n", static_cast<long>(valid_instances));
+
+    if(instance_index != -1 && valid_instances == 0)
+    {
+        std::cerr << "Error: instance_index " << instance_index
+                  << " exceeds the number of valid instances (" << num_kernel << ")" << std::endl;
+        return false;
+    }
+
+    std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
+              << best_instance_index << ")" << "\navg_time: " << best_avg_time
+              << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
+              << best_split_k << std::endl;
 
     if(instance_index != -1)
     {

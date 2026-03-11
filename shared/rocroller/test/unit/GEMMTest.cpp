@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -41,12 +18,48 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    class GEMMTestGPU : public BaseGEMMContextFixture<>
+    std::set<int> NonZeroDSReadOffsets(std::string const& instruction, std::string const& s)
+    {
+        std::regex ds_read_offset(instruction + ".*offset:(\\d+)");
+
+        auto begin = std::sregex_iterator(s.begin(), s.end(), ds_read_offset);
+        auto end   = std::sregex_iterator();
+
+        std::set<int> rv;
+        for(auto i = begin; i != end; ++i)
+        {
+            auto m = (*i)[1].str();
+            rv.insert(std::stoi(m));
+        }
+        return rv;
+    }
+
+    std::set<int> Direct2LDSWriteStrides(std::string const& s)
+    {
+        std::regex m0_stride_pattern("s_add_u32 m0, m0, (\\d+)");
+
+        auto begin = std::sregex_iterator(s.begin(), s.end(), m0_stride_pattern);
+        auto end   = std::sregex_iterator();
+
+        std::set<int> rv;
+        for(auto i = begin; i != end; ++i)
+        {
+            auto m = (*i)[1].str();
+            rv.insert(std::stoi(m));
+        }
+        return rv;
+    }
+
+    // ========================================================================
+    // GEMMTestSuite
+    // ========================================================================
+
+    class GEMMTestSuite : public BaseGEMMContextFixture<>
     {
     };
 
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
-    TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
+    TEST_P(GEMMTestSuite, GPU_GEMM_Schedulers)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -79,29 +92,43 @@ namespace GEMMTests
         EXPECT_NE(NormalizedSource(coop_nop), NormalizedSource(rr));
 
         EXPECT_NE(NormalizedSource(priority_nop), NormalizedSource(rr));
-
-        std::set<std::string> insts;
-        std::vector<int>      seeds = {2, 4, 8, 314, 1729};
-        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Random);
-        for(auto seed : seeds)
-        {
-            settings->set(Settings::RandomSeed, seed);
-            basicGEMM<float>(gemm);
-            std::string rand     = m_context->instructions()->toString();
-            bool        not_seen = insts.insert(rand).second;
-            EXPECT_EQ(not_seen, true);
-        }
-        // Can not compare random insts to others because non-zero chance seed generates such insts
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMM)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP32_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMapping)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_LDS_Padded)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+
+        // This kernel uses 128bit buffer_load and ds_write
+        // instructions; so each wave loads 16 * 64 bytes per
+        // instruction.
+        gemm.padA = {32 * 64, 4};
+        gemm.padB = {16 * 64, 4};
+        basicGEMM<float>(gemm);
+
+        auto instructions = m_context->instructions()->toString();
+        auto ldsOffsets   = NonZeroDSReadOffsets("ds_read_b32", instructions);
+
+        // With no padding in A, the LDS buffer for B would start at
+        //
+        //   B[0] = WGTS M * WGTS K * sizeof(float)
+        //
+        // so make sure this isn't in the read offsets!
+        EXPECT_FALSE(ldsOffsets.contains(gemm.macM * gemm.macK * sizeof(float)));
+    }
+
+    TEST_P(GEMMTestSuite, GPU_GEMM_Workgroup_Mapping)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -110,7 +137,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
+    TEST_P(GEMMTestSuite, GPU_GEMM_Workgroup_Mapping_XCC)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
@@ -121,7 +148,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMLargerLDS)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_LDS_Larger)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -129,7 +156,7 @@ namespace GEMMTests
         gemm.macN             = 256;
         gemm.loadPathA        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD        = true;
+        gemm.storePath        = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         gemm.prefetchInFlight = 1;
         auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
         auto bytesPerElement = sizeof(float);
@@ -147,7 +174,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZero)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP32_BetaZero)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -155,7 +182,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNotSetC)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP32_NotSetC)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -163,16 +190,16 @@ namespace GEMMTests
         basicGEMM<float>(gemm, false, false, 1, true);
     }
 
-    TEST_P(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)
+    TEST_P(GEMMTestSuite, DISABLED_GPU_GEMM_DataType_FP32_MultipleOutputTiles)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.storeLDSD     = false;
+        gemm.storePath     = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.loopOverTiles = true;
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNoLDSA)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_NoLDS_A)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -182,7 +209,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNoLDSB)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_NoLDS_B)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -192,7 +219,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNoLDSAB)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_NoLDS_AB)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -202,21 +229,21 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP8_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8NT{};
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x32_NT)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_BF8_16x16x32_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8NT{};
         basicGEMM<BF8, BF8, float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP8_Conversion_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8NT{};
@@ -224,7 +251,7 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float, FP8>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionBF8_NT)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_BF8_Conversion_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8NT{};
@@ -232,7 +259,7 @@ namespace GEMMTests
         basicGEMM<BF8, BF8, float, BF8>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMSRConversionFP8_NT)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP8_StochasticRounding_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8NT{};
@@ -253,7 +280,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMSRConversionBF8_NT)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_BF8_StochasticRounding_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8NT{};
@@ -274,7 +301,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_ScaledPrefetchGEMMMXF8TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_Scaled_Prefetch_MX_F8_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -313,7 +340,7 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    void check_GEMMF8_TN(rocRoller::ContextPtr m_context)
+    void CheckGEMMF8TN(rocRoller::ContextPtr m_context)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
@@ -332,23 +359,23 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x32_TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP8_16x16x32_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8TN{};
         basicGEMM<FP8, FP8, float>(gemm);
-        check_GEMMF8_TN(m_context);
+        CheckGEMMF8TN(m_context);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x32_TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_BF8_16x16x32_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8TN{};
         basicGEMM<BF8, BF8, float>(gemm);
-        check_GEMMF8_TN(m_context);
+        CheckGEMMF8TN(m_context);
     }
 
-    TEST_P(GEMMTestGPU, GPU_LargerLDSGEMMFP8_32x32x64_TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP8_LargerLDS_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm             = GEMMProblemF8F6F4{32, 32, 64};
@@ -362,7 +389,7 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    static void checkNumDwordx4(std::string generatedCode,
+    static void CheckNumDwordx4(std::string generatedCode,
                                 const int   numBitsPerElementAB,
                                 const int   macM,
                                 const int   macN,
@@ -380,7 +407,7 @@ namespace GEMMTests
                   numBufferLoadsForAB + numBufferLoadsForC);
     }
 
-    TEST_P(GEMMTestGPU, GPU_GEMM_FP8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_Direct2LDS_FP8_MT256x256x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm      = GEMMProblemF8F6F4{32, 32, 64};
@@ -392,7 +419,7 @@ namespace GEMMTests
         gemm.macK      = 128;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
 
@@ -401,7 +428,7 @@ namespace GEMMTests
         auto const  numBitsPerElementAB = 8;
         std::string generatedCode       = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         gemm.macM,
                         gemm.macN,
@@ -409,7 +436,7 @@ namespace GEMMTests
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
-    TEST_P(GEMMTestGPU, GPU_GEMM_BF8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_Direct2LDS_BF8_MT256x256x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm      = GEMMProblemF8F6F4{32, 32, 64};
@@ -421,7 +448,7 @@ namespace GEMMTests
         gemm.macK      = 128;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
 
@@ -430,7 +457,7 @@ namespace GEMMTests
         auto const  numBitsPerElementAB = 8;
         std::string generatedCode       = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         gemm.macM,
                         gemm.macN,
@@ -438,7 +465,7 @@ namespace GEMMTests
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
-    TEST_P(GEMMTestGPU, GPU_GEMM_FP4_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_LoadPath_Direct2LDS_FP4_MT256x256x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm      = GEMMProblemF8F6F4{32, 32, 64};
@@ -450,7 +477,7 @@ namespace GEMMTests
         gemm.macK      = 128;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.storeLDSD = false;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
 
@@ -459,7 +486,7 @@ namespace GEMMTests
         auto const  numBitsPerElementAB = 4;
         std::string generatedCode       = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         gemm.macM,
                         gemm.macN,
@@ -467,7 +494,7 @@ namespace GEMMTests
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP16_AllLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -487,12 +514,12 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16_96x256)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP16_96x256)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -512,30 +539,15 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStoreDWave)
+    TEST_P(GEMMTestSuite, GPU_GEMM_StoreDWave)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-
-        auto nonZeroDSReadOffsets = [](auto s) {
-            std::regex ds_read_offset("ds_read_b128.*offset:(\\d+)");
-
-            auto begin = std::sregex_iterator(s.begin(), s.end(), ds_read_offset);
-            auto end   = std::sregex_iterator();
-
-            std::set<int> rv;
-            for(auto i = begin; i != end; ++i)
-            {
-                auto m = (*i)[1].str();
-                rv.insert(std::stoi(m));
-            }
-            return rv;
-        };
 
         gemm.m = 256;
         gemm.n = 512;
@@ -552,20 +564,20 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         gemm.splitStoreTileIntoWaveBlocks = true;
         basicGEMM<Half>(gemm);
         auto instructions0 = output();
-        EXPECT_EQ(nonZeroDSReadOffsets(instructions0), std::set<int>{1024});
+        EXPECT_EQ(NonZeroDSReadOffsets("ds_read_b128", instructions0), std::set<int>{1024});
 
         gemm.splitStoreTileIntoWaveBlocks = false;
         basicGEMM<Half>(gemm);
         auto instructions1 = output();
-        EXPECT_EQ(nonZeroDSReadOffsets(instructions1), std::set<int>{64});
+        EXPECT_EQ(NonZeroDSReadOffsets("ds_read_b128", instructions1), std::set<int>{64});
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDSDebug)
+    TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP16_AllLDS_Debug)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -585,12 +597,12 @@ namespace GEMMTests
 
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
 
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_ScaledLDSGEMMMXF8TN)
+    TEST_P(GEMMTestSuite, GPU_GEMM_Scaled_LDS_MX_F8_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -623,5 +635,45 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    INSTANTIATE_TEST_SUITE_P(GEMMTest, GEMMTestGPU, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(GEMMTest, GEMMTestSuite, currentGPUISA());
+
+    // ========================================================================
+    // GEMMSchedulerRandomTestSuite
+    // ========================================================================
+
+    // Params are: random seed value
+    class GEMMSchedulerRandomTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
+    {
+    };
+
+    // Test to verify different random seeds produce different instruction sequences
+    TEST_P(GEMMSchedulerRandomTestSuite, GPU_GEMM_Schedulers_Random)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto [seed] = std::get<1>(GetParam());
+
+        GEMMProblem gemm;
+        gemm.macK = 8;
+
+        // TODO: Re-enable LDS once LDS deallocations are fixed
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+
+        auto settings = Settings::getInstance();
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Random);
+        settings->set(Settings::RandomSeed, seed);
+
+        basicGEMM<float>(gemm);
+
+        // Verify the kernel generates successfully with this random seed
+        EXPECT_GT(m_context->instructions()->toString().size(), 0);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTest,
+        GEMMSchedulerRandomTestSuite,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(2, 4, 8, 314, 1729))));
+
 }

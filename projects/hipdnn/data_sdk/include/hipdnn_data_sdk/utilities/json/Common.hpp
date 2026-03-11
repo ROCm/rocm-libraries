@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <flatbuffers/flatbuffer_builder.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
@@ -80,6 +82,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::UINT8, "uint8"},
                                  {DataType::INT32, "int32"},
                                  {DataType::INT8, "int8"},
+                                 {DataType::FP8_E4M3, "fp8_e4m3"},
+                                 {DataType::FP8_E5M2, "fp8_e5m2"},
                              }
 
 )
@@ -121,3 +125,5 @@ inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::js
 }
 
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

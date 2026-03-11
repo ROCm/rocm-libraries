@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -33,11 +10,13 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
-#include <DataGenerator.hpp>
-#include <common/SourceMatcher.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {
@@ -54,6 +33,11 @@ namespace rocRoller
                 N,
 
                 Count
+            };
+
+            struct XYTuple
+            {
+                int x, y;
             };
 
             struct MNKTuple
@@ -97,7 +81,7 @@ namespace rocRoller
 
                 int scaleBlockSize = -1;
 
-                bool scaleSkipPermlane = false;
+                ScaleSkipPermlaneMode scaleSkipPermlane = ScaleSkipPermlaneMode::None;
 
                 std::vector<size_t> scalePretileA;
                 std::vector<size_t> scalePretileB;
@@ -105,6 +89,8 @@ namespace rocRoller
                 // Order: M/N, K tile, K subtile
                 std::vector<size_t> scaleShuffleTileA;
                 std::vector<size_t> scaleShuffleTileB;
+
+                std::vector<size_t> pretileB;
 
                 std::string kernelNamePart() const;
             };
@@ -179,7 +165,11 @@ namespace rocRoller
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 Parameters::Solution::LoadPath loadPathB{
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
-                bool storeLDSD = true;
+                Parameters::Solution::StorePath storePath{
+                    Parameters::Solution::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
+
+                std::pair<int, int> padLDSA = {0, 0};
+                std::pair<int, int> padLDSB = {0, 0};
 
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
@@ -187,18 +177,12 @@ namespace rocRoller
                 bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
 
-                // Unroll Options
-                unsigned int unrollX = 0;
-                unsigned int unrollY = 0;
-
                 std::string scheduler;
                 std::string schedulerCost;
-                bool        matchMemoryAccess;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                bool tailLoops = true;
+
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 
@@ -212,6 +196,7 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
+            std::ostream& operator<<(std::ostream& s, XYTuple const& x);
             std::ostream& operator<<(std::ostream& s, MNKTuple const& x);
             std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
             std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
@@ -227,6 +212,16 @@ namespace rocRoller::Client::GEMMClient::CLI
 {
     constexpr bool PARSE_SUCCESS = true;
     constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an X,Y pair (negative OK).
+     */
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseXY(const std::string& arg, XYTuple& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.

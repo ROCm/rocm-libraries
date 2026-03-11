@@ -98,3 +98,26 @@ Tests:
              HIPSPARSE_SPMM_CSR_ALG1,
              HIPSPARSE_SPMM_CSR_ALG2]
   filename: [Chebyshev4]
+
+- name: spmm_csc
+  category: pre_checkin
+  function: spmm_csc
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: [32]
+  K: 1
+  alpha: [0.5]
+  alphai: [1.5]
+  beta: [-1.0]
+  betai: [2.0]
+  transA: [HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_ROW]
+  orderC: [HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
+             HIPSPARSE_SPMM_CSR_ALG1,
+             HIPSPARSE_SPMM_CSR_ALG2]
+  filename: [nos4]
+  graph_test: true

@@ -2,17 +2,24 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_data_sdk/utilities/json/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/LayernormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/RMSNormAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
 
 namespace hipdnn_data_sdk::data_objects
@@ -29,6 +36,11 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ConvolutionBwdAttributes, "ConvolutionBwdAttributes"},
      {NodeAttributes::ConvolutionWrwAttributes, "ConvolutionWrwAttributes"},
      {NodeAttributes::MatmulAttributes, "MatmulAttributes"},
+     {NodeAttributes::SdpaAttributes, "SdpaAttributes"},
+     {NodeAttributes::LayernormAttributes, "LayernormAttributes"},
+     {NodeAttributes::RMSNormAttributes, "RMSNormAttributes"},
+     {NodeAttributes::BlockScaleDequantizeAttributes, "BlockScaleDequantizeAttributes"},
+     {NodeAttributes::BlockScaleQuantizeAttributes, "BlockScaleQuantizeAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -70,6 +82,21 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
     case data_objects::NodeAttributes::MatmulAttributes:
         nodeJson = *node.attributes_as_MatmulAttributes();
         break;
+    case data_objects::NodeAttributes::SdpaAttributes:
+        nodeJson = *node.attributes_as_SdpaAttributes();
+        break;
+    case data_objects::NodeAttributes::LayernormAttributes:
+        nodeJson = *node.attributes_as_LayernormAttributes();
+        break;
+    case data_objects::NodeAttributes::RMSNormAttributes:
+        nodeJson = *node.attributes_as_RMSNormAttributes();
+        break;
+    case data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+        nodeJson = *node.attributes_as_BlockScaleDequantizeAttributes();
+        break;
+    case data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+        nodeJson = *node.attributes_as_BlockScaleQuantizeAttributes();
+        break;
     default:
         throw std::runtime_error(
             "hipdnn_data_sdk::data_objects::to_json(Node): Unsupported NodeAttributes type: "
@@ -89,6 +116,10 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     graphJson["intermediate_data_type"] = graph.intermediate_data_type();
     graphJson["name"] = graph.name()->c_str();
     graphJson["tensors"] = graph.tensors();
+    if(graph.preferred_engine_id().has_value())
+    {
+        graphJson["preferred_engine_id"] = graph.preferred_engine_id().value();
+    }
 }
 
 }
@@ -124,6 +155,16 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MatmulAttributes:
             return to<data_objects::MatmulAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::SdpaAttributes:
+            return to<data_objects::SdpaAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::LayernormAttributes:
+            return to<data_objects::LayernormAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::RMSNormAttributes:
+            return to<data_objects::RMSNormAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+            return to<data_objects::BlockScaleDequantizeAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+            return to<data_objects::BlockScaleQuantizeAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
                 "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
@@ -146,10 +187,24 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
     auto ioType = entry.at("io_data_type").get<data_objects::DataType>();
     auto intermediateType = entry.at("intermediate_data_type").get<data_objects::DataType>();
 
+    flatbuffers::Optional<int64_t> preferredEngineId = flatbuffers::nullopt;
+    if(entry.contains("preferred_engine_id"))
+    {
+        preferredEngineId = entry["preferred_engine_id"].get<int64_t>();
+    }
+
     auto nodes = toVector<Node>(builder, entry.at("nodes"));
     auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
-    return data_objects::CreateGraphDirect(
-        builder, name.c_str(), computeType, intermediateType, ioType, &tensors, &nodes);
+    return data_objects::CreateGraphDirect(builder,
+                                           name.c_str(),
+                                           computeType,
+                                           intermediateType,
+                                           ioType,
+                                           &tensors,
+                                           &nodes,
+                                           preferredEngineId);
 }
 
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

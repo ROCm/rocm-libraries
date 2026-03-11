@@ -1,33 +1,11 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import argparse
 import dataclasses as dc
-import pathlib
 import random
 import time
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -91,21 +69,23 @@ def mocked_run(cmd, **kwargs):
     test_yaml = """
 ---
 client:          GEMMv00
-device:          0
-kernelGenerate:  0
-kernelAssemble:  0
-kernelExecute:   [ 11345953, 11285794, 11359553, 11373794, 11348034, 11430433,
-                   11296513, 11409154, 11417954, 11372353 ]
-checked:         true
-correct:         true
-rnorm:           2.5e-05
+resultType:      GEMM
+benchmark:
+  device:          0
+  kernelGenerate:  0
+  kernelAssemble:  0
+  kernelExecute:   [ 11345953, 11285794, 11359553, 11373794, 11348034, 11430433,
+                     11296513, 11409154, 11417954, 11372353 ]
+  checked:         true
+  correct:         true
+  rnorm:           2.5e-05
 ...
 """
     assert cmd[0] == "client/rocroller-gemm"
     yaml_file = None
     for arg in cmd:
         if arg.startswith("--yaml"):
-            yaml_file = pathlib.Path(arg.split("=")[1])
+            yaml_file = Path(arg.split("=")[1])
     yaml_file.write_text(test_yaml)
     return NS(returncode=0, stdout=test_yaml.encode("ascii"))
 
@@ -211,7 +191,7 @@ def test_get_args():
     parser = argparse.ArgumentParser()
     ow.get_args(parser)
     args = parser.parse_args(["--output=testingrequired"])
-    assert args.output_dir == pathlib.Path("testingrequired")
+    assert args.output_dir == Path("testingrequired")
 
     input_args = [
         "--output=testing123",
@@ -224,7 +204,7 @@ def test_get_args():
     ow.get_args(parser)
     args = parser.parse_args(input_args)
 
-    assert args.output_dir == pathlib.Path("testing123")
+    assert args.output_dir == Path("testing123")
     assert args.generations == 2
     assert args.num_parents == 2
     assert args.population == 3

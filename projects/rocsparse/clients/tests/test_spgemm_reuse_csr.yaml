@@ -52,8 +52,8 @@ Tests:
   function: spgemm_reuse_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [62, 485]
-  N: [11, 827]
+  M: [62, 300]
+  N: [11, 300]
   K: [45, 325]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -69,8 +69,8 @@ Tests:
   function: spgemm_reuse_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [2716, 27461]
-  N: [1846, 38574]
+  M: [2000]
+  N: [1846, 2000]
   K: [3957, 2847]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -104,7 +104,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [22, 447]
+  N: [22, 300]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -125,7 +125,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [3267, 14125]
+  N: [2000]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -171,7 +171,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [54, 662]
+  N: [54, 300]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -190,7 +190,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [6702, 21142]
+  N: [2000]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]

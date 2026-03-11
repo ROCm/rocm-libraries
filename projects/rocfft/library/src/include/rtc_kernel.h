@@ -26,10 +26,12 @@
 
 #include <algorithm>
 #include <future>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/callback.h"
 #include "rtc_generator.h"
@@ -121,16 +123,26 @@ struct RTCKernel
 
     // take already-compiled code object and prepare to launch the
     // named kernel
-    RTCKernel(const std::string&       kernel_name,
-              const std::vector<char>& code,
-              dim3                     gridDim  = {},
-              dim3                     blockDim = {});
+    RTCKernel(const std::string&                       kernel_name,
+              std::shared_future<hipModule_wrapper_t>& module,
+              dim3                                     gridDim  = {},
+              dim3                                     blockDim = {});
 
     virtual ~RTCKernel()
     {
         kernel = nullptr;
-        (void)hipModuleUnload(module);
-        module = nullptr;
+
+#ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
+        std::lock_guard<std::mutex> lock(active_modules_mutex);
+        // decrement refcount and remove the module from the map if it's no longer used
+        auto it = active_modules.find(rtc_module_key{kernel_name, deviceId});
+        if(it != active_modules.end())
+        {
+            it->second.refcount--;
+            if(it->second.refcount == 0)
+                active_modules.erase(it);
+        }
+#endif
     }
 
     // disallow copies, since we expect this to be managed by smart ptr
@@ -158,9 +170,10 @@ struct RTCKernel
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) = 0;
 #endif
 
-    // function to construct the correct RTCKernel object, given a kernel name and its compiled code
+    // function to construct the correct RTCKernel object, given a
+    // kernel name and its code object module
     using rtckernel_construct_t = std::function<std::unique_ptr<RTCKernel>(
-        const std::string&, const std::vector<char>&, dim3, dim3)>;
+        const std::string&, std::shared_future<hipModule_wrapper_t>&, dim3, dim3)>;
 
     // grid parameters for this kernel.  may be set by runtime
     // compilation, if compilation of this kernel type knows how to.
@@ -169,9 +182,17 @@ struct RTCKernel
     dim3 gridDim;
     dim3 blockDim;
 
-    std::string kernel_name;
+    const std::string kernel_name;
+    const int         deviceId = hipInvalidDeviceId;
 
 protected:
+    // Hang on to the module that was used to construct this kernel, to
+    // ensure that the module lives long enough.  Normally we'd expect
+    // the module to be kept alive by the active_modules map below, but
+    // it's possible to have standalone RTCKernels too.
+    const std::shared_future<hipModule_wrapper_t> module;
+    hipFunction_t                                 kernel = nullptr;
+
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     struct RTCGenerator
     {
@@ -194,10 +215,48 @@ protected:
         dim3 gridDim;
         dim3 blockDim;
     };
+
+    // runtime compile a kernel, given a generator struct that
+    // indicates how to generate code for it
+    static std::shared_future<std::unique_ptr<RTCKernel>> runtime_compile(
+        const RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name);
+
+    // Keep track of modules that have been requested, so that if two
+    // identical kernel requests come at the same time, we only
+    // create one module.  Modules are per-device so that needs to be
+    // part of the key.
+    struct rtc_module_key
+    {
+        std::string kernel_name;
+        int         deviceId = 0;
+        bool        operator<(const rtc_module_key& other) const
+        {
+            if(kernel_name < other.kernel_name)
+                return true;
+            if(kernel_name > other.kernel_name)
+                return false;
+            return deviceId < other.deviceId;
+        };
+    };
+
+    // Cache of actively used HIP modules.  As kernels are requested
+    // for plans in RTCKernel::runtime_compile, a std::shared_future
+    // for the module is added here.  Subsequent requests for the same
+    // kernel will increase the refcount of the module and avoid
+    // creating a new duplicate module.
+    //
+    // As RTCKernel objects are destroyed, the refcounts are decreased,
+    // and the modules are freed when nothing references them anymore.
+    struct rtc_module_t
+    {
+        std::shared_future<hipModule_wrapper_t> module;
+        size_t                                  refcount = 0;
+    };
+    static std::map<rtc_module_key, rtc_module_t> active_modules;
+    static std::mutex                             active_modules_mutex;
 #endif
 
-    hipModule_t   module = nullptr;
-    hipFunction_t kernel = nullptr;
+    static int get_current_hip_device();
 };
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS

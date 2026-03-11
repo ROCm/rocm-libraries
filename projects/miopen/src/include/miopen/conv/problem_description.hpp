@@ -104,10 +104,10 @@ namespace conv {
 MIOPEN_INTERNALS_EXPORT miopenAlphaBetaCase_t ClassifyAlphaBeta(const Scalar& alpha,
                                                                 const Scalar& beta);
 
-struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
+struct ProblemDescription : ProblemDescriptionBase
 #if MIOPEN_ENABLE_SQLITE
     ,
-                                                    SQLiteSerializable<ProblemDescription>
+                            SQLiteSerializable<ProblemDescription>
 #endif
 {
     ProblemDescription() = default;
@@ -222,7 +222,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     bool IsDirectionForward() const { return direction == conv::Direction::Forward; }
     bool IsDirectionBackwardData() const { return direction == conv::Direction::BackwardData; }
     bool IsDirectionBackwardWrW() const { return direction == conv::Direction::BackwardWeights; }
-    std::string GetDirectionStr() const;
+    MIOPEN_INTERNALS_EXPORT std::string GetDirectionStr() const;
 
     const Scalar& GetAlpha() const { return alpha; }
     const Scalar& GetBeta() const { return beta; }
@@ -295,6 +295,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
         return GetInCastType() || GetWeightsCastType() || GetOutCastType();
     }
 
+    bool UseTF32() const { return use_tf32; }
+
     // To be used in Solvers that do not implement ALT FP16 kernels.
     // Those Solvers must be non-applicable for gfx90a when this function returns true.
     bool IsGfx90aFp16altRequired() const
@@ -338,9 +340,9 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
                out.AllLengthsFitIntoInt();
     }
 
-    void HeuristicUpdateLayouts();
+    MIOPEN_INTERNALS_EXPORT void HeuristicUpdateLayouts();
 
-    void MakeNetworkConfig(std::string& conf_key) const;
+    MIOPEN_INTERNALS_EXPORT void MakeNetworkConfig(std::string& conf_key) const;
 
     NetworkConfig MakeNetworkConfig() const override
     {
@@ -352,7 +354,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     // Todo: remove after fixing fin
     [[deprecated]] NetworkConfig BuildConfKey() const { return MakeNetworkConfig(); }
 
-    void Serialize(std::ostream& stream) const;
+    MIOPEN_INTERNALS_EXPORT void Serialize(std::ostream& stream) const;
 
     friend std::ostream& operator<<(std::ostream& os, const ProblemDescription& obj)
     {
@@ -395,6 +397,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
             self.GetInDataType(), self.GetWeightsDataType(), self.GetOutDataType());
         f(data_type, "data_type");
         f(self.GetDirectionStr(), "direction");
+        if(data_type == "FP32" && self.UseTF32())
+            f("TF32", "compute_datatype");
     }
 
     template <class Self, class Visitor>
@@ -405,13 +409,14 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
               [&](std::string value, std::string name) { f(value, name); });
     }
 
-    void SetupFloats(ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
-    std::string ComputeInLayout() const;
-    std::string ComputeOutLayout() const;
-    std::string ComputeWeightsLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeInLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeOutLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeWeightsLayout() const;
 
     TensorDescriptor in;
     TensorDescriptor weights;
@@ -425,6 +430,7 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
+    mutable bool use_tf32                 = false;
 };
 
 } // namespace conv

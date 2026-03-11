@@ -56,8 +56,6 @@ auto get_elimit<FmhaBwdBf16>(ck_tile::index_t hdim_q, ck_tile::index_t hdim_v)
     return ck_tile::make_tuple(rtol, atol);
 }
 
-extern template float fmha_bwd<2>(fmha_bwd_traits, fmha_bwd_args, const ck_tile::stream_config&);
-
 template <typename DataTypeConfig>
 bwd_result fmha_bwd_run(mode_enum mode,
                         ck_tile::index_t batch,
@@ -243,12 +241,29 @@ bwd_result fmha_bwd_run(mode_enum mode,
         (mode == mode_enum::batch ? seqlen_qs[0] : seqstart_q_host.back());
     const ck_tile::index_t shape_seqlen_k =
         (mode == mode_enum::batch ? seqlen_ks[0] : seqstart_k_host.back());
-    // Keep it equal to or smaller than minimal bn0 of all tiles in fmha_bwd.py
-    // TODO: add API for requesting kN0/nsplits/workspace_size? It is not safe to rely on internal
-    // implementation details in client code.
-    const ck_tile::index_t kN0 = 16;
-    const ck_tile::index_t nsplits =
-        deterministic ? ck_tile::integer_divide_ceil(max_seqlen_k, kN0) : 1;
+
+    const fmha_bwd_traits fmha_traits{
+        shape_seqlen_q,
+        shape_seqlen_k,
+        batch,
+        max_seqlen_q,
+        max_seqlen_k,
+        hdim_q,
+        hdim_v,
+        nhead,
+        nhead_k,
+        data_type,
+        mode == mode_enum::group,
+        mask.type,
+        bias.type,
+        use_dbias,
+        p_drop > 0.0f,
+        s_randval,
+        deterministic,
+    };
+    fmha_bwd_launcher launcher(fmha_traits);
+
+    const ck_tile::index_t nsplits = launcher.dq_acc_splits;
 
     ck_tile::HostTensor<QDataType> q_host(
         get_lengths(i_perm, shape_batch, nhead, shape_seqlen_q, hdim_q));
@@ -287,9 +302,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
             ? get_lengths(i_perm, shape_batch, nhead, shape_seqlen_q, max_seqlen_k)
             : std::array<ck_tile::index_t, 4>{1, 1, 1, 1} /* dummy shape for simplifying code */);
     ck_tile::HostTensor<AccDataType> dq_acc_host(
-        i_perm
-            ? std::array<ck_tile::index_t, 5>{nsplits, shape_batch, nhead, shape_seqlen_q, hdim_q}
-            : std::array<ck_tile::index_t, 5>{nsplits, shape_batch, shape_seqlen_q, nhead, hdim_q});
+        std::array<ck_tile::index_t, 5>{shape_batch, nhead, nsplits, shape_seqlen_q, hdim_q});
 
     if(init_method == "ui" || init_method == "0")
     {
@@ -408,17 +421,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                                 : "")
               << ", mask:" << mask << std::flush;
 
-    auto fmha_traits = fmha_bwd_traits{hdim_q,
-                                       hdim_v,
-                                       data_type,
-                                       mode == mode_enum::group,
-                                       mask.type,
-                                       bias.type,
-                                       use_dbias,
-                                       p_drop > 0.0f,
-                                       s_randval,
-                                       deterministic};
-    auto fmha_args   = [&]() {
+    auto fmha_args = [&]() {
         /// NOTE: we broadcast bias from [1, 1, seqlen_q, seqlen_k] to [batch, nhead, seqlen_q,
         ///       seqlen_k] in this example, hence both the 'batch_stride_bias' &
         ///       'nhead_stride_bias' are 0.
@@ -433,6 +436,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
         const ck_tile::index_t stride_dk      = (i_perm ? hdim_q : nhead * hdim_q);
         const ck_tile::index_t stride_dv      = (i_perm ? hdim_v : nhead * hdim_v);
         const ck_tile::index_t stride_dbias   = (i_perm ? max_seqlen_k : nhead * max_seqlen_k);
+        const auto split_stride_dq_acc        = (shape_seqlen_q * hdim_q);
         // setup nhead_stride_* arguments
         const ck_tile::index_t nhead_stride_q       = (i_perm ? shape_seqlen_q * hdim_q : hdim_q);
         const ck_tile::index_t nhead_stride_k       = (i_perm ? shape_seqlen_k * hdim_q : hdim_q);
@@ -444,6 +448,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
         const ck_tile::index_t nhead_stride_lsed    = shape_seqlen_q;
         const ck_tile::index_t nhead_stride_dbias =
             (i_perm ? shape_seqlen_q * max_seqlen_k : max_seqlen_k);
+        const auto nhead_stride_dq_acc =
+            static_cast<ck_tile::long_index_t>(split_stride_dq_acc) * nsplits;
         // setup batch_stride_* arguments
         const ck_tile::index_t batch_stride_q       = (nhead * shape_seqlen_q * hdim_q);
         const ck_tile::index_t batch_stride_k       = (nhead_k * shape_seqlen_k * hdim_q);
@@ -456,8 +462,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
         const ck_tile::index_t batch_stride_dk      = (nhead * shape_seqlen_k * hdim_q);
         const ck_tile::index_t batch_stride_dv      = (nhead * shape_seqlen_k * hdim_v);
         const ck_tile::index_t batch_stride_dbias   = (nhead * shape_seqlen_q * max_seqlen_k);
-        const ck_tile::index_t split_stride_dq_acc =
-            (shape_batch * nhead * shape_seqlen_q * hdim_q);
+        const auto batch_stride_dq_acc              = nhead * nhead_stride_dq_acc;
 
         const auto drop_seed_offset = [&]() -> decltype(fmha_bwd_args::drop_seed_offset) {
             if(drop_prefs)
@@ -478,7 +483,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                              k_buf.GetDeviceBuffer(),
                              v_buf.GetDeviceBuffer(),
                              bias.type == bias_enum::alibi ? alibi_slope_buf.GetDeviceBuffer()
-                                                             : bias_buf.GetDeviceBuffer(),
+                                                           : bias_buf.GetDeviceBuffer(),
                              o_buf.GetDeviceBuffer(),
                              lse_buf.GetDeviceBuffer(),
                              do_buf.GetDeviceBuffer(),
@@ -509,11 +514,11 @@ bwd_result fmha_bwd_run(mode_enum mode,
                              stride_k,
                              stride_v,
                              bias.type == bias_enum::alibi ? (bias.rank_info == 0 ? 0 : nhead)
-                                                             : stride_bias,
+                                                           : stride_bias,
                              stride_o,
                              stride_randval,
                              stride_do,
-                             stride_q, // stride_dq_acc
+                             hdim_q,   // stride_dq_acc
                              stride_q, // stride_dq
                              stride_dk,
                              stride_dv,
@@ -526,7 +531,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                              nhead_stride_randval,
                              nhead_stride_do,
                              nhead_stride_lsed,
-                             nhead_stride_q, // nhead_stride_dq_acc
+                             nhead_stride_dq_acc,
                              nhead_stride_q, // nhead_stride_dq
                              nhead_stride_k, // nhead_stride_dk
                              nhead_stride_v, // nhead_stride_dv
@@ -539,7 +544,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                              batch_stride_randval,
                              batch_stride_do,
                              batch_stride_lsed,
-                             batch_stride_q, // batch_stride_dq_acc
+                             batch_stride_dq_acc,
                              batch_stride_q, // batch_stride_dq
                              batch_stride_dk,
                              batch_stride_dv,
@@ -553,7 +558,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                              drop_seed_offset};
     }();
 
-    const float ave_time = fmha_bwd(fmha_traits, fmha_args, stream_config);
+    const float ave_time = launcher(fmha_args, stream_config);
     if(ave_time < 0)
     {
         std::cout << ", not supported yet" << std::flush << std::endl;
@@ -844,7 +849,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
             dq_acc_buf.SetZero();
 
         ck_tile::stream_config stream_config_v{nullptr, true, 0, 0, 1};
-        fmha_bwd(fmha_traits, fmha_args, stream_config_v);
+        launcher(fmha_args, stream_config_v);
 
         dq_buf.FromDevice(dq_host.data());
         dk_buf.FromDevice(dk_host.data());

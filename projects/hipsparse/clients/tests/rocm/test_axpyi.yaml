@@ -60,3 +60,14 @@ Tests:
   alpha: [0.3]
   alphai: [1.7]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
+
+- name: axpyi
+  category: pre_checkin
+  function: axpyi
+  precision: *single_double_precisions_complex_real
+  N: [14653]
+  nnz: [6000] 
+  alpha: [0.3]
+  alphai: [0.6]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  graph_test: true
