@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(hip REQUIRED)
 find_package(hipdnn_test_sdk REQUIRED)
+find_package(hipdnn_plugin_sdk REQUIRED)
 find_package(GTest REQUIRED)
 find_package(Threads REQUIRED)
 find_package(nlohmann_json REQUIRED)
@@ -25,6 +26,7 @@ target_link_libraries(hipdnn_integration_tests
     PRIVATE
         hip::host
         hipdnn_test_sdk
+        hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
         nlohmann_json::nlohmann_json

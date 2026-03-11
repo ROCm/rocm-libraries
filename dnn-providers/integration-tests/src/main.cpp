@@ -3,11 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
-#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <iostream>
 #include <set>
 
@@ -68,9 +68,14 @@ std::string formatPluginSet(const std::set<std::string>& plugins) {
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
-    hipdnn_frontend::initializeFrontendLogging();
-    hipdnn_data_sdk::logging::registerLoggingCallback(
-        hipdnn_test_sdk::utilities::testLoggingCallback);
+    // Initialize test logging infrastructure to forward logs to std::cerr based
+    // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
+    auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
+
+    // Initialize plugin logger with test recording callback so that plugin logs
+    // are routed to the log recorder for capture.
+    hipdnn_plugin_sdk::logging::initializeCallbackLogging("hipdnn_integration_tests",
+                                                          recordingCallback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
