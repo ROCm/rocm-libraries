@@ -11,6 +11,7 @@
 #include <miopen/util.hpp>
 
 #include <ranges>
+#include <set>
 
 namespace miopen {
 namespace solver {
@@ -126,23 +127,23 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
 
 // function generated from MI355 2d data
 bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
-        const ProblemDescription& problem) const
+                                const ProblemDescription& problem) const
 {
-    const std::string& arch = context.GetStream().GetDeviceName();
-    const std::set<std::string> mi = {"gfx942", "gfx955"}
-    const bool is_mi = mi.find(arch) != mi.end();
-    const bool is_gfx11 = StartsWith(arch, "gfx11");
-    const bool is_gfx12 = StartsWith(arch, "gfx12");
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                  = problem.GetBatchSize();
-    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
-    auto g                  = problem.GetGroupCount();
-    auto spatial_per_batch  = s / b;
-    auto channels_per_group = c / g;
-    auto spatial_work_per_group = s * channels_per_group
+    auto b                      = problem.GetBatchSize();
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto spatial_per_batch      = s / b;
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is gfx12)
+    if(is_gfx11 || is_gfx12)
     {
         // REFINED RULE: SWPG and CPG windows
         // Pattern: Medium-high SWPG range with moderate CPG range
@@ -152,8 +153,8 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
         // CPG window [300, 2500):
         //   - Includes problematic medium-to-high channel counts
         //   - Excludes very high CPG (>= 2500) which are different workloads
-        if(1000000 <= spatial_work_per_group < 2500000)
-            if(300 <= channels_per_group < 2500)
+        if(1000000 <= spatial_work_per_group && spatial_work_per_group < 2500000)
+            if(300 <= channels_per_group && channels_per_group < 2500)
                 return true;
     }
     else if(is_mi)
@@ -368,23 +369,23 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
 
 // function generated from MI355 2d data
 bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
-        const ProblemDescription& problem) const
+                              const ProblemDescription& problem) const
 {
-    const std::string& arch = context.GetStream().GetDeviceName();
-    const std::set<std::string> mi = {"gfx942", "gfx955"}
-    const bool is_mi = mi.find(arch) != mi.end();
-    const bool is_gfx11 = StartsWith(arch, "gfx11");
-    const bool is_gfx12 = StartsWith(arch, "gfx12");
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                  = problem.GetBatchSize();
-    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
-    auto g                  = problem.GetGroupCount();
-    auto spatial_per_batch  = s / b;
-    auto channels_per_group = c / g;
-    auto spatial_work_per_group = s * channels_per_group
+    auto b                      = problem.GetBatchSize();
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto spatial_per_batch      = s / b;
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is gfx12)
+    if(is_gfx11 || is_gfx12)
     {
         // PRIMARY: Memory-bound small problem
         // SWPG < 10k
