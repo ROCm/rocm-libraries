@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 
@@ -98,9 +99,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
             pivot_value = S(1) / pivot_value;
         else if(myinfo == 0)
             myinfo = k + 1;
-
-        // synchronize across waves before overwriting common
-        __syncthreads();
 
         // swap rows (lazy swaping)
         if(myrow == pivot_index)
@@ -686,6 +684,7 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
     using S = decltype(std::real(T{}));
 
     // determine sizes
+    constexpr I max_threads = ROCSOLVER_ASAN_VALUE(256, 1024);
     I dimy, dimx;
     if(m <= 8)
         dimx = 8;
@@ -697,13 +696,18 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
         dimx = 64;
     else if(m <= 128)
         dimx = 128;
-    else if(m <= 256)
-        dimx = 256;
-    else if(m <= 512)
-        dimx = 512;
+    else if constexpr(!rocsolver_enable_asan)
+    {
+        if(m <= 256)
+            dimx = 256;
+        else if(m <= 512)
+            dimx = 512;
+        else
+            dimx = 1024;
+    }
     else
-        dimx = 1024;
-    dimy = I(1024) / dimx;
+        dimx = 256;
+    dimy = I(max_threads) / dimx;
 
     // prepare kernel launch
     dim3 grid(1, 1, batch_count);
