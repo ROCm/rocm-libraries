@@ -272,7 +272,16 @@ def main():
     with open(output_json, "w") as f:
         json.dump(output, f, indent=2)
 
+    # Print summary
     print(f"Exported {len(tests)} tests to run to {output_json}")
+
+    # Print changed files for visibility
+    if changed_files:
+        print(f"\nChanged files ({len(changed_files)}):")
+        for f in sorted(changed_files):
+            print(f"  - {f}")
+    else:
+        print("\nNo files changed.")
 
 
 if __name__ == "__main__":
