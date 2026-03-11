@@ -36,7 +36,7 @@
 #include "csrsm_device.h"
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsm(rocsparse_operation transB,
                J                   m,
@@ -57,21 +57,21 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        rocsparse::csrsm_device<BLOCKSIZE, WFSIZE, SLEEP>(transB,
-                                                          m,
-                                                          nrhs,
-                                                          alpha,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          csr_val,
-                                                          B,
-                                                          ldb,
-                                                          done_array,
-                                                          map,
-                                                          zero_pivot,
-                                                          idx_base,
-                                                          fill_mode,
-                                                          diag_type);
+        rocsparse::csrsm_device<BLOCKSIZE, SLEEP>(transB,
+                                                  m,
+                                                  nrhs,
+                                                  alpha,
+                                                  csr_row_ptr,
+                                                  csr_col_ind,
+                                                  csr_val,
+                                                  B,
+                                                  ldb,
+                                                  done_array,
+                                                  map,
+                                                  zero_pivot,
+                                                  idx_base,
+                                                  fill_mode,
+                                                  diag_type);
     }
 
     template <typename I, typename J, typename T>
@@ -211,11 +211,10 @@ namespace rocsparse
 
             if(blockdim == 64)
             {
-
                 if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<64, 64, true>),
+                        (rocsparse::csrsm<64, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -240,7 +239,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<64, 64, false>),
+                        (rocsparse::csrsm<64, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -268,7 +267,7 @@ namespace rocsparse
                 if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<128, 64, true>),
+                        (rocsparse::csrsm<128, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -293,7 +292,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<128, 64, false>),
+                        (rocsparse::csrsm<128, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -321,7 +320,7 @@ namespace rocsparse
                 if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<256, 64, true>),
+                        (rocsparse::csrsm<256, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -346,7 +345,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<256, 64, false>),
+                        (rocsparse::csrsm<256, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -374,7 +373,7 @@ namespace rocsparse
                 if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<512, 64, true>),
+                        (rocsparse::csrsm<512, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -399,7 +398,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<512, 64, false>),
+                        (rocsparse::csrsm<512, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -427,7 +426,7 @@ namespace rocsparse
                 if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<1024, 64, true>),
+                        (rocsparse::csrsm<1024, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -452,7 +451,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<1024, 64, false>),
+                        (rocsparse::csrsm<1024, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
