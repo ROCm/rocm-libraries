@@ -7,9 +7,10 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "harness/SharedHandle.hpp"
 
 namespace hipdnn_integration_tests {
 
@@ -37,32 +38,28 @@ std::string EngineTestNameGenerator(const testing::TestParamInfo<EngineTestCase<
     return engineName + "_" + std::to_string(info.index);
 }
 
-/// Builds a test matrix of (engine, testCase) pairs based on engine capability.
-///
-/// For each test case, builds the graph and queries which engines support it
-/// using hipDNN frontend `get_ranked_engine_ids`.
-///
-/// Usage:
-///   INSTANTIATE_TEST_SUITE_P(Smoke, MyFixture,
-///       testing::ValuesIn(BuildEngineTestMatrix<MyFixture, TestCaseType>(
-///           testing::Combine(
-///               testing::Values(TensorLayout::NCHW),
-///               testing::ValuesIn(getTestCases())))),
-///       EngineTestNameGenerator<TestCaseType>);
-///
-/// Requirements:
-///   FixtureClass must provide:
-///     static std::pair<graph::Graph, GraphOutputs> buildGraph(
-///         hipdnnHandle_t handle, const TestCase& tc);
+// Builds a test matrix of (engine, testCase) pairs based on engine capability.
+//
+// For each test case, builds the graph and queries which engines support it
+// using hipDNN frontend `get_ranked_engine_ids`.
+//
+// Usage:
+//   INSTANTIATE_TEST_SUITE_P(Smoke, MyFixture,
+//       testing::ValuesIn(BuildEngineTestMatrix<MyFixture, TestCaseType>(
+//           testing::Combine(
+//               testing::Values(TensorLayout::NCHW),
+//               testing::ValuesIn(getTestCases())))),
+//       EngineTestNameGenerator<TestCaseType>);
+//
+// Requirements:
+//   FixtureClass must provide:
+//     static std::pair<graph::Graph, GraphOutputs> buildGraph(
+//         hipdnnHandle_t handle, const TestCase& tc);
 template <typename FixtureClass, typename TestCase>
 std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
     testing::internal::ParamGenerator<TestCase> testCaseGen) {
     std::vector<EngineTestCase<TestCase>> result;
-
-    hipdnnHandle_t handle;
-    if (hipdnnCreate(&handle) != HIPDNN_STATUS_SUCCESS) {
-        throw std::runtime_error("BuildEngineTestMatrix: hipdnnCreate failed");
-    }
+    hipdnnHandle_t handle = getSharedHandle();
 
     for (const auto& testCase : testCaseGen) {
         auto [graph, outputs] = FixtureClass::buildGraph(handle, testCase);
@@ -86,7 +83,6 @@ std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
         }
     }
 
-    hipdnnDestroy(handle);
     return result;
 }
 

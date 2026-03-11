@@ -178,7 +178,7 @@ class BatchnormBackwardActivation
         const auto& param = this->GetParam();
         const auto& [layout, bnTestCase, activTestCase] = param.testCase;
 
-        auto [graphObj, outputs] = buildGraph(this->_handle, param.testCase);
+        auto [graphObj, outputs] = buildGraph(getSharedHandle(), param.testCase);
 
         // Register validators
         this->registerValidator(outputs.dx,

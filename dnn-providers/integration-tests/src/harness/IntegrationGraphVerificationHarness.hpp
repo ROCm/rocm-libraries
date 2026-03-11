@@ -5,25 +5,12 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
 #include <functional>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
-#include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
-#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
-#include <hipdnn_frontend/node/BatchnormNode.hpp>
-#include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
-#include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
-#include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
-#include <hipdnn_frontend/node/MatmulNode.hpp>
-#include <hipdnn_frontend/node/Node.hpp>
-#include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -32,9 +19,9 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <nlohmann/json.hpp>
-#include <set>
 #include <vector>
 
+#include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace hipdnn_integration_tests {
@@ -46,8 +33,6 @@ using namespace hipdnn_frontend;
 template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType> {
    protected:
-    hipdnnHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
     int _deviceId = 0;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
@@ -70,83 +55,9 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
         // Initialize HIP
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
-
-        // Create handle and stream (hipDNN auto-loads plugins from standard path)
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
-        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
-
-        // Verify loaded plugins exactly match expected plugins
-        verifyExpectedPlugins();
-    }
-
-    void TearDown() override {
-        if (_handle != nullptr) {
-            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
-        }
-        if (_stream != nullptr) {
-            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
-        }
     }
 
     virtual void runGraphTest() = 0;
-
-    void verifyExpectedPlugins() {
-        auto expectedPlugins = TestConfig::get().getExpectedPluginPaths();
-        auto loadedPlugins = getLoadedPluginFilenames();
-
-        if (expectedPlugins != loadedPlugins) {
-            FAIL() << "Plugin mismatch!\n"
-                   << "  Expected: " << formatPluginSet(expectedPlugins) << "\n"
-                   << "  Loaded:   " << formatPluginSet(loadedPlugins);
-        }
-    }
-
-    std::set<std::string> getLoadedPluginFilenames() {
-        // Two call pattern: How many plugins, how large are the paths?
-        size_t numPlugins = 0;
-        size_t maxPathLength = 0;
-        auto status =
-            hipdnnGetLoadedEnginePluginPaths_ext(_handle, &numPlugins, nullptr, &maxPathLength);
-        if (status != HIPDNN_STATUS_SUCCESS || numPlugins == 0) {
-            return {};
-        }
-
-        // Two call pattern: What are the actual paths?
-        std::vector<std::vector<char>> pathBuffers(numPlugins, std::vector<char>(maxPathLength));
-        std::vector<char*> pluginPathsC(numPlugins);
-        for (size_t i = 0; i < numPlugins; ++i) {
-            pluginPathsC[i] = pathBuffers[i].data();
-        }
-        status = hipdnnGetLoadedEnginePluginPaths_ext(_handle, &numPlugins, pluginPathsC.data(),
-                                                      &maxPathLength);
-        if (status != HIPDNN_STATUS_SUCCESS) {
-            return {};
-        }
-
-        // Strip full path down to just the filenames
-        std::set<std::string> filenames;
-        for (size_t i = 0; i < numPlugins; ++i) {
-            std::filesystem::path pluginPath = std::filesystem::canonical(pluginPathsC[i]);
-            filenames.insert(pluginPath.filename().string());
-        }
-        return filenames;
-    }
-
-    static std::string formatPluginSet(const std::set<std::string>& plugins) {
-        std::string result = "[";
-        bool first = true;
-        for (const auto& plugin : plugins) {
-            if (!first) {
-                result += ", ";
-            } else {
-                first = false;
-            }
-            result += plugin;
-        }
-        result += "]";
-        return result;
-    }
 
     // Determine tolerance for an output tensor based on the graph and
     // configured tolerance mode for the engine.
@@ -185,7 +96,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
-        auto result = graph.build(_handle);
+        auto result = graph.build(getSharedHandle());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
@@ -193,7 +104,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
         initializeBundle(graph, gpuBundle, seed);
         initializeBundle(graph, cpuBundle, seed);
 
-        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(_handle, graph, gpuBundle));
+        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
         executeCpuGraph(graph, cpuBundle);
 
         ASSERT_GE(outputTensorIds.size(), 1)

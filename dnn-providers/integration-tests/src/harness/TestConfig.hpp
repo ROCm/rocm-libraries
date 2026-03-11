@@ -5,7 +5,6 @@
 
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <map>
@@ -21,7 +20,7 @@ namespace hipdnn_integration_tests {
 //
 // Example:
 //   [plugins.miopen]
-//   path = "libmiopen_plugin.so"
+//   name = "miopen_provider_plugin"
 //   engines = ["MIOPEN_PLUGIN"]
 //
 //   [engines.MIOPEN_PLUGIN]
@@ -69,10 +68,10 @@ class TestConfig {
         return _expectedFailures.count(testName) > 0;
     }
 
-    // Get expected plugin filenames from config (e.g., {"libfusilli_plugin.so",
-    // "libmiopen_plugin.so"})
-    const std::set<std::string>& getExpectedPluginPaths() const {
-        return _expectedPluginPaths;
+    // Get expected plugin names from config (e.g., {"fusilli_plugin",
+    // "miopen_provider_plugin"})
+    const std::set<std::string>& getExpectedPluginNames() const {
+        return _expectedPluginNames;
     }
 
    private:
@@ -99,11 +98,11 @@ class TestConfig {
                 }
             }
 
-            // Populate expected plugin paths from plugin definitions
+            // Populate expected plugin names from plugin definitions
             if (config.contains("plugins")) {
                 for (const auto& [name, info] : config["plugins"].items()) {
-                    if (info.contains("path")) {
-                        _expectedPluginPaths.insert(info["path"].get<std::string>());
+                    if (info.contains("name")) {
+                        _expectedPluginNames.insert(info["name"].get<std::string>());
                     }
                 }
             }
@@ -127,7 +126,7 @@ class TestConfig {
     }
 
     std::set<std::string> _expectedFailures;
-    std::set<std::string> _expectedPluginPaths;
+    std::set<std::string> _expectedPluginNames;
     std::map<std::string, ToleranceMode> _engineTolerances;
 };
 

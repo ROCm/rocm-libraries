@@ -79,7 +79,7 @@ class ConvForward
         const auto& param = this->GetParam();
         const auto& [layout, convTestCase] = param.testCase;
 
-        auto [graphObj, outputs] = buildGraph(this->_handle, param.testCase);
+        auto [graphObj, outputs] = buildGraph(getSharedHandle(), param.testCase);
 
         this->registerValidator(outputs.y, this->getTolerance(param.engineId, graphObj, outputs.y));
 
