@@ -436,9 +436,9 @@ struct SelectedKernel {{
     static constexpr ck_tile::index_t WarpTileK = {tile_config["warp_tile_k"]};
 
     // Traits
-    static constexpr bool kPadM = {"true" if pad_m == "true" else "false"};
-    static constexpr bool kPadN = {"true" if pad_n == "true" else "false"};
-    static constexpr bool kPadK = {"true" if pad_k == "true" else "false"};
+    static constexpr bool kPadM = {"true" if pad_m in [True, "true"] else "false"};
+    static constexpr bool kPadN = {"true" if pad_n in [True, "true"] else "false"};
+    static constexpr bool kPadK = {"true" if pad_k in [True, "true"] else "false"};
     static constexpr bool Preshuffle = false;
 
     static constexpr bool DoubleSmemBuffer = {"true" if pipeline == "compv4" else "false"};
@@ -447,8 +447,7 @@ struct SelectedKernel {{
     static constexpr bool NumWaveGroup       = 1;
 
     static constexpr bool TransposeC = false;
-    static constexpr bool UsePersistentKernel = {"true" if str(persistent).lower() == "true" else "false"};
-    static constexpr bool UseStructuredSparsity = false;
+    static constexpr bool UsePersistentKernel = {"true" if persistent in [True, "true"] else "false"};
     static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr ck_tile::StreamKReductionStrategy reduction_strategy = {reduction_strategy_map.get(reduction_strategy, "ck_tile::StreamKReductionStrategy::Linear")};
 
@@ -697,11 +696,11 @@ struct SelectedKernel {{
                     pipeline,
                     epilogue,
                     scheduler,
+                    reduction_strategy,
                     pad_m,
                     pad_n,
                     pad_k,
                     persistent,
-                    reduction_strategy,
                 ) = trait_combo
 
                 # Create kernel name with proper boolean capitalization
@@ -873,10 +872,10 @@ def main():
             trait_parts[1],  # epilogue
             trait_parts[2],  # scheduler
             trait_parts[3],  # reduction_strategy
-            trait_parts[4] == "false",  # pad_m
-            trait_parts[5] == "false",  # pad_n
-            trait_parts[6] == "false",  # pad_k
-            trait_parts[7],  # persistent
+            trait_parts[4] == "True",  # pad_m
+            trait_parts[5] == "True",  # pad_n
+            trait_parts[6] == "True",  # pad_k
+            trait_parts[7] == "True",  # persistent
         )
 
         # Generate the kernel
