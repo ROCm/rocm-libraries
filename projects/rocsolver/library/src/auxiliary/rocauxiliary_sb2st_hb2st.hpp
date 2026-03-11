@@ -329,7 +329,7 @@ __device__ void sb2st_hb2st_task(
     if (task == 0)
     {
         // First task of the sweep brings column sweep to tridiagonal,
-        // and applies reflector to diagonal block.
+        // and applies reflector to diagonal block A{jc, jc}.
         if (yid == 0)
         {
             // Copy column sweep to shared memory, A[j+1:j+1+nc, s].
@@ -362,7 +362,7 @@ __device__ void sb2st_hb2st_task(
         }
         __syncthreads();
 
-        #if 0
+        #if 1
             if (s_tau != 0)
             {
                 // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
@@ -375,7 +375,7 @@ __device__ void sb2st_hb2st_task(
                                 Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
                     __syncthreads();
                     sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
-                                Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work);
+                                Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
                 #endif
 
                 // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
@@ -384,42 +384,32 @@ __device__ void sb2st_hb2st_task(
     }
     else
     {
-        #if 0
-            // Bulge chasing applies reflector from previous step to off-diagonal
-            // block, creating a bulge, then brings 1st column of bulge back to band
-            // kd, and applies reflector to off-diagonal and diagonal block.
-            rocblas_int jp = jc - kd;
+        // Bulge chasing applies reflector from previous step to off-diagonal
+        // block A{jc, jp}, creating a bulge, then creates reflector to bring
+        // 1st column of bulge back to bandwidth kd, and applies reflector to
+        // off-diagonal block A{jc, jp} and diagonal block A{jc, jc}.
+        rocblas_int jp = jc - kd;
 
-            if (yid == 0)
-            {
-                // Copy previous Householder vector, vp, to shared memory.
-                for (rocblas_int i = xid; i < kd; i += DIMX)
-                    s_housev[i] = V[vi + i + (vj - kd)*ldv];
-                if (xid == 0)
-                    s_tau = V[ldv - 1 + (vj - kd)*ldv];
-            }
+        if (yid == 0)
+        {
+            // Copy previous Householder vector, vp, to shared memory.
+            for (rocblas_int i = xid; i < kd; i += DIMX)
+                s_housev[i] = V[vi + i + (vj - kd)*ldv];
+            if (xid == 0)
+                s_tau = V[ldv - 1 + (vj - kd)*ldv];
+        }
+        __syncthreads();
+
+        // Apply vp on right to lower off-diagonal tile,
+        // A{jc, jp} := A{jc, jp} H.
+        if (s_tau != 0)
+        {
+            sb2st_larf( xid, yid, rocblas_side_right, nc, kd, s_housev, s_tau,
+                        Aband + idiag + kd + jp*ldab, ldab-1, s_work );
             __syncthreads();
+        }
 
-            // Apply vp on right to lower off-diagonal tile,
-            // A{jc, jp} := A{jc, jp} H.
-            if (s_tau != 0)
-            {
-                sb2st_larf( xid, yid, rocblas_side_right, nc, kd, s_housev, s_tau,
-                            Aband + idiag + kd + jp*ldab, ldab-1, s_work );
-                __syncthreads();
-            }
-
-            // Copy conj of top row of A{jc, jp} to 1st col of A{jp, jc} to maintain
-            // symmetry for next task.
-            if (yid == 0)
-            {
-                for (rocblas_int i = xid; i < kd-1; i += DIMX)
-                {
-                    Aband[ idiag - (kd - 1) + i + jc*ldab ]
-                        = conj( Aband[ idiag + (kd - 1) + i + (jp + 1 + i)*ldab ] );
-                }
-            }
-
+        #if 1
             if (nc > 1)
             {
                 if (yid == 0)
@@ -453,15 +443,15 @@ __device__ void sb2st_hb2st_task(
                 }
                 __syncthreads();
 
-                // apply Householder reflector
                 if (s_tau != 0)
                 {
-                    // Apply on left of lower off-diagonal, A{jc, jp} := H^H A{jc, jp}.
-                    sb2st_larf( xid, yid, rocblas_side_left, nc, kd, s_housev, conj( s_tau ),
-                                Aband + idiag + kd + jp*ldab, ldab-1, s_work );
+                    // Apply vc on left of lower off-diagonal block, A{jc, jp+1} := H^H A{jc, jp+1}.
+                    // Skip 1st column that was eliminated above.
+                    sb2st_larf( xid, yid, rocblas_side_left, nc, kd-1, s_housev, conj( s_tau ),
+                                Aband + idiag + kd - 1 + (jp + 1)*ldab, ldab-1, s_work );
                     __syncthreads();
 
-                    // Apply on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
+                    // Apply vc on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
                     #if 0
                         sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, s_tau,
                                     Aband + idiag + jc*ldab, ldab-1, s_work );
@@ -470,12 +460,23 @@ __device__ void sb2st_hb2st_task(
                                     Aband + idiag + jc*ldab, ldab-1, s_work );
                         __syncthreads();
 
-                        sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, s_tau,
+                        sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
                                     Aband + idiag + jc*ldab, ldab-1, s_work );
                     #endif
                 }
             }
         #endif
+
+        // Copy conj of top row of A{jc, jp} to 1st col of A{jp, jc} to maintain
+        // symmetry for next task.
+        if (yid == 0)
+        {
+            for (rocblas_int i = xid; i < kd-1; i += DIMX)
+            {
+                Aband[ idiag - (kd - 1) + i + jc*ldab ]
+                    = conj( Aband[ idiag + (kd - 1) - i + (jp + 1 + i)*ldab ] );
+            }
+        }
     }
 }
 
@@ -532,6 +533,12 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     rocblas_int task = round - (2 * sweep);
     assert( task >= 0 );
     assert( sweep >= 0 );
+
+    #define ONLY_SWEEP_0 1
+    #if ONLY_SWEEP_0
+        if (sweep > 0)
+            return;
+    #endif
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
@@ -656,7 +663,9 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     rocblas_stride shiftV = 0;
     laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
            batch_count );
-    print_matrix( "V=0", ldv, nv, V, ldv, 4 );
+
+    print_matrix( "dA_in", ldab, n, Aband, ldab, 6 );
+    print_matrix( "dV_init", ldv, nv, V, ldv, 6 );
 
     // rocblas_pointer_mode old_mode;
     // rocblas_get_pointer_mode( handle, &old_mode );
@@ -688,24 +697,24 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     // execute sweeps
     for (rocblas_int round = 0; round < num_rounds; ++round)
     {
+        // Run sweeps in half-open interval [begin, ..., end).
+        // Near the end, there are kd - 1 empty rounds, where a sweep has
+        // finished but the next sweep hasn't started per these formulas;
+        // skip those rounds.
+        rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
+
         //#define ONLY_SWEEP_0 1
-        #define ONLY_TASK_0 1
-        #if ONLY_SWEEP_0
-            // Run just sweep 0.
-            rocblas_int sweep_end = 1;
-        #elif ONLY_TASK_0
+        //#define ONLY_TASK_0 1     passes larfg, passes larf2x
+        //#define ONLY_TASK_01 1
+        #if ONLY_TASK_0
             // Run all sweeps, task 0. See also below.
-            rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
             sweep_begin = sweep_end - 1;
-        #else
-            // Run sweeps in half-open interval [begin, ..., end).
-            // Near the end, there are kd - 1 empty rounds, where a sweep has
-            // finished but the next sweep hasn't started per these formulas;
-            // skip those rounds.
-            rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
+        #elif ONLY_TASK_01
+            // Run all sweeps, task 0. See also below.
+            sweep_begin_finishes = 2*sweep_begin + std::min( 2, ceildiv( n - sweep_begin - 1, kd ) - 1 );
         #endif
         rocblas_int parallel_sweeps = sweep_end - sweep_begin;
-        printf( "round %d, sweeps %d : %d, parallel sweeps %d\n",
+        printf( "# round %d, sweeps %d : %d, parallel sweeps %d\n",
                 round, sweep_begin, sweep_end, parallel_sweeps );
         if (parallel_sweeps > 0)
         {
@@ -717,6 +726,12 @@ rocblas_status rocsolver_sb2st_hb2st_template(
                 Aband, shiftA, ldab, strideA,
                 E, strideE,
                 V, ldv, strideV );
+
+            std::string lbl = "dA" + std::to_string( round );
+            print_matrix( lbl.c_str(), ldab, n, Aband, ldab, 6 );
+
+            lbl = "dV" + std::to_string( round );
+            print_matrix( lbl.c_str(), ldv, nv, V, ldv, 6 );
         }
         if (round == sweep_begin_finishes)
         {
@@ -724,8 +739,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
             sweep_begin_finishes
                 = 2*sweep_begin + ceildiv( n - sweep_begin - 1, kd ) - 1;
         }
-        print_matrix( "A", ldab, n, Aband, ldab, 4 );
-        print_matrix( "V", ldv, nv, V, ldv, 4 );
 
         #if ONLY_TASK_0
             // Run all sweeps, task 0. See also above.
