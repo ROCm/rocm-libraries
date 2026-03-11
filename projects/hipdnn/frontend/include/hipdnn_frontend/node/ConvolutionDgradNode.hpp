@@ -25,6 +25,11 @@ public:
     {
     }
 
+    std::string_view getOperationType() const override
+    {
+        return "conv_dgrad";
+    }
+
     Error pre_validate_node() const override
     {
         HIPDNN_RETURN_IF_FALSE(

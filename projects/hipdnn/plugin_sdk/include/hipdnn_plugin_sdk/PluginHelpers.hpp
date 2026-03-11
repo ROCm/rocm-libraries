@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
@@ -23,7 +24,8 @@ void throwIfNull(T* value)
     if(value == nullptr)
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                    std::string(typeid(T).name()) + " is nullptr");
+                                    "Null pointer provided to "
+                                        + std::string(HIPDNN_FUNCTION_NAME));
     }
 }
 

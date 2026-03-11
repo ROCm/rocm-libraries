@@ -788,7 +788,7 @@ TEST_F(TestRMSNormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     auto tensors = graphOp->getTensorDescriptors();
@@ -798,6 +798,6 @@ TEST_F(TestRMSNormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
 TEST_F(TestRMSNormOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

@@ -24,6 +24,11 @@ public:
     {
     }
 
+    std::string_view getOperationType() const override
+    {
+        return "conv_fprop";
+    }
+
     Error pre_validate_node() const override
     {
         // Validate tensor pointers

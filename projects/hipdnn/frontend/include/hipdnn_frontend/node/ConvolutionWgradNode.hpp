@@ -25,6 +25,11 @@ public:
     {
     }
 
+    std::string_view getOperationType() const override
+    {
+        return "conv_wgrad";
+    }
+
     Error pre_validate_node() const override
     {
         auto x = attributes.get_x();

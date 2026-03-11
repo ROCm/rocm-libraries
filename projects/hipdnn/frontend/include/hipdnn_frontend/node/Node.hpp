@@ -9,12 +9,15 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend::graph
 {
+
 class INode
 {
 public:
@@ -46,6 +49,12 @@ public:
         return {};
     }
     virtual std::string getNodeName() const
+    {
+        return {};
+    }
+
+    /// Returns the operation type tag for this node, or empty if not set.
+    virtual std::string_view getOperationType() const
     {
         return {};
     }
