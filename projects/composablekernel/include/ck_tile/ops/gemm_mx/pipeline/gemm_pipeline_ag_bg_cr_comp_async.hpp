@@ -323,22 +323,25 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             constexpr index_t NWarp = BlockWarps::at(I1{});
 
             // Compute effective XdlPack sizes (fall back to 1 when iter count < pack)
-            constexpr index_t MPerXdl       = WarpTile::at(I0{});
-            constexpr index_t NPerXdl       = WarpTile::at(I1{});
-            constexpr index_t KPerXdl       = WarpTile::at(I2{});
-            constexpr index_t MIterPerWarp  = MPerBlock / (MWarp * MPerXdl);
-            constexpr index_t NIterPerWarp  = NPerBlock / (NWarp * NPerXdl);
-            constexpr index_t KIterPerWarp  = KPerBlock / KPerXdl;
+            constexpr index_t MPerXdl      = WarpTile::at(I0{});
+            constexpr index_t NPerXdl      = WarpTile::at(I1{});
+            constexpr index_t KPerXdl      = WarpTile::at(I2{});
+            constexpr index_t MIterPerWarp = MPerBlock / (MWarp * MPerXdl);
+            constexpr index_t NIterPerWarp = NPerBlock / (NWarp * NPerXdl);
+            constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
 
             constexpr index_t MXdlPackEff =
                 (MIterPerWarp >= Policy::MXdlPack && MIterPerWarp % Policy::MXdlPack == 0)
-                    ? Policy::MXdlPack : 1;
+                    ? Policy::MXdlPack
+                    : 1;
             constexpr index_t NXdlPackEff =
                 (NIterPerWarp >= Policy::NXdlPack && NIterPerWarp % Policy::NXdlPack == 0)
-                    ? Policy::NXdlPack : 1;
+                    ? Policy::NXdlPack
+                    : 1;
             constexpr index_t KXdlPackEff =
                 (KIterPerWarp >= Policy::KXdlPack && KIterPerWarp % Policy::KXdlPack == 0)
-                    ? Policy::KXdlPack : 1;
+                    ? Policy::KXdlPack
+                    : 1;
 
             // Packed scale dimensions
             constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize / KXdlPackEff;
@@ -352,15 +355,13 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
             // Create scale windows with packed int32_t dimensions
             auto scale_a_dram_window = make_tile_window(
                 scale_a_tensor_view,
-                make_tuple(number<MPerBlock / MXdlPackEff>{},
-                           number<ScaleKDimPerBlock>{}),
+                make_tuple(number<MPerBlock / MXdlPackEff>{}, number<ScaleKDimPerBlock>{}),
                 scale_a_base_origin,
                 Policy::template MakeMX_ScaleA_DramTileDistribution<Problem>());
 
             auto scale_b_dram_window = make_tile_window(
                 scale_b_tensor_view,
-                make_tuple(number<NPerBlock / NXdlPackEff>{},
-                           number<ScaleKDimPerBlock>{}),
+                make_tuple(number<NPerBlock / NXdlPackEff>{}, number<ScaleKDimPerBlock>{}),
                 scale_b_base_origin,
                 Policy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
 

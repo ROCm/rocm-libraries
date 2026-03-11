@@ -50,18 +50,18 @@ class TestMxGemmUtil : public ::testing::Test
     // the GPU tile distribution: values are XdlMNThread apart in M and XdlKThread apart in K.
     //   byte[ik * MNPack + imn] = e8m0 at strided (mn, k) position
     // kLast=true for A scales (layout [M, K/32]), kLast=false for B scales (layout [K/32, N])
-    template <ck_tile::index_t MNPack = 2,
-              ck_tile::index_t KPack = 2,
+    template <ck_tile::index_t MNPack      = 2,
+              ck_tile::index_t KPack       = 2,
               ck_tile::index_t XdlMNThread = 16,
-              ck_tile::index_t XdlKThread = 4>
+              ck_tile::index_t XdlKThread  = 4>
     static auto packScalesMNxK(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool kLast)
     {
-        auto src_lengths                       = src.get_lengths();
-        const ck_tile::index_t MN              = kLast ? src_lengths[0] : src_lengths[1];
-        const ck_tile::index_t K_scale         = kLast ? src_lengths[1] : src_lengths[0];
-        const ck_tile::index_t MN_packed       = MN / MNPack;
-        const ck_tile::index_t K_packed        = K_scale / KPack;
-        const ck_tile::index_t total_packed    = MN_packed * K_packed;
+        auto src_lengths                    = src.get_lengths();
+        const ck_tile::index_t MN           = kLast ? src_lengths[0] : src_lengths[1];
+        const ck_tile::index_t K_scale      = kLast ? src_lengths[1] : src_lengths[0];
+        const ck_tile::index_t MN_packed    = MN / MNPack;
+        const ck_tile::index_t K_packed     = K_scale / KPack;
+        const ck_tile::index_t total_packed = MN_packed * K_packed;
 
         std::vector<int32_t> packed(total_packed);
 
@@ -69,11 +69,11 @@ class TestMxGemmUtil : public ::testing::Test
         {
             for(ck_tile::index_t packed_k = 0; packed_k < K_packed; packed_k++)
             {
-                int32_t val                    = 0;
-                ck_tile::index_t mn_lane       = packed_mn % XdlMNThread;
-                ck_tile::index_t mn_group      = packed_mn / XdlMNThread;
-                ck_tile::index_t k_lane        = packed_k % XdlKThread;
-                ck_tile::index_t k_group       = packed_k / XdlKThread;
+                int32_t val               = 0;
+                ck_tile::index_t mn_lane  = packed_mn % XdlMNThread;
+                ck_tile::index_t mn_group = packed_mn / XdlMNThread;
+                ck_tile::index_t k_lane   = packed_k % XdlKThread;
+                ck_tile::index_t k_group  = packed_k / XdlKThread;
                 for(ck_tile::index_t ik = 0; ik < KPack; ik++)
                 {
                     for(ck_tile::index_t imn = 0; imn < MNPack; imn++)
@@ -125,9 +125,9 @@ class TestMxGemmUtil : public ::testing::Test
         ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_b_host);
 
         // Compute effective XdlPack sizes based on GemmConfig tile dimensions
-        constexpr ck_tile::index_t MPerXdl      = GemmConfig::M_Warp_Tile;
-        constexpr ck_tile::index_t NPerXdl      = GemmConfig::N_Warp_Tile;
-        constexpr ck_tile::index_t KPerXdl      = GemmConfig::K_Warp_Tile;
+        constexpr ck_tile::index_t MPerXdl = GemmConfig::M_Warp_Tile;
+        constexpr ck_tile::index_t NPerXdl = GemmConfig::N_Warp_Tile;
+        constexpr ck_tile::index_t KPerXdl = GemmConfig::K_Warp_Tile;
         constexpr ck_tile::index_t MIterPerWarp =
             GemmConfig::M_Tile / (GemmConfig::M_Warp * MPerXdl);
         constexpr ck_tile::index_t NIterPerWarp =
@@ -146,11 +146,9 @@ class TestMxGemmUtil : public ::testing::Test
 
         // Pack scales into int32_t for GPU consumption
         auto scale_a_packed =
-            packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
-                scale_a_host, true);
+            packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_a_host, true);
         auto scale_b_packed =
-            packScalesMNxK<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
-                scale_b_host, false);
+            packScalesMNxK<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_b_host, false);
 
         ck_tile::DeviceMem a_dev_buf(a_host.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_dev_buf(b_host.get_element_space_size_in_bytes());

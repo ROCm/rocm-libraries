@@ -346,8 +346,7 @@ struct BlockGemmARegBRegCRegV1
                             AWarpTensor a_warp_tensor;
                             a_warp_tensor.get_thread_buffer() =
                                 a_block_tensor.get_y_sliced_thread_data(
-                                    merge_sequences(sequence<mIter, kIter>{},
-                                                    a_warp_y_index_zeros),
+                                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
                                     merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
                             // OpSel for A: selects byte within packed int32_t
@@ -368,10 +367,9 @@ struct BlockGemmARegBRegCRegV1
                                 constexpr index_t kOpSelB = ikxdl * NXdlPack + inxdl;
 
                                 // read C warp tensor from C block tensor
-                                using c_iter_idx =
-                                    std::conditional_t<TransposeC,
-                                                       sequence<nIter, mIter>,
-                                                       sequence<mIter, nIter>>;
+                                using c_iter_idx = std::conditional_t<TransposeC,
+                                                                      sequence<nIter, mIter>,
+                                                                      sequence<mIter, nIter>>;
                                 CWarpTensor c_warp_tensor;
                                 c_warp_tensor.get_thread_buffer() =
                                     c_block_tensor.get_y_sliced_thread_data(
@@ -379,12 +377,11 @@ struct BlockGemmARegBRegCRegV1
                                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                                 // warp GEMM with MX scaling using pre-packed scale and OpSel
-                                WarpGemm{}.template operator()<kOpSelA, kOpSelB>(
-                                    c_warp_tensor,
-                                    a_warp_tensor,
-                                    b_warp_tensor,
-                                    a_scale_packed,
-                                    b_scale_packed);
+                                WarpGemm{}.template operator()<kOpSelA, kOpSelB>(c_warp_tensor,
+                                                                                 a_warp_tensor,
+                                                                                 b_warp_tensor,
+                                                                                 a_scale_packed,
+                                                                                 b_scale_packed);
 
                                 // write C warp tensor into C block tensor
                                 c_block_tensor.set_y_sliced_thread_data(

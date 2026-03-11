@@ -104,13 +104,13 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     static constexpr index_t KXdlPack = 2;
 
     // Effective pack sizes: fall back to 1 when dimension is too small
-    using BlockWarps_ = typename BlockGemmShape::BlockWarps;
-    static constexpr index_t MPerBlock_ = BlockGemmShape::kM;
-    static constexpr index_t NPerBlock_ = BlockGemmShape::kN;
-    static constexpr index_t KPerBlock_ = BlockGemmShape::kK;
-    static constexpr index_t MWarp_ = BlockWarps_::at(number<0>{});
-    static constexpr index_t NWarp_ = BlockWarps_::at(number<1>{});
-    static constexpr index_t KPerXdl_ = BlockGemmShape::WarpTile::at(number<2>{});
+    using BlockWarps_                      = typename BlockGemmShape::BlockWarps;
+    static constexpr index_t MPerBlock_    = BlockGemmShape::kM;
+    static constexpr index_t NPerBlock_    = BlockGemmShape::kN;
+    static constexpr index_t KPerBlock_    = BlockGemmShape::kK;
+    static constexpr index_t MWarp_        = BlockWarps_::at(number<0>{});
+    static constexpr index_t NWarp_        = BlockWarps_::at(number<1>{});
+    static constexpr index_t KPerXdl_      = BlockGemmShape::WarpTile::at(number<2>{});
     static constexpr index_t MIterPerWarp_ = MPerBlock_ / (MWarp_ * MThreadPerXdl);
     static constexpr index_t NIterPerWarp_ = NPerBlock_ / (NWarp_ * NThreadPerXdl);
     static constexpr index_t KIterPerWarp_ = KPerBlock_ / KPerXdl_;
@@ -279,8 +279,8 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         auto scale_a = kargs.scale_m_ptr;
 
         static constexpr int BlockScaleSize = ScaleM::GranularityK;
-        const auto scale_k_packed = kargs.K / BlockScaleSize / KXdlPackEff;
-        const auto scale_m_packed = kargs.M / MXdlPackEff;
+        const auto scale_k_packed           = kargs.K / BlockScaleSize / KXdlPackEff;
+        const auto scale_m_packed           = kargs.M / MXdlPackEff;
 
         // A scale tensor view - layout [M/MXdlPackEff, K/32/KXdlPackEff] with int32_t elements
         const auto scale_a_tensor_view = make_naive_tensor_view<address_space_enum::global>(
@@ -308,8 +308,8 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         auto scale_b = kargs.scale_n_ptr;
 
         static constexpr int BlockScaleSize = ScaleN::GranularityK;
-        const auto scale_k_packed = kargs.K / BlockScaleSize / KXdlPackEff;
-        const auto scale_n_packed = kargs.N / NXdlPackEff;
+        const auto scale_k_packed           = kargs.K / BlockScaleSize / KXdlPackEff;
+        const auto scale_n_packed           = kargs.N / NXdlPackEff;
 
         // B scale tensor view - [N/NXdlPackEff, K/32/KXdlPackEff] of int32_t
         const auto scale_b_tensor_view = make_naive_tensor_view<address_space_enum::global>(

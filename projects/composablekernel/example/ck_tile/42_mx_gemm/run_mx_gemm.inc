@@ -19,17 +19,17 @@ auto calculate_rtol_atol(const ck_tile::index_t K, const float max_accumulated_v
 // the GPU tile distribution: values are XdlMNThread apart in M and XdlKThread apart in K.
 //   byte[ik * MNPack + imn] = e8m0 at strided (mn, k) position
 // kLast=true for A scales (layout [M, K/32]), kLast=false for B scales (layout [K/32, N])
-template <ck_tile::index_t MNPack = 2,
-          ck_tile::index_t KPack = 2,
+template <ck_tile::index_t MNPack      = 2,
+          ck_tile::index_t KPack       = 2,
           ck_tile::index_t XdlMNThread = 16,
-          ck_tile::index_t XdlKThread = 4>
+          ck_tile::index_t XdlKThread  = 4>
 auto packScalesMNxK(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool kLast)
 {
-    auto src_lengths      = src.get_lengths();
-    const ck_tile::index_t MN         = kLast ? src_lengths[0] : src_lengths[1];
-    const ck_tile::index_t K_scale    = kLast ? src_lengths[1] : src_lengths[0];
-    const ck_tile::index_t MN_packed  = MN / MNPack;
-    const ck_tile::index_t K_packed   = K_scale / KPack;
+    auto src_lengths                    = src.get_lengths();
+    const ck_tile::index_t MN           = kLast ? src_lengths[0] : src_lengths[1];
+    const ck_tile::index_t K_scale      = kLast ? src_lengths[1] : src_lengths[0];
+    const ck_tile::index_t MN_packed    = MN / MNPack;
+    const ck_tile::index_t K_packed     = K_scale / KPack;
     const ck_tile::index_t total_packed = MN_packed * K_packed;
 
     // Output as flat vector of int32_t (row-major [MN/MNPack, K/32/KPack])
@@ -39,7 +39,7 @@ auto packScalesMNxK(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool kLast)
     {
         for(ck_tile::index_t packed_k = 0; packed_k < K_packed; packed_k++)
         {
-            int32_t val = 0;
+            int32_t val               = 0;
             ck_tile::index_t mn_lane  = packed_mn % XdlMNThread;
             ck_tile::index_t mn_group = packed_mn / XdlMNThread;
             ck_tile::index_t k_lane   = packed_k % XdlKThread;
@@ -151,19 +151,16 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
     }
 
     // Compute effective XdlPack sizes based on GemmConfig tile dimensions
-    constexpr ck_tile::index_t MPerXdl_ = GemmConfig::M_Warp_Tile;
-    constexpr ck_tile::index_t NPerXdl_ = GemmConfig::N_Warp_Tile;
-    constexpr ck_tile::index_t KPerXdl_ = GemmConfig::K_Warp_Tile;
+    constexpr ck_tile::index_t MPerXdl_      = GemmConfig::M_Warp_Tile;
+    constexpr ck_tile::index_t NPerXdl_      = GemmConfig::N_Warp_Tile;
+    constexpr ck_tile::index_t KPerXdl_      = GemmConfig::K_Warp_Tile;
     constexpr ck_tile::index_t MIterPerWarp_ = GemmConfig::M_Tile / (GemmConfig::M_Warp * MPerXdl_);
     constexpr ck_tile::index_t NIterPerWarp_ = GemmConfig::N_Tile / (GemmConfig::N_Warp * NPerXdl_);
     constexpr ck_tile::index_t KIterPerWarp_ = GemmConfig::K_Tile / KPerXdl_;
 
-    constexpr ck_tile::index_t MXdlPackEff =
-        (MIterPerWarp_ >= 2 && MIterPerWarp_ % 2 == 0) ? 2 : 1;
-    constexpr ck_tile::index_t NXdlPackEff =
-        (NIterPerWarp_ >= 2 && NIterPerWarp_ % 2 == 0) ? 2 : 1;
-    constexpr ck_tile::index_t KXdlPackEff =
-        (KIterPerWarp_ >= 2 && KIterPerWarp_ % 2 == 0) ? 2 : 1;
+    constexpr ck_tile::index_t MXdlPackEff = (MIterPerWarp_ >= 2 && MIterPerWarp_ % 2 == 0) ? 2 : 1;
+    constexpr ck_tile::index_t NXdlPackEff = (NIterPerWarp_ >= 2 && NIterPerWarp_ % 2 == 0) ? 2 : 1;
+    constexpr ck_tile::index_t KXdlPackEff = (KIterPerWarp_ >= 2 && KIterPerWarp_ % 2 == 0) ? 2 : 1;
 
     // Pack scales: [M, K/32] e8m0_t → [M/MXdlPackEff, K/32/KXdlPackEff] int32_t
     // Original unpacked tensors are kept for CPU reference validation

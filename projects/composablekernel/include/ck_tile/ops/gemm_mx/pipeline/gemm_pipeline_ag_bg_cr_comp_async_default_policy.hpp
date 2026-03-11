@@ -169,14 +169,13 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t KIterPerWarp_packed = KIterPerWarp / KXdlPackEff;
 
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<NWarp>,
-                tuple<sequence<MIterPerWarp_packed, MWarp, MPerXdl>,
-                      sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
-                tuple<sequence<0, 1>, sequence<2, 1>>,
-                tuple<sequence<0, 1>, sequence<1, 2>>,
-                sequence<2, 1, 2>,
-                sequence<0, 0, 2>>{});
+            tile_distribution_encoding<sequence<NWarp>,
+                                       tuple<sequence<MIterPerWarp_packed, MWarp, MPerXdl>,
+                                             sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
+                                       tuple<sequence<0, 1>, sequence<2, 1>>,
+                                       tuple<sequence<0, 1>, sequence<1, 2>>,
+                                       sequence<2, 1, 2>,
+                                       sequence<0, 0, 2>>{});
     }
 
     template <typename Problem>
@@ -186,11 +185,11 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
         using BlockWarps     = typename BlockGemmShape::BlockWarps;
         using WarpTile       = typename BlockGemmShape::WarpTile;
 
-        constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
-        constexpr index_t MWarp     = BlockWarps::at(number<0>{});
-        constexpr index_t NWarp     = BlockWarps::at(number<1>{});
-        constexpr index_t NPerXdl   = WarpTile::at(number<1>{});
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
+        constexpr index_t NPerBlock    = Problem::BlockGemmShape::kN;
+        constexpr index_t MWarp        = BlockWarps::at(number<0>{});
+        constexpr index_t NWarp        = BlockWarps::at(number<1>{});
+        constexpr index_t NPerXdl      = WarpTile::at(number<1>{});
+        constexpr index_t KPerBlock    = Problem::BlockGemmShape::kK;
         constexpr index_t K_Lane       = get_warp_size() / NPerXdl;
         constexpr index_t NIterPerWarp = NPerBlock / (NWarp * NPerXdl);
 
@@ -208,14 +207,13 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t KIterPerWarp_packed = KIterPerWarp / KXdlPackEff;
 
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<MWarp>,
-                tuple<sequence<NIterPerWarp_packed, NWarp, NPerXdl>,
-                      sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
-                tuple<sequence<0, 1>, sequence<2, 1>>,
-                tuple<sequence<0, 1>, sequence<1, 2>>,
-                sequence<2, 1, 2>,
-                sequence<0, 0, 2>>{});
+            tile_distribution_encoding<sequence<MWarp>,
+                                       tuple<sequence<NIterPerWarp_packed, NWarp, NPerXdl>,
+                                             sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
+                                       tuple<sequence<0, 1>, sequence<2, 1>>,
+                                       tuple<sequence<0, 1>, sequence<1, 2>>,
+                                       sequence<2, 1, 2>,
+                                       sequence<0, 0, 2>>{});
     }
 };
 } // namespace ck_tile
