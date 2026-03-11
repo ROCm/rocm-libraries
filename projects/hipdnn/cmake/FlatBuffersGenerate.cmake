@@ -45,6 +45,10 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
         FetchContent_Populate(${_fc_name})
     endif()
 
+    # Convert compiler paths to CMake-style (forward slashes) for ExternalProject
+    file(TO_CMAKE_PATH "${CMAKE_C_COMPILER}" _c_compiler)
+    file(TO_CMAKE_PATH "${CMAKE_CXX_COMPILER}" _cxx_compiler)
+
     # Build flatc at build time via ExternalProject (separate CMake instance avoids
     # target name collisions). LOG flags suppress all configure/build output.
     ExternalProject_Add(${_ep_name}
@@ -59,6 +63,9 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
             -DFLATBUFFERS_BUILD_TESTS=OFF
             -DFLATBUFFERS_BUILD_FLATHASH=OFF
             -DFLATBUFFERS_ENABLE_PCH=ON
+            -DCMAKE_C_COMPILER=${_c_compiler}
+            -DCMAKE_CXX_COMPILER=${_cxx_compiler}
+            -DCMAKE_RC_COMPILER=CMAKE_RC_COMPILER-NOTREQUIRED
             -DCMAKE_BUILD_TYPE=Release
         BUILD_COMMAND ${CMAKE_COMMAND} --build ${_flatc_build_dir} --target flatc
         INSTALL_COMMAND ""

@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -112,7 +113,7 @@ rocblas_status rocblas_hpr_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int HPR_DIM_X = 64;
-    static constexpr int HPR_DIM_Y = 16;
+    static constexpr int HPR_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     static constexpr int N_TX      = 2; // x items per x thread
 
     rocblas_int blocksX = (n - 1) / (HPR_DIM_X * N_TX) + 1;
