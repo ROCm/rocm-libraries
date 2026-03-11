@@ -1530,7 +1530,7 @@ struct topk_air_config_params
 {
     kernel_config_params kernel_config;
     unsigned int         radix_bits                   = 8;
-    unsigned int         candidate_buffer_coefficient = 128;
+    unsigned int         candidate_buffer_coefficient = 256;
     unsigned int         thread_counter_limit         = 32;
 };
 } // namespace detail
@@ -1550,10 +1550,10 @@ struct topk_air_config : public detail::topk_air_config_params
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
     constexpr topk_air_config()
         : detail::topk_air_config_params{
-            {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT},
-            RadixBits,
-            CandidateBufferCoefficient,
-            ThreadCounterLimit
+              {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT},
+              RadixBits,
+              CandidateBufferCoefficient,
+              ThreadCounterLimit
     }
     {}
 #endif
@@ -1561,14 +1561,14 @@ struct topk_air_config : public detail::topk_air_config_params
 
 namespace detail
 {
-template<class Key, class Value, class SizeOut>
+template<class Key, class Value, class SizeIn>
 constexpr topk_air_config_params topk_air_config_params_base()
 {
     constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        sizeof(Key) + (std::is_same_v<Value, empty_type> ? sizeof(Value) : 0),
+        sizeof(Key) + (!std::is_same_v<Value, empty_type> ? sizeof(Value) : 0),
         sizeof(int));
     return topk_air_config_params{
-        {limit_block_size<256u, sizeof(SizeOut) * 2, ROCPRIM_WARP_SIZE_64>::value,
+        {limit_block_size<256u, sizeof(SizeIn) * 2, ROCPRIM_WARP_SIZE_64>::value,
          ::rocprim::max(1u, 10u / item_scale)}
     };
 };

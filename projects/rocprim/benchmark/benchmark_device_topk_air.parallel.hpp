@@ -20,17 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_TOPK_PARALLEL_HPP_
-#define ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_TOPK_PARALLEL_HPP_
+#ifndef ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_PARALLEL_HPP_
+#define ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_custom_type.hpp"
 #include "../common/utils_data_generation.hpp"
 #include "../common/utils_device_ptr.hpp"
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -47,42 +44,47 @@
 #include <vector>
 
 template<typename Config>
-inline std::string device_air_topk_config_name()
+auto config_name()
 {
-    if constexpr(std::is_same_v<rocprim::default_config, Config>)
+    if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
-        return "default_config";
+        return std::string("default");
     }
     else
     {
         constexpr auto config = Config{};
-        return "{bs:" + std::to_string(config.kernel_config.block_size)
-               + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
-               + ",radix_bits:" + std::to_string(config.radix_bits)
-               + ",adapt_coeff:" + std::to_string(config.candidate_buffer_coefficient)
-               + ",limit:" + std::to_string(config.thread_counter_limit) + "}";
+        return primbench::json{}
+            .add("bs", config.kernel_config.block_size)
+            .add("ipt", config.kernel_config.items_per_thread)
+            .add("rb", config.radix_bits)
+            .add("adapt_coeff", config.candidate_buffer_coefficient)
+            .add("limit", config.thread_counter_limit);
     }
 }
 
 template<typename Key,
          typename Value  = rocprim::empty_type,
          typename Config = rocprim::default_config>
-struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
+struct device_topk_air_benchmark : public primbench::benchmark_interface
 {
     bool small_k                  = false;
     bool adversarial_distribution = false;
 
-    device_air_topk_benchmark(bool SmallK, bool AdversarialDistribution)
+    device_topk_air_benchmark(bool SmallK, bool AdversarialDistribution)
         : small_k(SmallK), adversarial_distribution(AdversarialDistribution)
     {}
 
-    std::string name() const override
+    primbench::json meta() const override
     {
-        return bench_naming::format_name(
-            std::string("{lvl:device,algo:topk,subalgo:air_topk,k:") + (small_k ? "small" : "large")
-            + "_" + (adversarial_distribution ? "adversarial" : "natural") + ",key_type:"
-            + std::string(Traits<Key>::name()) + ",value_type:" + std::string(Traits<Value>::name())
-            + ", cfg: " + device_air_topk_config_name<Config>() + "}");
+        return primbench::json{}
+            .add("lvl", "device")
+            .add("algo", "topk")
+            .add("subalgo", "air")
+            .add("is_small", small_k)
+            .add("is_adversarial", adversarial_distribution)
+            .add("key_type", primbench::name<Key>())
+            .add("value_type", primbench::name<Value>())
+            .add("cfg", config_name<Config>());
     }
 
     template<class SizeT, class SeedT>
@@ -107,38 +109,39 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
         memcpy(&max_val, &max_int, sizeof(key_type));
         // Generate uniformly distributed data
         return adversarial_distribution
-                   ? get_random_data<key_type>(size, key_type{0}, max_val, seed.get_0())
+                   ? get_random_data<key_type>(size, key_type{0}, max_val, seed)
                    : get_random_data<key_type>(size,
                                                common::generate_limits<key_type>::min(),
                                                common::generate_limits<key_type>::max(),
-                                               seed.get_0());
+                                               seed);
     }
 
+private:
     // Keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark_utils::state&& state) const
+    auto do_run(primbench::state& state) const
         -> std::enable_if_t<std::is_same<val, ::rocprim::empty_type>::value, void>
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using key_type = Key;
 
         // Calculate the number of elements
-        size_t size = bytes / sizeof(key_type);
-        size_t k    = 10;
+        size_t items = bytes / sizeof(key_type);
+        size_t k     = 10;
 
         if(!small_k)
         {
-            k = size / 2;
+            k = items / 2;
         }
 
         // Generate uniformly distributed data
-        const auto keys_input = generate_input(size, seed);
+        const auto keys_input = generate_input(items, seed);
 
         common::device_ptr<key_type> d_keys_input(keys_input);
-        common::device_ptr<key_type> d_keys_output(size);
+        common::device_ptr<key_type> d_keys_output(items);
 
         // Get size of d_temporary_storage
         size_t temporary_storage_bytes = 0;
@@ -148,12 +151,15 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
                                   d_keys_output.get(),
                                   static_cast<Value*>(nullptr),
                                   static_cast<Value*>(nullptr),
-                                  size,
+                                  items,
                                   k,
                                   stream,
                                   false));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+
+        state.set_items(items);
+        state.add_reads<key_type>(items);
 
         // Run
         state.run(
@@ -165,50 +171,48 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
                                           d_keys_output.get(),
                                           static_cast<Value*>(nullptr),
                                           static_cast<Value*>(nullptr),
-                                          size,
+                                          items,
                                           k,
                                           stream,
                                           false));
             });
-
-        state.set_throughput(size, sizeof(key_type));
     }
 
     // Pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark_utils::state&& state) const
+    auto do_run(primbench::state& state) const
         -> std::enable_if_t<!std::is_same<val, ::rocprim::empty_type>::value, void>
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using key_type   = Key;
         using value_type = Value;
 
         // Calculate the number of elements
-        size_t size = bytes / (sizeof(key_type) + sizeof(value_type));
-        size_t k    = 10;
+        size_t items = bytes / (sizeof(key_type) + sizeof(value_type));
+        size_t k     = 10;
 
         if(!small_k)
         {
-            k = size / 2;
+            k = items / 2;
         }
 
         // Generate uniformly distributed data
-        const auto keys_input = generate_input(size, seed);
+        const auto keys_input = generate_input(items, seed);
 
-        std::vector<value_type> values_input(size);
-        for(size_t i = 0; i < size; ++i)
+        std::vector<value_type> values_input(items);
+        for(size_t i = 0; i < items; ++i)
         {
             values_input[i] = value_type(i);
         }
 
         common::device_ptr<key_type> d_keys_input(keys_input);
-        common::device_ptr<key_type> d_keys_output(size);
+        common::device_ptr<key_type> d_keys_output(items);
 
         common::device_ptr<value_type> d_values_input(values_input);
-        common::device_ptr<value_type> d_values_output(size);
+        common::device_ptr<value_type> d_values_output(items);
 
         // Get size of d_temporary_storage
         size_t temporary_storage_bytes = 0;
@@ -218,13 +222,16 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
                                   d_keys_output.get(),
                                   d_values_input.get(),
                                   d_values_output.get(),
-                                  size,
+                                  items,
                                   k,
                                   stream,
                                   false));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+        state.set_items(items);
+        state.add_reads<key_type>(items);
+        state.add_reads<value_type>(items);
         // Run
         state.run(
             [&]
@@ -235,18 +242,17 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
                                           d_keys_output.get(),
                                           d_values_input.get(),
                                           d_values_output.get(),
-                                          size,
+                                          items,
                                           k,
                                           stream,
                                           false));
             });
-
-        state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
     }
 
-    void run(benchmark_utils::state&& state) override
+public:
+    void run(primbench::state& state) override
     {
-        do_run(std::forward<benchmark_utils::state>(state));
+        do_run(state);
     }
 
 private:
@@ -309,21 +315,21 @@ template<typename Key,
          unsigned int Limit>
 struct device_topk_air_benchmark_generator
 {
-    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
     {
         using config
             = rocprim::topk_air_config<BlockSize, ItemsPerThread, RadixBits, AdaptCoeff, Limit>;
         storage.emplace_back(
-            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(true, true));
+            std::make_unique<device_topk_air_benchmark<Key, Value, config>>(true, true));
         storage.emplace_back(
-            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(true, false));
+            std::make_unique<device_topk_air_benchmark<Key, Value, config>>(true, false));
         storage.emplace_back(
-            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(false, true));
+            std::make_unique<device_topk_air_benchmark<Key, Value, config>>(false, true));
         storage.emplace_back(
-            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(false, false));
+            std::make_unique<device_topk_air_benchmark<Key, Value, config>>(false, false));
     }
 };
 
 #endif // BENCHMARK_CONFIG_TUNING
 
-#endif // ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_TOPK_PARALLEL_HPP_
+#endif // ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_PARALLEL_HPP_

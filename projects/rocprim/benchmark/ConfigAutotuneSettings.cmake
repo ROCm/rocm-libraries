@@ -92,8 +92,8 @@ ${TUNING_TYPES};64 128 256 512 1024;1 2 4 8 16;4 8 12 16" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_topk_air")
     set(list_across_names "KeyType;ValueType;BlockSize;ItemsPerThread;RadixBits;AdaptCoeff;Limit" PARENT_SCOPE)
     set(list_across "\
-${TUNING_TYPES};${LIMITED_TUNING_TYPES} rocprim::empty_type;64 128 256 512 1024;1 2 4 8 16;8;64 128 256;32" PARENT_SCOPE)
-    set(output_pattern_suffix "@InputType@_@BlockSize@_@ItemsPerThread@_@RadixBits@_@AdaptCoeff@" PARENT_SCOPE)
+${TUNING_TYPES};${LIMITED_TUNING_TYPES} rocprim::empty_type;256;2 3 4 5 6 10;8;256;32" PARENT_SCOPE)
+    set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@ItemsPerThread@_@RadixBits@_@AdaptCoeff@_@Limit@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_segmented_radix_sort_keys")
     set(list_across_names "\
 KeyType;RadixBits;BlockSize;ItemsPerThread;WarpSmallLWS;WarpSmallIPT;WarpSmallBS;WarpPartition;WarpMediumLWS;WarpMediumIPT;WarpMediumBS" PARENT_SCOPE)

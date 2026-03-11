@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_AIR_TOPK_HPP_
-#define ROCPRIM_DEVICE_DETAIL_DEVICE_AIR_TOPK_HPP_
+#ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_TOPK_AIR_HPP_
+#define ROCPRIM_DEVICE_DETAIL_DEVICE_TOPK_AIR_HPP_
 
 #include "../../block/block_load_func.hpp"
 #include "../../block/block_scan.hpp"
@@ -930,8 +930,8 @@ struct device_topk_air_impl
     /// Why not store the pivot bin of the current iteration?
     /// - Because the histogram result is not available until the end of this function.
     template<unsigned int Iteration>
-    ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE ROCPRIM_LAUNCH_BOUNDS(
-        ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
+    ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
     static void 
     histogram_and_filter(
         storage_type* __restrict__                p_global_storage,
@@ -955,7 +955,7 @@ struct device_topk_air_impl
                 bool                                is_last_block;
                 typename block_scan_t::storage_type scan;
             } union_data;
-            histogram_t<histogram_size>         block_local_histogram;
+            histogram_t<histogram_size> block_local_histogram;
         } storage;
 
         // Load problem size and init local_histogram
@@ -1089,8 +1089,8 @@ struct device_topk_air_impl
     ///
     /// Because `histogram_and_filter` only performs filtering for earlier
     /// iterations, this function is needed to run the final round of filtering.
-    ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE ROCPRIM_LAUNCH_BOUNDS(
-        ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
+    ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
     static void 
     last_filter(
         storage_type* __restrict__                p_global_storage,
@@ -1420,7 +1420,8 @@ template<class Config,
          typename ValuesInputIterator,
          typename ValuesOutputIterator,
          typename SizeIn,
-         typename SizeOut>
+         typename SizeOut,
+         typename Decomposer>
 struct device_topk_air_impl_invoker
 {
 private:
@@ -1442,7 +1443,8 @@ private:
                                                  ValuesInputIterator,
                                                  ValuesOutputIterator,
                                                  ActualSizeIn,
-                                                 SizeOut>;
+                                                 SizeOut,
+                                                 Decomposer>;
 
     template<class SizeType>
     static inline constexpr auto in_range(const SizeIn& size)
@@ -1508,7 +1510,7 @@ public:
         using value_in_t =
             typename device_topk_air_helper::iterator_traits<ValuesInputIterator>::value_type;
 
-        using Selector     = topk_air_config_selector<key_in_t, value_in_t, SizeOut>;
+        using Selector     = topk_air_config_selector<key_in_t, value_in_t, SizeIn>;
         using Targets      = typename Selector::targets;
         const auto& stream = std::get<hipStream_t const&>(args);
         target_arch target_arch{};
@@ -1582,22 +1584,23 @@ ROCPRIM_FORCE_INLINE hipError_t device_topk_air(void* temporary_storage,
                                         ValuesInputIterator,
                                         ValuesOutputIterator,
                                         SizeIn,
-                                        SizeOut>::invoke(size,
-                                                         std::tie(temporary_storage,
-                                                                  storage_size,
-                                                                  keys_input,
-                                                                  keys_output,
-                                                                  values_input,
-                                                                  values_output,
-                                                                  size,
-                                                                  K,
-                                                                  decomposer,
-                                                                  stream,
-                                                                  debug_synchronous));
+                                        SizeOut,
+                                        Decomposer>::invoke(size,
+                                                            std::tie(temporary_storage,
+                                                                     storage_size,
+                                                                     keys_input,
+                                                                     keys_output,
+                                                                     values_input,
+                                                                     values_output,
+                                                                     size,
+                                                                     K,
+                                                                     decomposer,
+                                                                     stream,
+                                                                     debug_synchronous));
 }
 
 } // namespace detail
 
 END_ROCPRIM_NAMESPACE
 
-#endif
+#endif // ROCPRIM_DEVICE_DETAIL_DEVICE_TOPK_AIR_HPP_

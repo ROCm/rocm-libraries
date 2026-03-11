@@ -30,34 +30,37 @@
 #include <string>
 #include <vector>
 
-#define CREATE_TOPK_AIR_TOPK_BENCHMARK(SMALL_K, ADVERSARIAL_DISTRIBUTION, ...) \
-    executor.queue_instance(                                                   \
-        device_air_topk_benchmark<__VA_ARGS__>(SMALL_K, ADVERSARIAL_DISTRIBUTION));
+#define CREATE_TOPK_AIR_BENCHMARK(SMALL_K, ADVERSARIAL_DISTRIBUTION, ...) \
+    executor.queue<device_topk_air_benchmark<__VA_ARGS__>>(SMALL_K, ADVERSARIAL_DISTRIBUTION);
 
-#define CREATE_BENCHMARK(...)                                \
-    CREATE_TOPK_AIR_TOPK_BENCHMARK(true, true, __VA_ARGS__)  \
-    CREATE_TOPK_AIR_TOPK_BENCHMARK(true, false, __VA_ARGS__) \
-    CREATE_TOPK_AIR_TOPK_BENCHMARK(false, true, __VA_ARGS__) \
-    CREATE_TOPK_AIR_TOPK_BENCHMARK(false, false, __VA_ARGS__)
+#define CREATE_BENCHMARK(...)                           \
+    CREATE_TOPK_AIR_BENCHMARK(true, true, __VA_ARGS__)  \
+    CREATE_TOPK_AIR_BENCHMARK(true, false, __VA_ARGS__) \
+    CREATE_TOPK_AIR_BENCHMARK(false, true, __VA_ARGS__) \
+    CREATE_TOPK_AIR_BENCHMARK(false, false, __VA_ARGS__)
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
+    primbench::settings settings;
+    settings.size = 128 * primbench::MiB;
+    // Note: this algorithm supports hipGraph, but is doesn't support being executed without
+    // `primbench::flags::sync`. This is because this `__syncthread_or` does somehow break the
+    // stream blocking mechanism of primbench. If we don't use `__syncthread_or`, we can remove
+    // `primbench::flags::sync` from here.
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+#ifndef BENCHMARK_CONFIG_TUNING
     // Note: custom keys not supported yet
     // using custom_key_float_int16 = common::custom_type<float, int16_t>;
     // using custom_key_int2            = common::custom_type<int, int>;
     // using custom_key_char_double     = common::custom_type<char, double>;
     // using custom_key_longlong_double = common::custom_type<long long, double>;
-
     // Fundamental key benchmarks, comparable with nth element and radix sort
     //  Integer
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(uint8_t)
-    CREATE_BENCHMARK(short)
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(long long)
+    CREATE_BENCHMARK(int16_t)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
     //  Float
@@ -77,23 +80,23 @@ int main(int argc, char* argv[])
 
     // Pair benchmarks, comparable with radix sort
     //  With fundamental key
-    CREATE_BENCHMARK(int, float)
-    CREATE_BENCHMARK(int, double)
-    CREATE_BENCHMARK(int, float2)
-    CREATE_BENCHMARK(int, custom_float2)
-    CREATE_BENCHMARK(int, double2)
-    CREATE_BENCHMARK(int, custom_double2)
-    CREATE_BENCHMARK(long long, float)
-    CREATE_BENCHMARK(long long, double)
-    CREATE_BENCHMARK(long long, float2)
-    CREATE_BENCHMARK(long long, custom_float2)
-    CREATE_BENCHMARK(long long, double2)
-    CREATE_BENCHMARK(long long, custom_double2)
+    CREATE_BENCHMARK(int32_t, float)
+    CREATE_BENCHMARK(int32_t, double)
+    CREATE_BENCHMARK(int32_t, float2)
+    CREATE_BENCHMARK(int32_t, custom_f32_f32)
+    CREATE_BENCHMARK(int32_t, double2)
+    CREATE_BENCHMARK(int32_t, custom_f64_f64)
+    CREATE_BENCHMARK(int64_t, float)
+    CREATE_BENCHMARK(int64_t, double)
+    CREATE_BENCHMARK(int64_t, float2)
+    CREATE_BENCHMARK(int64_t, custom_f32_f32)
+    CREATE_BENCHMARK(int64_t, double2)
+    CREATE_BENCHMARK(int64_t, custom_f64_f64)
     CREATE_BENCHMARK(int8_t, int8_t)
     CREATE_BENCHMARK(uint8_t, uint8_t)
     CREATE_BENCHMARK(rocprim::half, rocprim::half)
     CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
-
+#endif // BENCHMARK_CONFIG_TUNING
     executor.run();
 }

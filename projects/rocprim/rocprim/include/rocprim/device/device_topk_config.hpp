@@ -22,8 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_TOPK_CONFIG_HPP_
 
 #include "config_types.hpp"
-// TODO: add this back when it's tuned
-// #include "detail/config/device_topk_air.hpp"
+#include "detail/config/device_topk_air.hpp"
 #include "detail/device_config_helper.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -31,27 +30,17 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// TODO: Need to remove it, when it's tuned
-template<class Target, class Key, class Value, class SizeOut>
-constexpr auto topk_air_config_picker()
-{
-    // Default case if none of the conditions match
-    return topk_air_config_params_base<Key, Value, SizeOut>();
-}
-
-template<class Key, class Value, class SizeOut>
+template<class Key, class Value, class SizeIn>
 struct topk_air_config_selector
 {
-    // TODO: Need to be changed, this is only a temporary list of targets.
-    using targets
-        = comp_targets<comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
+    using targets    = topk_air_targets;
     using param_type = topk_air_config_params;
 
     param_type params;
 
     template<class Target>
     constexpr topk_air_config_selector(Target)
-        : params(topk_air_config_picker<Target, Key, Value, SizeOut>())
+        : params(topk_air_config_picker<Target, Key, Value, SizeIn>())
     {}
 };
 
@@ -59,4 +48,4 @@ struct topk_air_config_selector
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_TOPK_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_TOPK_CONFIG_HPP_

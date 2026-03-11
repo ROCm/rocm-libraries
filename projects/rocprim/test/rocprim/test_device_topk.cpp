@@ -295,12 +295,12 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                                        = typename TestFixture::key_type;
-    constexpr bool descending                             = TestFixture::descending;
-    using decomposer_t                                    = typename TestFixture::decomposer_t;
-    using config                                          = typename TestFixture::config;
-    using size_in_type                                    = unsigned int;
-    using size_out_type                                   = unsigned int;
+    using key_type                       = typename TestFixture::key_type;
+    constexpr bool descending            = TestFixture::descending;
+    using decomposer_t                   = typename TestFixture::decomposer_t;
+    using config                         = typename TestFixture::config;
+    using size_in_type                   = unsigned int;
+    using size_out_type                  = unsigned int;
     constexpr bool ordered               = TestFixture::ordered;
     constexpr bool deterministic         = TestFixture::deterministic;
     constexpr bool stable                = TestFixture::stable;
@@ -514,7 +514,6 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
                 decomposer,
                 stream,
                 debug_synchronous)));
-
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);

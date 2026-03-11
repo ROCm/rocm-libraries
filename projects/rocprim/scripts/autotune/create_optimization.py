@@ -676,12 +676,12 @@ class AlgorithmDeviceSearchN(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
-class AlgorithmDeviceTopkAirTopk(Algorithm):
+class AlgorithmDeviceTopkAir(Algorithm):
     algorithm_name = "device_topk_air"
     cpp_configuration_template_name = "topk_air_config_template"
     config_selection_params = [
         SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
-        SelectionType(name="value_type", is_optional=False, select_on_size_only=True)]
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
@@ -831,7 +831,7 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
     elif algorithm_name == 'device_select_unique_by_key':
         return AlgorithmDeviceSelectUniqueByKey(fallback_entries)
     elif algorithm_name == 'device_topk_air':
-        return AlgorithmDeviceTopkAirTopk(fallback_entries)
+        return AlgorithmDeviceTopkAir(fallback_entries)
     elif algorithm_name == 'device_reduce_by_key':
         return AlgorithmDeviceReduceByKey(fallback_entries)
     elif algorithm_name == 'device_find_first_of':
