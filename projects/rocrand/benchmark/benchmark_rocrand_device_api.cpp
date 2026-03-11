@@ -70,7 +70,7 @@
         std::string context_key = "config/" + std::string(KERNEL_NAME);                         \
         std::string launch_info = "Blocks: " + std::to_string(p.blocks)                         \
                                   + ", Threads: " + std::to_string(p.threads)                   \
-                                  + ", Occupancy: " + std::to_string(p.occupancy);              \
+                                  + ", Occupancy: " + std::to_string(p.effective_occupancy);    \
                                                                                                 \
         benchmark::AddCustomContext(context_key, launch_info);                                  \
         ctx.blocks  = p.blocks;                                                                 \
@@ -1043,6 +1043,36 @@ void add_benchmarks(const benchmark_context&                      ctx,
 
 int main(int argc, char* argv[])
 {
+
+    int   input_threads   = 0;
+    int   input_blocks    = 0;
+    float input_provision = -1.0f;
+
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+
+        if(arg == "--threads" && i + 1 < argc)
+        {
+            input_threads = std::stoi(argv[++i]);
+        }
+        else if(arg == "--blocks" && i + 1 < argc)
+        {
+            input_blocks = std::stoi(argv[++i]);
+        }
+        else if(arg == "--provision" && i + 1 < argc)
+        {
+            input_provision = std::stof(argv[++i]);
+        }
+        else if(arg == "--help" || arg == "-h")
+        {
+            printf("Manual Launch Overrides:\n");
+            printf("  --threads <int>     Threads per block (e.g., --threads 256)\n");
+            printf("  --blocks <int>      Total grid blocks (e.g., --blocks 100)\n");
+            printf("  --provision <float> Waves per CU (e.g., --provision 0.5)\n\n");
+        }
+    }
+
     // get paramaters before they are passed into
     // benchmark::Initialize()
     std::string outFormat     = "";
@@ -1060,21 +1090,9 @@ int main(int argc, char* argv[])
                                 1,
                                 "number of dimensions of quasi-random values");
     parser.set_optional<size_t>("trials", "trials", 20, "number of trials");
-    parser.set_optional<size_t>(
-        "blocks",
-        "blocks",
-        0,
-        "number of blocks. If 0, computed automatically based on occupancy and provision");
-    parser.set_optional<size_t>(
-        "threads",
-        "threads",
-        0,
-        "number of threads in each block. If 0, computed automatically to maximize occupancy");
-    parser.set_optional<size_t>(
-        "provision",
-        "provision",
-        1,
-        "number of waves per Compute Unit (multiplier for automatic block computation).");
+    parser.set_optional<int>("threads", "threads", 0, "threads");
+    parser.set_optional<int>("blocks", "blocks", 0, "blocks");
+    parser.set_optional<float>("provision", "provision", -1.0f, "provision");
     parser.set_optional<std::vector<double>>(
         "lambda",
         "lambda",
@@ -1094,14 +1112,20 @@ int main(int argc, char* argv[])
     ctx.trials     = parser.get<size_t>("trials");
     ctx.lambdas    = parser.get<std::vector<double>>("lambda");
 
-    int input_threads   = parser.get<size_t>("threads");
-    int input_blocks    = parser.get<size_t>("blocks");
-    int input_provision = parser.get<size_t>("provision");
-
-    //Sanity input check for a negative provision
-    if(input_provision <= 0)
+    //User input sanity checks
+    if(input_provision <= 0 && input_provision != -1.0f)
     {
-        fprintf(stderr, "[Error] Input provision must be greater than 0.\n");
+        fprintf(stderr, "[Error] --provision must be a positive float.\n");
+        exit(EXIT_FAILURE);
+    }
+    if(input_threads < 0)
+    {
+        fprintf(stderr, "[Error] --threads must be a positive integer.\n");
+        exit(EXIT_FAILURE);
+    }
+    if(input_blocks < 0)
+    {
+        fprintf(stderr, "[Error] --blocks must be a positive integer.\n");
         exit(EXIT_FAILURE);
     }
 

@@ -23,16 +23,48 @@
 
 #include "benchmark_utils.hpp"
 #include <cstdio>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <vector>
 
+// Philox and Threefry are state heavy generators.
+// We apply a heuristic that reduces the "effective" occupancy for a launch by fractional values
+// when calculating the number of blocks for these generators on gfx90a.
+// This allows us to better hide memory latency, resulting in improved performance for this architecture.
+inline float get_base_provision(const char* kernel_name)
+{
+    static const std::string arch = []()
+    {
+        hipDeviceProp_t props;
+        int             dev_id;
+        HIP_CHECK(hipGetDevice(&dev_id));
+        HIP_CHECK(hipGetDeviceProperties(&props, dev_id));
+        return std::string(props.gcnArchName);
+    }();
+
+    if(arch.find("gfx90a") != std::string::npos)
+    {
+        if(strstr(kernel_name, "philox"))
+            return 0.31f;
+        if(strstr(kernel_name, "threefry4x32_20"))
+            return 0.25f;
+        if(strstr(kernel_name, "threefry2x64_20"))
+            return 0.5f;
+        if(strstr(kernel_name, "threefry4x64_20"))
+            return 0.25f;
+    }
+
+    return 1.0f;
+}
+
 struct launch_params
 {
-    int blocks                = 0;
-    int threads               = 0;
-    int occupancy             = 0;
-    int multiprocessors       = 0;
-    int max_threads_per_block = 0;
+    int   blocks        = 0;
+    int   threads       = 0;
+    int   max_occupancy = 0; // Theoretical maximum waves per CU based on kernel resource usage
+    float effective_occupancy   = 0; // Actual waves per CU launched
+    int   multiprocessors       = 0;
+    int   max_threads_per_block = 0;
 };
 
 /// Compute the launch bounds (block size and grid size). By default we'll
@@ -44,7 +76,7 @@ inline launch_params get_benchmark_launch_parameters(T           kernel,
                                                      const char* kernel_name    = "unnamed_kernel",
                                                      int         user_threads   = 0,
                                                      int         user_blocks    = 0,
-                                                     int         user_provision = 1)
+                                                     float       user_provision = -1.0f)
 {
     launch_params params{};
 
@@ -72,13 +104,13 @@ inline launch_params get_benchmark_launch_parameters(T           kernel,
         }
 
         params.threads = user_threads;
-        HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&params.occupancy,
+        HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&params.max_occupancy,
                                                                kernel,
                                                                params.threads,
                                                                0));
 
         // Sanity check for zero occupancy with user provided threads
-        if(params.occupancy == 0)
+        if(params.max_occupancy == 0)
         {
             fprintf(stderr,
                     "[Error] Kernel %s cannot be launched with %d threads due to zero occupancy.\n",
@@ -103,8 +135,8 @@ inline launch_params get_benchmark_launch_parameters(T           kernel,
 
             // Prefer configurations with higher occupancy.
             // If occupancy is equal, prefer larger block sizes to increase in-flight threads.
-            if(current_occupancy > params.occupancy
-               || (current_occupancy == params.occupancy && t > params.threads))
+            if(current_occupancy > params.max_occupancy
+               || (current_occupancy == params.max_occupancy && t > params.threads))
             {
                 // Sanity check for threads not exceeding device limit
                 if(t > params.max_threads_per_block)
@@ -117,8 +149,8 @@ inline launch_params get_benchmark_launch_parameters(T           kernel,
                     exit(EXIT_FAILURE);
                 }
 
-                params.threads   = t;
-                params.occupancy = current_occupancy;
+                params.threads       = t;
+                params.max_occupancy = current_occupancy;
             }
         }
     }
@@ -127,15 +159,32 @@ inline launch_params get_benchmark_launch_parameters(T           kernel,
     if(user_blocks > 0)
     {
         params.blocks = user_blocks;
+
+        params.effective_occupancy = static_cast<float>(user_blocks) / params.multiprocessors;
     }
     else
     {
-        // Multiplied by provision factor
-        params.blocks = params.occupancy * params.multiprocessors * user_provision;
+
+        float provision = 1.0f;
+
+        if(user_provision > 0.0f)
+        {
+            // If user provided --provision, ignore get_base_provision
+            provision = user_provision;
+        }
+        else
+        {
+            // Get base provision based on kernel name heuristic
+            provision = get_base_provision(kernel_name);
+        }
+
+        params.effective_occupancy = static_cast<float>(params.max_occupancy) * provision;
+
+        params.blocks = static_cast<int>(params.effective_occupancy * params.multiprocessors);
     }
 
     //Sanity check for zero occupancy and zero threads
-    if(params.threads == 0 || params.occupancy == 0)
+    if(params.threads == 0 || params.effective_occupancy == 0)
     {
         fprintf(stderr, "[Error] Kernel %s: No valid thread configuration found.\n", kernel_name);
         exit(EXIT_FAILURE);
