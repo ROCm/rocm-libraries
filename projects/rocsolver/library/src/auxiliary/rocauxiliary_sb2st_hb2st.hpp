@@ -204,7 +204,7 @@ __device__ void sb2st_larf(
 // conventions. I guess y comes from sy.)
 template <typename T, typename I>
 __device__ void sb2st_helarf(
-    const I xid, const I yid, rocblas_side side, I n,
+    const I xid, const I yid, I n,
     T* v, T tau, T* C, I ldc, T* s_work )
 {
     // Reductions assume this DIMX.
@@ -367,8 +367,8 @@ __device__ void sb2st_hb2st_task(
             {
                 // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
                 // Using ldab-1 adjusts for band format.
-                #if 0
-                    sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, s_tau,
+                #if 1
+                    sb2st_helarf( xid, yid, nc, s_housev, s_tau,
                                 Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
                 #else
                     sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
@@ -452,8 +452,8 @@ __device__ void sb2st_hb2st_task(
                     __syncthreads();
 
                     // Apply vc on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
-                    #if 0
-                        sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, s_tau,
+                    #if 1
+                        sb2st_helarf( xid, yid, nc, s_housev, s_tau,
                                     Aband + idiag + jc*ldab, ldab-1, s_work );
                     #else
                         sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
@@ -486,13 +486,14 @@ __device__ void sb2st_hb2st_task(
 
    Sweep i can begin execution when sweep i-1 has completed 3 rounds. That is,
    - Sweep 0 can start at round 0
-   - Sweep 1 can start at round 3
+   - Sweep 1 can start at round 2
    ...
-   - Sweep i can start at round 3*i
+   - Sweep i can start at round 2*i
    ...
-   - Sweep n-1 can start at round 3*(n-1)
+   - Sweep n-1 can start at round 2*(n-1)
 
-   Sweep n-1 is complete after 1 round, therefore the total number of rounds is 3*(n-1)+1 */
+   Sweep n-1 is complete after 1 round, therefore the total number of rounds is 3*(n-1)+1.
+*/
 template <typename T, typename S>
 ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     rocblas_int n,
@@ -533,12 +534,6 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     rocblas_int task = round - (2 * sweep);
     assert( task >= 0 );
     assert( sweep >= 0 );
-
-    //#define ONLY_SWEEP_0 1  // passes
-    #if ONLY_SWEEP_0
-        if (sweep > 0)
-            return;
-    #endif
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
@@ -703,16 +698,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
         // skip those rounds.
         rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
 
-        //#define ONLY_SWEEP_0 1
-        //#define ONLY_TASK_0 1     passes larfg, passes larf2x
-        //#define ONLY_TASK_01 1
-        #if ONLY_TASK_0
-            // Run all sweeps, task 0. See also below.
-            sweep_begin = sweep_end - 1;
-        #elif ONLY_TASK_01
-            // Run all sweeps, task 0. See also below.
-            sweep_begin_finishes = 2*sweep_begin + std::min( 2, ceildiv( n - sweep_begin - 1, kd ) - 1 );
-        #endif
         rocblas_int parallel_sweeps = sweep_end - sweep_begin;
         printf( "# round %d, sweeps %d : %d, parallel sweeps %d\n",
                 round, sweep_begin, sweep_end, parallel_sweeps );
@@ -739,12 +724,6 @@ rocblas_status rocsolver_sb2st_hb2st_template(
             sweep_begin_finishes
                 = 2*sweep_begin + ceildiv( n - sweep_begin - 1, kd ) - 1;
         }
-
-        #if ONLY_TASK_0
-            // Run all sweeps, task 0. See also above.
-            // Skip odd rounds.
-            ++round;
-        #endif
     }
 
     // copy diagonal
