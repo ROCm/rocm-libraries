@@ -14,8 +14,12 @@
 # Environment variables (set by Jenkins):
 #   FORCE_CI - Set to "true" for nightly/scheduled builds
 #   BRANCH_NAME - Git branch name
-#   GIT_PREVIOUS_COMMIT, GIT_COMMIT - For detecting changes
-#   CHANGE_TARGET - Base branch for PR builds (set by Jenkins)
+#   CHANGE_ID - PR number (set by Jenkins Multibranch Pipeline for PRs)
+#   CHANGE_TARGET - Base branch for PR builds (set by Jenkins Multibranch Pipeline)
+#
+# Note: CHANGE_ID may not be set even for PR builds if Jenkins job is not
+# configured as Multibranch Pipeline. Script uses three-dot git diff syntax
+# to correctly detect PR changes regardless of CHANGE_ID availability.
 #
 # Manual override (set by developer/admin if needed):
 #   DISABLE_SMART_BUILD - Set to "true" to force full build
@@ -43,15 +47,14 @@ if [ "$DISABLE_SMART_BUILD" = "true" ]; then
 fi
 
 # 3. Force full build if CMakeLists.txt or cmake/ configuration changed
-# For PR builds, always compare against base branch (not incremental commits)
+# Always compare against base branch (not consecutive commits) to avoid false positives from merge commits
+# Three-dot syntax (...) only shows changes actually made in the PR, not changes from merged develop branch
 if [ -n "$CHANGE_ID" ]; then
-    # This is a PR build - compare entire PR against base branch
+    # This is a PR build (CHANGE_ID set by Jenkins Multibranch Pipeline)
     CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
-elif [ -n "$GIT_PREVIOUS_COMMIT" ] && [ -n "$GIT_COMMIT" ]; then
-    # Regular branch build - compare consecutive commits
-    CHANGED_FILES=$(git diff --name-only $GIT_PREVIOUS_COMMIT..$GIT_COMMIT 2>/dev/null || echo "")
 else
-    # Fallback to comparing with base branch
+    # Fallback: Works for both branch builds and PRs without CHANGE_ID
+    # Use three-dot syntax to avoid including merge commit changes from develop
     CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
 fi
 
