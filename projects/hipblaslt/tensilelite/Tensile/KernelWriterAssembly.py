@@ -74,7 +74,7 @@ from .KernelWriterModules import *
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
-from .CustomKernels import isCustomKernelConfig
+from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath
 from .Common import roundUp, log2, ceilDivide, choose_multiplier
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Common.DataType import DataType
@@ -135,7 +135,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def _getCustomKernelSource(self, kernel, CustomKernelDirectory):
     kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
-    with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
+    with open(getCustomKernelFilepath(kernelName, CustomKernelDirectory)) as f:
       rocmVersion = self.assembler.rocm_version
       if not (rocmVersion.major >= 6 and rocmVersion.patch >= 32650):
         code = []

@@ -33,10 +33,21 @@ def isCustomKernelConfig(config):
     return "CustomKernel" in config and config["CustomKernel"]["name"]
 
 def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
-    return os.path.join(directory, (name + ".s"))
+    flat = os.path.join(directory, (name + ".s"))
+    if os.path.isfile(flat):
+        return flat
+    for root, _, files in os.walk(directory):
+        if (name + ".s") in files:
+            return os.path.join(root, (name + ".s"))
+    return flat
 
 def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
-    return [fname[:-2] for fname in os.listdir(directory) if fname.endswith(".s")]
+    names = []
+    for root, _, files in os.walk(directory):
+        for fname in files:
+            if fname.endswith(".s"):
+                names.append(fname[:-2])
+    return names
 
 def getCustomKernelContents(name, directory=CUSTOM_KERNEL_PATH):
     try:
