@@ -332,4 +332,34 @@ hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::Pointw
     }
 }
 
+hipdnn_data_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase_t phase)
+{
+    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+
+    switch(phase)
+    {
+    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+        return NormFwdPhase::INFERENCE;
+    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+        return NormFwdPhase::TRAINING;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnNormFwdPhase_t value");
+    }
+}
+
+hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase phase)
+{
+    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+
+    switch(phase)
+    {
+    case NormFwdPhase::INFERENCE:
+        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    case NormFwdPhase::TRAINING:
+        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK NormFwdPhase value");
+    }
+}
+
 } // namespace hipdnn_backend

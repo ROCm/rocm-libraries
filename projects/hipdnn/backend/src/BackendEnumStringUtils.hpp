@@ -10,6 +10,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnNormFwdPhase.h"
 #include "HipdnnPointwiseMode.h"
 #include "HipdnnStatus.h"
 
@@ -194,6 +195,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT";
     case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT:
         return "HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT";
+    case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
+        return "HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -471,6 +474,24 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
     case HIPDNN_ATTR_MATMUL_MATH_PREC_EXT:
         return "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT";
 
+    // RMSNorm operation attributes
+    case HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT";
+    case HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT:
+        return "HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT";
+    case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
+        return "HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT";
+
     // Extension API
     case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
         return "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT";
@@ -505,6 +526,19 @@ inline const char* hipdnnGetPluginUnloadingModeString(hipdnnPluginUnloadingMode_
         return "HIPDNN_PLUGIN_UNLOAD_EAGER";
     default:
         return "HIPDNN_PLUGIN_UNLOAD_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetNormFwdPhaseString(hipdnnNormFwdPhase_t phase)
+{
+    switch(phase)
+    {
+    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+        return "HIPDNN_NORM_FWD_PHASE_INFERENCE";
+    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+        return "HIPDNN_NORM_FWD_PHASE_TRAINING";
+    default:
+        return "HIPDNN_NORM_FWD_PHASE_UNKNOWN";
     }
 }
 
