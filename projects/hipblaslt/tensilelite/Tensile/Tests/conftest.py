@@ -45,6 +45,8 @@ def pytest_addoption(parser):
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
+    parser.addoption("--disable-client-lock", action="store_true", default=False,
+                     help="Disable automatic client lock for parallel test execution")
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
@@ -81,6 +83,35 @@ def worker_lock_path(tmp_path_factory, worker_id):
 
     return tmp_path_factory.getbasetemp().parent / "client_execution.lock"
 
+@pytest.fixture(scope="session", autouse=True)
+def assign_gpu_to_worker(worker_id):
+    """
+    Assigns a GPU to each pytest-xdist worker using modulo arithmetic.
+    Worker IDs are in format 'gw0', 'gw1', 'gw2', etc.
+    Sets HIP_VISIBLE_DEVICES to isolate GPU access per worker.
+
+    If you have N GPUs and M workers:
+    - Worker 0 -> GPU 0, Worker 1 -> GPU 1, ..., Worker N-1 -> GPU N-1
+    - Worker N -> GPU 0, Worker N+1 -> GPU 1, etc. (wraps around)
+    """
+    if not worker_id or worker_id == "master":
+        # Single worker or master process - use all GPUs
+        return
+
+    import re
+    from Tensile.ParallelExecution import detectAvailableGpus
+
+    num_gpus = detectAvailableGpus()
+    # Extract numeric ID from worker_id (e.g., 'gw0' -> 0, 'gw1' -> 1)
+    match = re.search(r'\d+', worker_id)
+    if match:
+        worker_num = int(match.group())
+        gpu_id = worker_num % num_gpus  # Use modulo to wrap around available GPUs
+        os.environ['HIP_VISIBLE_DEVICES'] = str(gpu_id)
+        print(f"Worker {worker_id} assigned to GPU {gpu_id} (total GPUs: {num_gpus})")
+    else:
+        print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
+
 @pytest.fixture
 def tensile_script_path():
     return os.path.join(moddir, 'bin', 'Tensile')
@@ -96,7 +127,8 @@ def worker_lock_instance(worker_lock_path):
 @pytest.fixture
 def tensile_args(pytestconfig, builddir, worker_lock_path):
     rv = []
-    if worker_lock_path:
+    disable_client_lock = pytestconfig.getoption("--disable-client-lock")
+    if worker_lock_path and not disable_client_lock:
         rv += ["--client-lock", str(worker_lock_path)]
 
     extraOptions = pytestconfig.getoption("--tensile-options")
