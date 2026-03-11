@@ -42,20 +42,12 @@ jobs:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-       # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
-      - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.projects_to_test, 'miopen') || contains(inputs.projects_to_test, 'miopen_plugin') }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: "ROCm/composable_kernel"
-          path: "composable_kernel"
-
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 5028da50db14c24801a7695e754256016d5068db # 2026-02-10 commit
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -111,6 +103,7 @@ jobs:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+          cmake_preset: windows-release
         run: |
           # clear cache before build and after download
           ccache -z
@@ -164,6 +157,19 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && github.event_name == 'push' }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --project miopen \
+            --failure_stage build \
+            --platform windows \
+            --log-path "${{ env.BUILD_DIR }}/logs" \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --pr-title "${{ github.event.pull_request.title }}"
+
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-windows]
@@ -174,3 +180,4 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
       test_type: ${{ inputs.test_type }}
+    secrets: inherit

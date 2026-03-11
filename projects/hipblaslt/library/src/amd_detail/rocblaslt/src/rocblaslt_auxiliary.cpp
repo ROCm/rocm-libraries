@@ -38,6 +38,7 @@
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
+#include <cstring>
 #endif
 
 #include "UserDrivenTuningParser.hpp"
@@ -58,27 +59,67 @@
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
-inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type, void* alpha, void* beta)
+template<typename T>
+void _set_value(void* ptr, T value)
 {
-    if(compute_type == rocblaslt_compute_f64)
+    *((T*)ptr) = value;
+}
+
+// Helper to check if the matrix type is complex
+bool is_complex_datatype(hipDataType type)
+{
+    return type == HIP_C_32F || type == HIP_C_64F;
+}
+
+/**
+ * \brief Correctly sets alpha and beta to 1.0 (real or complex)
+ * * This function now uses both compute_type (for precision) and 
+ * matrix_type (for real/complex) to set the values correctly,
+ * mimicking the cuBLAS behavior.
+ */
+inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type, 
+                             hipDataType matrix_type, 
+                             void* alpha, 
+                             void* beta)
+{
+    if (is_complex_datatype(matrix_type)) 
     {
-        *((double*)alpha) = 1.f;
-        *((double*)beta)  = 1.f;
+        
+        if (compute_type == rocblaslt_compute_f64)
+        {
+            // 64-bit complex compute
+            _set_value(alpha, std::complex<double>(1.0, 0.0));
+            _set_value(beta,  std::complex<double>(1.0, 0.0));
+        }
+        else
+        {
+            _set_value(alpha, std::complex<float>(1.0f, 0.0f));
+            _set_value(beta,  std::complex<float>(1.0f, 0.0f));
+        }
     }
-    else if(compute_type == rocblaslt_compute_i32)
+    else 
     {
-        *((int32_t*)alpha) = 1.f;
-        *((int32_t*)beta)  = 1.f;
-    }
-    else if(compute_type == rocblaslt_compute_f16)
-    {
-        *((hipblasLtHalf*)alpha) = 1.f;
-        *((hipblasLtHalf*)beta)  = 1.f;
-    }
-    else
-    {
-        *((float*)alpha) = 1.f;
-        *((float*)beta)  = 1.f;
+     
+        if(compute_type == rocblaslt_compute_f64)
+        {
+            _set_value(alpha, (double)1.0);
+            _set_value(beta,  (double)1.0);
+        }
+        else if(compute_type == rocblaslt_compute_i32)
+        {
+            _set_value(alpha, (int32_t)1);
+            _set_value(beta,  (int32_t)1);
+        }
+        else if(compute_type == rocblaslt_compute_f16)
+        {
+            _set_value(alpha, (hipblasLtHalf)1.0f);
+            _set_value(beta,  (hipblasLtHalf)1.0f);
+        }
+        else
+        {
+            _set_value(alpha, (float)1.0f);
+            _set_value(beta,  (float)1.0f);
+        }
     }
 }
 
@@ -397,11 +438,9 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     constexpr bool strided_batch = true;
     constexpr bool grouped_gemm  = false;
 
-    int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
-    if(scaleAlphaVec)
-    {
-        setTo1(matmul_descr->compute_type, (void*)alpha_1, &alpha);
-    }
+    // If scaleAlphaVec is enabled, we override alpha to 1.0 and rely on scaleAlphaVec instead.
+    // IMPORTANT: alpha must not point to stack memory: ASAN caught stack-use-after-return where
+    // alpha was set to a stack-local buffer (alpha_1) and then used later during solution search.
 
     RocblasltContractionProblem problem{opA,
                                         opB,
@@ -461,6 +500,15 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB};
+
+    if(scaleAlphaVec)
+    {
+        // Fill owned storage with "1" for the compute type, and repoint alpha into it.
+        const void* alphaTmp = problem.alpha;
+        std::memset(problem.alpha_owned.data(), 0, problem.alpha_owned.size());
+        setTo1(matmul_descr->compute_type, (void*)problem.alpha_owned.data(), &alphaTmp);
+        problem.alpha = alphaTmp;
+    }
 
     return problem;
 }
@@ -838,7 +886,7 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
                 throw rocblaslt_status_invalid_value;
             }
 
-            if(scaleType != HIP_R_32F && scaleType != HIP_R_64F && scaleType != HIP_R_32I)
+            if(scaleType != HIP_R_32F && scaleType != HIP_R_64F && scaleType != HIP_R_32I && scaleType != HIP_C_32F && scaleType != HIP_C_64F)
             {
                 log_error(__func__, "invalid scale type", scaleType);
                 throw rocblaslt_status_invalid_value;
@@ -1786,7 +1834,7 @@ rocblaslt_status
         auto&                  tensile_data = matmul_desc->m_data;
         int8_t                 alpha[16]    = {0};
         int8_t                 beta[16]     = {0};
-        assignAlphaBeta1(compute_type, (void*)alpha, (void*)beta);
+        assignAlphaBeta1(compute_type, matA->type , (void*)alpha, (void*)beta);
         //bias ptr can be set later after getting solution.
         bool dummy_bias_address = false;
         if(matmul_desc->bias == nullptr && is_bias_enabled(matmul_desc->epilogue))
@@ -1976,7 +2024,7 @@ rocblaslt_status rocblaslt_matmul_get_all_algos_cpp(
     {
         int8_t alpha[16] = {0};
         int8_t beta[16]  = {0};
-        assignAlphaBeta1(matmul_desc.compute_type, (void*)alpha, (void*)beta);
+        assignAlphaBeta1(matmul_desc.compute_type, typeA, (void*)alpha, (void*)beta);
 
         auto prob = construct_rocblaslt_problem(
             handle, &matmul_desc, &matA, &matB, &matC, &matD, &alpha, &beta, maxWorkspaceSize);

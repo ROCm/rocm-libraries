@@ -53,7 +53,8 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
                                                   std::vector<int>& indexes,
                                                   std::vector<std::vector<std::string>>& kernels);
 
-MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
+MIOPEN_INTERNALS_EXPORT
+std::vector<int> GenerateSplitK(int max_split_k);
 
 // Main template implementation with validation function
 template <typename DataType, typename ValidationFunc>

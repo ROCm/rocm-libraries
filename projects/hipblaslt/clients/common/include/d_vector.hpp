@@ -34,6 +34,12 @@
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/sysinfo.h>
+#endif
+
 #define MEM_MAX_GUARD_PAD 8192
 #define MAX_DTYPE_SIZE sizeof(double)
 
@@ -67,6 +73,42 @@ public:
         return capacity() < s;
     }
 
+    size_t get_available_host_memory()
+    {
+#ifdef __linux__
+        struct sysinfo info;
+        if(sysinfo(&info) == 0)
+        {
+            // In the linux system, the host memory(pinned memory)'s capacity is the same as the free memory
+            return info.freeram;
+        }
+        else
+        {
+            hipblaslt_cerr << "Error getting available host memory" << std::endl;
+            return 0;
+        }
+#elif defined(_WIN32)
+        MEMORYSTATUSEX memStatus = {};
+        memStatus.dwLength = sizeof(memStatus);
+        if(GlobalMemoryStatusEx(&memStatus))
+        {
+            // In the windows system, the host memory(pinned memory)'s capacity is the half of the physical memory
+            // Use available physical memory with a safety margin to avoid OOM
+            // Dividing by 2 provides a conservative estimate for hipHostMalloc
+            // during heavy testing scenarios
+            return memStatus.ullAvailPhys / 2;
+        }
+        else
+        {
+            hipblaslt_cerr << "Error getting available host memory" << std::endl;
+            return 0;
+        }
+#else
+        hipblaslt_cerr << "Error getting available host memory: unsupported platform" << std::endl;
+        return 0;
+#endif
+    }
+
 protected:
     hip_memory(size_t size, size_t capacity, bool use_HMM = false)
         : m_size(size)
@@ -95,7 +137,22 @@ public:
         : hip_memory(size, capacity, use_HMM)
     {
         char* d = nullptr;
-        if((use_HMM ? hipMallocManaged(&d, capacity) : hipMalloc(&d, capacity)) != hipSuccess)
+
+        if(use_HMM)
+        {
+            // Keep 20% of the available system memory for room of emergency
+            size_t available_host_memory = get_available_host_memory() * 0.8;
+            // Need to ensure sufficient host memory, otherwise hipMallocManaged may OOM and hip api won't return error code,
+            // and will cause the gtest get aborted
+            if(available_host_memory < capacity || hipMallocManaged(&d, capacity) != hipSuccess)
+            {
+                hipblaslt_cerr << "Error allocating (" << (capacity >> 30) << " GB) unified memory, m_size is (" << (m_size >> 30) << " GB)"
+                               << std::endl;
+                d      = nullptr;
+                m_size = m_capacity = 0;
+            }
+        }
+        else if(hipMalloc(&d, capacity) != hipSuccess)
         {
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
@@ -134,9 +191,14 @@ public:
         : hip_memory(size, capacity, false)
     {
         char* d = nullptr;
-        if(hipHostMalloc(&d, capacity) != hipSuccess)
+
+        // Keep 20% of the available system memory for room of emergency
+        size_t available_host_memory = get_available_host_memory() * 0.8;
+        // Need to ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code,
+        // and will cause the gtest get aborted
+        if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
         {
-            hipblaslt_cerr << "Error allocating (" << (m_size >> 30) << " GB) host memory"
+            hipblaslt_cerr << "Error allocating (" << (capacity >> 30) << " GB) host memory, m_size is (" << (m_size >> 30) << " GB)"
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;

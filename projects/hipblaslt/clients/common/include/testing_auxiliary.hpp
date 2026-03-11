@@ -1793,11 +1793,16 @@ void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_GELU_AUX);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX_BIAS")
                 == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX_BIAS")
+                == HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID")
                 == HIPBLASLT_EPILOGUE_SIGMOID);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD")
                 == HIPBLASLT_EPILOGUE_DGELU_BGRAD);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DRELU") == HIPBLASLT_EPILOGUE_DRELU);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DRELU_BGRAD")
+                == HIPBLASLT_EPILOGUE_DRELU_BGRAD);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_BGRADA") == HIPBLASLT_EPILOGUE_BGRADA);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_BGRADB") == HIPBLASLT_EPILOGUE_BGRADB);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_EXT")
@@ -2420,6 +2425,8 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
                 == "EPILOGUE_GELU");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DGELU)}
                 == "EPILOGUE_DGELU");
+    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DRELU)}
+                == "EPILOGUE_DRELU");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_GELU_BIAS)}
                 == "EPILOGUE_GELU_BIAS");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_GELU_AUX)}
@@ -2431,9 +2438,11 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DGELU_BGRAD)}
                 == "EPILOGUE_DGELU_BGRAD");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_BGRADA)}
-                == "EPILOGUE_DGELU_BGRADA");
+                == "EPILOGUE_BGRADA");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_BGRADB)}
-                == "EPILOGUE_DGELU_BGRADB");
+                == "EPILOGUE_BGRADB");
+    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DRELU_BGRAD)}
+                == "EPILOGUE_DRELU_BGRAD");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_EXT)}
                 == "EPILOGUE_SWISH_EXT");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT)}
@@ -2695,6 +2704,29 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(desc_result5.find("epilogueAuxDataType") == std::string::npos);
     ASSERT_TRUE(desc_result5.front() == '[' && desc_result5.back() == ']');
 
+    // Test case 6: Epilogue extension without aux_type
+    _rocblaslt_matmul_desc desc5;
+    desc5.compute_type = rocblaslt_compute_i32;
+    desc5.scale_type   = HIP_R_32I;
+    desc5.op_A         = HIPBLAS_OP_N;
+    desc5.op_B         = HIPBLAS_OP_N;
+    desc5.epilogue     = ROCBLASLT_EPILOGUE_DRELU_BGRAD;
+    desc5.bias         = nullptr;
+    desc5.bias_type    = HIPBLASLT_DATATYPE_INVALID;
+    desc5.aux_type     = HIPBLASLT_DATATYPE_INVALID; // Invalid aux type
+    desc5.e            = reinterpret_cast<void*>(0x55555555);
+    desc5.lde          = 64;
+
+    std::string desc_result5 = rocblaslt_matmul_desc_to_string(&desc5);
+    ASSERT_TRUE(!desc_result5.empty());
+    ASSERT_TRUE(desc_result5.find("computeType=COMPUTE_32I") != std::string::npos);
+    ASSERT_TRUE(desc_result5.find("epilogue=EPILOGUE_DRELU_BGRAD") != std::string::npos);
+    ASSERT_TRUE(desc_result5.find("epilogueAuxPointer=0x") != std::string::npos);
+    ASSERT_TRUE(desc_result5.find("epilogueAuxLd=64") != std::string::npos);
+    // Should NOT contain epilogueAuxDataType since aux_type is invalid
+    ASSERT_TRUE(desc_result5.find("epilogueAuxDataType") == std::string::npos);
+    ASSERT_TRUE(desc_result5.front() == '[' && desc_result5.back() == ']');
+
     // Test different data types
     _rocblaslt_matmul_desc desc6;
     desc6.compute_type = rocblaslt_compute_f32_fast_bf16;
@@ -2771,6 +2803,8 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_GELU_AUX_BIAS) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DGELU) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DGELU_BGRAD) == true);
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DRELU) == true);
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DRELU_BGRAD) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_EXT) == true);

@@ -173,3 +173,73 @@ TEST_F(TestGraphTensorBundle, TensorsHaveCorrectDimensions)
         }
     }
 }
+
+TEST_F(TestGraphTensorBundle, ToDeviceVariantPackReturnsCorrectMapping)
+{
+    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    auto& tensorMap = graphWrapper->getTensorMap();
+
+    GraphTensorBundle bundle(tensorMap);
+
+    auto variantPack = bundle.toDeviceVariantPack();
+
+    EXPECT_EQ(variantPack.size(), bundle.tensors.size());
+
+    for(const auto& [uid, tensorPtr] : bundle.tensors)
+    {
+        ASSERT_TRUE(variantPack.find(uid) != variantPack.end());
+        EXPECT_EQ(variantPack[uid], tensorPtr->rawDeviceData());
+    }
+}
+
+TEST_F(TestGraphTensorBundle, GetTensorReturnsCorrectTensor)
+{
+    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    auto& tensorMap = graphWrapper->getTensorMap();
+
+    GraphTensorBundle bundle(tensorMap);
+
+    ASSERT_FALSE(bundle.tensors.empty());
+    auto firstUid = bundle.tensors.begin()->first;
+
+    auto& tensor = bundle.getTensor(firstUid);
+    EXPECT_EQ(&tensor, bundle.tensors.at(firstUid).get());
+}
+
+TEST_F(TestGraphTensorBundle, GetTensorThrowsForInvalidUid)
+{
+    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    auto& tensorMap = graphWrapper->getTensorMap();
+
+    GraphTensorBundle bundle(tensorMap);
+
+    int64_t invalidUid = 99999;
+    EXPECT_THROW(bundle.getTensor(invalidUid), std::runtime_error);
+}
+
+TEST_F(TestGraphTensorBundle, GetTensorConstReturnsCorrectTensor)
+{
+    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    auto& tensorMap = graphWrapper->getTensorMap();
+
+    GraphTensorBundle bundle(tensorMap);
+
+    ASSERT_FALSE(bundle.tensors.empty());
+    auto firstUid = bundle.tensors.begin()->first;
+
+    const auto& constBundle = bundle;
+    const auto& tensor = constBundle.getTensor(firstUid);
+    EXPECT_EQ(&tensor, bundle.tensors.at(firstUid).get());
+}
+
+TEST_F(TestGraphTensorBundle, GetTensorConstThrowsForInvalidUid)
+{
+    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    auto& tensorMap = graphWrapper->getTensorMap();
+
+    GraphTensorBundle bundle(tensorMap);
+
+    const auto& constBundle = bundle;
+    int64_t invalidUid = 99999;
+    EXPECT_THROW(constBundle.getTensor(invalidUid), std::runtime_error);
+}

@@ -24,12 +24,11 @@
 ################################################################################
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import verify_grs_finish_before_lrs
+from Tensile.Components.CMSValidator import add_gr_finish_before_lr_constraints
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_grs_finish_before_lrs(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_gr_finish_before_lr_constraints]
 
     def test_simple_case_success(self):
         """
@@ -79,7 +78,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA at index 0 is not valid. There are no guarantees on when it will be done."
+            "GRA @ idx=0 is not valid. There are no guarantees on when it will be done."
         )
 
     def test_no_sbarrier(self): 
@@ -105,7 +104,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA at index 0 is not valid. There is no SBarrier acting on it."
+            "GRA @ idx=0 is not valid. There is no SBarrier acting on it."
         )
 
     def test_swait_after_sbarrier(self):
@@ -132,7 +131,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA at index 0 is not valid. No SBarrier between SWait @ idx=3 and LR1 @ idx=6. Order must be GR -> SWait -> SBarrier -> LR1."
+            "GRA @ idx=0 is not valid. No SBarrier between SWait @ idx=3 and LRA1 @ idx=6. Order must be GRA -> SWait -> SBarrier -> LRA1."
         )
 
     def test_guaranteed_after_first_lr1(self):
@@ -160,7 +159,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
 
         self.validate(
             optSchedule, syncCode, 1, 4, 4, 0,
-            "GRA at index 0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=3. Order must be GR -> SWait -> SBarrier -> LR1."
+            "GRA @ idx=0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LRA1 @ idx=3. Order must be GRA -> SWait -> SBarrier -> LRA1."
         )
 
     def test_less_than_1_full_iteration_to_complete(self):
@@ -363,7 +362,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRB (Swapped, loading A) at index 3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=2. Order must be GR -> SWait -> SBarrier -> LR1."
+            "GRB (Swapped, loading A) @ idx=3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LRA1 @ idx=2. Order must be GRB (Swapped, loading A) -> SWait -> SBarrier -> LRA1."
         )
 
     def test_fail_with_odd_number_of_grs(self):

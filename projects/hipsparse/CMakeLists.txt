@@ -8,7 +8,7 @@ include(hipsparse_shim)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
-project(hipsparse VERSION 4.3.0 LANGUAGES CXX C)
+project(hipsparse VERSION 4.5.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
     cmake_policy(SET CMP0066 NEW) # Honor per-config flags in try_compile()
@@ -264,7 +264,7 @@ if(HIPSPARSE_ENABLE_ASAN)
     target_link_options(hipsparse PRIVATE -fsanitize=address -shared-libasan -fuse-ld=lld)
     
     # Apply ASAN to client common libraries
-    if(HIPSPARSE_ENABLE_CLIENT)
+    if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
         target_compile_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan)
         target_link_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
         

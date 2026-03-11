@@ -41,7 +41,7 @@
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #ifdef CK_EXPERIMENTAL_BUILDER
-#include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
+#include <miopen/ck_builder/factories/grouped_convolution_forward.hpp>
 #endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
