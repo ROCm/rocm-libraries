@@ -12,7 +12,6 @@
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::conv;
 using namespace hipdnn_data_sdk::types;
-
 // =================================================================================================
 // TestCalculateConvWrwTolerance
 // =================================================================================================
@@ -771,5 +770,361 @@ TEST(TestCalculateConvDgradTolerance, ThrowsOnOutputOverflow)
     double val = 1.0e5;
 
     EXPECT_THROW((calculateConvDgradTolerance<half, float, float>(-val, val, -val, val, wDims)),
+                 std::overflow_error);
+}
+// =================================================================================================
+// TestCalculateConvFpropTolerance
+// =================================================================================================
+
+struct ConvFpropToleranceTestCase
+{
+    double inputMin;
+    double inputMax;
+    double wMin;
+    double wMax;
+    std::vector<int64_t> wDims;
+    double expectedTolerance;
+    bool expectThrow = false;
+
+    friend std::ostream& operator<<(std::ostream& os, const ConvFpropToleranceTestCase& tc)
+    {
+        os << "inputMin: " << tc.inputMin << ", inputMax: " << tc.inputMax << ", wMin: " << tc.wMin
+           << ", wMax: " << tc.wMax << ", wDims: [";
+        for(size_t i = 0; i < tc.wDims.size(); ++i)
+        {
+            os << tc.wDims[i] << (i < tc.wDims.size() - 1 ? ", " : "");
+        }
+        os << "], expectedTolerance: " << tc.expectedTolerance
+           << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
+        return os;
+    }
+};
+
+template <typename T>
+std::vector<ConvFpropToleranceTestCase> getConvFpropToleranceTestCases();
+
+// Float / Float / Float (High Precision: Linear)
+// Error = 2 * N^2 * u * maxProduct
+// For fprop: N = C * R * S (input channels × filter spatial dims)
+template <>
+std::vector<ConvFpropToleranceTestCase>
+    getConvFpropToleranceTestCases<TypeTriple<float, float, float>>()
+{
+    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+            {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
+            // C=1, R=1, S=1. Accum = 1. Tol = 2 * 1^2 * 2^-23 = 2 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23)},
+            // C=2, R=1, S=1. Accum = 2. Tol = 2 * 2^2 * 2^-23 = 8 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 2, 1, 1}, 8.0 * std::pow(2.0, -23)},
+            // C=10, R=1, S=1. Accum = 10. Tol = (20 * 2^-23) / (1 - 20 * 2^-23) * 10
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {1, 10, 1, 1},
+             (20.0 * std::pow(2.0, -23)) / (1.0 - 20.0 * std::pow(2.0, -23)) * 10.0},
+            // C=3, R=3, S=3. Accum = 27. Tol = (54 * 2^-23) / (1 - 54 * 2^-23) * 27
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {1, 3, 3, 3},
+             (54.0 * std::pow(2.0, -23)) / (1.0 - 54.0 * std::pow(2.0, -23)) * 27.0},
+            // Large values: range -1000, 1000. maxProduct = 10^6.
+            // C=10, R=1, S=1. Accum = 10. Tol = gamma * 10^7
+            {-1000.0,
+             1000.0,
+             -1000.0,
+             1000.0,
+             {1, 10, 1, 1},
+             (20.0 * std::pow(2.0, -23)) / (1.0 - 20.0 * std::pow(2.0, -23)) * 1.0e7},
+            // 3D Convolution (5D tensors): C=1, D=1, R=1, S=1. Accum = 1. Tol = 2 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1, 1}, 2.0 * std::pow(2.0, -23)},
+            // 3D Convolution: C=2, D=2, R=2, S=2. Accum = 16. Tol = 2 * 16^2 * 2^-23 = 512 * 2^-23
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {1, 2, 2, 2, 2},
+             (32.0 * std::pow(2.0, -23)) / (1.0 - 32.0 * std::pow(2.0, -23)) * 16.0},
+            // 3D Convolution: C=3, D=3, R=3, S=3. Accum = 81. Tol = gamma * 81
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {1, 3, 3, 3, 3},
+             (162.0 * std::pow(2.0, -23)) / (1.0 - 162.0 * std::pow(2.0, -23)) * 81.0}};
+}
+
+// Float / Double / Float (Input casting error)
+template <>
+std::vector<ConvFpropToleranceTestCase>
+    getConvFpropToleranceTestCases<TypeTriple<float, double, float>>()
+{
+    return {// C=1, R=1, S=1. Accum = 1. Tol = (2 + 2) * 2^-23 = 4 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 4.0 * std::pow(2.0, -23)},
+            // C=10, R=1, S=1. Accum = 10. Tol = (200 + 20) * 2^-23 = 220 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 10, 1, 1}, 220.0 * std::pow(2.0, -23)}};
+}
+
+// HipBfloat16 / Float / Float (High Precision Compute: Linear)
+template <>
+std::vector<ConvFpropToleranceTestCase>
+    getConvFpropToleranceTestCases<TypeTriple<bfloat16, float, float>>()
+{
+    return {
+        {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+        {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
+        // C=1, R=1, S=1. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23) + std::pow(2.0, -7)},
+        // C=2, R=1, S=1. Accum = 2. Tol = 8 * 2^-23 + 2 * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 2, 1, 1}, 8.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -7)},
+        // C=10, R=1, S=1. Accum = 10. Tol = 200 * 2^-23 + 10 * 2^-7
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 10, 1, 1},
+         200.0 * std::pow(2.0, -23) + 10.0 * std::pow(2.0, -7)},
+        // 3D Convolution: C=2, D=2, R=2, S=2. Accum = 16. Tol = 512 * 2^-23 + 16 * 2^-7
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 2, 2, 2, 2},
+         512.0 * std::pow(2.0, -23) + 16.0 * std::pow(2.0, -7)}};
+}
+
+// HipBfloat16 / HipBfloat16 / HipBfloat16 (Lower Precision: Statistical)
+template <>
+std::vector<ConvFpropToleranceTestCase>
+    getConvFpropToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
+{
+    return {
+        {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+        {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
+        // C=1, R=1, S=1. Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 6.0 * 1.0 * std::sqrt(2.0) * std::pow(2.0, -7)},
+        // C=2, R=1, S=1. Accum = 2. Tol = 6 * 2 * sqrt(4) * 2^-7 = 24 * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 2, 1, 1}, 6.0 * 2.0 * std::sqrt(4.0) * std::pow(2.0, -7)},
+        // C=10, R=1, S=1. Accum = 10. Tol = 6 * 10 * sqrt(20) * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 10, 1, 1}, 6.0 * 10.0 * std::sqrt(20.0) * std::pow(2.0, -7)},
+        // 3D Convolution: C=2, D=2, R=2, S=2. Accum = 16. Tol = 6 * 16 * sqrt(32) * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 2, 2, 2, 2}, 6.0 * 16.0 * std::sqrt(32.0) * std::pow(2.0, -7)}};
+}
+
+// Half / Float / Float (High Precision Compute: Linear)
+template <>
+std::vector<ConvFpropToleranceTestCase>
+    getConvFpropToleranceTestCases<TypeTriple<half, float, float>>()
+{
+    return {
+        {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+        {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
+        // C=1, R=1, S=1. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23) + std::pow(2.0, -10)},
+        // C=2, R=1, S=1. Accum = 2. Tol = 8 * 2^-23 + 2 * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 2, 1, 1}, 8.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -10)},
+        // C=10, R=1, S=1. Accum = 10. Tol = 200 * 2^-23 + 10 * 2^-10
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 10, 1, 1},
+         200.0 * std::pow(2.0, -23) + 10.0 * std::pow(2.0, -10)},
+        // 3D Convolution: C=2, D=2, R=2, S=2. Accum = 16. Tol = 512 * 2^-23 + 16 * 2^-10
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 2, 2, 2, 2},
+         512.0 * std::pow(2.0, -23) + 16.0 * std::pow(2.0, -10)}};
+}
+
+// Half / Half / Half (Lower Precision: Statistical)
+template <>
+std::vector<ConvFpropToleranceTestCase>
+    getConvFpropToleranceTestCases<TypeTriple<half, half, half>>()
+{
+    return {
+        {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+        {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
+        // C=1, R=1, S=1. Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 6.0 * std::sqrt(2.0) * std::pow(2.0, -10)},
+        // C=2, R=1, S=1. Accum = 2. Tol = 6 * 2 * sqrt(4) * 2^-10 = 24 * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 2, 1, 1}, 24.0 * std::pow(2.0, -10)},
+        // C=10, R=1, S=1. Accum = 10. Tol = 6 * 10 * sqrt(20) * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 10, 1, 1}, 60.0 * std::sqrt(20.0) * std::pow(2.0, -10)},
+        // 3D Convolution: C=2, D=2, R=2, S=2. Accum = 16. Tol = 6 * 16 * sqrt(32) * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 2, 2, 2, 2}, 6.0 * 16.0 * std::sqrt(32.0) * std::pow(2.0, -10)}};
+}
+
+// Test fixture for ConvFprop tolerance
+template <typename Out, typename In, typename Comp>
+class TestCalculateConvFpropTolerance : public ::testing::TestWithParam<ConvFpropToleranceTestCase>
+{
+protected:
+    void verifyTolerance()
+    {
+        const auto& params = GetParam();
+
+        if(params.expectThrow)
+        {
+            EXPECT_THROW(
+                (calculateConvFpropTolerance<Out, In, Comp>(
+                    params.inputMin, params.inputMax, params.wMin, params.wMax, params.wDims)),
+                std::invalid_argument)
+                << "Failed to throw for dims size: " << params.wDims.size();
+        }
+        else
+        {
+            auto tol = calculateConvFpropTolerance<Out, In, Comp>(
+                params.inputMin, params.inputMax, params.wMin, params.wMax, params.wDims);
+
+            auto expected = static_cast<float>(params.expectedTolerance);
+
+            EXPECT_NEAR(static_cast<float>(tol), expected, 1e-5f)
+                << "Failed for dims size: " << params.wDims.size();
+        }
+    }
+};
+
+// Test cases for different type combinations
+using TestCalculateConvFpropToleranceFp32 = TestCalculateConvFpropTolerance<float, float, float>;
+TEST_P(TestCalculateConvFpropToleranceFp32, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvFpropToleranceFp32,
+    ::testing::ValuesIn(getConvFpropToleranceTestCases<TypeTriple<float, float, float>>()));
+
+using TestCalculateConvFpropToleranceInputDouble
+    = TestCalculateConvFpropTolerance<float, double, float>;
+TEST_P(TestCalculateConvFpropToleranceInputDouble, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvFpropToleranceInputDouble,
+    ::testing::ValuesIn(getConvFpropToleranceTestCases<TypeTriple<float, double, float>>()));
+
+using TestCalculateConvFpropToleranceComputeFloatBfp16
+    = TestCalculateConvFpropTolerance<bfloat16, float, float>;
+TEST_P(TestCalculateConvFpropToleranceComputeFloatBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvFpropToleranceComputeFloatBfp16,
+    ::testing::ValuesIn(getConvFpropToleranceTestCases<TypeTriple<bfloat16, float, float>>()));
+
+using TestCalculateConvFpropToleranceBfp16
+    = TestCalculateConvFpropTolerance<bfloat16, bfloat16, bfloat16>;
+TEST_P(TestCalculateConvFpropToleranceBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvFpropToleranceBfp16,
+    ::testing::ValuesIn(
+        getConvFpropToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()));
+
+using TestCalculateConvFpropToleranceComputeFloatFp16
+    = TestCalculateConvFpropTolerance<half, float, float>;
+TEST_P(TestCalculateConvFpropToleranceComputeFloatFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvFpropToleranceComputeFloatFp16,
+    ::testing::ValuesIn(getConvFpropToleranceTestCases<TypeTriple<half, float, float>>()));
+
+using TestCalculateConvFpropToleranceFp16 = TestCalculateConvFpropTolerance<half, half, half>;
+TEST_P(TestCalculateConvFpropToleranceFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvFpropToleranceFp16,
+    ::testing::ValuesIn(getConvFpropToleranceTestCases<TypeTriple<half, half, half>>()));
+
+// Test that calculateConvFpropTolerance catches simulated wrong outputs
+TEST(TestCalculateConvFpropTolerance, DetectsFailure)
+{
+    // C=10, R=10, S=1 => Accumulations = 100
+    std::vector<int64_t> dims = {1, 10, 10, 1};
+    std::vector<int64_t> strides = {100, 100, 10, 1};
+
+    // Create tensors
+    auto baseline = hipdnn_data_sdk::utilities::createTensor(
+        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
+        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
+        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+
+    baseline->fillTensorWithValue(1.0f);
+    actualPassing->fillTensorWithValue(1.05f);
+    actualFailing->fillTensorWithValue(1.2f);
+
+    auto tol = calculateConvFpropTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
+
+    // tol approx 0.1
+    EXPECT_LT(tol, 0.15f);
+    EXPECT_GT(tol, 0.09f);
+
+    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+
+    {
+        SCOPED_TRACE("Validator should have passed");
+        bool valid = validator->allClose(*baseline, *actualPassing);
+        EXPECT_TRUE(valid);
+    }
+    {
+        SCOPED_TRACE("Validator should have failed");
+        bool valid = validator->allClose(*baseline, *actualFailing);
+        EXPECT_FALSE(valid);
+    }
+}
+
+// Test that calculateConvFpropTolerance throws when nU >= 1.0 (singularity)
+TEST(TestCalculateConvFpropTolerance, ThrowsOnSingularity)
+{
+    // For float, epsilon is 2^-23 approx 1.19e-7.
+    // nU = 2 * n * epsilon.
+    // We need nU >= 1.0 => n >= 1 / (2 * epsilon) = 2^22 = 4,194,304.
+    // Let's use C=5,000,000, R=1, S=1 => accumulations = 5,000,000.
+    std::vector<int64_t> dims = {1, 5000000, 1, 1};
+
+    EXPECT_THROW((calculateConvFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, dims)),
+                 std::overflow_error);
+}
+
+// Test that calculateConvFpropTolerance throws when tolerance exceeds OutputType max
+TEST(TestCalculateConvFpropTolerance, ThrowsOnOutputOverflow)
+{
+    // OutputType = half (max approx 65504)
+    // ComputeType = float
+    // We need tolerance > 65504.
+    // Let C=10, R=1, S=1 => accumulations = 10.
+    // maxProduct = 1e10 (input 1e5 * w 1e5)
+    // sumAbsProductBound = 1e11
+    // epsilon (float) approx 1.19e-7
+    // gamma approx 2 * 10 * 1.19e-7 approx 2.38e-6
+    // accumulatedTolerance approx 2.38e-6 * 1e11 approx 2.38e5 = 238,000
+    // 238,000 > 65,504 => Should throw.
+
+    std::vector<int64_t> dims = {1, 10, 1, 1};
+    double val = 1.0e5;
+
+    EXPECT_THROW((calculateConvFpropTolerance<half, float, float>(-val, val, -val, val, dims)),
                  std::overflow_error);
 }
