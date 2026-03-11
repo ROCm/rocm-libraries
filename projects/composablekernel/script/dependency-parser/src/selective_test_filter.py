@@ -35,7 +35,9 @@ def get_changed_files(ref1, ref2, project: str = None):
     """Return a set of files changed between two git refs."""
     try:
         # Don't use git path filter - it can miss files when running from subdirectories
-        cmd = ["git", "diff", "--name-only", ref1, ref2]
+        git_root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
+        cmd = ["git", "-C", git_root, "diff", "--name-only", f"{ref1}...{ref2}", "--", "projects/composablekernel"]
+
         result = subprocess.run(
             cmd,
             capture_output=True,
