@@ -1069,6 +1069,7 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
 static std::size_t cutOffBatch_1 = 5;
 static std::size_t cutOffBatch_2 = 25;
 static std::size_t cutOffBatch_3 = 20;
+static std::size_t cutOffBatch_4 = 150;
 
 // Partial pass is currently restricted to large enough batch sizes,
 // unite stride, interleaved FFTs.
@@ -1097,6 +1098,15 @@ auto check_pp_restrictions = [](const NodeMetaData& nodeData, const size_t& cutO
     return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
 };
 
+// Length exceptions for partial-pass 3D kernels may vary by GPU architecture and precision
+auto check_pp_length = [](const std::vector<std::vector<size_t>>& exceptions,
+                          const std::vector<size_t>&              length) -> bool {
+    const bool length_found
+        = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
+
+    return length_found;
+};
+
 bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
 {
     if(!pool.has_function(
@@ -1109,14 +1119,6 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    CS_3D_PP)))
         return false;
 
-    auto find_length = [](const std::vector<std::vector<size_t>>& exceptions,
-                          const std::vector<size_t>&              length) -> bool {
-        const bool length_found
-            = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
-
-        return length_found;
-    };
-
     size_t cutOffBatch = cutOffBatch_1;
     if(nodeData.precision == rocfft_precision_single)
     {
@@ -1125,11 +1127,11 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
         // Set a different batch cut-off for gfx1201/gfx950 when
         // not hitting the excepted lengths in single-precision
         std::vector<std::vector<size_t>> gfx1201LenException = {{52, 64, 64}, {128, 64, 64}};
-        lenExceptionFound = find_length(gfx1201LenException, nodeData.length);
+        lenExceptionFound = check_pp_length(gfx1201LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx1201" && !lenExceptionFound)
             cutOffBatch = cutOffBatch_2;
         std::vector<std::vector<size_t>> gfx950LenException = {{52, 64, 64}};
-        lenExceptionFound = find_length(gfx950LenException, nodeData.length);
+        lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx950" && !lenExceptionFound)
             cutOffBatch = cutOffBatch_2;
     }
@@ -1166,11 +1168,19 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
     size_t cutOffBatch
         = nodeData.precision == rocfft_precision_double ? cutOffBatch_1 : cutOffBatch_2;
     if(get_curr_gcn_arch_name() == "gfx950")
-        cutOffBatch = cutOffBatch_3;
+    {
+        std::vector<std::vector<size_t>> gfx950LenException = {{72, 84, 84}};
+        auto lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
+        cutOffBatch            = lenExceptionFound ? cutOffBatch_4 : cutOffBatch_3;
+    }
     else if(get_curr_gcn_arch_name() == "gfx942")
+    {
         cutOffBatch = cutOffBatch_1;
+    }
     else if(get_curr_gcn_arch_name() == "gfx90a")
+    {
         cutOffBatch = cutOffBatch_3;
+    }
 
     return check_pp_restrictions(nodeData, cutOffBatch);
 }
