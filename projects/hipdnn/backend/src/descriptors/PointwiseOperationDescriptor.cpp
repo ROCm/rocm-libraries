@@ -77,11 +77,11 @@ void PointwiseOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                     "PointwiseOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_POINTWISE_AXIS:
-        setOptionalInt64(_data.axis_tensor_uid,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(AXIS)");
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.axis_tensor_uid,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "PointwiseOperationDescriptor::setAttribute(AXIS)");
         break;
     case HIPDNN_ATTR_POINTWISE_MODE:
         setPointwiseMode(_data.operation,
@@ -91,46 +91,52 @@ void PointwiseOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                          "PointwiseOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP:
-        setOptionalFloat(_data.relu_lower_clip,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(RELU_LOWER_CLIP)");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.relu_lower_clip,
+            attributeType,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::setAttribute(RELU_LOWER_CLIP)");
         break;
     case HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP:
-        setOptionalFloat(_data.relu_upper_clip,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(RELU_UPPER_CLIP)");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.relu_upper_clip,
+            attributeType,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::setAttribute(RELU_UPPER_CLIP)");
         break;
     case HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE:
-        setOptionalFloat(_data.relu_lower_clip_slope,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(RELU_LOWER_CLIP_SLOPE)");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.relu_lower_clip_slope,
+            attributeType,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::setAttribute(RELU_LOWER_CLIP_SLOPE)");
         break;
     case HIPDNN_ATTR_POINTWISE_SWISH_BETA:
-        setOptionalFloat(_data.swish_beta,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(SWISH_BETA)");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.swish_beta,
+            attributeType,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::setAttribute(SWISH_BETA)");
         break;
     case HIPDNN_ATTR_POINTWISE_ELU_ALPHA:
-        setOptionalFloat(_data.elu_alpha,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(ELU_ALPHA)");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.elu_alpha,
+            attributeType,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::setAttribute(ELU_ALPHA)");
         break;
     case HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA:
-        setOptionalFloat(_data.softplus_beta,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::setAttribute(SOFTPLUS_BETA)");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.softplus_beta,
+            attributeType,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::setAttribute(SOFTPLUS_BETA)");
         break;
     case HIPDNN_ATTR_POINTWISE_MATH_PREC:
         setDataType(_computeDataType,
@@ -195,12 +201,12 @@ void PointwiseOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                     "PointwiseOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_POINTWISE_AXIS:
-        getOptionalInt64(_data.axis_tensor_uid,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(AXIS)");
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.axis_tensor_uid,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "PointwiseOperationDescriptor::getAttribute(AXIS)");
         break;
     case HIPDNN_ATTR_POINTWISE_MODE:
         getPointwiseMode(_data.operation,
@@ -211,52 +217,58 @@ void PointwiseOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                          "PointwiseOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP:
-        getOptionalFloat(_data.relu_lower_clip,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(RELU_LOWER_CLIP)");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.relu_lower_clip,
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::getAttribute(RELU_LOWER_CLIP)");
         break;
     case HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP:
-        getOptionalFloat(_data.relu_upper_clip,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(RELU_UPPER_CLIP)");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.relu_upper_clip,
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::getAttribute(RELU_UPPER_CLIP)");
         break;
     case HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE:
-        getOptionalFloat(_data.relu_lower_clip_slope,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(RELU_LOWER_CLIP_SLOPE)");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.relu_lower_clip_slope,
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::getAttribute(RELU_LOWER_CLIP_SLOPE)");
         break;
     case HIPDNN_ATTR_POINTWISE_SWISH_BETA:
-        getOptionalFloat(_data.swish_beta,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(SWISH_BETA)");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.swish_beta,
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::getAttribute(SWISH_BETA)");
         break;
     case HIPDNN_ATTR_POINTWISE_ELU_ALPHA:
-        getOptionalFloat(_data.elu_alpha,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(ELU_ALPHA)");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.elu_alpha,
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::getAttribute(ELU_ALPHA)");
         break;
     case HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA:
-        getOptionalFloat(_data.softplus_beta,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "PointwiseOperationDescriptor::getAttribute(SOFTPLUS_BETA)");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(
+            _data.softplus_beta,
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "PointwiseOperationDescriptor::getAttribute(SOFTPLUS_BETA)");
         break;
     case HIPDNN_ATTR_POINTWISE_MATH_PREC:
         getDataType(_computeDataType,
