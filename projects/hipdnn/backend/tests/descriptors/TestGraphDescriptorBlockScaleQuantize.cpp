@@ -63,10 +63,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        &blockSize);
 
     int64_t axis = 1;
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
-                       HIPDNN_TYPE_INT64,
-                       1,
-                       &axis);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT, HIPDNN_TYPE_INT64, 1, &axis);
 
     bool transpose = true;
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,

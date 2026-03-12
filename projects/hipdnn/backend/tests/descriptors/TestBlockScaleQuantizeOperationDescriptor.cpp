@@ -57,8 +57,8 @@ public:
         setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT, _xDesc);
         setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT, _yDesc);
         setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT, _scaleDesc);
-        if(std::find(skip.begin(), skip.end(),
-                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT)
+        if(std::find(
+               skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT)
            == skip.end())
         {
             int32_t blockSize = K_BSQ_BLOCK_SIZE;
@@ -282,10 +282,8 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetAndGetAxis)
 {
     auto desc = getDescriptor();
     int64_t axis = 2;
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
-                                       HIPDNN_TYPE_INT64,
-                                       1,
-                                       &axis));
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT, HIPDNN_TYPE_INT64, 1, &axis));
 
     ASSERT_TRUE(desc->getData().axis.has_value());
     ASSERT_EQ(desc->getData().axis.value(), 2);
@@ -397,10 +395,8 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeAxisAfterFinalize)
     setAllAttributesExcept();
     auto desc = getDescriptor();
     int64_t axis = 3;
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
-                       HIPDNN_TYPE_INT64,
-                       1,
-                       &axis);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT, HIPDNN_TYPE_INT64, 1, &axis);
     desc->finalize();
 
     int64_t retrieved = 0;
@@ -434,10 +430,8 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeAxisQueryReturnsOn
     setAllAttributesExcept();
     auto desc = getDescriptor();
     int64_t axis = 1;
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
-                       HIPDNN_TYPE_INT64,
-                       1,
-                       &axis);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT, HIPDNN_TYPE_INT64, 1, &axis);
     desc->finalize();
 
     int64_t elementCount = 0;
@@ -714,10 +708,8 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithBlockSizeAndAxis)
     auto desc = getDescriptor();
 
     int64_t axis = 1;
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
-                       HIPDNN_TYPE_INT64,
-                       1,
-                       &axis);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT, HIPDNN_TYPE_INT64, 1, &axis);
     desc->finalize();
 
     auto node = desc->buildNode();
