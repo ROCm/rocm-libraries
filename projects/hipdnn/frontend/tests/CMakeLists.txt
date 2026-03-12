@@ -65,6 +65,7 @@ add_executable(
     TestUtilities.cpp
     TestTopologicalSortingUtils.cpp
     TestSdkLogging.cpp
+    TestVersion.cpp
 )
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

@@ -4683,10 +4683,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     disable_validation = False
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
-
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
                 2,2,3,3, 8,8, 11,11,12,12,
                 4,4,5,5, 8,8, 13,13,14,14, 
@@ -4727,10 +4723,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
         disable_validation = True
 
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
-
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
                 2,2,3,3, 8,8, 11,11,12,12,
                 4,4,5,5, 8,8, 13,13,14,14, 
@@ -4740,7 +4732,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         lrb0   = [                                       11,11,13,13,15,15,17,17]
         #                wait then read
         syncs.add(             6, dscnt=2, comment="wait for the first 4 LRAs before swapping/packing")
-        syncs.add(                     9, dscnt=2, comment="wait for the rest of LRAs before swapping/packing them")
+        syncs.add(                     9, dscnt=0, comment="wait for the rest of LRAs before swapping/packing them")
         pack_a0= [              7,7,7, 9,9,9, 8,8, 10,10, 8, 10] # swap instructions
         pack_a0+=[                                       i+11 for i in offset] # last at 27
         # because of GR starting at 22, we need barrier at 21, will use that for sync too.
@@ -4759,7 +4751,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         grb    = [                                                    53,57,61, 64,69,75,79,84] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
-        syncs.add(                                                 47, vlcnt=7, barrier=True, comment="wait for the previous GRs")
+        syncs.add(                                                 48, vlcnt=7, barrier=True, comment="wait for the previous GRs")
         lra1   =[[                                                 48,48,50,50,52,52,54,54],
                                                                    [49,49,51,51,53,53,54,54]]
         lrb1   = [                                                                                  59,59,  61,61,63,63,65,65]
@@ -4801,10 +4793,11 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
     kernel["MfmaInitCVgprs"] = True
     kernel["UseMFMAF32XEmulation"] = True
+    kernel["UseDot2F32XEmulation"] = False
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation("NN transpose with wider loads is not yet supported by validator")
+        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "Pack validation for NN transpose is not yet supported by validator")
     return True, opt1
 
 

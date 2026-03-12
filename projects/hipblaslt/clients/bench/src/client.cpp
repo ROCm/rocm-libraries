@@ -383,16 +383,10 @@ try
          "Specific stride of strided_batched matrix E, second dimension * leading dimension.")
 
         ("alpha",
-          value<double>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
-
-        ("alphai",
-          value<double>(&arg.alphai)->default_value(0.0), "specifies the scalar alphai")
+          value<float>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
 
         ("beta",
-         value<double>(&arg.beta)->default_value(0.0), "specifies the scalar beta")
-
-        ("betai",
-          value<double>(&arg.betai)->default_value(0.0), "specifies the scalar betai")
+         value<float>(&arg.beta)->default_value(0.0), "specifies the scalar beta")
 
         ("function,f",
          value<std::string>(&function)->default_value("matmul"), "BLASLt function to test. "
@@ -400,23 +394,23 @@ try
 
         ("precision,r",
          value<std::string>(&precision)->default_value("f16_r"), "Precision of matrix A,B,C,D  "
-         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
+         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r")
 
         ("a_type",
          value<std::string>(&a_type), "Precision of matrix A. "
-        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
+        "Options: f32_r,f16_r,bf16_r,i8_r")
 
         ("b_type",
          value<std::string>(&b_type), "Precision of matrix B. "
-        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
+        "Options: f32_r,f16_r,bf16_r,i8_r")
 
         ("c_type",
          value<std::string>(&c_type), "Precision of matrix C. "
-         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
+         "Options: f32_r,f16_r,bf16_r,i8_r")
 
         ("d_type",
          value<std::string>(&d_type), "Precision of matrix D. "
-        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
+        "Options: f32_r,f16_r,bf16_r,i8_r")
 
         ("compute_type",
          value<std::string>(&compute_type)->default_value("f32_r"), "Precision of computation. "
@@ -432,7 +426,7 @@ try
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
-        "Options: f16_r,bf16_r,f32_c,f64_c")
+        "Options: f16_r,bf16_r")
 
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
@@ -441,11 +435,11 @@ try
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
-         "N = no transpose, T = transpose, C = conjugate transpose")
+         "N = no transpose, T = transpose")
 
         ("transB",
          value<char>(&arg.transB)->default_value('N'),
-         "N = no transpose, T = transpose, C = conjugate transpose")
+         "N = no transpose, T = transpose")
 
         ("swizzleA",
          value<bool>(&arg.swizzle_a)->default_value(false),
@@ -845,7 +839,7 @@ try
             + " is not equal to --d_type " + std::string(hip_datatype_to_string(arg.d_type)));
 
     bool is_f16 = arg.a_type == HIP_R_16F || arg.a_type == HIP_R_16BF;
-    bool is_f32 = arg.a_type == HIP_R_32F || arg.a_type == HIP_C_32F;
+    bool is_f32 = arg.a_type == HIP_R_32F;
     arg.compute_type
         = compute_type == "" ? (HIPBLAS_COMPUTE_32F) : string_to_hipblas_computetype(compute_type);
     if(arg.compute_type == HIPBLASLT_COMPUTE_TYPE_INVALID)
