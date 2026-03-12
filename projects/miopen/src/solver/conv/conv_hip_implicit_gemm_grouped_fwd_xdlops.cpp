@@ -459,6 +459,7 @@ static const std::vector<std::string> ranked_gemm_grp_fwd = {
 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>"
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::string> ranked_gemm_grp_fwd_navi = {
 "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 128, 64, Filter1x1Stride1Pad0, 16, 16, 2, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
 "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 64, Filter1x1Stride1Pad0, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
