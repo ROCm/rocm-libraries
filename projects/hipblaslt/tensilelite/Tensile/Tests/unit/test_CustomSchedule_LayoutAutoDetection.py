@@ -213,7 +213,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_192x128x32_TF32": {"TN"},
             "_get_schedule_128x128x32_TF32": {"TN"},
             "_get_schedule_128x128x32_TF32_plr1": {"NN", "NT", "TN"},
-            "_get_schedule_128x128x64_TF32": {"TN"}, # TODO/FIXME: re-enable NN once the underlying CMS kernel is fixed
+            "_get_schedule_128x128x64_TF32": {"NN", "TN"},
             "_get_schedule_128x256x32_TF32": {"TN"},
             "_get_schedule_128x160x64_TF32": {"TN"},
             "_get_schedule_256x128x32_TF32": {"TN"},

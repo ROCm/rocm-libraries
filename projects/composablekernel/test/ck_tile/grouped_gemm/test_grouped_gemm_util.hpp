@@ -470,7 +470,7 @@ class TestCkTileGroupedGemm : public ::testing::Test
                 c_m_n_host_ref.mData.begin(),
                 c_m_n_host_ref.mData.end(),
                 0.0f,
-                [](float acc, auto v) { return std::max(acc, std::abs(float(v))); });
+                [](float acc, auto v) { return std::max(acc, std::abs(static_cast<float>(v))); });
             const auto rtol_atol = calculate_rtol_atol(Ks[i], kbatch, max_accumulated_value);
             pass &= ck_tile::check_err(c_m_n_tensors[i],
                                        c_m_n_host_ref,

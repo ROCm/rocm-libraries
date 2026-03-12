@@ -47,12 +47,15 @@ add_executable(
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorOps.cpp
-    descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
+    descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
+    descriptors/TestSdpaFpropOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
+    descriptors/TestDescriptorFromFlatBuffer.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp

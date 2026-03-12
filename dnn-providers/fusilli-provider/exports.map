@@ -1,0 +1,8 @@
+/*
+ * Version script for fusilli_plugin
+ * Export only the hipDNN plugin interface symbols
+ */
+{
+	global: hipdnn*;
+	local: *;
+};

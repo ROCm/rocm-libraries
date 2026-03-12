@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocauxiliary_steqr.hpp"
 #include "rocauxiliary_sterf.hpp"
@@ -44,7 +45,8 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define STEDC_BDIM 512 // Number of threads per thread-block used in main stedc kernels
+#define STEDC_BDIM \
+    ROCSOLVER_ASAN_VALUE(256, 512) // Number of threads per thread-block used in main stedc kernels
 #define STEDC_SOLVE_BDIM 4 // Number of threads per thread-block used in solver kernel
 
 // bit indicating base deflation candidate
