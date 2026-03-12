@@ -32,6 +32,7 @@ add_executable(
     IntegrationMatmul.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationSetPluginPathsExt.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -66,6 +67,7 @@ target_compile_definitions(
 add_dependencies(
     public_hipdnn_frontend_tests
     test_good_plugin
+#CWMDBG    test_good_default_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin
