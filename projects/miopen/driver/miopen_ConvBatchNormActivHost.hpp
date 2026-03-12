@@ -254,7 +254,7 @@ int miopenBNPerActivFwdInferHost_mt(miopenTensorDescriptor_t& inputTensor,
                     // y_i = gamma*x_hat + beta
                     out_ptr[index] = (scale_ptr[adjIndex] * inhat) + bias_ptr[adjIndex];
                 } // end for(n_batchs)
-            }     // for (column)
+            } // for (column)
         }
     });
 
