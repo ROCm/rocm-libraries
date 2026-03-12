@@ -18,6 +18,7 @@ add_executable(
     engines/TestHipKernelEngine.cpp
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
+    hip/TestHipProgramAndKernel.cpp
 )
 
 target_compile_options(hip_kernel_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

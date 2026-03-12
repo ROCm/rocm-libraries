@@ -5,7 +5,8 @@
 #include "kernel_includes.hpp"
 #include <cstddef>
 #include <unordered_map>
-#include <stdexcept>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 @HEADER_DEFINITIONS@
 
@@ -25,7 +26,7 @@ std::string_view getKernelInc(const char* name)
     auto it = map.find(name);
     if(it == map.end())
     {
-        throw std::runtime_error(std::string("Failed to load kernel include: ") + name);
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, std::string("Failed to load kernel include: ") + name);
     }
     return it->second;
 }

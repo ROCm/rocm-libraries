@@ -7,6 +7,8 @@
 #include "kernel_includes.hpp"
 #include "kernel_sources.hpp"
 #include <hip/hiprtc.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider
@@ -59,8 +61,10 @@ HipProgram::HipProgram(std::string kernelFileName, const std::vector<std::string
             hiprtcGetProgramLog(prog, log.data());
         }
         hiprtcDestroyProgram(&prog);
-        throw std::runtime_error("hiprtcCompileProgram failed for " + _programName + ": "
-                                 + hiprtcGetErrorString(result) + "\nCompilation log:\n" + log);
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "hiprtcCompileProgram failed for " + _programName + ": " + hiprtcGetErrorString(result)
+                + "\nCompilation log:\n" + log);
     }
 
     // Extract binary
