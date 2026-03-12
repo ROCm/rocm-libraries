@@ -420,10 +420,12 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                                                   MWarp / BlockSize,
                           "BLdsTile size is wrong!");
             static_assert(Policy::template GetSmemSizeA<Problem>() ==
-                              MPerBlock * (KPerBlock * lds_padded_sizeof<ADataType>() / APackedSize),
+                              MPerBlock *
+                                  (KPerBlock * lds_padded_sizeof<ADataType>() / APackedSize),
                           "SmemSizeA size is wrong!");
             static_assert(Policy::template GetSmemSizeB<Problem>() ==
-                              (KPerBlock * lds_padded_sizeof<BDataType>() / BPackedSize) * NPerBlock,
+                              (KPerBlock * lds_padded_sizeof<BDataType>() / BPackedSize) *
+                                  NPerBlock,
                           "SmemSizeB size is wrong!");
 
             ////////////// MX Scale register tiles (ping-pong buffers) /////////////////

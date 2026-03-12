@@ -631,10 +631,11 @@ struct tile_window_with_static_distribution
 
                 // Calculate SMEM address using base pointer
                 // Use byte arithmetic for dwordx3 padding (12-byte elements use 16-byte LDS stride)
-                CK_TILE_LDS_ADDR LdsDataType* smem = reinterpret_cast<CK_TILE_LDS_ADDR LdsDataType*>(
-                    reinterpret_cast<CK_TILE_LDS_ADDR char*>(lds_base_ptr) +
-                    (lds_coord.get_offset() + lds_ys_offset) / Traits::PackedSize *
-                        lds_padded_sizeof<LdsDataType>());
+                CK_TILE_LDS_ADDR LdsDataType* smem =
+                    reinterpret_cast<CK_TILE_LDS_ADDR LdsDataType*>(
+                        reinterpret_cast<CK_TILE_LDS_ADDR char*>(lds_base_ptr) +
+                        (lds_coord.get_offset() + lds_ys_offset) / Traits::PackedSize *
+                            lds_padded_sizeof<LdsDataType>());
 
                 const auto dram_ys_offset = [&]() {
                     if constexpr(static_move_ys)

@@ -104,8 +104,8 @@ struct pk_fp6_t
 
     CK_TILE_HOST static int32_t float_to_fp6_e2m3(float val)
     {
-        int32_t best     = 0;
-        float best_err   = 1e30f;
+        int32_t best   = 0;
+        float best_err = 1e30f;
         for(int32_t i = 0; i < 64; i++)
         {
             float err = std::fabs(val - fp6_e2m3_to_float(i));

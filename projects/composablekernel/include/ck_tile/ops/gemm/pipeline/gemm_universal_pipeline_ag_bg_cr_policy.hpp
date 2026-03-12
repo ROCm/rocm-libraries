@@ -837,9 +837,8 @@ struct UniversalGemmBasePolicy
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
 
         constexpr index_t KPack    = static_cast<index_t>(BlockGemm::Traits::KPack);
-        constexpr index_t VecElems =
-            static_cast<index_t>(Problem::VectorLoadSize / sizeof(A)) *
-            numeric_traits<A>::PackedSize;
+        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(A)) *
+                                     numeric_traits<A>::PackedSize;
 
         return ck_tile::min(KPack, VecElems);
     }
@@ -851,9 +850,8 @@ struct UniversalGemmBasePolicy
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
 
         constexpr index_t KPack    = static_cast<index_t>(BlockGemm::Traits::KPack);
-        constexpr index_t VecElems =
-            static_cast<index_t>(Problem::VectorLoadSize / sizeof(B)) *
-            numeric_traits<B>::PackedSize;
+        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(B)) *
+                                     numeric_traits<B>::PackedSize;
 
         return ck_tile::min(KPack, VecElems);
     }
@@ -864,9 +862,10 @@ struct UniversalGemmBasePolicy
         using ADataType                 = remove_cvref_t<typename Problem::ADataType>;
         constexpr auto APackedSize      = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = Derived::template MakeALdsBlockDescriptor<Problem>();
-        constexpr index_t smem_size_a   = integer_least_multiple(
-            a_lds_block_desc.get_element_space_size() * lds_padded_sizeof<ADataType>() / APackedSize,
-            16);
+        constexpr index_t smem_size_a =
+            integer_least_multiple(a_lds_block_desc.get_element_space_size() *
+                                       lds_padded_sizeof<ADataType>() / APackedSize,
+                                   16);
         return smem_size_a;
     }
 
@@ -879,9 +878,10 @@ struct UniversalGemmBasePolicy
                                                                         typename Problem::BDataType>;
         constexpr auto BPackedSize                 = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
-        constexpr index_t smem_size_b   = integer_least_multiple(
-            b_lds_block_desc.get_element_space_size() * lds_padded_sizeof<BDataType>() / BPackedSize,
-            16);
+        constexpr index_t smem_size_b =
+            integer_least_multiple(b_lds_block_desc.get_element_space_size() *
+                                       lds_padded_sizeof<BDataType>() / BPackedSize,
+                                   16);
         return smem_size_b;
     }
 
