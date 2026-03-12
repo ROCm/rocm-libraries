@@ -125,7 +125,6 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
 #endif
 }
 
-// function generated from MI355 2d data
 bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
                                 const ProblemDescription& problem) const
 {
@@ -364,7 +363,6 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-// function generated from MI355 2d data
 bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
                               const ProblemDescription& problem) const
 {

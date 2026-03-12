@@ -174,7 +174,6 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-// function generated from MI355 2d data
 bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
                                 const ProblemDescription& problem) const
 {
@@ -427,7 +426,6 @@ size_t GemmBwd1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
     return 0;
 }
 
-// function generated from MI355 2d data
 bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
                                 const ProblemDescription& problem) const
 {
@@ -654,7 +652,6 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-// function generated from MI355 2d data
 bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescription& problem) const
 {
     const std::string& arch        = context.GetStream().GetDeviceName();

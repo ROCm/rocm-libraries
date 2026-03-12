@@ -911,7 +911,6 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
-// function generated from MI355 2d data
 bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescription& problem) const
 {
     const std::string& arch        = context.GetStream().GetDeviceName();
