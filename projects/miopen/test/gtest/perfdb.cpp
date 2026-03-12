@@ -1517,6 +1517,12 @@ protected:
         if(!args.empty())
         {
             exe_path() = fs::absolute(args[0]);
+#ifdef _WIN32
+            // CTest may invoke without .exe extension, but CreateProcess
+            // with explicit lpApplicationName requires it
+            if(!exe_path().has_extension())
+                exe_path().replace_extension(".exe");
+#endif
         }
     }
 
