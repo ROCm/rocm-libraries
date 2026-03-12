@@ -31,9 +31,6 @@ namespace rocRoller
             size_t valueCount = 1;
             for(auto operand : operands)
             {
-                size_t operandPacking = operand.varType.dataType == DataType::None
-                                            ? 1
-                                            : DataTypeInfo::Get(operand.varType).packing;
                 if(operand.valueCount != 1)
                 {
                     if(valueCount == 1)
@@ -43,8 +40,7 @@ namespace rocRoller
                                     "Each operand's value count in an expression must either "
                                     "be 1 or equal to all other non-1 value counts\n",
                                     ShowValue(valueCount),
-                                    ShowValue(operand.valueCount),
-                                    ShowValue(operandPacking));
+                                    ShowValue(operand.valueCount));
                 }
             }
 
@@ -397,8 +393,6 @@ namespace rocRoller
                     actualNumRegister
                         = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
 
-                    if(operandVariableType.dataType != DataType::None)
-                        operandValueCount *= DataTypeInfo::Get(operandVariableType).packing;
                     if(operandValueCount != 1)
                     {
                         // Each value count of an operand in an expression

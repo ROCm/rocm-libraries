@@ -715,8 +715,8 @@ namespace rocRoller
                 return subset;
             }
 
-            Register::ValuePtr resultPlaceholder(ResultType const&    resType,
-                                                 bool                 allowSpecial = true) const
+            Register::ValuePtr resultPlaceholder(ResultType const& resType,
+                                                 bool              allowSpecial = true) const
             {
                 // Obtain the register count by dividing the value count of the result type by its packing
                 size_t count = resType.valueCount

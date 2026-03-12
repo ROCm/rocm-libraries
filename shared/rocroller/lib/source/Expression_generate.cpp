@@ -1,7 +1,5 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-
-#include "rocRoller/Utilities/Error.hpp"
 #include <algorithm>
 #include <numeric>
 #include <queue>
@@ -137,8 +135,8 @@ namespace rocRoller
             // A special case of resultPlaceholder, for use when the value count in resType should be ignored
             // and the placeholder should be created with a given count
             Register::ValuePtr resultPlaceholderWithCount(ResultType const& resType,
-                                                         size_t            count,
-                                                         bool              allowSpecial = true)
+                                                          size_t            count,
+                                                          bool              allowSpecial = true)
             {
                 auto regType = resType.regType;
                 if(IsWriteableSpecial(regType))
@@ -473,7 +471,7 @@ namespace rocRoller
 
                     auto conversion = resultPlaceholderWithCount(resType, 1, true);
 
-                    for(size_t k = 0; k < resType.valueCount; ++k)
+                    for(size_t k = 0; k < dest->valueCount(); ++k)
                     {
                         auto lhsVal = lhs->regType() == Register::Type::Literal
                                               || IsSpecial(lhs->regType()) || lhs->valueCount() == 1
@@ -789,11 +787,13 @@ namespace rocRoller
                     if(isUnpacking)
                     {
                         // unpacking args into (multiple registers) dest
-                        dest = resultPlaceholderWithCount(destType, results[0]->valueCount() * packingRatio, true);
+                        dest = resultPlaceholderWithCount(
+                            destType, results[0]->valueCount() * packingRatio, true);
                     }
                     else
                     {
-                        dest = resultPlaceholderWithCount(destType, results[0]->valueCount() / packingRatio, true);
+                        dest = resultPlaceholderWithCount(
+                            destType, results[0]->valueCount() / packingRatio, true);
                     }
                 }
 
@@ -824,7 +824,7 @@ namespace rocRoller
                     }
                     else
                     {
-                        for(size_t i = 0; i < destType.valueCount; i++)
+                        for(size_t i = 0; i < dest->valueCount(); i++)
                         {
                             Register::ValuePtr arg;
                             if(argInfo.packing < destInfo.packing)
