@@ -104,8 +104,15 @@ class TensorDataMoverLoad(TensorDataMover):
             mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
             mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), f"wCompId = fTid // wavelen({wavelen}) // numComp({numComp})"))
             if ("MXS" in tc):
-                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mxUnit, f"woffset = wCompId * mxUnit{mxUnit} * Size{INDEX_CHARS[tIdx]}"))
-                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr("Size%s"%INDEX_CHARS[tIdx]), f"woffset = wCompId * mxUnit{mxUnit} * Size{INDEX_CHARS[tIdx]}"))
+                mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+                numMxKGroups = mxDU // mxUnit
+                if numMxKGroups >= numComp:
+                    # K-splitting: offset by stride to next k_group
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mxUnit, f"woffset = wCompId * mxUnit({mxUnit})"))
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr("Size%s"%INDEX_CHARS[tIdx]), f"woffset *= Size{INDEX_CHARS[tIdx]}"))
+                else:
+                    # M/N-splitting: offset within same k_group along tile dimension
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * mxUnit * bpe), f"woffset = wCompId * mt//numComp({mt // numComp}) * mxUnit({mxUnit}) * bpe({bpe})"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
