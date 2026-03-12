@@ -85,9 +85,5 @@ add_custom_target(tensilelite-device-libraries ALL
     DEPENDS "${output_stamp}"
 )
 
-if(HIPBLASLT_ENABLE_EXTOPS)
-    add_subdirectory(extops)
-endif()
-if(HIPBLASLT_ENABLE_MATRIX_TRANSFORM)
-    add_subdirectory(matrix-transform)
-endif()
+add_subdirectory(extops)
+add_subdirectory(matrix-transform)

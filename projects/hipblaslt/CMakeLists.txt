@@ -396,7 +396,7 @@ if(HIPBLASLT_ENABLE_HOST)
 endif()
 
 # Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for
-if(HIPBLASLT_ENABLE_DEVICE AND NOT HIPBLASLT_IS_SUBPROJECT)
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
