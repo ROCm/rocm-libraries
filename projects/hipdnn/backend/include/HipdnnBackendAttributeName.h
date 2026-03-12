@@ -48,6 +48,7 @@
  * - 2400-2499: RMSNorm operation attributes
  * - 2500-2599: Matmul operation attributes
  * - 2600-2699: SDPA forward propagation operation attributes
+ * - 2700-2799: Layernorm operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -761,6 +762,41 @@ typedef enum
 
     /** @brief Compute data type for SDPA forward */
     HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT = 2641,
+
+    /** @} */
+
+    /**
+     * @name Layernorm Operation Attributes (2700-2799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT = 2700,
+
+    /** @brief Scale tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT = 2701,
+
+    /** @brief Bias tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT = 2702,
+
+    /** @brief Epsilon tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT = 2703,
+
+    /** @brief Output tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT = 2704,
+
+    /** @brief Mean output tensor for layernorm (optional) */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT = 2705,
+
+    /** @brief Inverse variance output tensor for layernorm (optional) */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT = 2706,
+
+    /** @brief Forward phase for layernorm (TRAINING or INFERENCE) */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT = 2707,
+
+    /** @brief Math precision (compute data type) for layernorm */
+    HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
 
     /** @} */
 

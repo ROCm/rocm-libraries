@@ -24,6 +24,7 @@ add_executable(
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLowering.cpp
