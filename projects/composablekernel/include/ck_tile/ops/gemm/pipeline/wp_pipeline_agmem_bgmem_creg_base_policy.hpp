@@ -278,8 +278,8 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         constexpr auto NumAccess     = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
         // For tf32 mode, use tf32_t for warp gemm; otherwise use original types
         using WarpGemm =
-            WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
-                               if_select_v<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
+            WarpGemmDispatcher<if_select_t<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
+                               if_select_t<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
                                typename Problem::CDataType,
                                WarpTile::at(I0),
                                WarpTile::at(I1),

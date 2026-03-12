@@ -9,7 +9,10 @@
 
 namespace ck_tile {
 
-using tf32_t = _BitInt(19); // 1 sign bit, 8 exponent bits, 10 mantissa bits
+// TF32 tag type: 1 sign bit, 8 exponent bits, 10 mantissa bits (see numeric_traits<tf32_t>)
+struct tf32_t
+{
+};
 
 // this struct has the information of
 // 1. limit of a certain type, simliar to std::numeric_limits

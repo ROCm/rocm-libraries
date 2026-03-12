@@ -94,8 +94,8 @@ struct CShuffleEpilogue
     using BDataTypeCompute = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
 
     // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_v<ADataTypeCompute, tf32_t, float, ADataTypeCompute>;
-    using BDataTypeBuf = if_select_v<BDataTypeCompute, tf32_t, float, BDataTypeCompute>;
+    using ADataTypeBuf = if_select_t<ADataTypeCompute, tf32_t, float, ADataTypeCompute>;
+    using BDataTypeBuf = if_select_t<BDataTypeCompute, tf32_t, float, BDataTypeCompute>;
 
     // For warp gemm selection: use tf32_t if compute type was tf32_t
     // For pk_int4/pk_fp4: use the other data type
@@ -150,7 +150,7 @@ struct CShuffleEpilogue
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "CShuffleEpilogue", 
+        return concat('_', "CShuffleEpilogue",
                       concat('x', MWave, NWave),
                       concat('x', MPerXdl, NPerXdl, KPerXdl),
                       VectorSizeC,

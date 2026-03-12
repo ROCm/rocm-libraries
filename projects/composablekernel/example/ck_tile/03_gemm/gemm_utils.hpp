@@ -37,7 +37,7 @@ struct GemmConfigBase
 
 // Type trait for tf32 storage type (tf32 uses float for memory layout calculations)
 template <typename T>
-using prec_storage_type = ck_tile::if_select_v<T, ck_tile::tf32_t, float, T>;
+using prec_storage_type = ck_tile::if_select_t<T, ck_tile::tf32_t, float, T>;
 
 template <typename PrecType>
 struct GemmConfigMemoryInterwave : public GemmConfigBase

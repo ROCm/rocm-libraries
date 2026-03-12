@@ -23,8 +23,8 @@ struct BasicInvoker
         // ADataTypeBuf: buffer/storage type (fp32 when tf32)
         using ADataTypeCompute = ADataType_;
         using BDataTypeCompute = BDataType_;
-        using ADataTypeBuf = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
-        using BDataTypeBuf = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
+        using ADataTypeBuf = ck_tile::if_select_t<ADataType_, ck_tile::tf32_t, float, ADataType_>;
+        using BDataTypeBuf = ck_tile::if_select_t<BDataType_, ck_tile::tf32_t, float, BDataType_>;
 
         if constexpr(std::is_same_v<ADataTypeCompute, ck_tile::tf32_t>)
         {

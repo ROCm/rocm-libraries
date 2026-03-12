@@ -87,10 +87,12 @@ CK_TILE_HOST_DEVICE constexpr float float_to_tf32(float x)
     return bit_cast<float>(i);
 }
 
-template <typename Y, std::enable_if_t<std::is_same_v<Y, tf32_t>, bool> = false>
+template <typename Y,
+          tf32_rounding_mode rounding                       = tf32_rounding_mode::trunc,
+          std::enable_if_t<std::is_same_v<Y, tf32_t>, bool> = false>
 CK_TILE_HOST_DEVICE constexpr float type_convert(float x)
 {
-    return float_to_tf32(x);
+    return float_to_tf32<rounding>(x);
 }
 
 CK_TILE_TYPE_CONVERT(fp16_t, fp16, float, float)

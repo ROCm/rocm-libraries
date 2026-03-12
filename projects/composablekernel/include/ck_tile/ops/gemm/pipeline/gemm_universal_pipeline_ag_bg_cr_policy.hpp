@@ -913,7 +913,7 @@ struct UniversalGemmPipelineAgBgCrPolicy
         using BDataType       = remove_cvref_t<typename Problem::BDataType>;
         using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
 
-        using ATypeToUse = if_select_v<ADataType, pk_int4_t, BDataType, ADataType>;
+        using ATypeToUse = if_select_t<ADataType, pk_int4_t, BDataType, ADataType>;
         using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
                                                   std::is_same_v<BDataType, pk_fp4_t> ||
                                                   sizeof(BDataType) < sizeof(ADataType),
@@ -921,8 +921,8 @@ struct UniversalGemmPipelineAgBgCrPolicy
                                               BDataType>;
 
         using WarpGemm =
-            WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
-                               if_select_v<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
+            WarpGemmDispatcher<if_select_t<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
+                               if_select_t<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
                                typename Problem::CDataType,
                                WarpTile::at(I0),
                                WarpTile::at(I1),
