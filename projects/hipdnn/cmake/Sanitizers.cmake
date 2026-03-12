@@ -24,6 +24,10 @@ if(BUILD_ADDRESS_SANITIZER)
     if (WIN32)
         message(STATUS "Configuring Address Sanitizer for Windows")
 
+        # ASAN is incompatible with the MSVC debug CRT (/MDd). Force the release CRT (/MD)
+        # to avoid false "bad-free" errors from ucrtbased.dll during static initialization.
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+
         # Windows: MSVC uses /fsanitize=address, Clang uses -fsanitize=address.
         if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
             set(SANITIZER_COMPILE_FLAGS /fsanitize=address)
