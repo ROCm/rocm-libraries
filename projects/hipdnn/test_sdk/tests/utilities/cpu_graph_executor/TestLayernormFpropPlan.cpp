@@ -71,7 +71,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                    shallowScaleTensor.get(),
                                    shallowBiasTensor.get(),
                                    *shallowYTensor,
-                                   hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON,
+                                   hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
                                    normalizedDimCount);
 
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
@@ -83,7 +83,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));
 }
 
-TEST_F(TestLayernormFpropPlan, ExecutePlanNormalizedDimCount2)
+TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
     std::vector<int64_t> dims = {6, 3, 32, 32};
@@ -95,7 +95,9 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanNormalizedDimCount2)
                                           DataType::FLOAT,
                                           dims,
                                           normalizedDimCount,
-                                          TensorLayout::NHWC);
+                                          TensorLayout::NHWC,
+                                          false,
+                                          true);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
@@ -128,7 +130,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanNormalizedDimCount2)
                                    shallowScaleTensor.get(),
                                    shallowBiasTensor.get(),
                                    *shallowYTensor,
-                                   hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON,
+                                   hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
                                    normalizedDimCount);
 
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
@@ -221,7 +223,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
                                    shallowScaleTensor.get(),
                                    shallowBiasTensor.get(),
                                    *shallowYTensor,
-                                   hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON,
+                                   hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
                                    normalizedDimCount,
                                    meanPtr,
                                    invVariancePtr);

@@ -113,13 +113,14 @@ public:
            == scaleTensor->dims().size()) // Dimensions not used by scale have been set to 1
         {
             normalizedDimCount = 0;
-            for(size_t i = scaleTensor->dims().size() - 1; i >= 0; --i)
+            for(int64_t i = static_cast<int64_t>(scaleTensor->dims().size()) - 1; i >= 0; --i)
             {
-                if(scaleTensor->dims()[i] == 1 && shallowXTensor->dims()[i] > 1)
+                if(scaleTensor->dims()[static_cast<size_t>(i)] == 1
+                   && shallowXTensor->dims()[static_cast<size_t>(i)] > 1)
                 {
                     break;
                 }
-                normalizedDimCount = static_cast<int64_t>(scaleTensor->dims().size() - i);
+                normalizedDimCount = static_cast<int64_t>(scaleTensor->dims().size()) - i;
             }
         }
         else // Dimensions not used by scale have been omitted
