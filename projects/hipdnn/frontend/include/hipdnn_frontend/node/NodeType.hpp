@@ -7,8 +7,8 @@ namespace hipdnn_frontend::graph
 
 /// Identifies the concrete type of a graph node without RTTI.
 /// Each node subclass carries its NodeType as a compile-time template
-/// parameter through BaseNode, enabling type-based dispatch (e.g.,
-/// engine override selection) via switch on getNodeType().
+/// parameter through BaseNode, enabling type-based dispatch when
+/// visiting the graph's node tree via INode::visit().
 enum class NodeType
 {
     UNKNOWN,
