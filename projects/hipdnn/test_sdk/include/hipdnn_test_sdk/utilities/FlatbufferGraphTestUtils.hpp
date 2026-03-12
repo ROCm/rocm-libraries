@@ -2074,16 +2074,7 @@ inline flatbuffers::FlatBufferBuilder
         builder, dvUid, "dv", dataType, &vStrides, &vDims));
 
     auto sdpaBwdAttributes = hipdnn_data_sdk::data_objects::CreateSdpaBackwardAttributes(
-        builder,
-        qUid,
-        kUid,
-        vUid,
-        oUid,
-        doUid,
-        statsUid,
-        dqUid,
-        dkUid,
-        dvUid);
+        builder, qUid, kUid, vUid, oUid, doUid, statsUid, dqUid, dkUid, dvUid);
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
