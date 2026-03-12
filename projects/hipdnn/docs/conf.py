@@ -8,11 +8,11 @@ import re
 
 from rocm_docs import ROCmDocs
 
-'''
+"""
 html_theme is usually unchanged (rocm_docs_theme).
 flavor defines the site header display, select the flavor for the corresponding portals
 flavor options: rocm, rocm-docs-home, rocm-blogs, rocm-ds, instinct, ai-developer-hub, local, generic
-'''
+"""
 html_theme = "rocm_docs_theme"
 html_theme_options = {
     "flavor": "generic",
@@ -28,7 +28,6 @@ html_theme_options = {
         "Support": "https://github.com/ROCm/rocm-libraries/issues/new/choose",
     },
     "link_main_doc": False,
-
 }
 
 name = "hipDNN (Beta)"
@@ -43,7 +42,7 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
-docs_core = ROCmDocs(f"{name} {version_number} socumentation")
+docs_core = ROCmDocs(f"{name} {version_number} documentation")
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
 docs_core.setup()
 

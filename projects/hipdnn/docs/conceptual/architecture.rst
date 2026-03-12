@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. 
-  :keywords: hipDNN, ROCm, API, 
+  :description: hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library.
+  :keywords: hipDNN, ROCm, API,
 
 .. _architecture:
 
@@ -8,8 +8,8 @@
 hipDNN high-level architecture
 ******************************
 
-hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. 
-hipDNN has support for engine plugins, which provide the kernels to solve graphs. 
+hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library.
+hipDNN has support for engine plugins, which provide the kernels to solve graphs.
 
 .. note::
 
@@ -21,13 +21,13 @@ The Hipdnn library is structured as three primary components:
 - **Backend**: The hipDNN backend is a shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to engines optimized to solve them.
 - **Engine plugins**: The hipDNN engine provider plugins are shared libraries responsible for matching the operations they provide to graphs, and executing the operations on the supported hardware. Plugins will continue to be added over time to provide additional operational support or performance improvements. See :ref:`plugin-support` for more information.
 
-The frontend API defines tensors and attaches them to operational nodes on a graph. The graph is then lowered through the backend APIs where it's examined by each plugin's engine to determine a match, at which a point and execution plan is established with the preferred matching engine. 
+The frontend API defines tensors and attaches them to operational nodes on a graph. The graph is then lowered through the backend APIs where it's examined by each plugin's engine to determine a match, at which a point an execution plan is established with the preferred matched engine.
 The frontend then allocates memory and populates the data used by the graph, which is then dispatched to the selected plugin's engine to run.
 
-Header-only SDKs provide shared utilities and interfaces. 
-hipDNN provides three SDKs: 
+Header-only SDKs provide shared utilities and interfaces.
+hipDNN provides three SDKs:
 
-- :ref:`data` (graph schemas and data structures) 
+- :ref:`data` (graph schemas and data structures)
 - :ref:`plugin-sdk` (plugin API and utilities)
 - :ref:`test-sdk` (testing utilities and CPU reference implementations)
 
@@ -51,6 +51,8 @@ Key characteristics:
 Frontend architecture
 ~~~~~~~~~~~~~~~~~~~~~
 
+.. _graph:
+
 Graph class
 ^^^^^^^^^^^
 
@@ -60,14 +62,19 @@ The central abstraction in the frontend is the ``Graph`` class, which:
 - Handles the creation and configuration of nodes.
 - Orchestrates the execution workflow.
 
+.. _nodes:
+
 Nodes
 ^^^^^
 
-Nodes represent individual operations within a graph.
+Nodes represent individual operations within a graph (for example, ``BatchnormNode``, ``PointwiseNode``).
 
-- Each node type (for example, ``BatchnormNode``, ``PointwiseNode``) inherits from ``INode``.
 - Nodes encapsulate their specific attributes and tensor connections.
-- Uses the Backend API to convert the graph to backend descriptors for backend consumption.
+- The Frontend uses the Backend API to convert the graph to backend descriptors for engine consumption.
+
+See :ref:`plugin-support` for a detailed list of the supported operations.
+
+.. _attributes:
 
 Attributes
 ^^^^^^^^^^
@@ -76,37 +83,29 @@ Attributes configure the behavior of nodes.
 
 - Each node type has corresponding attribute classes (for example, ``Batchnorm_attributes``).
 - Attributes include operation-specific parameters like epsilon, momentum, etc.
-- Support builder pattern for easy configuration.
+
+.. _tensor-attributes:
+
+TensorAttributes
+^^^^^^^^^^^^^^^^
+
+Tensors are attributes that define the shape of the data processed by operations in the graph.
+Tensors are attached to graph operation nodes and determine:
+
+- The dimensions of the data.
+- How the data is packed in memory.
+- The data's type.
+
 
 Simplified workflow example
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code:: cpp
-
-  // Create a graph
-  Graph graph;
-  graph.set_compute_data_type(DataType_t::FLOAT);
-
-  // Create tensors
-  auto x = Graph::tensor(/* tensor attributes */);
-  auto scale = Graph::tensor(/* tensor attributes */);
-  auto bias = Graph::tensor(/* tensor attributes */);
-
-  // Add operations
-  auto [y, mean, inv_var, _, _] = graph.batchnorm(x, scale, bias, bn_attributes);
-
-  // Build and execute
-  graph.build_operation_graph(handle);
-  graph.create_execution_plans();
-  graph.build_plans();
-  graph.execute(handle, variant_pack, workspace);
-
-For complete working examples, see the official `samples on GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_.
+See :ref: `build-execute` for a simplified workflow example.
 
 SDKs and plugin architecture
 ============================
 
-This section is relevant for plugin developers who want a granular breakdown of the system architecture for the SDK and plugin components.
+This section is relevant primarily for plugin developers who want a breakdown of the system architecture for the SDK and plugin components.
 
 SDKs
 ----
@@ -118,7 +117,7 @@ hipDNN provides three header-only SDK libraries that serve as the foundation for
 Data SDK (``data_sdk``)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation. 
+The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation.
 The serialized structures allow data to be marshalled and passed between the backend and plugins in a type-safe and highly version-compatible fashion.
 
 - **Dependencies**: ``FlatBuffers`` and ``spdlog``.
@@ -163,7 +162,7 @@ The Test SDK provides utilities for testing plugins.
   - Mock objects for unit testing.
 
 
-Plugin engines 
+Plugin engines
 --------------
 
 Engines, provided by each plugin, provide the actual computational implementations for hipDNN graphs.
@@ -210,14 +209,14 @@ Plugin architecture
 Plugin loading
 ~~~~~~~~~~~~~~~
 
-- The backend discovers plugins at runtime via the default plugin path, or by using ``hipdnnSetEnginePluginPaths_ext`` to provide additional paths from which to load the plugins.
+- The backend discovers plugins at runtime via the default plugin path, environment variables, or by using ``hipdnnSetEnginePluginPaths_ext`` to provide additional paths from which to load the plugins.
 - Each plugin exports standard entry points defined in the Plugin SDK.
 
 Engine management
 ~~~~~~~~~~~~~~~~~
 
 - Each plugin can provide multiple engines.
-- Engines must have globally unique IDs that remain constant for each run.
+- Engines must have fixed globally-unique IDs that remain constant for each run.
 - Plugins determine which engines are applicable for a given graph.
 
 Key plugin functions

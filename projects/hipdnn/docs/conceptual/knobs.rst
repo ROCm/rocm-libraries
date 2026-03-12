@@ -1,6 +1,6 @@
 .. meta::
   :description: hipDNN engine configuration knobs provide a flexible mechanism for controlling runtime behavior of hipDNN engines.
-  :keywords: hipDNN, ROCm, API, 
+  :keywords: hipDNN, ROCm, API,
 
 .. _knobs:
 
@@ -104,7 +104,7 @@ These are the global knobs available in hipDNN:
    * - ``global.workspace_size_limit``
      - Integer (int64)
      - The maximum size needed for optimal performance.
-     - Limits the maximum workspace memory that solvers can use for convolution operations (Forward, Backward Data, Backward Weights). Refer to the plugin-specific ``Operation support`` document for specific details.
+     - Limits the maximum workspace memory that solvers can use for convolution operations (Forward, Backward Data, Backward Weights). Refer to :ref: `plugin-support` for specific details.
 
 .. note::
 
@@ -113,10 +113,7 @@ These are the global knobs available in hipDNN:
 Provider-specific knobs
 =======================
 
-Different engine providers may expose their own custom knobs. Refer to the provider-specific documentation for details:
-
-- :ref:`miopen`
-- :ref:`hipblaslt`
+Different engine providers may expose their own custom knobs. Refer to the o :ref: `plugin-support` for specific details.
 
 .. tip::
 

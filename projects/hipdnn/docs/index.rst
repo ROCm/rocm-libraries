@@ -1,20 +1,22 @@
 .. meta::
-  :description: hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
+  :description: hipDNN (Deep Neural Network) is a graph-based library providing improved performance for deep learning workloads with AMD GPUs.
   :keywords: hipDNN, ROCm, documentation,
 
 ********************
 hipDNN documentation
 ********************
 
-hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs.
-Each plugin implements specific operations with support for different datatypes, layouts, and features.
-hipDNN allows developers to run deep learning workloads on AMD GPUs by providing an interface modeled after the cuDNN frontend API.
+hipDNN (Deep Neural Network) is a graph-based library providing improved performance for deep learning workloads with AMD GPUs.
 
-The component public repository is located at `https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn>`_.
+hipDNN uses operation graphs as an intermediate representation to describe computations, allowing different backend engines to optimize and execute these graphs efficiently.
+
+hipDNN provides an interace that follows established deep learning conventions and has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
+
+The public repository for hipDNN is located at `https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn>`_.
 
 .. note::
 
-  hipDNN is in beta. Running production workloads is not recommended.
+  hipDNN is in beta-stage development and consequently not recommended for running production workloads at this time.
 
 .. grid:: 2
   :gutter: 3
@@ -29,17 +31,17 @@ The component public repository is located at `https://github.com/ROCm/rocm-libr
     * :doc:`High-level architecture <conceptual/architecture>`
     * :doc:`Engine configuration knobs <conceptual/knobs>`
     * :doc:`Backend architecture <conceptual/backend-architecture>`
-  
+
   .. grid-item-card:: How to
 
     * :doc:`Build and execute operation graphs <how-to/build-execute-hipdnn>`
-    * :doc:`Migrate a cudNN project to hipDNN <how-to/migrate-cudnn>`
     * :doc:`Get/set engine knob configurations <how-to/get-set-engine-knob>`
     * :doc:`Develop plugins <how-to/develop-plugins>`
+    * :doc:`Migrate a cudNN project to hipDNN <how-to/migrate-cudnn>`
 
   .. grid-item-card:: Reference
 
-    * :doc:`Plugin-specific operation support <reference/plugins>`
+    * :doc:`Operation support <reference/plugins>`
     * :doc:`Environment variables <reference/environment-variables>`
     * :doc:`Glossary <reference/glossary>`
 

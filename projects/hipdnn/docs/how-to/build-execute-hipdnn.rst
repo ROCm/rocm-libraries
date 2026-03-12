@@ -1,6 +1,6 @@
 .. meta::
   :description: Learn how to build and execute operation graphs in hipDNN.
-  :keywords: hipDNN, ROCm, API, how-to 
+  :keywords: hipDNN, ROCm, API, how-to
 
 .. _build-execute:
 
@@ -10,7 +10,7 @@ Build and execute operation graphs in hipDNN
 
 This section covers how to use the frontend API to build and execute graph operations in hipDNN.
 
-The hipDNN frontend provides a C++ header-only API for building and executing operation graphs. 
+The hipDNN frontend provides a C++ header-only API for building and executing operation graphs.
 
 Frontend file structure
 =======================
@@ -25,56 +25,12 @@ Here's the basic frontend file structure with links to the GitHub repository:
 Frontend architecture
 =====================
 
-The frontend architecture consists of the ``Graph`` class, tensors, nodes, and attributes.
+Refer to :ref: `architecture` for a conceptual description of the hipDNN graph, tensors, nodes, and attributes.
 
-.. _graph:
+See :ref:`plugin-support` for a detailed list of the supported operations.
 
-Graph class
------------
-
-The central abstraction in the frontend is the ``Graph`` class, which:
-
-- Manages the construction of operation graphs.
-- Handles the creation and configuration of nodes.
-- Orchestrates the execution workflow.
-
-.. _nodes:
-
-TensorAttributes
-----------------
-
-Tensors are attributes that define the shape of the data processed by operations in the graph. 
-Tensors are attached to graph operation nodes and determine:
-
-- The dimensions of the data.
-- How the data is packed in memory.
-- The data's type.
-
-
-See :ref:`operation-support` for a detailed list of the supported operations.
-
-Nodes
------
-
-Nodes represent individual operations within a graph:
-
-- Each node type (for example, ``BatchnormNode``, ``PointwiseNode``) inherits from ``INode``.
-- Nodes encapsulate their specific attributes and tensor connections.
-- Support serialization to Flatbuffer format for backend consumption.
-
-.. _attributes:
-
-Attributes
-----------
-
-Attributes configure the behavior of nodes:
-
-- Each node type has corresponding attribute classes (for example, ``Batchnorm_attributes``).
-- Attributes include operation-specific parameters like epsilon, momentum, etc.
-- Support builder pattern for easy configuration.
-
-Simplified workflow
-===================
+Simplified workflow example
+===========================
 
 This example demonstrates sample code that creates a graph, creates tensors, and adds operations before building and executing them. Here's a simplified workflow example:
 
@@ -108,4 +64,3 @@ This is the basic frontend workflow:
 The graph is then processed to find a matching engine, the configuration knobs are applied and execution plans are built, memory is allocated, tensor data is supplied, and the resulting plan is executed on the GPU hardware.
 
 For complete working examples, see the official `samples on GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_.
-

@@ -43,10 +43,10 @@ subtrees:
     - entries:
       - file: how-to/build-execute-hipdnn.rst
         title: Build and execute operation graphs
-      - file: how-to/migrate-cudnn.rst
-        title: Migrate a cuDNN project to hipDNN
       - file: how-to/get-set-engine-knob.rst
         title: Get/set engine knob configurations
+      - file: how-to/migrate-cudnn.rst
+        title: Migrate a cuDNN project to hipDNN
   - file: reference/how-to-plugin.rst
     title: For plugin developers
     subtrees:
@@ -57,7 +57,7 @@ subtrees:
 - caption: Reference
   entries:
   - file: reference/plugins.rst
-    title: Plugin-specific operation support
+    title: Operation support
     subtrees:
     - entries:
       - file: reference/miopen-plugin.rst
@@ -97,7 +97,7 @@ subtrees:
           - file: reference/backend-api/backend-callback-type.rst
             title: Callback type
           - file: reference/backend-api/backend-descriptor-type.rst
-            title: Descriptor type 
+            title: Descriptor type
           - file: reference/backend-api/backend-heuristic-type.rst
             title: Heuristic type
           - file: reference/backend-api/backend-limits.rst
@@ -119,4 +119,3 @@ subtrees:
   entries:
   - file: license.rst
     title: License
-

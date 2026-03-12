@@ -50,6 +50,11 @@ Here's an example:
 
   When using the MIOpen legacy plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
 
+Plugin loading
+==============
+
+The following environment variable can be used to control which folders hipDNN looks in to load plugins.
+
 ``HIPDNN_PLUGIN_DIR``
 ---------------------
 

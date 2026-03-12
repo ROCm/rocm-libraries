@@ -1,6 +1,6 @@
 .. meta::
   :description: Learn how to develop plugins for hipDNN.
-  :keywords: hipDNN, ROCm, API, how-to 
+  :keywords: hipDNN, ROCm, API, how-to
 
 .. _develop-plugins:
 
@@ -8,12 +8,14 @@
 Develop plugins for hipDNN
 **************************
 
-hipDNN supports a plugin architecture that allows for modular extensions to the framework. Plugins are designed to be separate projects that extend hipDNN's capabilities without being part of the core repository. 
+hipDNN supports a plugin architecture that allows for modular extensions to the framework. Plugins are designed to be separate projects that extend hipDNN's capabilities without being part of the core repository.
 The backend discovers and manages these plugins, leveraging them for different aspects of deep learning routines. This architecture provides flexibility in implementation choices and enables optimizations for specific hardware or use cases.
 
 .. important::
 
   This page is for advanced users such as senior developers, engineers, and system administrators who are looking to extend hipDNN with customized plugins. Most users should use the default plugins described in :ref:`build-execute`.
+
+It is recommended to review the :ref: `architecture` and :ref: `backend-architecture` documents for context before beginning plugin development.
 
 Plugin types
 ============
@@ -74,10 +76,10 @@ Engine IDs
 Every engine used by hipDNN requires a unique engine ID. Plugins that provide more than one engine must have a unique ID for each engine provided by the plugin.
 
 hipDNN uses a deterministic hash-based system for managing engine IDs. This system converts human-readable engine names to unique ``int64_t`` identifiers.
-The engine ID system ensures globally unique identifiers across all plugins. 
+The engine ID system ensures globally unique identifiers across all plugins.
 
-When creating a new engine, select a unique descriptive name for the new engine. 
-During development, add the ``HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")`` macro to a source file in your project. 
+When creating a new engine, select a unique descriptive name for the new engine.
+During development, add the ``HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")`` macro to a source file in your project.
 This registers the name globally (verifying that it doesn't conflict with plugin names from the official distribution) and creates variables that can be used to retrieve the unique ID for this engine.
 
 Here's the workflow:
@@ -135,27 +137,27 @@ This section focuses on developing kernel engine plugins.
 Prerequisites
 -------------
 
-Before creating a plugin, ensure you've installed hipDNN. Plugins depend on the hipDNN Data SDK and Plugin SDK headers. 
+Before creating a plugin, ensure you've installed hipDNN. Plugins depend on the hipDNN Data SDK and Plugin SDK headers.
 
 Steps
 -----
 
 1. Create plugin structure.
-   
+
    1. Create a new project/repository for your plugin.
    2. Add definitions for the plugin interface defined in `plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h>`_. See :ref:`miopen` for an implementation reference.
 
 2. Implement the plugin API functions.
 
    The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``engine_plugin_api.h``. However, the common architectural pattern consists of:
-   
+
    - **Engine manager**: Manages available engines and their capabilities.
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique ``int64_t`` ID).
    - **Execution plans**: Define how operations are executed.
    - **Engine name and ID**: Name your engine and place it in the EngineNames registry
 
 3. Build and deploy the plugin.
-  
+
    - Configure CMake to build the plugin as a shared library.
    - Install to the ROCm hipDNN plugin directory where hipDNN can discover it at runtime, or use the ``HIPDNN_PLUGIN_DIR`` environment variable to force hipDNN to load plugins from only the folder specified in that environment variable.
 
@@ -207,9 +209,10 @@ Key files reference
 Build configuration
 ~~~~~~~~~~~~~~~~~~~
 
-Your plugin's ``CMakeLists.txt`` should:
+Your plugin's ``CMakeLists.txt`` must:
 
 - Build as a shared library.
+- Enable Position Independent Code (PIC) compilation for the library.
 - Link against hipDNN Data SDK and Plugin SDK.
 - Set appropriate install paths.
 - Link to required compute libraries (that is, HIP).
@@ -220,12 +223,12 @@ Use hipDNN SDKs in external plugins
 When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:
 
 - Absolute path: (``HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR``):
-  
+
   - Hardcoded at CMake configure time.
   - This is intended for developer use *only*.
 
 - Relative path (``HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR``):
-  
+
   - This is recommended for installations.
   - Automatically prepends the ``CMAKE_INSTALL_PREFIX`` of the consumer.
   - Remains correct when setting the prefix during the CMake install command.
@@ -315,7 +318,7 @@ Prior to creating a hipDNN handle, you can specify custom plugin paths using the
 Plugin symbol resolution
 ------------------------
 
-On Linux, all plugins are loaded with ``RTLD_NOW | RTLD_LOCAL`` to ensure that all symbols are resolved at load time. 
+On Linux, all plugins are loaded with ``RTLD_NOW | RTLD_LOCAL`` to ensure that all symbols are resolved at load time.
 This means that all dependencies must be satisfied when the plugin is loaded. To avoid symbol conflicts, all plugins must be built with with ``-fvisibility=hidden`` to limit symbol exposure.
 
 Path resolution
@@ -329,8 +332,8 @@ Custom paths can be:
 Loading modes
 ~~~~~~~~~~~~~~
 
-``HIPDNN_PLUGIN_LOADING_ADDITIVE``: Adds new paths to the existing plugin search paths. 
-``HIPDNN_PLUGIN_LOADING_ABSOLUTE``: Only loads from the specified paths. 
+``HIPDNN_PLUGIN_LOADING_ADDITIVE``: Adds new paths to the existing plugin search paths.
+``HIPDNN_PLUGIN_LOADING_ABSOLUTE``: Only loads from the specified paths.
 
 Example usage
 ~~~~~~~~~~~~~
@@ -369,7 +372,7 @@ After creating a hipDNN handle, you can query which engine plugins were successf
 This function uses a two-call pattern:
 
 - **First call**: Query the number of plugins and required buffer size:
-  
+
   .. code:: cpp
 
     size_t num_plugins = 0;
@@ -378,7 +381,7 @@ This function uses a two-call pattern:
     hipdnnGetLoadedEnginePluginPaths_ext(handle, &num_plugins, nullptr, &max_len);
 
 - **Second call**: Retrieve the actual plugin paths:
-  
+
   .. code:: cpp
 
     hipdnnGetLoadedEnginePluginPaths_ext(handle, &num_plugins, nullptr, &max_len);

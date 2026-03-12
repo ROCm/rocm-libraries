@@ -10,24 +10,19 @@ hipDNN prerequisites
 
 Ensure your system has these requirements before installing hipDNN.
 
+.. important::
+
+  The hipDNN frontend API is distributed as a header-only library, requiring the development ROCm packages to be installed. The base ROCm install package does not include the hipDNN frontend API header files.
+  For example, on Linux with a gfx950 GPU, install the `amdrocm-core-dev7.12-gfx950` package instead of the `amdrocm7.12-gfx950` package (`amdrocm-core-dev7.12-gfx950` includes the `amdrocm7.121-gfx950` package, so only the `amdrocm-core-dev7.12-gfx950` package needs to be installed).
+
 System requirements
 ===================
 
-- An AMD GPU with ROCm support.
-- Operating System:
-
-  - **Linux**: Any distribution supported by `TheRock <https://github.com/ROCm/TheRock>`_ (such as Ubuntu 24).
-  - **Windows**: Windows 11 (hipDNN has limited Windows support. See :ref:`windows` for more info).
+- An AMD GPU with ROCm support. See `ROCm compatibility matrix <https://rocm.docs.amd.com/en/7.12.0/compatibility/compatibility-matrix.html>`
+- Linux or Windows operating system. See `Install AMD ROCm <https://rocm.docs.amd.com/en/7.12.0/install/rocm.html>`
 
 Dependencies
 ============
-
-Use the `prebuilt binaries and Docker files <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/dockerfiles/Dockerfile.ubuntu24>`_ for a consistent development environment with all dependencies pre-installed. 
-This is the recommended approach for most users. For more details about these Docker images, see the `Docker README <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/dockerfiles/README.md>`_. 
-
-.. note::
-
-  Dockerfile development environments are not available for Windows. See :ref:`windows` for more info.
 
 Required dependencies
 ---------------------
@@ -39,53 +34,20 @@ Required dependencies
    * - Dependency
      - Version
      - Description
-   * - ROCm
-     - Matching TheRock (ROCm version 7.0.0 or later)
-     - AMD GPU programming stack (see `TheRock releases <https://github.com/ROCm/TheRock/releases>`_)
+   * - ROCm Development Install
+     - ROCm version 7.12.0 or later
+     - AMD GPU programming stack
    * - CMake
      - 3.25.2 or later
      - Build system generator
-   * - Ninja
+   * - Ninja (recommended)
      - 1.12.1 or later
-     - Faster build system (recommended)
+     - Faster build system
    * - C++ Compiler
      - C++17 compatible
-     - hipDNN requires C++17 compatible AMD Clang (plugins using device code may require C++20)
-   * - HIP
-     - Matching TheRock
-     - GPU programming interface (included with ROCm/TheRock)
-   * - clang-format
-     - 18.X
-     - Code formatting tool
-   * - clang-tidy 
-     - 20.X
-     - Static analysis tool
-   * - LLVM Tools 
-     - 20.X
-     - LLVM tools for code_coverage, and ASAN enabled builds
+     - hipDNN API supports C++17
 
-Optional dependencies
----------------------
+Install
+=======
 
-.. list-table::
-   :widths: 3 3 5
-   :header-rows: 1
-
-   * - Dependency
-     - Version
-     - Description
-   * - Docker
-     - Latest
-     - For a containerized build environment
-   * - Python3
-     - Latest
-     - For test name validation
-  
-Third-party libraries
----------------------
-
-These libraries are automatically managed by CMake (see `Dependencies.cmake <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/cmake/Dependencies.cmake>`_ for more information):
-
-- `FlatBuffers <https://github.com/google/flatbuffers>`_: The serialization library
-- `Google Test <https://github.com/google/googletest>`_: A unit testing framework
-- `spdlog <https://github.com/gabime/spdlog>`_: The logging library
+Follow the instructions at `Install AMD ROCm <https://rocm.docs.amd.com/en/7.12.0/install/rocm.html>` to install ROCm, including hipDNN.

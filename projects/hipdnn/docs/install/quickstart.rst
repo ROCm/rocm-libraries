@@ -1,5 +1,5 @@
 .. meta::
-  :description: 
+  :description: This quick start guide demonstrates how to include hipDNN in a CMake project.
   :keywords: hipDNN, ROCm, install, Windows
 
 ******************
@@ -10,18 +10,15 @@ This guide demonstrates how to include hipDNN in a CMake project. This guide req
 
 .. important::
 
-  This guide is appropriate for most general-purpose users. Plugin developers who want to build from source should refer to :ref:`plugin-install`.
+  This guide is appropriate for integrating hipDNN into applications for running deep learning worlkloads. Plugin developers who want to build from source should refer to :ref:`plugin-install`.
 
 Prerequisites
 ==============
 
-- **ROCm** / **TheRock** installed with hipDNN packages (see `TheRock Releases <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_)
-- **CMake**
-- **Ninja** (recommended)
-- A **C++17** compatible compiler
+- ROCm and hipDNN installed with dependencies. See :ref:`prerequisites`.
 
-Configure project files
-=======================
+Add the hipdnn_frontend package to your project files
+=====================================================
 
 1. Add ``hipdnn_frontend`` in your ``CMakeLists.txt`` file:
 

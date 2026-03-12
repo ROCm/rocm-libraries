@@ -1,5 +1,5 @@
 .. meta::
-   :description: hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
+   :description: hipDNN (Deep Neural Network) is a graph-based library providing improved performance for deep learning workloads with AMD GPUs.
    :keywords: hipDNN, ROCm, library, API
 
 .. _what-is:
@@ -8,12 +8,17 @@
 What is hipDNN?
 ******************
 
-hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
-It uses operation graphs as an intermediate representation to describe computations, allowing different backend engines to optimize and execute these graphs efficiently.
+hipDNN (Deep Neural Network) is a graph-based library providing improved performance for deep learning workloads with AMD GPUs.
 
-hipDNN allows developers to run deep learning workloads on AMD GPUs by providing an interface that matches established deep learning library conventions.
+hipDNN uses operation graphs as an intermediate representation to describe computations, allowing different backend engines to optimize and execute these graphs efficiently.
 
-hipDNN has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
+hipDNN provides an interace that follows established deep learning conventions and has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
+
+The public repository for hipDNN is located at `https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn>`_.
+
+.. note::
+
+  hipDNN is in beta-stage development and consequently not recommended for running production workloads at this time.
 
 hipDNN and the ROCm ecosystem
 =============================
@@ -33,7 +38,7 @@ hipDNN and the ROCm ecosystem
      - The portable API for deep learning operations.
    * - Engine selection and execution
      - Engine provider plugins
-     - Matches fused graph operations to engines for optimized performance.
+     - Matches fused graph operations with engines for optimized performance.
    * - Runtime
      - HIP
      - The translation layer between C++ and GPU hardware.
@@ -47,7 +52,6 @@ Features
 - **Graph-based API**: Operations are expressed as computational graphs rather than individual function calls, enabling optimization opportunities.
 - **Plugin architecture**: Backend kernel engines are implemented through plugins, allowing extensibility without modifying the core library.
 - **Performance through fusion**: Multiple operations can be fused into single kernels for better performance.
-- **Engine selection**: Heuristics will be implemented as plugins, allowing extensibility without modifying the core library, and benchmarking will be implemented as an extensible frontend API allowing customized engine selection logic.
 - **Industry standard API**: Provides a familiar interface that matches established deep learning library conventions.
 
 Components
@@ -62,5 +66,3 @@ Engine provider plugins
 =======================
 
 hipDNN operations are implemented through provider plugins. Each provider plugin provides its own set of supported operations. See :ref:`plugin-support` for more information.
-
-

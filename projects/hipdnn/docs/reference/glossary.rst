@@ -15,5 +15,4 @@ hipDNN glossary
 - **Execution Plan**: A compiled, ready-to-execute representation of an operation graph for a specific engine.
 - **Plan Builder**: A component responsible for determining if an engine can handle a graph and constructing execution plans.
 - **Plugin**: A dynamically loaded library that provides engine implementations via the hipDNN plugin API.
-- **TheRock**: The CI/build infrastructure system for ROCm libraries.
 - **Workspace**: Temporary memory buffer required by an engine to execute operations.
