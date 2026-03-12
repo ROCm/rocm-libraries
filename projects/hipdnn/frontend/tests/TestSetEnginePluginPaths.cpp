@@ -19,7 +19,7 @@ using namespace hipdnn_frontend::detail;
 using namespace ::testing;
 
 // GMock matcher: verifies that a const char* const* array contains the expected strings
-MATCHER_P2(pathArrayMatches, expectedPaths, count, "") // NOLINT(readability-identifier-naming)
+MATCHER_P2(pathArrayMatches, expectedPaths, count, "")
 {
     if(arg == nullptr)
     {
@@ -62,9 +62,10 @@ protected:
     }
 };
 
-TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsSuccess)
+TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAbsoluteSuccess)
 {
-    std::vector<std::filesystem::path> paths = {"./path/to/plugin_a", "./path/to/plugin_b"};
+    std::vector<std::filesystem::path> paths
+        = {"/path/to/plugin_a", "/path/to/plugin_b", "/path/to/plugins"};
 
     // Expected strings after std::filesystem::path conversion
     std::vector<std::string> expectedStrings;
@@ -80,15 +81,15 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsSuccess)
                                         HIPDNN_PLUGIN_LOADING_ABSOLUTE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::ABSOLUTE);
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
     EXPECT_TRUE(error.is_good());
 }
 
-TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsBackendFailure)
+TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveBackendFailure)
 {
-    std::array<const char*, 1> paths = {"./some/path"};
+    std::array<const char*, 2> paths = {"/some/path1", "/some/path2"};
 
-    std::vector<std::string> expectedStrings = {"./some/path"};
+    std::vector<std::string> expectedStrings = {"/some/path1", "/some/path2"};
 
     EXPECT_CALL(*_mockBackend,
                 setEnginePluginPathsExt(paths.size(),
@@ -96,7 +97,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsBackendFailure)
                                         HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::ADDITIVE);
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -108,13 +109,13 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveEmptyPaths)
     EXPECT_CALL(*_mockBackend, setEnginePluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::ADDITIVE);
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     EXPECT_TRUE(error.is_good());
 }
 
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsInvalidMode)
 {
-    std::vector<std::filesystem::path> paths = {"./path/to/plugin"};
+    std::vector<std::filesystem::path> paths = {"/path/to/plugin"};
 
     // Cast an invalid integer to PluginLoadingMode to simulate an unrecognized value
     auto invalidMode = static_cast<PluginLoadingMode>(99);
@@ -151,7 +152,8 @@ TEST_F(TestSetEnginePluginPaths, GetLoadedEnginePluginPathsSuccess)
                              size_t* /*maxStringLen*/) {
             for(size_t i = 0; i < numPlugins; ++i)
             {
-                std::strcpy(pluginPaths[i], expectedPaths[i].c_str());
+                hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+                    pluginPaths[i], expectedPaths[i].c_str(), maxLen);
             }
             return HIPDNN_STATUS_SUCCESS;
         }));

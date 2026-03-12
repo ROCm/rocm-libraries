@@ -15,14 +15,14 @@
  *
  * // Load plugins from specific folders only (absolute mode)
  * std::vector<std::filesystem::path> paths = {"./plugins/engine_a.so", "./plugins/engine_b.so"};
- * auto err = hipdnn_frontend::setEnginePluginPaths(paths, PluginLoadingMode::ABSOLUTE);
+ * auto err = hipdnn_frontend::setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
  * if (err.is_bad()) {
  *     // handle error
  * }
  *
  * // Add additional folders to load plugins from (additive mode)
  * std::vector<std::string> paths2 = {"./plugins/engine_a.so", "./plugins/engine_b.so"};
- * auto err2 = hipdnn_frontend::setEnginePluginPaths(paths2, PluginLoadingMode::ADDITIVE);
+ * auto err2 = hipdnn_frontend::setEnginePluginPaths(paths2, PluginLoadingMode::MODE_ADDITIVE);
  * @endcode
  */
 
@@ -49,8 +49,8 @@ namespace hipdnn_frontend
  */
 enum class PluginLoadingMode
 {
-    ADDITIVE, ///< Load user-specified plugins alongside defaults
-    ABSOLUTE, ///< Load only user-specified plugins
+    MODE_ADDITIVE, ///< Load user-specified plugins alongside defaults
+    MODE_ABSOLUTE, ///< Load only user-specified plugins
 };
 typedef PluginLoadingMode PluginLoadingMode_t; ///< @brief Type alias for PluginLoadingMode
 
@@ -64,9 +64,9 @@ inline std::optional<hipdnnPluginLoadingMode_ext_t>
 {
     switch(mode)
     {
-    case PluginLoadingMode::ADDITIVE:
+    case PluginLoadingMode::MODE_ADDITIVE:
         return HIPDNN_PLUGIN_LOADING_ADDITIVE;
-    case PluginLoadingMode::ABSOLUTE:
+    case PluginLoadingMode::MODE_ABSOLUTE:
         return HIPDNN_PLUGIN_LOADING_ABSOLUTE;
     default:
         return std::nullopt;
@@ -87,8 +87,8 @@ inline std::optional<hipdnnPluginLoadingMode_ext_t>
  *
  * @tparam Container An iterable container with size() and range-for support
  * @param pluginPaths Container of paths to plugin directories or files
- * @param mode Loading mode: PluginLoadingMode::ADDITIVE loads user paths
- *             alongside defaults; PluginLoadingMode::ABSOLUTE loads only
+ * @param mode Loading mode: PluginLoadingMode::MODE_ADDITIVE loads user paths
+ *             alongside defaults; PluginLoadingMode::MODE_ABSOLUTE loads only
  *             user-specified paths.
  * @return Error indicating success or failure
  */

@@ -33,12 +33,12 @@ TEST(IntegrationFrontendSetPluginPathsExt, EmptyPathsAdditive)
 {
     // Reset plugin paths from any prior test to ensure clean state
     std::vector<fs::path> emptyPaths = {};
-    setEnginePluginPaths(emptyPaths, PluginLoadingMode::ABSOLUTE);
+    setEnginePluginPaths(emptyPaths, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
-    auto error = setEnginePluginPaths(emptyPaths, PluginLoadingMode::ADDITIVE);
+    auto error = setEnginePluginPaths(emptyPaths, PluginLoadingMode::MODE_ADDITIVE);
     ASSERT_TRUE(error.is_good());
 
     hipdnnHandle_t handle = nullptr;
@@ -61,7 +61,7 @@ TEST(IntegrationFrontendSetPluginPathsExt, AbsoluteLoadsOnlyCustom)
     const auto& pluginFilePath = testGoodPluginPath();
     std::array<const char*, 1> paths = {pluginFilePath.c_str()};
 
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::ABSOLUTE);
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
     ASSERT_TRUE(error.is_good());
 
     hipdnnHandle_t handle = nullptr;
@@ -88,13 +88,13 @@ TEST(IntegrationFrontendSetPluginPathsExt, AbsoluteLoadsOnlyCustom)
 TEST(IntegrationFrontendSetPluginPathsExt, AdditiveLoadsBothDefaultAndCustom)
 {
     // Reset plugin paths from any prior test to ensure clean state
-    setEnginePluginPaths(std::vector<fs::path>{}, PluginLoadingMode::ABSOLUTE);
+    setEnginePluginPaths(std::vector<fs::path>{}, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths = {getTestPluginCustomDir().c_str()};
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::ADDITIVE);
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     ASSERT_TRUE(error.is_good());
 
     hipdnnHandle_t handle = nullptr;
@@ -121,7 +121,7 @@ TEST(IntegrationFrontendGetPluginPathsExt, GetLoadedPluginPathsAfterAbsolute)
     const auto& pluginFilePath = testGoodPluginPath();
     std::array<const char*, 1> setPaths = {pluginFilePath.c_str()};
 
-    auto error = setEnginePluginPaths(setPaths, PluginLoadingMode::ABSOLUTE);
+    auto error = setEnginePluginPaths(setPaths, PluginLoadingMode::MODE_ABSOLUTE);
     ASSERT_TRUE(error.is_good());
 
     hipdnnHandle_t handle = nullptr;
@@ -141,13 +141,13 @@ TEST(IntegrationFrontendGetPluginPathsExt, GetLoadedPluginPathsAfterAbsolute)
 TEST(IntegrationFrontendGetPluginPathsExt, GetLoadedPluginPathsAfterAdditive)
 {
     // Reset plugin paths from any prior test to ensure clean state
-    setEnginePluginPaths(std::vector<fs::path>{}, PluginLoadingMode::ABSOLUTE);
+    setEnginePluginPaths(std::vector<fs::path>{}, PluginLoadingMode::MODE_ABSOLUTE);
 
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths = {getTestPluginCustomDir().c_str()};
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::ADDITIVE);
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     ASSERT_TRUE(error.is_good());
 
     hipdnnHandle_t handle = nullptr;
