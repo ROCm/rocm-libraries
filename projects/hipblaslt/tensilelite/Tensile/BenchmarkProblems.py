@@ -58,6 +58,61 @@ from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 from Tensile.Common.TimingInstrumentation import timing_context
 
+import hashlib
+import json
+
+def _computeCacheKey(benchmarkStep):
+    """Compute a deterministic hash from the 6 cache-relevant parameter fields."""
+    cacheFields = {
+        "ConstantParams": benchmarkStep.constantParams,
+        "ForkParams": benchmarkStep.forkParams,
+        "ParamGroups": benchmarkStep.paramGroups,
+        "CustomKernels": benchmarkStep.customKernels,
+        "InternalSupportParams": benchmarkStep.internalSupportParams,
+        "CustomKernelWildcard": benchmarkStep.customKernelWildcard,
+    }
+    canonical = json.dumps(cacheFields, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:12]
+
+def _findMatchingCache(stepBaseDir, benchmarkStep, useCache):
+    """Search all cache entries for one matching the current parameters.
+
+    Returns (cacheDir, codeObjectFiles) if found, (None, None) otherwise.
+    """
+    if not useCache:
+        return None, None
+
+    # Check new multi-cache layout
+    cachesDir = os.path.join(stepBaseDir, "caches")
+    if os.path.isdir(cachesDir):
+        for entry in os.listdir(cachesDir):
+            cachePath = os.path.join(cachesDir, entry, "cache.yaml")
+            if not os.path.isfile(cachePath):
+                continue
+            c = LibraryIO.read(cachePath)
+            if c["ConstantParams"] == benchmarkStep.constantParams and \
+                    c["ForkParams"] == benchmarkStep.forkParams and \
+                    c["ParamGroups"] == benchmarkStep.paramGroups and \
+                    c["CustomKernels"] == benchmarkStep.customKernels and \
+                    c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
+                    c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
+                return os.path.join(cachesDir, entry), c["CodeObjectFiles"]
+
+    # Fall back to legacy single cache.yaml
+    legacyCachePath = os.path.join(stepBaseDir, "cache.yaml")
+    if os.path.isfile(legacyCachePath):
+        c = LibraryIO.read(legacyCachePath)
+        if c["ConstantParams"] == benchmarkStep.constantParams and \
+                c["ForkParams"] == benchmarkStep.forkParams and \
+                c["ParamGroups"] == benchmarkStep.paramGroups and \
+                c["CustomKernels"] == benchmarkStep.customKernels and \
+                c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
+                c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
+            # Legacy cache — sourcePath stays at stepBaseDir/source
+            return "__legacy__", c["CodeObjectFiles"]
+
+    return None, None
+
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
     """Helper function to generate a single solution from a permutation."""
@@ -333,12 +388,14 @@ def writeBenchmarkFiles(
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  sourceDir=str(sourcePath))
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  sourceDir=str(sourcePath))
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
@@ -412,23 +469,25 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         solutionsFileName = resultsFileBase + ".yaml"
 
         # check if a solution cache exists and if it matches our solution parameters
-        cachePath = os.path.join(stepBaseDir, "cache.yaml")
-        sourcePath = ensurePath(shortNamePath / "source")
+        cacheKey = _computeCacheKey(benchmarkStep)
+        cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
 
         with timing_context("python_cache_check"):
             cacheValid = False
-            if useCache and os.path.isfile(cachePath):
-                c = LibraryIO.read(cachePath)
-                if c["ConstantParams"] == benchmarkStep.constantParams and \
-                        c["ForkParams"] == benchmarkStep.forkParams and \
-                        c["ParamGroups"] == benchmarkStep.paramGroups and \
-                        c["CustomKernels"] == benchmarkStep.customKernels and \
-                        c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
-                        c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
-                    cacheValid = True
-                    codeObjectFiles = c["CodeObjectFiles"]
+            matchDir, matchCO = _findMatchingCache(stepBaseDir, benchmarkStep, useCache)
+            if matchDir is not None:
+                cacheValid = True
+                codeObjectFiles = matchCO
+                if matchDir == "__legacy__":
+                    cacheDir = stepBaseDir
                 else:
-                    printWarning("Cache data does not match config: redoing solution generation")
+                    cacheDir = matchDir
+
+        if cacheDir == stepBaseDir:
+            # Legacy cache layout
+            sourcePath = ensurePath(shortNamePath / "source")
+        else:
+            sourcePath = ensurePath(Path(cacheDir) / "source")
 
         if not cacheValid:
             # enumerate benchmark permutations and create resulting solution objects
@@ -482,6 +541,8 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
             # write cache data
             with timing_context("python_write_cache"):
+                ensurePath(cacheDir)
+                cachePath = os.path.join(cacheDir, "cache.yaml")
                 cacheData = {
                     "CodeObjectFiles": codeObjectFiles,
                     "ConstantParams": benchmarkStep.constantParams,
@@ -529,7 +590,10 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
-            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath)
+            configPaths = [str(sourcePath / "ClientParameters.ini")]
+            if enableTileSelection:
+                configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
+            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
             if returncode:
                 benchmarkTestFails += 1
