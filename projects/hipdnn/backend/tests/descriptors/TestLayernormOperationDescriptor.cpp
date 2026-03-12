@@ -472,6 +472,20 @@ TEST_P(TestLayernormOperationDescriptorGetTensor, GetAttributeTensorDescriptorRe
     EXPECT_EQ(tensorImpl->getData().uid, tc.expectedUid);
 }
 
+TEST_P(TestLayernormOperationDescriptorGetTensor, QueryModeReturnsOne)
+{
+    // makeFinalized() sets all tensors including optional mean/inv_variance.
+    // Query mode (elementCount=0, arrayOfElements=nullptr) should report 1 for each.
+    makeFinalized();
+    auto desc = getDescriptor();
+    const auto& tc = GetParam();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(
+        desc->getAttribute(tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     AllTensors,
     TestLayernormOperationDescriptorGetTensor,
@@ -742,6 +756,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeProducesCorrectNodeT)
     ASSERT_EQ(attrs->mean_tensor_uid.value(), K_LAYERNORM_TENSOR_MEAN_UID);
     ASSERT_TRUE(attrs->inv_variance_tensor_uid.has_value());
     ASSERT_EQ(attrs->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
+    ASSERT_EQ(attrs->forward_phase, NormFwdPhase::INFERENCE);
 }
 
 TEST_F(TestLayernormOperationDescriptor, BuildNodeWithHalfComputeType)

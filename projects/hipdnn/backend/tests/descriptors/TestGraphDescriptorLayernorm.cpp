@@ -172,6 +172,10 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
     auto* attrs = graphT->nodes[0]->attributes.AsLayernormAttributes();
     ASSERT_NE(attrs, nullptr);
 
+    // Verify compute_data_type and forward_phase on the node
+    const auto& node = *graphT->nodes[0];
+    EXPECT_EQ(node.compute_data_type, DataType::FLOAT);
+
     // Verify tensor UID references
     EXPECT_EQ(attrs->x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
     EXPECT_EQ(attrs->scale_tensor_uid, K_LAYERNORM_TENSOR_SCALE_UID);
@@ -182,6 +186,7 @@ TEST_F(TestGraphDescriptorLayernorm, BuildFromSingleOperation)
     EXPECT_EQ(attrs->mean_tensor_uid.value(), K_LAYERNORM_TENSOR_MEAN_UID);
     EXPECT_TRUE(attrs->inv_variance_tensor_uid.has_value());
     EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(attrs->forward_phase, NormFwdPhase::TRAINING);
 }
 
 TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
@@ -228,7 +233,19 @@ TEST_F(TestGraphDescriptorLayernorm, ComputeDataTypePreserved)
     auto graphT = GetGraph(serialized.ptr)->UnPack();
 
     ASSERT_EQ(graphT->nodes.size(), 1);
-    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
+
+    const auto& node = *graphT->nodes[0];
+    EXPECT_EQ(node.compute_data_type, DataType::HALF);
+    ASSERT_EQ(node.attributes.type, NodeAttributes::LayernormAttributes);
+
+    auto* attrs = node.attributes.AsLayernormAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_EQ(attrs->x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_LAYERNORM_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->bias_tensor_uid, K_LAYERNORM_TENSOR_BIAS_UID);
+    EXPECT_EQ(attrs->epsilon_tensor_uid, K_LAYERNORM_TENSOR_EPSILON_UID);
+    EXPECT_EQ(attrs->y_tensor_uid, K_LAYERNORM_TENSOR_Y_UID);
+    EXPECT_EQ(attrs->forward_phase, NormFwdPhase::TRAINING);
 }
 
 TEST_F(TestGraphDescriptorLayernorm, BuildFromOperationWithoutOptionalTensors)

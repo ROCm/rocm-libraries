@@ -38,7 +38,7 @@ public:
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationLayernormDescriptorLowering : public ::testing::Test
+class IntegrationLayerNormDescriptorLowering : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -70,10 +70,10 @@ protected:
 // Builds a layernorm graph via the frontend API (training phase, with mean/inv_variance),
 // lowers it to the backend via build_operation_graph_via_descriptors, retrieves the
 // serialized graph, and verifies all tensor and operation attributes match.
-TEST_F(IntegrationLayernormDescriptorLowering, LayernormGraphRoundTrip)
+TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("TestLayernormGraph")
+    graph->set_name("TestLayerNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
@@ -107,16 +107,12 @@ TEST_F(IntegrationLayernormDescriptorLowering, LayernormGraphRoundTrip)
 
     auto [y, mean, invVariance] = graph->layernorm(x, scale, bias, layernormAttrs);
     y->set_uid(K_LAYERNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
-    if(mean)
-    {
-        mean->set_uid(K_LAYERNORM_TENSOR_MEAN_UID).set_output(true).set_name("MEAN");
-    }
-    if(invVariance)
-    {
-        invVariance->set_uid(K_LAYERNORM_TENSOR_INV_VARIANCE_UID)
-            .set_output(true)
-            .set_name("INV_VARIANCE");
-    }
+    ASSERT_NE(mean, nullptr); // always set in TRAINING mode
+    ASSERT_NE(invVariance, nullptr); // always set in TRAINING mode
+    mean->set_uid(K_LAYERNORM_TENSOR_MEAN_UID).set_output(true).set_name("MEAN");
+    invVariance->set_uid(K_LAYERNORM_TENSOR_INV_VARIANCE_UID)
+        .set_output(true)
+        .set_name("INV_VARIANCE");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -205,11 +201,19 @@ TEST_F(IntegrationLayernormDescriptorLowering, LayernormGraphRoundTrip)
     ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_MEAN_UID), 0u);
     auto* meanT = tensorMap[K_LAYERNORM_TENSOR_MEAN_UID];
     EXPECT_EQ(meanT->name, "MEAN");
+    EXPECT_EQ(meanT->uid, K_LAYERNORM_TENSOR_MEAN_UID);
+    EXPECT_EQ(meanT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(meanT->dims, toVec(K_LAYERNORM_TENSOR_MEAN_DIMS));
+    EXPECT_EQ(meanT->strides, toVec(K_LAYERNORM_TENSOR_MEAN_STRIDES));
 
     // Verify INV_VARIANCE tensor
     ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_INV_VARIANCE_UID), 0u);
     auto* invVarianceT = tensorMap[K_LAYERNORM_TENSOR_INV_VARIANCE_UID];
     EXPECT_EQ(invVarianceT->name, "INV_VARIANCE");
+    EXPECT_EQ(invVarianceT->uid, K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(invVarianceT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(invVarianceT->dims, toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS));
+    EXPECT_EQ(invVarianceT->strides, toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES));
 
     // -- Verify layernorm operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -234,10 +238,10 @@ TEST_F(IntegrationLayernormDescriptorLowering, LayernormGraphRoundTrip)
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
 // through the lowering round-trip.
-TEST_F(IntegrationLayernormDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
+TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("AutoUidLayernormGraph")
+    graph->set_name("AutoUidLayerNormGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
@@ -269,14 +273,10 @@ TEST_F(IntegrationLayernormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     auto [y, mean, invVariance] = graph->layernorm(x, scale, bias, layernormAttrs);
     y->set_output(true);
-    if(mean)
-    {
-        mean->set_output(true);
-    }
-    if(invVariance)
-    {
-        invVariance->set_output(true);
-    }
+    ASSERT_NE(mean, nullptr); // always set in TRAINING mode
+    ASSERT_NE(invVariance, nullptr); // always set in TRAINING mode
+    mean->set_output(true);
+    invVariance->set_output(true);
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -341,7 +341,138 @@ TEST_F(IntegrationLayernormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
                                             layernorm->y_tensor_uid,
                                             layernorm->mean_tensor_uid.value(),
                                             layernorm->inv_variance_tensor_uid.value()};
-    EXPECT_EQ(nodeUids.size(), 7u) << "Layernorm node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 7u) << "LayerNorm node tensor UIDs are not distinct";
+}
+
+// Inference mode: mean and inv_variance should not appear in the serialized graph.
+TEST_F(IntegrationLayerNormDescriptorLowering, InferenceModeOmitsMeanAndInvVariance)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("InferenceLayerNormGraph")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_LAYERNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_LAYERNORM_TENSOR_X_DIMS)).set_stride(toVec(K_LAYERNORM_TENSOR_X_STRIDES));
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_LAYERNORM_TENSOR_SCALE_UID).set_name("SCALE").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_LAYERNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(K_LAYERNORM_TENSOR_BIAS_UID).set_name("BIAS").set_data_type(DataType::FLOAT);
+    bias->set_dim(toVec(K_LAYERNORM_TENSOR_BIAS_DIMS))
+        .set_stride(toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(K_LAYERNORM_TENSOR_EPSILON_UID)
+        .set_name("EPSILON")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS))
+        .set_stride(toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES))
+        .set_value(1e-5f);
+
+    LayernormAttributes layernormAttrs;
+    layernormAttrs.set_name("layernorm_op");
+    layernormAttrs.set_forward_phase(NormFwdPhase::INFERENCE);
+    layernormAttrs.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph->layernorm(x, scale, bias, layernormAttrs);
+    y->set_uid(K_LAYERNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
+    // mean and invVariance should be nullptr in INFERENCE mode
+    EXPECT_EQ(mean, nullptr);
+    EXPECT_EQ(invVariance, nullptr);
+
+    // -- Validate and lower --
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph_via_descriptors(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // -- Retrieve serialized graph --
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    size_t serializedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(serializedSize, 0u);
+
+    std::vector<uint8_t> serializedData(serializedSize);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    // -- Deserialize into GraphT --
+    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
+    ASSERT_NE(graphFb, nullptr);
+    hipdnn_data_sdk::data_objects::GraphT graphT;
+    graphFb->UnPackTo(&graphT);
+
+    // -- Verify graph-level attributes --
+    EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(graphT.intermediate_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(graphT.io_data_type, DataTypeSdk::FLOAT);
+
+    // -- Verify tensors -- inference phase yields 5 tensors (x, scale, bias, epsilon, y)
+    // No mean or inv_variance tensors
+    ASSERT_EQ(graphT.tensors.size(), 5u);
+
+    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    for(const auto& t : graphT.tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+
+    // Verify X tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_X_UID), 0u);
+    auto* xT = tensorMap[K_LAYERNORM_TENSOR_X_UID];
+    EXPECT_EQ(xT->name, "X");
+    EXPECT_EQ(xT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(xT->dims, toVec(K_LAYERNORM_TENSOR_X_DIMS));
+    EXPECT_EQ(xT->strides, toVec(K_LAYERNORM_TENSOR_X_STRIDES));
+
+    // Verify SCALE tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORM_TENSOR_SCALE_UID]->name, "SCALE");
+
+    // Verify BIAS tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORM_TENSOR_BIAS_UID]->name, "BIAS");
+
+    // Verify EPSILON tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_EPSILON_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORM_TENSOR_EPSILON_UID]->name, "EPSILON");
+
+    // Verify Y tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORM_TENSOR_Y_UID), 0u);
+    auto* yT = tensorMap[K_LAYERNORM_TENSOR_Y_UID];
+    EXPECT_EQ(yT->name, "Y");
+    EXPECT_EQ(yT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_FALSE(yT->virtual_);
+
+    // -- Verify layernorm operation node --
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto& node = graphT.nodes[0];
+    EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);
+
+    auto* layernorm = node->attributes.AsLayernormAttributes();
+    ASSERT_NE(layernorm, nullptr);
+
+    EXPECT_EQ(layernorm->x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
+    EXPECT_EQ(layernorm->scale_tensor_uid, K_LAYERNORM_TENSOR_SCALE_UID);
+    EXPECT_EQ(layernorm->bias_tensor_uid, K_LAYERNORM_TENSOR_BIAS_UID);
+    EXPECT_EQ(layernorm->epsilon_tensor_uid, K_LAYERNORM_TENSOR_EPSILON_UID);
+    EXPECT_EQ(layernorm->y_tensor_uid, K_LAYERNORM_TENSOR_Y_UID);
+    // mean and inv_variance should not be set in inference mode
+    EXPECT_FALSE(layernorm->mean_tensor_uid.has_value());
+    EXPECT_FALSE(layernorm->inv_variance_tensor_uid.has_value());
+    EXPECT_EQ(layernorm->forward_phase, NormFwdPhaseSdk::INFERENCE);
 }
 
 } // namespace
