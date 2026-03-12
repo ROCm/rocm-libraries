@@ -12,7 +12,7 @@ using namespace rocRoller;
 
 const int SHUFFLE_M = 16;
 const int SHUFFLE_N = 16;
-const int SHUFFLE_K = 128;
+const int SHUFFLE_K = 32;
 
 /**
  * @brief Set the required conditions in order to run a provided kernel
@@ -738,7 +738,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
 
     if(gemm->params->kernelType.swizzleB)
     {
-        descA = TensorDescriptor(gemm->params->kernelType.typeB,
+        descB = TensorDescriptor(gemm->params->kernelType.typeB,
                                 {K, N},
                                 {static_cast<size_t>(SHUFFLE_K * SHUFFLE_N),
                                 static_cast<size_t>((K / SHUFFLE_K) * SHUFFLE_K * SHUFFLE_N)});
