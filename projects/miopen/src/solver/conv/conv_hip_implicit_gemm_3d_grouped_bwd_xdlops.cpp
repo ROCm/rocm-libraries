@@ -497,7 +497,8 @@ static const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
 };
 // clang-format on
 
-void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
+void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(
+    const ExecutionContext& ctx)
 {
     const auto dev_name = ctx.GetStream().GetDeviceName();
     const bool is_gfx11 = StartsWith(dev_name, "gfx11");

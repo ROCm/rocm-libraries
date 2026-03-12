@@ -540,7 +540,8 @@ std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultip
 };
 // clang-format on
 
-void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
+void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(
+    const ExecutionContext& ctx)
 {
     const auto dev_name = ctx.GetStream().GetDeviceName();
     const bool is_gfx11 = StartsWith(dev_name, "gfx11");

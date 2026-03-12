@@ -494,7 +494,8 @@ std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 32, 3
 };
 // clang-format on
 
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(
+    const ExecutionContext& ctx)
 {
     const auto dev_name = ctx.GetStream().GetDeviceName();
     const bool is_gfx11 = StartsWith(dev_name, "gfx11");
