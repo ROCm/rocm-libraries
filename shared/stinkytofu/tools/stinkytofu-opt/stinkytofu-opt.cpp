@@ -21,9 +21,9 @@
  *
  * ************************************************************************ */
 #include "stinkytofu-opt.hpp"
-#include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -62,8 +62,8 @@ namespace
         void run(Function& func, PassContext& passCtx) override
         {
             GfxArchID arch = getGfxArchID(passCtx.getGemmTileConfig().arch[0],
-                                         passCtx.getGemmTileConfig().arch[1],
-                                         passCtx.getGemmTileConfig().arch[2]);
+                                          passCtx.getGemmTileConfig().arch[1],
+                                          passCtx.getGemmTileConfig().arch[2]);
 
             std::string irText = readFile(stinkytofuIRFile);
 
@@ -255,6 +255,7 @@ int main(int argc, char** argv)
     }
 
     stinkytofu::Function func("kernel");
+    func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
     passManager.run(func);
 
     return 0;

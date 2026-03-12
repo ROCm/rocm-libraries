@@ -307,7 +307,7 @@ globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the
 globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
-globalParameters["UseStinkyTofu"] = True  # Enable StinkyTofu IR conversion for supported architectures
+
 # StinkyTofu optimization level
 # None: Disable StinkyTofu feature (set null in yaml file)
 # 0: No optimization

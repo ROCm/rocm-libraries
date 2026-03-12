@@ -23,10 +23,15 @@
 #pragma once
 
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <functional>
 #include <vector>
@@ -41,12 +46,18 @@ struct PassInfo
 };
 
 // List of available passes
-const std::vector<PassInfo> availablePasses = {
-    {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
-    {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
-    {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
-    {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
-};
+const std::vector<PassInfo> availablePasses
+    = {{"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
+       {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
+       {"StinkyBuildImplicitDependencyPass",
+        []() { return createStinkyBuildImplicitDependencyPass(); }},
+       {"StinkyRemoveWaitCntPass", []() { return createStinkyRemoveWaitCntPass(); }},
+       {"StinkyWaitCntInsertionPass", []() { return createStinkyWaitCntInsertionPass(); }},
+       {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
+       {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
+       {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
+       {"DumpStinkyFunctionPass",
+        []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }}};
 
 /**
  * Get default PassManagerDebugConfig configuration.

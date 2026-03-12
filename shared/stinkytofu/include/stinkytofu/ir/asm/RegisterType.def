@@ -45,6 +45,8 @@ REGISTER_TYPE(EXEC_HI,     "exec_hi",     "Execution mask (high)")
 // Below are pseudo register definition.
 REGISTER_TYPE(PSEUDO_START,"PSEUDO_START","The beginning of all pseudo-register types")
 REGISTER_TYPE(BARRIER,     "BARRIER",     "Barrier pseudo-register")
+REGISTER_TYPE(MUBUF_LOAD,    "MUBUF_LOAD",    "MUBUF Load pseudo-register")
+REGISTER_TYPE(DS_READ,    "DS_READ",    "DS Load pseudo-register")
 REGISTER_TYPE(DS_WRITE,    "DS_WRITE",    "DS Write pseudo-register")
 REGISTER_TYPE(TENSOR_LOAD, "TENSOR_LOAD", "Tensor Load pseudo-register")
 REGISTER_TYPE(UNKNOWN,     "UNKNOWN",     "Unknown/invalid register type")

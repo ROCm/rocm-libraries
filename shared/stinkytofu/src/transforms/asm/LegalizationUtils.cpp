@@ -292,6 +292,8 @@ namespace stinkytofu
                 firstInst = lastInst;
         }
 
+        lastInst->addModifier<SWaitCntData>(*waitData);
+
         // Remove the original s_waitcnt instruction
         if(firstInst)
             inst->erase();

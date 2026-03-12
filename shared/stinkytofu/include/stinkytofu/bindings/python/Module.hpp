@@ -55,7 +55,8 @@
     X(UseSgprForGRO, int)           \
     X(PrintBeforePass, std::string) \
     X(PrintAfterPass, std::string)  \
-    X(DebugPass, std::string)
+    X(DebugPass, std::string)       \
+    X(EnableWaitCntInsertion, bool)
 
 namespace stinkytofu
 {

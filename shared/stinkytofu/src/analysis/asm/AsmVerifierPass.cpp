@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -69,6 +69,14 @@ namespace stinkytofu
         }
     }
 
+    // TODO: We should fix this by adding a new field to the HwInstDesc to indicate if the instruction can use less operands.
+    static bool canUseLessOperand(const StinkyInstruction* inst)
+    {
+        if(inst->getUnifiedOpcode() == GFX::tensor_load_to_lds)
+            return true;
+        return false;
+    }
+
     static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                            const AsmVerifierConfig& config)
     {
@@ -87,7 +95,7 @@ namespace stinkytofu
         {
             bool        isDest       = field.isDest;
             unsigned    operandIndex = isDest ? destIdx++ : srcIdx++;
-            const auto& regs = isDest ? inst->getDestRegs() : inst->getSrcRegs();
+            const auto& regs         = isDest ? inst->getDestRegs() : inst->getSrcRegs();
 
             if(field.fieldSizeBits == 0)
                 continue;
@@ -96,11 +104,16 @@ namespace stinkytofu
             if(expectedWidth <= 1)
                 continue;
 
-            if(operandIndex >= regs.size())
+            if(operandIndex >= regs.size() && !canUseLessOperand(inst))
             {
                 errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "
                        << (isDest ? "dest[" : "src[") << operandIndex << "]\n";
                 continue;
+            }
+
+            if(operandIndex >= regs.size())
+            {
+                break;
             }
 
             const StinkyRegister& reg = regs[operandIndex];

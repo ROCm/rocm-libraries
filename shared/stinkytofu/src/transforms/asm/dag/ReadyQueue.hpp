@@ -27,8 +27,8 @@
 #include <queue>
 
 #include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
 namespace
 {
@@ -69,7 +69,7 @@ namespace
         for(unsigned i = 0; i < dagGraph.size(); ++i)
         {
             std::cerr << "Node " << i << ": ";
-            dagNodes[i].inst->dump(std::cerr, false);
+            dagNodes[i].inst->dump(std::cerr);
             std::cerr << "  successors: ";
             for(unsigned succId : dagGraph[i])
             {

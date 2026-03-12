@@ -5209,6 +5209,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
+                               "EnableWaitCntInsertion": False,
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],

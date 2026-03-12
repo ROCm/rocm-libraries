@@ -93,9 +93,10 @@ namespace stinkytofu
             Conservative, ///< Safe, conservative wait count placement
             Minimal, ///< Minimal wait counts (more aggressive)
             Unroll, ///< Unroll-aware wait count placement
-            Custom ///< Use custom WaitCntConfig
+            Custom, ///< Use custom WaitCntConfig
+            Classical ///< Classical wait count placement
         };
-        WaitCntMode          waitCntMode   = WaitCntMode::Conservative;
+        WaitCntMode          waitCntMode   = WaitCntMode::Classical;
         const WaitCntConfig* customWaitCnt = nullptr; ///< Custom waitcnt config (if mode=Custom)
 
         // ========== Iteration Control ==========
