@@ -140,6 +140,7 @@ void Handle::ClearKernels(const std::string& algorithm, const std::string& netwo
 {
     this->impl->cache.ClearKernels(algorithm, network_config);
 }
+
 void Handle::ClearProgram(const fs::path& program_name, const std::string& params) const
 {
     this->impl->cache.ClearProgram(program_name, params);
@@ -296,4 +297,8 @@ hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
     return hipblasLt_handle_ptr{handle};
 }
 #endif
+
+MIOPEN_INTERNALS_EXPORT void set_device(int id) {}
+MIOPEN_INTERNALS_EXPORT int get_device_id() { return -1; }
+
 } // namespace miopen
