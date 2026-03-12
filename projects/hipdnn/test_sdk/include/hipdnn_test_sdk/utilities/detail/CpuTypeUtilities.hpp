@@ -29,7 +29,7 @@ inline TargetType safeTestTypeCast(SourceType value)
     static_assert(std::numeric_limits<std::remove_cv_t<TargetType>>::is_specialized,
                   "safeTestTypeCast: TargetType must define numeric_limits");
 
-    const auto src = static_cast<long double>(value);
+    const auto src = static_cast<double>(value);
 
     // If SourceType is not integral, treat it as floating-like and reject NaN/Inf.
     if constexpr(!std::is_integral_v<std::remove_cv_t<SourceType>>)
@@ -40,14 +40,14 @@ inline TargetType safeTestTypeCast(SourceType value)
         }
     }
 
-    const auto lo = static_cast<long double>(std::numeric_limits<TargetType>::lowest());
-    const auto hi = static_cast<long double>(std::numeric_limits<TargetType>::max());
+    const auto lo = static_cast<double>(std::numeric_limits<TargetType>::lowest());
+    const auto hi = static_cast<double>(std::numeric_limits<TargetType>::max());
     if(src < lo || src > hi)
     {
         throw std::out_of_range("safeTestTypeCast: value out of representable range");
     }
 
-    return static_cast<TargetType>(value);
+    return static_cast<TargetType>(src);
 }
 
 } // namespace hipdnn_test_sdk::detail
