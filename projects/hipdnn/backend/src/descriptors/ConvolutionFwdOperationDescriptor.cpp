@@ -127,19 +127,11 @@ void ConvolutionFwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                     "ConvolutionFwdOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "ConvolutionFwdOperationDescriptor::setAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_CHAR");
-        THROW_IF_NULL(arrayOfElements,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "ConvolutionFwdOperationDescriptor::setAttribute(): arrayOfElements is null");
-        THROW_IF_LT(elementCount,
-                    static_cast<int64_t>(0),
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "ConvolutionFwdOperationDescriptor::setAttribute(): elementCount is negative");
-        _name = std::string(static_cast<const char*>(arrayOfElements),
-                            static_cast<size_t>(elementCount));
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "ConvolutionFwdOperationDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -237,34 +229,13 @@ void ConvolutionFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                     "ConvolutionFwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
-    {
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "ConvolutionFwdOperationDescriptor::getAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_CHAR");
-        if(arrayOfElements == nullptr || requestedElementCount == 0)
-        {
-            THROW_IF_NULL(
-                elementCount,
-                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                "ConvolutionFwdOperationDescriptor::getAttribute(): elementCount is null");
-            *elementCount = static_cast<int64_t>(_name.size() + 1);
-            return;
-        }
-        THROW_IF_LT(
-            requestedElementCount,
-            static_cast<int64_t>(0),
-            HIPDNN_STATUS_BAD_PARAM,
-            "ConvolutionFwdOperationDescriptor::getAttribute(): requestedElementCount is negative");
-        auto maxSize = static_cast<size_t>(requestedElementCount);
-        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-            static_cast<char*>(arrayOfElements), _name.c_str(), maxSize);
-        if(elementCount != nullptr)
-        {
-            *elementCount = static_cast<int64_t>(std::min(_name.size() + 1, maxSize));
-        }
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ConvolutionFwdOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
         getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
                          attributeType,

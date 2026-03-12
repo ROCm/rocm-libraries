@@ -19,6 +19,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -47,6 +48,19 @@ void getInt64Vector(const std::vector<int64_t>& source,
                     int64_t* elementCount,
                     void* arrayOfElements,
                     const char* errorPrefix);
+
+void setString(std::string& target,
+               hipdnnBackendAttributeType_t attributeType,
+               int64_t elementCount,
+               const void* arrayOfElements,
+               const char* errorPrefix);
+
+void getString(const std::string& source,
+               hipdnnBackendAttributeType_t attributeType,
+               int64_t requestedElementCount,
+               int64_t* elementCount,
+               void* arrayOfElements,
+               const char* errorPrefix);
 
 template <typename T>
 void setScalar(T& target,

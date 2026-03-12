@@ -775,5 +775,86 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
     ASSERT_NE(output, nullptr);
 }
 
+// --- setString ---
+
+TEST(TestDescriptorAttributeUtils, SetStringThrowsOnWrongAttributeType)
+{
+    std::string target;
+    const char* data = "hello";
+
+    ASSERT_THROW_HIPDNN_STATUS(setString(target, HIPDNN_TYPE_INT64, 5, data, "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetStringThrowsOnNullArrayOfElements)
+{
+    std::string target;
+
+    ASSERT_THROW_HIPDNN_STATUS(setString(target, HIPDNN_TYPE_CHAR, 5, nullptr, "test"),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, SetStringThrowsOnNegativeElementCount)
+{
+    std::string target;
+    const char* data = "hello";
+
+    ASSERT_THROW_HIPDNN_STATUS(setString(target, HIPDNN_TYPE_CHAR, -1, data, "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetStringSuccess)
+{
+    std::string target;
+    const char* data = "hello";
+
+    ASSERT_NO_THROW(setString(target, HIPDNN_TYPE_CHAR, 5, data, "test"));
+    ASSERT_EQ(target, "hello");
+}
+
+// --- getString ---
+
+TEST(TestDescriptorAttributeUtils, GetStringReturnsSizeWhenBufferNull)
+{
+    std::string source = "hello";
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 0, &count, nullptr, "test"));
+    ASSERT_EQ(count, 6); // "hello" + null terminator
+}
+
+TEST(TestDescriptorAttributeUtils, GetStringCopiesData)
+{
+    std::string source = "hello";
+    std::array<char, 16> buffer = {};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 16, &count, buffer.data(), "test"));
+    ASSERT_EQ(count, 6);
+    ASSERT_STREQ(buffer.data(), "hello");
+}
+
+TEST(TestDescriptorAttributeUtils, GetStringTruncatesWhenBufferSmall)
+{
+    std::string source = "hello";
+    std::array<char, 4> buffer = {};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 4, &count, buffer.data(), "test"));
+    ASSERT_EQ(count, 4);
+    ASSERT_STREQ(buffer.data(), "hel"); // 3 chars + null
+}
+
+TEST(TestDescriptorAttributeUtils, GetStringThrowsOnWrongAttributeType)
+{
+    std::string source = "hello";
+    std::array<char, 16> buffer = {};
+    int64_t count = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getString(source, HIPDNN_TYPE_INT64, 16, &count, buffer.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
 } // namespace testing
 } // namespace hipdnn_backend
