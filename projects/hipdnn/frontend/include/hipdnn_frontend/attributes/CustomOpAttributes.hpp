@@ -140,12 +140,18 @@ public:
     {
         for(auto& tensor : inputs)
         {
-            tensor->fill_from_context(graphAttributes);
+            if(tensor)
+            {
+                tensor->fill_from_context(graphAttributes);
+            }
         }
 
         for(auto& tensor : outputs)
         {
-            tensor->fill_from_context(graphAttributes);
+            if(tensor)
+            {
+                tensor->fill_from_context(graphAttributes);
+            }
         }
 
         if(get_compute_data_type() == DataType::NOT_SET)
@@ -183,19 +189,31 @@ public:
     {
         CustomOpAttributes attr;
 
-        attr.set_custom_op_id(fb->custom_op_id()->str());
-
-        for(auto uid : *fb->input_tensor_uids())
+        if(fb->custom_op_id() != nullptr)
         {
-            attr.inputs.push_back(tensorMap.at(uid));
+            attr.set_custom_op_id(fb->custom_op_id()->str());
         }
 
-        for(auto uid : *fb->output_tensor_uids())
+        if(fb->input_tensor_uids() != nullptr)
         {
-            attr.outputs.push_back(tensorMap.at(uid));
+            for(auto uid : *fb->input_tensor_uids())
+            {
+                attr.inputs.push_back(tensorMap.at(uid));
+            }
         }
 
-        attr.data.assign(fb->data()->begin(), fb->data()->end());
+        if(fb->output_tensor_uids() != nullptr)
+        {
+            for(auto uid : *fb->output_tensor_uids())
+            {
+                attr.outputs.push_back(tensorMap.at(uid));
+            }
+        }
+
+        if(fb->data() != nullptr)
+        {
+            attr.data.assign(fb->data()->begin(), fb->data()->end());
+        }
 
         return attr;
     }

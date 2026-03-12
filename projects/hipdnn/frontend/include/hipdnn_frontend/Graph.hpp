@@ -2328,6 +2328,10 @@ public:
      * @param attributes Custom op configuration including opaque payload
      * @return Vector of output tensors
      *
+     * @note This operation requires a matching custom plugin to find an engine.
+     *       It will fail engine selection unless a plugin is loaded that explicitly
+     *       handles the specified `custom_op_id`.
+     *
      * @see CustomOpAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
@@ -2339,7 +2343,8 @@ public:
     {
         if(attributes.get_name().empty())
         {
-            attributes.set_name("CustomOp_" + std::to_string(_sub_nodes.size()));
+            attributes.set_name("CustomOp_" + attributes.get_custom_op_id() + "_"
+                                + std::to_string(_sub_nodes.size()));
         }
 
         for(size_t i = 0; i < inputs.size(); ++i)
