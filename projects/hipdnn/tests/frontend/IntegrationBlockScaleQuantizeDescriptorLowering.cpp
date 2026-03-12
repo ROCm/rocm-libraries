@@ -187,24 +187,24 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
     // Use dims where dim[axis] is divisible by block_size (64 / 32 = 2)
     const std::vector<int64_t> xDims = {2, 64, 32, 32};
     const std::vector<int64_t> xStrides = {65536, 1024, 32, 1};
-    constexpr int32_t blockSize = 32;
-    constexpr int64_t xUid = 50;
-    constexpr int64_t yUid = 51;
-    constexpr int64_t scaleUid = 52;
+    constexpr int32_t BLOCK_SIZE = 32;
+    constexpr int64_t X_UID = 50;
+    constexpr int64_t Y_UID = 51;
+    constexpr int64_t SCALE_UID = 52;
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(xUid).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_uid(X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(xDims).set_stride(xStrides);
 
     BlockScaleQuantizeAttributes bsqAttrs;
     bsqAttrs.set_name("bsq_transpose_op");
-    bsqAttrs.set_block_size(blockSize);
+    bsqAttrs.set_block_size(BLOCK_SIZE);
     bsqAttrs.set_axis(1);
     bsqAttrs.set_transpose(true);
 
     auto [y, scale] = graph->block_scale_quantize(x, std::move(bsqAttrs));
-    y->set_uid(yUid).set_output(true).set_name("Y");
-    scale->set_uid(scaleUid).set_output(true).set_name("Scale");
+    y->set_uid(Y_UID).set_output(true).set_name("Y");
+    scale->set_uid(SCALE_UID).set_output(true).set_name("Scale");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -243,8 +243,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
     }
 
     // Y dims match X dims; strides are reordered by transpose
-    ASSERT_NE(tensorMap.count(yUid), 0u);
-    auto* yT = tensorMap[yUid];
+    ASSERT_NE(tensorMap.count(Y_UID), 0u);
+    auto* yT = tensorMap[Y_UID];
     EXPECT_EQ(yT->dims, xDims);
     // Expected transposed strides: sort X stride indices ascending [3,2,1,0],
     // rotate axis=1 to front [1,0,3,2], inverse perm gives strideOrder [1,0,3,2]
@@ -255,7 +255,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
     auto* bsq = graphT.nodes[0]->attributes.AsBlockScaleQuantizeAttributes();
     ASSERT_NE(bsq, nullptr);
 
-    EXPECT_EQ(bsq->block_size, blockSize);
+    EXPECT_EQ(bsq->block_size, BLOCK_SIZE);
     EXPECT_TRUE(bsq->axis.has_value());
     EXPECT_EQ(bsq->axis.value(), 1);
     EXPECT_TRUE(bsq->transpose);
