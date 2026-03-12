@@ -602,6 +602,90 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
     ASSERT_EQ(elementCount, 1);
 }
 
+TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorScaleQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorBiasQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorEpsilonQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorMeanQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestLayernormOperationDescriptor, GetAttributeTensorInvVarianceQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
 TEST_F(TestLayernormOperationDescriptor, GetAttributeNormFwdPhaseQueryReturnsOne)
 {
     makeFinalized();
@@ -712,13 +796,15 @@ TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 7u);
-    ASSERT_EQ(tensors[0]->getData().uid, K_LAYERNORM_TENSOR_X_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_LAYERNORM_TENSOR_SCALE_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_LAYERNORM_TENSOR_BIAS_UID);
-    ASSERT_EQ(tensors[3]->getData().uid, K_LAYERNORM_TENSOR_EPSILON_UID);
-    ASSERT_EQ(tensors[4]->getData().uid, K_LAYERNORM_TENSOR_Y_UID);
-    ASSERT_EQ(tensors[5]->getData().uid, K_LAYERNORM_TENSOR_MEAN_UID);
-    ASSERT_EQ(tensors[6]->getData().uid, K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
+    // getTensorDescriptors() returns the same shared_ptr objects held internally —
+    // pointer identity proves no accidental clone was made.
+    ASSERT_EQ(tensors[0].get(), desc->getXDesc().get());
+    ASSERT_EQ(tensors[1].get(), desc->getScaleDesc().get());
+    ASSERT_EQ(tensors[2].get(), desc->getBiasDesc().get());
+    ASSERT_EQ(tensors[3].get(), desc->getEpsilonDesc().get());
+    ASSERT_EQ(tensors[4].get(), desc->getYDesc().get());
+    ASSERT_EQ(tensors[5].get(), desc->getMeanDesc().get());
+    ASSERT_EQ(tensors[6].get(), desc->getInvVarianceDesc().get());
 }
 
 TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsWithoutOptional)
@@ -726,13 +812,14 @@ TEST_F(TestLayernormOperationDescriptor, GetTensorDescriptorsWithoutOptional)
     setRequiredAttributes();
     getDescriptor()->finalize();
 
-    auto tensors = getDescriptor()->getTensorDescriptors();
+    auto desc = getDescriptor();
+    auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 5u);
-    ASSERT_EQ(tensors[0]->getData().uid, K_LAYERNORM_TENSOR_X_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_LAYERNORM_TENSOR_SCALE_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_LAYERNORM_TENSOR_BIAS_UID);
-    ASSERT_EQ(tensors[3]->getData().uid, K_LAYERNORM_TENSOR_EPSILON_UID);
-    ASSERT_EQ(tensors[4]->getData().uid, K_LAYERNORM_TENSOR_Y_UID);
+    ASSERT_EQ(tensors[0].get(), desc->getXDesc().get());
+    ASSERT_EQ(tensors[1].get(), desc->getScaleDesc().get());
+    ASSERT_EQ(tensors[2].get(), desc->getBiasDesc().get());
+    ASSERT_EQ(tensors[3].get(), desc->getEpsilonDesc().get());
+    ASSERT_EQ(tensors[4].get(), desc->getYDesc().get());
 }
 
 TEST_F(TestLayernormOperationDescriptor, BuildNodeProducesCorrectNodeT)
