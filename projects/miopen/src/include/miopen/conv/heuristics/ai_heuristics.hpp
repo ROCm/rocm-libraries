@@ -124,19 +124,8 @@ class Model;
 MIOPEN_INTERNALS_EXPORT std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                                             const ExecutionContext& ctx,
                                                             const std::string& device);
-} // namespace immed_mode
-
 /**
- * @brief 3D convolution AI heuristics namespace
- *
- * This namespace contains classes and functions for 3D convolution AI heuristics
- * using TunaNet3D neural networks to predict optimal solvers for 3D convolution
- * operations (NCDHW layout).
- */
-namespace convnd {
-
-/**
- * @brief 3D-specific metadata handler for TunaNetND models
+ * @brief ND-specific metadata handler for TunaNetND models
  *
  * This class provides a simple interface for accessing ND convolution metadata.
  * All data is loaded during construction with proper error handling.
@@ -191,7 +180,8 @@ private:
 public:
     /**
      * @brief Constructor - loads all metadata immediately with error handling
-     * @param device Device name (e.g., "gfx942", "gfx950") - "_3d" suffix appended internally
+     * @param device Device name (e.g., "gfx942", "gfx950")
+     * @param dim Spatial dimension (2 or 3)
      * @note Does not throw - use IsValid() to check for errors
      */
     MIOPEN_INTERNALS_EXPORT explicit MetadataND(const std::string& device, const int& dim);
@@ -301,11 +291,11 @@ public:
 };
 
 /**
- * @brief Abstract base class for 3D AI heuristics models
+ * @brief Abstract base class for ND AI heuristics models
  *
- * This class defines the interface for 3D convolution AI heuristics models.
- * Implementations should provide device-specific TunaNet3D inference
- * for predicting optimal 3D convolution solvers.
+ * This class defines the interface for ND convolution AI heuristics models.
+ * Implementations should provide device-specific TunaNetND inference
+ * for predicting optimal ND convolution solvers (both 2D and 3D).
  */
 class ModelND
 {
@@ -313,8 +303,8 @@ public:
     virtual ~ModelND() = default;
 
     /**
-     * @brief Check if a 3D convolution problem is supported by this model
-     * @param problem 3D convolution problem description
+     * @brief Check if an ND convolution problem is supported by this model
+     * @param problem ND convolution problem description (2D or 3D)
      * @param ctx Execution context
      * @return true if problem is supported, false otherwise
      */
@@ -322,8 +312,8 @@ public:
                                     const ExecutionContext& ctx) const = 0;
 
     /**
-     * @brief Run TunaNetND inference on the given 3D problem
-     * @param problem ND convolution problem description
+     * @brief Run TunaNetND inference on the given ND problem
+     * @param problem ND convolution problem description (2D or 3D)
      * @return Vector of solver probabilities (one per solver)
      */
     virtual std::vector<float> Forward(const conv::ProblemDescription& problem) const = 0;
@@ -346,11 +336,13 @@ protected:
 /**
  * @brief Factory function to create ND AI heuristics model for given device
  * @param device GPU device name (e.g., "gfx942", "gfx950")
- * @return Device-specific 3D model instance, or nullptr if unsupported
+ * @param dim Spatial dimension (2 or 3)
+ * @return Device-specific ND model instance, or nullptr if unsupported
  */
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
-} // namespace convnd
+
+} // namespace immed_mode
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING

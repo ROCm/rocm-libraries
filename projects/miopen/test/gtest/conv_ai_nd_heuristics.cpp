@@ -225,9 +225,9 @@ protected:
 // --- MetadataND tests ---
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_LoadValidArchitecture)
 {
-    convnd::MetadataND metadata(device_name, spatial_dim);
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
-    
+
     // Expected model prefix depends on dimension
     std::string expected_prefix = (spatial_dim == 3) ? device_name + "_3d" : device_name;
     EXPECT_EQ(metadata.GetModelPrefix(), expected_prefix);
@@ -240,7 +240,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_LoadValidArchitecture)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeDirection)
 {
-    convnd::MetadataND metadata(device_name, spatial_dim);
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
     auto fwd_encoded = metadata.EncodeDirection(miopen::conv::Direction::Forward);
     auto bwd_encoded = metadata.EncodeDirection(miopen::conv::Direction::BackwardData);
@@ -252,7 +252,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeDirection)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodePrecision)
 {
-    convnd::MetadataND metadata(device_name, spatial_dim);
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
     auto fp32_encoded = metadata.EncodePrecision(miopenFloat);
     auto fp16_encoded = metadata.EncodePrecision(miopenHalf);
@@ -264,7 +264,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodePrecision)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeLayouts)
 {
-    convnd::MetadataND metadata(device_name, spatial_dim);
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
     ASSERT_TRUE(metadata.IsValid());
 
     std::string default_layout     = GetDefaultLayout();
@@ -292,13 +292,13 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_EncodeLayouts)
 // --- ModelND tests ---
 TEST_P(GPU_ConvNDAIHeuristics_FP32, GetNDModel_SupportedDevice)
 {
-    auto model = convnd::GetNDModel(device_name, spatial_dim);
+    auto model = immed_mode::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
 }
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_CorrectDimension)
 {
-    auto model = convnd::GetNDModel(device_name, spatial_dim);
+    auto model = immed_mode::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
     auto problem = CreateProblem();
     EXPECT_TRUE(model->IsProblemSupported(problem, ctx));
@@ -306,7 +306,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_CorrectDimension)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_WrongDimension)
 {
-    auto model = convnd::GetNDModel(device_name, spatial_dim);
+    auto model = immed_mode::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
 
     // Create a problem with the opposite dimension
@@ -325,7 +325,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_IsProblemSupported_WrongDimension)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_Forward_ReturnsValidPredictions)
 {
-    auto model = convnd::GetNDModel(device_name, spatial_dim);
+    auto model = immed_mode::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
     auto problem = CreateProblem();
     ASSERT_TRUE(model->IsProblemSupported(problem, ctx));
@@ -358,7 +358,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, PredictSolver_UsesCaching)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_DifferentProblemSizes)
 {
-    auto model = convnd::GetNDModel(device_name, spatial_dim);
+    auto model = immed_mode::GetNDModel(device_name, spatial_dim);
     ASSERT_NE(model, nullptr);
 
     if(spatial_dim == 3)
@@ -393,7 +393,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_DifferentProblemSizes)
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_OptionalPattern)
 {
-    convnd::MetadataND invalid_metadata("nonexistent", spatial_dim);
+    immed_mode::MetadataND invalid_metadata("nonexistent", spatial_dim);
     EXPECT_FALSE(invalid_metadata.IsValid());
     EXPECT_EQ(invalid_metadata.GetNumInputs(), 0);
     EXPECT_EQ(invalid_metadata.GetNumOutputs(), 0);

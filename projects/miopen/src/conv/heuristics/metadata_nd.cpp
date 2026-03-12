@@ -34,7 +34,7 @@
 
 namespace miopen {
 namespace ai {
-namespace convnd {
+namespace immed_mode {
 
 // Helper function to safely load JSON with error handling
 static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
@@ -472,7 +472,7 @@ size_t MetadataND::EncodeOutLayout(const std::string& layout) const
     return (it != out_layout_encodings.end()) ? it->second : 0;
 }
 
-} // namespace convnd
+} // namespace immed_mode
 } // namespace ai
 } // namespace miopen
 

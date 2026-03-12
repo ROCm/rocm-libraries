@@ -696,7 +696,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     {
         int dim = is3d ? 3 : 2;
         // 3D or 2D path: Use TunaNetND model
-        std::unique_ptr<convnd::ModelND> model = convnd::GetNDModel(device, dim);
+        std::unique_ptr<ModelND> model = GetNDModel(device, dim);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
             return {}; // Fallback: empty vector
@@ -724,17 +724,6 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             problem, device, false, predictions, model->metadata.solver_map);
     }
 }
-
-} // namespace immed_mode
-
-/**
- * @brief ND convolution AI heuristics namespace
- *
- * This namespace contains classes and functions for ND convolution AI heuristics
- * using TunaNetND neural networks to predict optimal solvers for ND convolution
- * operations (NCDHW layout).
- */
-namespace convnd {
 
 // MetadataND implementation moved to metadata_nd.cpp
 
@@ -980,7 +969,7 @@ std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim)
     return nullptr;
 }
 
-} // namespace convnd
+} // namespace immed_mode
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
