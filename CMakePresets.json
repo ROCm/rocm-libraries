@@ -81,6 +81,14 @@
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipblaslt-provider"
             }
+        },
+        {
+            "name": "sdpa-kernel-provider",
+            "description": "Build hipdnn and sdpa-kernel-provider",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;sdpa-kernel-provider"
+            }
         }
     ],
     "buildPresets": [

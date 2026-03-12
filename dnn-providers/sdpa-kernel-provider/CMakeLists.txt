@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -36,6 +36,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
      ${HIP_DIR}/cmake
 )
 
+option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 option(SDPAKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
@@ -51,6 +52,11 @@ if(SDPAKERNELPROVIDER_ENABLE_COVERAGE)
     message(VERBOSE "Enabling compile flags for coverage-mapping")
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+# In superbuild mode, HIPDNN_SKIP_TESTS overrides the local test option
+if(HIPDNN_SKIP_TESTS)
+    set(SDPAKERNELPROVIDER_ENABLE_TESTS OFF)
 endif()
 
 list(
@@ -81,16 +87,27 @@ list(
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# SDK dependencies - use targets directly in superbuild, find_package otherwise
+if(NOT TARGET hipdnn_data_sdk)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 include(CheckToolVersion)
-include(ClangCheck)
+if(ENABLE_CLANG_FORMAT)
+    include(ClangCheck)
+endif()
 include(ClangTidy)
 
 # Setup testing dependencies
 include(Dependencies)
-include(Tests)
+if(NOT HIPDNN_SKIP_TESTS)
+    include(Tests)
+endif()
 
 if(WIN32)
     set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")

@@ -7,13 +7,15 @@ SPDX-License-Identifier: MIT
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
-#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
+
+    auto callback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
     hipdnn_plugin_sdk::logging::initializeCallbackLogging(
-        "sdpa_kernel_plugin_integration_tests", hipdnn_test_sdk::utilities::testLoggingCallback);
+        "sdpa_kernel_plugin_integration_tests", callback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();

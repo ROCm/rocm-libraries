@@ -53,6 +53,7 @@ set(AVAILABLE_COMPONENTS
     hipdnn
     miopen-provider
     hipblaslt-provider
+    sdpa-kernel-provider
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -184,6 +185,14 @@ if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT hipblaslt-provider
         PREFIX_PATH dnn-providers
         EXPECT_TARGET hipblaslt_plugin
+    )
+endif()
+
+if("sdpa-kernel-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT sdpa-kernel-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET sdpa_kernel_plugin
     )
 endif()
 

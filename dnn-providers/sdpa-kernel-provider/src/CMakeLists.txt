@@ -53,7 +53,11 @@ if(SDPAKERNELPROVIDER_ENABLE_TESTS)
 
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    # Finalize test targets with prefix to avoid collisions in superbuild mode
+    finalize_test_targets("${PROJECT_NAME}")
 
-    install_sdpa_kernel_plugin_ctest_files()
+    # For standalone builds we need to install the ctest files
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_sdpa_kernel_plugin_ctest_files()
+    endif()
 endif()
