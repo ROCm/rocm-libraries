@@ -843,8 +843,10 @@ typedef enum
     /** @brief Next running variance output tensor (optional) */
     HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT = 2811,
 
-    /** @brief Compute data type for batchnorm training forward */
-    HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT = 2812,
+    /** @brief Math precision (compute data type) for batchnorm training forward.
+     *  Note: named MATH_PREC to match the naming convention used by layernorm,
+     *  rmsnorm, and matmul (HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, etc.). */
+    HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT = 2812,
 
     /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
     HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2813,

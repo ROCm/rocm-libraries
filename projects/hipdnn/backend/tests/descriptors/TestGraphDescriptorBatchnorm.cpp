@@ -114,7 +114,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                            &nextRunningVarianceDesc);
     }
 
-    desc->setAttribute(HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     if(!peerStatsDescs.empty())
     {

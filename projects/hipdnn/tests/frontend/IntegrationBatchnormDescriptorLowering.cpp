@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -18,6 +19,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
@@ -32,18 +34,6 @@ public:
     using Graph::build_operation_graph_via_descriptors;
     using Graph::get_raw_graph_descriptor;
 };
-
-// -- Test constants for BatchnormGraphRoundTrip --
-
-constexpr int64_t K_TENSOR_X_UID = 500;
-constexpr int64_t K_TENSOR_SCALE_UID = 501;
-constexpr int64_t K_TENSOR_BIAS_UID = 502;
-constexpr int64_t K_TENSOR_EPSILON_UID = 503;
-
-constexpr std::array<int64_t, 4> K_TENSOR_DATA_DIMS = {2, 64, 16, 16};
-constexpr std::array<int64_t, 4> K_TENSOR_DATA_STRIDES = {16384, 256, 16, 1};
-constexpr std::array<int64_t, 4> K_TENSOR_PARAM_DIMS = {1, 64, 1, 1};
-constexpr std::array<int64_t, 4> K_TENSOR_PARAM_STRIDES = {64, 1, 1, 1};
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
@@ -76,38 +66,72 @@ protected:
     hipdnnHandle_t _handle = nullptr;
 };
 
-TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTrip)
+TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptionals)
 {
+    // Full round-trip with all optional tensors including running stats.
     auto graph = std::make_shared<TestableGraph>();
-    graph->set_name("TestBnFwdGraph")
+    graph->set_name("TestBnFwdGraphAllOptionals")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
+    x->set_uid(K_BATCHNORM_INTEG_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_BATCHNORM_INTEG_DATA_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
+    scale->set_uid(K_BATCHNORM_INTEG_TENSOR_SCALE_UID)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(K_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
-    bias->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
+    bias->set_uid(K_BATCHNORM_INTEG_TENSOR_BIAS_UID)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT);
+    bias->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
-    epsilon->set_uid(K_TENSOR_EPSILON_UID).set_name("Epsilon");
+    epsilon->set_uid(K_BATCHNORM_INTEG_TENSOR_EPSILON_UID).set_name("Epsilon");
+
+    auto prevRunMean = std::make_shared<TensorAttributes>();
+    prevRunMean->set_uid(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID)
+        .set_name("PrevRunMean")
+        .set_data_type(DataType::FLOAT);
+    prevRunMean->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+
+    auto prevRunVar = std::make_shared<TensorAttributes>();
+    prevRunVar->set_uid(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID)
+        .set_name("PrevRunVar")
+        .set_data_type(DataType::FLOAT);
+    prevRunVar->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+
+    auto momentum = std::make_shared<TensorAttributes>(0.1f);
+    momentum->set_uid(K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID).set_name("Momentum");
 
     BatchnormAttributes bnAttrs;
     bnAttrs.set_name("bn_fwd_op");
     bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_previous_running_stats(prevRunMean, prevRunVar, momentum);
 
     auto [y, meanOut, invVarOut, nextRunMean, nextRunVar]
         = graph->batchnorm(x, scale, bias, bnAttrs);
-    y->set_uid(504).set_output(true).set_name("Y");
-    meanOut->set_uid(505).set_output(true).set_name("Mean");
-    invVarOut->set_uid(506).set_output(true).set_name("InvVariance");
+    y->set_uid(K_BATCHNORM_INTEG_TENSOR_Y_UID).set_output(true).set_name("Y");
+    meanOut->set_uid(K_BATCHNORM_INTEG_TENSOR_MEAN_UID).set_output(true).set_name("Mean");
+    invVarOut->set_uid(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID)
+        .set_output(true)
+        .set_name("InvVariance");
+    nextRunMean->set_uid(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID)
+        .set_output(true)
+        .set_name("NextRunMean");
+    nextRunVar->set_uid(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID)
+        .set_output(true)
+        .set_name("NextRunVar");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -142,8 +166,9 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTrip)
     EXPECT_EQ(graphT.io_data_type, DataTypeSdk::FLOAT);
 
     // -- Verify tensors --
-    // x, scale, bias, epsilon, y, mean, invVariance = 7 tensors
-    ASSERT_EQ(graphT.tensors.size(), 7u);
+    // x, scale, bias, epsilon, y, mean, invVariance,
+    // prevRunMean, prevRunVar, momentum, nextRunMean, nextRunVar = 12 tensors
+    ASSERT_EQ(graphT.tensors.size(), 12u);
 
     std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
     for(const auto& t : graphT.tensors)
@@ -152,33 +177,43 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTrip)
     }
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    auto* xT = tensorMap[K_TENSOR_X_UID];
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_X_UID), 0u);
+    auto* xT = tensorMap[K_BATCHNORM_INTEG_TENSOR_X_UID];
     EXPECT_EQ(xT->name, "X");
     EXPECT_EQ(xT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(xT->dims, toVec(K_TENSOR_DATA_DIMS));
-    EXPECT_EQ(xT->strides, toVec(K_TENSOR_DATA_STRIDES));
+    EXPECT_EQ(xT->dims, toVec(K_BATCHNORM_INTEG_DATA_DIMS));
+    EXPECT_EQ(xT->strides, toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
 
     // Verify Scale tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_SCALE_UID), 0u);
-    auto* scaleT = tensorMap[K_TENSOR_SCALE_UID];
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_SCALE_UID), 0u);
+    auto* scaleT = tensorMap[K_BATCHNORM_INTEG_TENSOR_SCALE_UID];
     EXPECT_EQ(scaleT->name, "Scale");
     EXPECT_EQ(scaleT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(scaleT->dims, toVec(K_TENSOR_PARAM_DIMS));
-    EXPECT_EQ(scaleT->strides, toVec(K_TENSOR_PARAM_STRIDES));
+    EXPECT_EQ(scaleT->dims, toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
+    EXPECT_EQ(scaleT->strides, toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     // Verify Bias tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_BIAS_UID), 0u);
-    auto* biasT = tensorMap[K_TENSOR_BIAS_UID];
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_BIAS_UID), 0u);
+    auto* biasT = tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID];
     EXPECT_EQ(biasT->name, "Bias");
 
-    // Verify output tensors exist
-    ASSERT_NE(tensorMap.count(504), 0u);
-    EXPECT_EQ(tensorMap[504]->name, "Y");
-    ASSERT_NE(tensorMap.count(505), 0u);
-    EXPECT_EQ(tensorMap[505]->name, "Mean");
-    ASSERT_NE(tensorMap.count(506), 0u);
-    EXPECT_EQ(tensorMap[506]->name, "InvVariance");
+    // Verify output tensors
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->name, "Y");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID]->name, "Mean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID]->name, "InvVariance");
+
+    // Verify running stats tensors
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID]->name, "PrevRunMean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID]->name, "PrevRunVar");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID]->name, "NextRunMean");
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID]->name, "NextRunVar");
 
     // -- Verify batchnorm forward operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -189,24 +224,33 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTrip)
     auto* bnFwd = node->attributes.AsBatchnormAttributes();
     ASSERT_NE(bnFwd, nullptr);
 
-    EXPECT_EQ(bnFwd->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(bnFwd->scale_tensor_uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(bnFwd->bias_tensor_uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(bnFwd->epsilon_tensor_uid, K_TENSOR_EPSILON_UID);
-    EXPECT_EQ(bnFwd->y_tensor_uid, 504);
+    EXPECT_EQ(bnFwd->x_tensor_uid, K_BATCHNORM_INTEG_TENSOR_X_UID);
+    EXPECT_EQ(bnFwd->scale_tensor_uid, K_BATCHNORM_INTEG_TENSOR_SCALE_UID);
+    EXPECT_EQ(bnFwd->bias_tensor_uid, K_BATCHNORM_INTEG_TENSOR_BIAS_UID);
+    EXPECT_EQ(bnFwd->epsilon_tensor_uid, K_BATCHNORM_INTEG_TENSOR_EPSILON_UID);
+    EXPECT_EQ(bnFwd->y_tensor_uid, K_BATCHNORM_INTEG_TENSOR_Y_UID);
 
     // Verify mean and inv_variance are set
     ASSERT_TRUE(bnFwd->mean_tensor_uid.has_value());
-    EXPECT_EQ(bnFwd->mean_tensor_uid.value(), 505);
+    EXPECT_EQ(bnFwd->mean_tensor_uid.value(), K_BATCHNORM_INTEG_TENSOR_MEAN_UID);
     ASSERT_TRUE(bnFwd->inv_variance_tensor_uid.has_value());
-    EXPECT_EQ(bnFwd->inv_variance_tensor_uid.value(), 506);
+    EXPECT_EQ(bnFwd->inv_variance_tensor_uid.value(), K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID);
 
-    // Running stats should not be set (not provided)
-    EXPECT_FALSE(bnFwd->prev_running_mean_tensor_uid.has_value());
-    EXPECT_FALSE(bnFwd->prev_running_variance_tensor_uid.has_value());
-    EXPECT_FALSE(bnFwd->momentum_tensor_uid.has_value());
-    EXPECT_FALSE(bnFwd->next_running_mean_tensor_uid.has_value());
-    EXPECT_FALSE(bnFwd->next_running_variance_tensor_uid.has_value());
+    // Verify running stats are set
+    ASSERT_TRUE(bnFwd->prev_running_mean_tensor_uid.has_value());
+    EXPECT_EQ(bnFwd->prev_running_mean_tensor_uid.value(),
+              K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID);
+    ASSERT_TRUE(bnFwd->prev_running_variance_tensor_uid.has_value());
+    EXPECT_EQ(bnFwd->prev_running_variance_tensor_uid.value(),
+              K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID);
+    ASSERT_TRUE(bnFwd->momentum_tensor_uid.has_value());
+    EXPECT_EQ(bnFwd->momentum_tensor_uid.value(), K_BATCHNORM_INTEG_TENSOR_MOMENTUM_UID);
+    ASSERT_TRUE(bnFwd->next_running_mean_tensor_uid.has_value());
+    EXPECT_EQ(bnFwd->next_running_mean_tensor_uid.value(),
+              K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID);
+    ASSERT_TRUE(bnFwd->next_running_variance_tensor_uid.has_value());
+    EXPECT_EQ(bnFwd->next_running_variance_tensor_uid.value(),
+              K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID);
 
     // No peer stats
     EXPECT_EQ(bnFwd->peer_stats_tensor_uid.size(), 0u);
@@ -222,15 +266,18 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
+    x->set_dim(toVec(K_BATCHNORM_INTEG_DATA_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
+    scale->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias").set_data_type(DataType::FLOAT);
-    bias->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
+    bias->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("Epsilon");
@@ -322,28 +369,37 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
         .set_compute_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(600).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_DATA_DIMS)).set_stride(toVec(K_TENSOR_DATA_STRIDES));
+    x->set_uid(K_BATCHNORM_MINIMAL_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_BATCHNORM_INTEG_DATA_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(601).set_name("Scale").set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
+    scale->set_uid(K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(602).set_name("Bias").set_data_type(DataType::FLOAT);
-    bias->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
+    bias->set_uid(K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT);
+    bias->set_dim(toVec(K_BATCHNORM_INTEG_PARAM_DIMS))
+        .set_stride(toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
-    epsilon->set_uid(603).set_name("Epsilon");
+    epsilon->set_uid(K_BATCHNORM_MINIMAL_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     BatchnormAttributes bnAttrs;
     bnAttrs.set_name("minimal_bn").set_epsilon(epsilon);
 
     auto [y, meanOut, invVarOut, nextRunMean, nextRunVar]
         = graph->batchnorm(x, scale, bias, bnAttrs);
-    y->set_uid(604).set_output(true).set_name("Y");
-    meanOut->set_uid(605).set_output(true).set_name("Mean");
-    invVarOut->set_uid(606).set_output(true).set_name("InvVariance");
+    y->set_uid(K_BATCHNORM_MINIMAL_TENSOR_Y_UID).set_output(true).set_name("Y");
+    meanOut->set_uid(K_BATCHNORM_MINIMAL_TENSOR_MEAN_UID).set_output(true).set_name("Mean");
+    invVarOut->set_uid(K_BATCHNORM_MINIMAL_TENSOR_INV_VARIANCE_UID)
+        .set_output(true)
+        .set_name("InvVariance");
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -370,17 +426,17 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
     ASSERT_NE(bnFwd, nullptr);
 
     // Required tensors
-    EXPECT_EQ(bnFwd->x_tensor_uid, 600);
-    EXPECT_EQ(bnFwd->scale_tensor_uid, 601);
-    EXPECT_EQ(bnFwd->bias_tensor_uid, 602);
-    EXPECT_EQ(bnFwd->epsilon_tensor_uid, 603);
-    EXPECT_EQ(bnFwd->y_tensor_uid, 604);
+    EXPECT_EQ(bnFwd->x_tensor_uid, K_BATCHNORM_MINIMAL_TENSOR_X_UID);
+    EXPECT_EQ(bnFwd->scale_tensor_uid, K_BATCHNORM_MINIMAL_TENSOR_SCALE_UID);
+    EXPECT_EQ(bnFwd->bias_tensor_uid, K_BATCHNORM_MINIMAL_TENSOR_BIAS_UID);
+    EXPECT_EQ(bnFwd->epsilon_tensor_uid, K_BATCHNORM_MINIMAL_TENSOR_EPSILON_UID);
+    EXPECT_EQ(bnFwd->y_tensor_uid, K_BATCHNORM_MINIMAL_TENSOR_Y_UID);
 
     // Optional outputs set by the graph's batchnorm() method
     ASSERT_TRUE(bnFwd->mean_tensor_uid.has_value());
-    EXPECT_EQ(bnFwd->mean_tensor_uid.value(), 605);
+    EXPECT_EQ(bnFwd->mean_tensor_uid.value(), K_BATCHNORM_MINIMAL_TENSOR_MEAN_UID);
     ASSERT_TRUE(bnFwd->inv_variance_tensor_uid.has_value());
-    EXPECT_EQ(bnFwd->inv_variance_tensor_uid.value(), 606);
+    EXPECT_EQ(bnFwd->inv_variance_tensor_uid.value(), K_BATCHNORM_MINIMAL_TENSOR_INV_VARIANCE_UID);
 
     // No running stats
     EXPECT_FALSE(bnFwd->prev_running_mean_tensor_uid.has_value());
