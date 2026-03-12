@@ -13,7 +13,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class MatmulNode : public BaseNode<MatmulNode, NodeType::Matmul>
+class MatmulNode : public BaseNode<MatmulNode, NodeType::MATMUL>
 {
 
 public:

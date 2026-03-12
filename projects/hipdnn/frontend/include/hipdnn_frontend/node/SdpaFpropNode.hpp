@@ -12,7 +12,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class SdpaFpropNode : public BaseNode<SdpaFpropNode, NodeType::SdpaFprop>
+class SdpaFpropNode : public BaseNode<SdpaFpropNode, NodeType::SDPA_FPROP>
 {
 
 public:

@@ -11,21 +11,21 @@ namespace hipdnn_frontend::graph
 /// engine override selection) via switch on getNodeType().
 enum class NodeType
 {
-    Unknown,
-    ConvolutionFprop,
-    ConvolutionDgrad,
-    ConvolutionWgrad,
-    Batchnorm,
-    BatchnormInference,
-    BatchnormBackward,
-    BatchnormInferenceVarianceExt,
-    Pointwise,
-    Matmul,
-    LayerNorm,
-    RMSNorm,
-    SdpaFprop,
-    BlockScaleQuantize,
-    BlockScaleDequantize
+    UNKNOWN,
+    CONVOLUTION_FPROP,
+    CONVOLUTION_DGRAD,
+    CONVOLUTION_WGRAD,
+    BATCHNORM,
+    BATCHNORM_INFERENCE,
+    BATCHNORM_BACKWARD,
+    BATCHNORM_INFERENCE_VARIANCE_EXT,
+    POINTWISE,
+    MATMUL,
+    LAYER_NORM,
+    RMS_NORM,
+    SDPA_FPROP,
+    BLOCK_SCALE_QUANTIZE,
+    BLOCK_SCALE_DEQUANTIZE
 };
 
 } // namespace hipdnn_frontend::graph

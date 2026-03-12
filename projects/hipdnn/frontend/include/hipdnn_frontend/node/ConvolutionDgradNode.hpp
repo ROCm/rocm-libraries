@@ -14,7 +14,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionDgradNode : public BaseNode<ConvolutionDgradNode, NodeType::ConvolutionDgrad>
+class ConvolutionDgradNode : public BaseNode<ConvolutionDgradNode, NodeType::CONVOLUTION_DGRAD>
 {
 public:
     ConvDgradAttributes attributes;

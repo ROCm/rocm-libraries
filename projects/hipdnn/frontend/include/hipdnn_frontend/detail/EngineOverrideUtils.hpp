@@ -32,21 +32,21 @@ inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INod
 
         switch(node.getNodeType())
         {
-        case graph::NodeType::ConvolutionFprop:
+        case graph::NodeType::CONVOLUTION_FPROP:
         {
             const auto& conv = static_cast<const graph::ConvolutionFpropNode&>(node);
             result = checkEngineOverride("conv_fprop",
                                          {conv.attributes.get_x(), conv.attributes.get_w()});
             break;
         }
-        case graph::NodeType::ConvolutionDgrad:
+        case graph::NodeType::CONVOLUTION_DGRAD:
         {
             const auto& conv = static_cast<const graph::ConvolutionDgradNode&>(node);
             result = checkEngineOverride("conv_dgrad",
                                          {conv.attributes.get_dy(), conv.attributes.get_w()});
             break;
         }
-        case graph::NodeType::ConvolutionWgrad:
+        case graph::NodeType::CONVOLUTION_WGRAD:
         {
             const auto& conv = static_cast<const graph::ConvolutionWgradNode&>(node);
             result = checkEngineOverride("conv_wgrad",

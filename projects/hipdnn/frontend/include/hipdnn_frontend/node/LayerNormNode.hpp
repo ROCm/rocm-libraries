@@ -27,7 +27,7 @@ namespace hipdnn_frontend::graph
  *
  * @see LayernormAttributes, Graph::layernorm()
  */
-class LayerNormNode : public BaseNode<LayerNormNode, NodeType::LayerNorm>
+class LayerNormNode : public BaseNode<LayerNormNode, NodeType::LAYER_NORM>
 {
 public:
     LayernormAttributes attributes;

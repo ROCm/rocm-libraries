@@ -56,7 +56,7 @@ public:
 
     virtual NodeType getNodeType() const
     {
-        return NodeType::Unknown;
+        return NodeType::UNKNOWN;
     }
 
     virtual void
@@ -160,7 +160,7 @@ protected:
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
 // BaseNode uses this to gather tensor uids, and populate unset ones.
-template <typename DerivedT, NodeType Type = NodeType::Unknown>
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
 class BaseNode : public INode
 {
 private:
@@ -253,6 +253,6 @@ protected:
     using INode::INode;
 };
 
-template <typename DerivedT, NodeType Type = NodeType::Unknown>
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
 using NodeCRTP = BaseNode<DerivedT, Type>; // NOLINT
 } // namespace hipdnn_frontend::graph
