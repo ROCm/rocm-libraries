@@ -366,8 +366,7 @@ protected:
         // Fill input2 with pattern: [10, 20, 30, 40]
         for(int n = 0; n < 4; ++n)
         {
-            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)),
-                                n);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -524,11 +523,7 @@ protected:
             for(int h = 0; h < 3; ++h)
             {
                 input1.setHostValue(
-                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 10) + h)),
-                    n,
-                    0,
-                    h,
-                    0);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
             }
         }
 
@@ -622,12 +617,7 @@ protected:
                                 (static_cast<float>(c) + 1.0f)
                                 * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                             expected.setHostValue(
-                                safeTestTypeCast<OutputType>(input1Val + input2Val),
-                                n,
-                                c,
-                                d,
-                                h,
-                                w);
+                                safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, d, h, w);
                         }
                     }
                 }
