@@ -500,8 +500,6 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
     auto in_transform_ptrs  = mgpuPlan ? in_buffer_copy.data() : in_buffer;
     auto out_transform_ptrs = mgpuPlan ? out_buffer_copy.data() : out_buffer;
 
-    gpubuf autoAllocWorkBuf;
-
     if(workBufSize > 0)
     {
         auto requiredWorkBufBytes = WorkBufBytes(real_type_size(rootPlan->precision));
