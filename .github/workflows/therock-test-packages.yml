@@ -74,3 +74,4 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
+    secrets: inherit
