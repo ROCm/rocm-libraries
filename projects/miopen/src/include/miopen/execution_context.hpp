@@ -221,7 +221,7 @@ struct ExecutionContext
                     {
                         const auto fname = filepath.stem().string();
                         if(fs::is_regular_file(filepath) && filepath.extension() == ext &&
-                           fname.starts_with(db_id))
+                           (fname.find(db_id) == 0))
                         {
                             MIOPEN_LOG_I2("Checking perf db file: " << fname);
                             const auto pos = fname.find('_');

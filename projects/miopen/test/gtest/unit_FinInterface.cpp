@@ -44,7 +44,7 @@ namespace {
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams& )
     {
         os << "none";
         return os;
@@ -371,6 +371,7 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
+#if MIOPEN_ENABLE_FIN_INTERFACE
 template <class SolverInfo>
 const auto& GetSolverNames()
 {
@@ -384,6 +385,7 @@ const auto& GetSolverNames()
     }();
     return names;
 }
+#endif
 
 template <class TestCase>
 const auto& GetTestCases()
@@ -620,9 +622,9 @@ using CPU_FinInterfaceTestGetAllConvSolvers_NONE = TestGetAllSolvers<ConvTestCas
 using CPU_FinInterfaceTestGetConvSolvers_NONE    = TestGetSolvers<ConvTestCase>;
 using GPU_FinInterfaceTestGetConvSolver_FP32     = TestGetSolver<ConvTestCase>;
 
-TEST_P(CPU_FinInterfaceTestGetAllConvSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(CPU_FinInterfaceTestGetConvSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(GPU_FinInterfaceTestGetConvSolver_FP32, FinInterface) { this->RunTest(); };
+TEST_P(CPU_FinInterfaceTestGetAllConvSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(CPU_FinInterfaceTestGetConvSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(GPU_FinInterfaceTestGetConvSolver_FP32, FinInterface) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_FinInterfaceTestGetAllConvSolvers_NONE,
@@ -642,9 +644,9 @@ using CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE = TestGetAllSolvers<BatchN
 using CPU_FinInterfaceTestGetBatchNormSolvers_NONE    = TestGetSolvers<BatchNormTestCase>;
 using GPU_FinInterfaceTestGetBatchNormSolver_FP32     = TestGetSolver<BatchNormTestCase>;
 
-TEST_P(CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(CPU_FinInterfaceTestGetBatchNormSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(GPU_FinInterfaceTestGetBatchNormSolver_FP32, FinInterface) { this->RunTest(); };
+TEST_P(CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(CPU_FinInterfaceTestGetBatchNormSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(GPU_FinInterfaceTestGetBatchNormSolver_FP32, FinInterface) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE,
