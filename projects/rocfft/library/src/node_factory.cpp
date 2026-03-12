@@ -1072,7 +1072,7 @@ static std::size_t cutOffBatch_3 = 20;
 
 // Partial pass is currently restricted to large enough batch sizes,
 // unite stride, interleaved FFTs.
-auto check_pp_restrictions = [](const NodeMetaData& nodeData, const bool& cutOffBatch) -> bool {
+auto check_pp_restrictions = [](const NodeMetaData& nodeData, const size_t& cutOffBatch) -> bool {
     size_t checkiDist = 0, checkoDist = 0;
 
     auto inputLength = nodeData.length;
