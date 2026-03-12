@@ -7,8 +7,8 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_frontend/detail/EngineOverrideDesc.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/NodeType.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -21,8 +21,6 @@ namespace hipdnn_frontend::graph
 
 class INode
 {
-    friend struct hipdnn_frontend::detail::EngineOverrideAccess;
-
 public:
     GraphAttributes graph_attributes; // NOLINT(readability-identifier-naming)
     INode(GraphAttributes attributes)
@@ -54,6 +52,11 @@ public:
     virtual std::string getNodeName() const
     {
         return {};
+    }
+
+    virtual NodeType getNodeType() const
+    {
+        return NodeType::Unknown;
     }
 
     virtual void
@@ -128,15 +131,6 @@ public:
     }
 
 protected:
-    /// Returns the engine override descriptor for this node.
-    /// Nodes that participate in engine override selection should override
-    /// this to return their operation name and ordered input tensors.
-    /// Default returns empty (node does not participate).
-    virtual hipdnn_frontend::detail::EngineOverrideDesc getEngineOverrideDesc() const
-    {
-        return {};
-    }
-
     std::vector<std::shared_ptr<INode>> _sub_nodes;
 
     Error validateSubtree()
@@ -166,7 +160,7 @@ protected:
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
 // BaseNode uses this to gather tensor uids, and populate unset ones.
-template <typename DerivedT>
+template <typename DerivedT, NodeType Type = NodeType::Unknown>
 class BaseNode : public INode
 {
 private:
@@ -180,6 +174,11 @@ private:
     }
 
 public:
+    NodeType getNodeType() const override
+    {
+        return Type;
+    }
+
     std::string getNodeName() const override
     {
         return std::string(self().attributes.get_name());
@@ -254,6 +253,6 @@ protected:
     using INode::INode;
 };
 
-template <typename DerivedT>
-using NodeCRTP = BaseNode<DerivedT>; // NOLINT
+template <typename DerivedT, NodeType Type = NodeType::Unknown>
+using NodeCRTP = BaseNode<DerivedT, Type>; // NOLINT
 } // namespace hipdnn_frontend::graph

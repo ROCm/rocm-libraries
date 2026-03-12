@@ -13,7 +13,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode>
+class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode, NodeType::ConvolutionFprop>
 {
 public:
     ConvFpropAttributes attributes;
@@ -22,11 +22,6 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
-    }
-
-    hipdnn_frontend::detail::EngineOverrideDesc getEngineOverrideDesc() const override
-    {
-        return {true, "conv_fprop", {attributes.get_x(), attributes.get_w()}};
     }
 
     Error pre_validate_node() const override

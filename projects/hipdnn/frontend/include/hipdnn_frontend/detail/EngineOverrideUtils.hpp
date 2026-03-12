@@ -3,27 +3,21 @@
 #pragma once
 
 #include <hipdnn_frontend/detail/EngineOverrideConfig.hpp>
-#include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 
 #include <optional>
-
-inline hipdnn_frontend::detail::EngineOverrideDesc
-    hipdnn_frontend::detail::EngineOverrideAccess::getDesc(
-        const hipdnn_frontend::graph::INode& node)
-{
-    return node.getEngineOverrideDesc();
-}
 
 namespace hipdnn_frontend::engine_override
 {
 
-/// Walk the graph using the node visitor to find the first operation
-/// that participates in engine override and return the preferred engine
-/// ID from the lazily-loaded engine override config (pointed to by
-/// HIPDNN_ENGINE_OVERRIDE_FILE).
+/// Walk the graph using the node visitor to find the first convolution
+/// operation and return the preferred engine ID from the lazily-loaded
+/// engine override config (pointed to by HIPDNN_ENGINE_OVERRIDE_FILE).
 ///
 /// Returns nullopt when:
-/// - no participating node is present in the graph,
+/// - no convolution node is present in the graph,
 /// - no rule in the config matches the operation's tensors, or
 /// - JSON support is compiled out (HIPDNN_FRONTEND_SKIP_JSON_LIB defined).
 inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INode& root)
@@ -35,10 +29,32 @@ inline std::optional<int64_t> getPreferredIdFromOverrideConfig(const graph::INod
         {
             return;
         }
-        auto desc = hipdnn_frontend::detail::EngineOverrideAccess::getDesc(node);
-        if(desc.enabled)
+
+        switch(node.getNodeType())
         {
-            result = checkEngineOverride(desc.name, desc.tensors);
+        case graph::NodeType::ConvolutionFprop:
+        {
+            const auto& conv = static_cast<const graph::ConvolutionFpropNode&>(node);
+            result = checkEngineOverride("conv_fprop",
+                                         {conv.attributes.get_x(), conv.attributes.get_w()});
+            break;
+        }
+        case graph::NodeType::ConvolutionDgrad:
+        {
+            const auto& conv = static_cast<const graph::ConvolutionDgradNode&>(node);
+            result = checkEngineOverride("conv_dgrad",
+                                         {conv.attributes.get_dy(), conv.attributes.get_w()});
+            break;
+        }
+        case graph::NodeType::ConvolutionWgrad:
+        {
+            const auto& conv = static_cast<const graph::ConvolutionWgradNode&>(node);
+            result = checkEngineOverride("conv_wgrad",
+                                         {conv.attributes.get_x(), conv.attributes.get_dy()});
+            break;
+        }
+        default:
+            break;
         }
     });
 

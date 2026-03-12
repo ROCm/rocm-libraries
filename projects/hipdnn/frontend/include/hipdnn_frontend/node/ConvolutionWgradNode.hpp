@@ -14,7 +14,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode>
+class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode, NodeType::ConvolutionWgrad>
 {
 public:
     ConvWgradAttributes attributes;
@@ -23,11 +23,6 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
-    }
-
-    hipdnn_frontend::detail::EngineOverrideDesc getEngineOverrideDesc() const override
-    {
-        return {true, "conv_wgrad", {attributes.get_x(), attributes.get_dy()}};
     }
 
     Error pre_validate_node() const override
