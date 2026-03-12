@@ -19,6 +19,24 @@ namespace rocRoller::Serialization
     }
 
     template <typename IO>
+    struct MappingTraits<Client::GEMMClient::XYTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::XYTuple& x)
+        {
+            iot::mapRequired(io, "x", x.x);
+            iot::mapRequired(io, "y", x.y);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::XYTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
+
+    template <typename IO>
     struct MappingTraits<Client::GEMMClient::MNKTuple, IO, EmptyContext>
     {
         static const bool flow = false;
@@ -107,6 +125,8 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "scalePreTileA", params.scalePretileA);
             iot::mapRequired(io, "scalePreTileB", params.scalePretileB);
+
+            iot::mapRequired(io, "pretileB", params.pretileB);
         }
 
         static void mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)
@@ -145,6 +165,38 @@ namespace rocRoller::Serialization
     };
 
     template <typename IO>
+    struct MappingTraits<Client::BenchmarkResults, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::BenchmarkResults& result)
+        {
+            iot::mapRequired(io, "device", result.benchmarkParams.device);
+            iot::mapRequired(io, "workgroupMappingValue", result.runParams.workgroupMappingValue);
+            iot::mapRequired(io, "numWGs", result.runParams.numWGs);
+            iot::mapRequired(io, "numWarmUp", result.benchmarkParams.numWarmUp);
+            iot::mapRequired(io, "numOuter", result.benchmarkParams.numOuter);
+            iot::mapRequired(io, "numInner", result.benchmarkParams.numInner);
+            iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
+            iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
+            iot::mapRequired(io, "kernelExecute", result.kernelExecute);
+            iot::mapRequired(io, "checked", result.checked);
+            iot::mapRequired(io, "correct", result.correct);
+            iot::mapRequired(io, "rnorm", result.rnorm);
+            iot::mapRequired(io, "sgprCount", result.sgprCount);
+            iot::mapRequired(io, "vgprCount", result.vgprCount);
+            iot::mapRequired(io, "agprCount", result.agprCount);
+            iot::mapRequired(io, "ldsBytes", result.ldsBytes);
+        }
+
+        static void mapping(IO& io, Client::BenchmarkResults& result, EmptyContext& ctx)
+        {
+            mapping(io, result);
+        }
+    };
+
+    template <typename IO>
     struct MappingTraits<Client::GEMMClient::Result, IO, EmptyContext>
     {
         static const bool flow = false;
@@ -153,30 +205,9 @@ namespace rocRoller::Serialization
         static void mapping(IO& io, Client::GEMMClient::Result& result)
         {
             iot::mapRequired(io, "resultType", result.benchmarkResults.resultType);
-            iot::mapRequired(io, "device", result.benchmarkResults.benchmarkParams.device);
-
-            flatMap(io, result.problemParams);
-            flatMap(io, result.solutionParams);
-
-            iot::mapRequired(io, "numWGs", result.benchmarkResults.runParams.numWGs);
-
-            iot::mapRequired(io, "numWarmUp", result.benchmarkResults.benchmarkParams.numWarmUp);
-            iot::mapRequired(io, "numOuter", result.benchmarkResults.benchmarkParams.numOuter);
-            iot::mapRequired(io, "numInner", result.benchmarkResults.benchmarkParams.numInner);
-
-            iot::mapRequired(io, "kernelGenerate", result.benchmarkResults.kernelGenerate);
-            iot::mapRequired(io, "kernelAssemble", result.benchmarkResults.kernelAssemble);
-            iot::mapRequired(io, "kernelExecute", result.benchmarkResults.kernelExecute);
-
-            iot::mapRequired(io, "checked", result.benchmarkResults.checked);
-            iot::mapRequired(io, "correct", result.benchmarkResults.correct);
-            iot::mapRequired(io, "rnorm", result.benchmarkResults.rnorm);
-
-            iot::mapRequired(io, "sgprCount", result.benchmarkResults.sgprCount);
-            iot::mapRequired(io, "vgprCount", result.benchmarkResults.vgprCount);
-            iot::mapRequired(io, "agprCount", result.benchmarkResults.agprCount);
-
-            iot::mapRequired(io, "ldsBytes", result.benchmarkResults.ldsBytes);
+            iot::mapRequired(io, "problem", result.problemParams);
+            iot::mapRequired(io, "solution", result.solutionParams);
+            iot::mapRequired(io, "benchmark", result.benchmarkResults);
         }
 
         static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)

@@ -13,7 +13,29 @@ set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/dat
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
-hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
+
+# Supported FlatBuffers versions (oldest to newest) - update this list when adding new version support.
+# Each version must have pre-generated headers in include/hipdnn_data_sdk/data_objects/v<version_tag>/
+# 24.12.23 matches PyTorch's FlatBuffers version for compatibility
+set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "${HIPDNN_FLATBUFFERS_VERSION}")
+
+if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
+    message(FATAL_ERROR
+        "Unsupported FlatBuffers version: ${HIPDNN_FLATBUFFERS_VERSION}. "
+        "Supported versions are: ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}"
+    )
+endif()
+
+# Compute versioned directory name from version string (e.g., "25.9.23" -> "v25_9_23")
+string(REPLACE "." "_" _fb_version_tag "${HIPDNN_FLATBUFFERS_VERSION}")
+set(HIPDNN_FLATBUFFERS_VERSION_DIR "v${_fb_version_tag}")
+set(HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_data_sdk/data_objects/${HIPDNN_FLATBUFFERS_VERSION_DIR}"
+)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
@@ -49,14 +71,11 @@ function(_hipdnn_data_sdk_process_dependency TARGET_NAME ALIAS_NAME)
         set(_hipdnn_data_sdk_local_export_targets ${_hipdnn_data_sdk_local_export_targets} PARENT_SCOPE)
 
         # Add include directory if specified
+        # When INCLUDE_SUBDIR is specified, we want to install the subdirectory WITH its name preserved
+        # (e.g., .../include/flatbuffers/ should install as flatbuffers/ not flatten its contents)
+        # So we use INCLUDE_DIR (the parent) in the list, and the install command will copy subdirs
         if(ARG_INCLUDE_DIR)
-            if(ARG_INCLUDE_SUBDIR)
-                list(APPEND _hipdnn_data_sdk_local_export_includes
-                     ${ARG_INCLUDE_DIR}/${ARG_INCLUDE_SUBDIR}
-                )
-            else()
-                list(APPEND _hipdnn_data_sdk_local_export_includes ${ARG_INCLUDE_DIR})
-            endif()
+            list(APPEND _hipdnn_data_sdk_local_export_includes ${ARG_INCLUDE_DIR})
             set(_hipdnn_data_sdk_local_export_includes ${_hipdnn_data_sdk_local_export_includes} PARENT_SCOPE)
         endif()
     endif()
@@ -85,9 +104,11 @@ if(TARGET FlatBuffers)
 endif()
 
 # Process nlohmann_json dependency
-_hipdnn_data_sdk_process_dependency(
-    nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
-)
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    _hipdnn_data_sdk_process_dependency(
+        nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
+    )
+endif()
 
 add_library(hipdnn_data_sdk INTERFACE)
 
@@ -96,58 +117,57 @@ hipdnn_generate_version_header(hipdnn_data_sdk)
 
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+endif()
+
+target_compile_definitions(
+    hipdnn_data_sdk INTERFACE
+    $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_DATA_SDK_SKIP_JSON_LIB>
+)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
+                              $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_GENERATED_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
 )
 
-# Automatically generate the flatbuffer headers from the schema files during build
+# Automatically generate the flatbuffer headers from the schema files during build.
+# When enabled, headers are regenerated for ALL supported FlatBuffers versions so that
+# schema changes are reflected across every version directory.
 if(HIPDNN_GENERATE_SDK_HEADERS)
-    set(SCHEMA_FILES
-        schemas/batchnorm_attributes.fbs
-        schemas/batchnorm_backward_attributes.fbs
-        schemas/batchnorm_inference_attributes.fbs
-        schemas/batchnorm_inference_attributes_variance_ext.fbs
-        schemas/convolution_common.fbs
-        schemas/convolution_fwd_attributes.fbs
-        schemas/convolution_bwd_attributes.fbs
-        schemas/convolution_wrw_attributes.fbs
-        schemas/data_types.fbs
-        schemas/engine_config.fbs
-        schemas/engine_details.fbs
-        schemas/graph.fbs
-        schemas/knob_value.fbs
-        schemas/matmul_attributes.fbs
-        schemas/pointwise_attributes.fbs
-        schemas/tensor_attributes.fbs
+    include(../cmake/FlatBuffersGenerate.cmake)
+
+    hipdnn_generate_flatbuffer_headers(
+        TARGET hipdnn_data_sdk
+        SCHEMAS
+            schemas/batchnorm_attributes.fbs
+            schemas/batchnorm_backward_attributes.fbs
+            schemas/batchnorm_inference_attributes.fbs
+            schemas/batchnorm_inference_attributes_variance_ext.fbs
+            schemas/block_scale_dequantize_attributes.fbs
+            schemas/convolution_common.fbs
+            schemas/convolution_fwd_attributes.fbs
+            schemas/convolution_bwd_attributes.fbs
+            schemas/convolution_wrw_attributes.fbs
+            schemas/data_types.fbs
+            schemas/engine_config.fbs
+            schemas/engine_details.fbs
+            schemas/graph.fbs
+            schemas/knob_value.fbs
+            schemas/layernorm_attributes.fbs
+            schemas/matmul_attributes.fbs
+            schemas/norm_common.fbs
+            schemas/pointwise_attributes.fbs
+            schemas/rmsnorm_attributes.fbs
+            schemas/block_scale_quantize_attributes.fbs
+            schemas/sdpa_attributes.fbs
+            schemas/tensor_attributes.fbs
+        SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
+        PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
+        SUPPORTED_VERSIONS ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}
+        GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_data_sdk/data_objects"
     )
-
-    _save_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
-
-    set(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS
-        "--gen-object-api;--gen-mutable;--gen-compare;--defaults-json;--scoped-enums"
-    )
-    build_flatbuffers(
-        "${SCHEMA_FILES}" # flatbuffers_schemas
-        "" # schema_include_dirs
-        generate_hipdnn_data_sdk_headers # custom_target_name
-        "" # additional_dependencies
-        ${HIP_DNN_DATA_SDK_INCLUDE_DIR}/hipdnn_data_sdk/data_objects # generated_includes_dir
-        "" # binary_schemas_dir
-        "" # copy_text_schemas_dir
-    )
-
-    # Flatc build has some warnings that trigger and print to the console.  Since we dont want these
-    # we can suppress all warnings by using the -w compile flag.  This command prepends -w to the
-    # compile flats for the flatc target.
-    if(TARGET flatc)
-        set_target_properties(flatc PROPERTIES COMPILE_FLAGS "-w")
-    endif()
-    _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
-
-    add_dependencies(hipdnn_data_sdk generate_hipdnn_data_sdk_headers)
 endif()
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
@@ -186,6 +206,9 @@ install(EXPORT hipdnn_data_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
 # that uses find_package to find the dependencies.
 if(_hipdnn_data_sdk_local_export_includes)
     # cmake-lint: disable=E1122
+    # Install FlatBuffers headers to data_sdk/flatbuffers/ (not hipdnn_data_sdk/flatbuffers/)
+    # so they're findable from the base include path without adding extra include directories
+    # Exclude code generation utilities (codegen/, pch/) that aren't needed at runtime
     install(
         DIRECTORY ${_hipdnn_data_sdk_local_export_includes}/
         DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}
@@ -193,6 +216,7 @@ if(_hipdnn_data_sdk_local_export_includes)
         FILES_MATCHING
         PATTERN "*.h"
         PATTERN "*.hpp"
+        PATTERN "codegen" EXCLUDE
     )
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_data_sdkConfig_local.cmake.in"

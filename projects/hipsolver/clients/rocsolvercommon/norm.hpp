@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -114,14 +114,14 @@ double norm_error(char        norm_type,
         }
     }
 
-    double      work[M];
-    rocblas_int incx  = 1;
-    double      alpha = -1.0;
-    rocblas_int size  = lda * N;
+    std::vector<double> work(M);
+    rocblas_int         incx  = 1;
+    double              alpha = -1.0;
+    rocblas_int         size  = lda * N;
 
-    double gold_norm = xlange(&norm_type, &M, &N, gold_double.data(), &lda, work);
+    double gold_norm = xlange(&norm_type, &M, &N, gold_double.data(), &lda, work.data());
     xaxpy(&size, &alpha, gold_double.data(), &incx, comp_double.data(), &incx);
-    double error = xlange(&norm_type, &M, &N, comp_double.data(), &lda, work);
+    double error = xlange(&norm_type, &M, &N, comp_double.data(), &lda, work.data());
     if(gold_norm > 0)
         error /= gold_norm;
 
@@ -158,14 +158,14 @@ double norm_error(char        norm_type,
         }
     }
 
-    double                 work[M];
+    std::vector<double>    work(M);
     rocblas_int            incx  = 1;
     rocblas_double_complex alpha = -1.0;
     rocblas_int            size  = lda * N;
 
-    double gold_norm = xlange(&norm_type, &M, &N, gold_double.data(), &lda, work);
+    double gold_norm = xlange(&norm_type, &M, &N, gold_double.data(), &lda, work.data());
     xaxpy(&size, &alpha, gold_double.data(), &incx, comp_double.data(), &incx);
-    double error = xlange(&norm_type, &M, &N, comp_double.data(), &lda, work);
+    double error = xlange(&norm_type, &M, &N, comp_double.data(), &lda, work.data());
     if(gold_norm > 0)
         error /= gold_norm;
 

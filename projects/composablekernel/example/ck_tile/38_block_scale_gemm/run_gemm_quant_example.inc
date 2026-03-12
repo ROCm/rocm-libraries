@@ -10,6 +10,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <chrono>
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/ops/common/utils.hpp"
@@ -184,7 +185,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
 
         using ABQuantPipeline = std::conditional_t<
             eight_warps,
-            ck_tile::ABQuantGemmPipelineAgBgCrAsync<PipelineProblem>,
+            ck_tile::ABQuantGemmPipelineAgBgCrEightWarps<PipelineProblem>,
             std::conditional_t<GemmConfig::DoubleSmemBuffer && GemmConfig::PreshuffleB,
                                ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
                                ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
@@ -235,8 +236,10 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
         const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
         const dim3 blocks = Kernel::BlockSize();
 
-        // Split-K validation is handled by Kernel::IsSupportedArgument
-        // Split-K is only supported for BQuantGrouped without preshuffle
+        // Split-K validation is handled by Kernel::IsSupportedArgument.
+        // Split-K is supported for:
+        //   - BQuantGrouped without preshuffle
+        //   - ABQuantGrouped without APreshuffleQuant
         if(!Kernel::IsSupportedArgument(kargs))
         {
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");

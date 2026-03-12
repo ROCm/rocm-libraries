@@ -28,7 +28,8 @@ constexpr void instantiate_kernel(std::vector<std::unique_ptr<DeviceOp>>& kernel
 // Helper function that instantiates multiple kernels using variadic templates.
 // Expands the parameter pack to call instantiate_kernel for each value.
 template <typename DeviceOp, typename T, T... values>
-constexpr void build_kernels_helper(std::vector<std::unique_ptr<DeviceOp>>& kernels)
+constexpr void
+add_device_operation_instances_helper(std::vector<std::unique_ptr<DeviceOp>>& kernels)
 {
     ((instantiate_kernel<values>(kernels)), ...);
 }
@@ -36,10 +37,10 @@ constexpr void build_kernels_helper(std::vector<std::unique_ptr<DeviceOp>>& kern
 // Implementation detail that expands an array into individual kernel instantiations.
 // Uses index_sequence to unpack array elements at compile-time.
 template <typename DeviceOp, typename T, std::size_t N, std::array<T, N> arr, std::size_t... I>
-constexpr void build_kernels_impl(std::vector<std::unique_ptr<DeviceOp>>& kernels,
-                                  std::index_sequence<I...>)
+constexpr void add_device_operation_instances_impl(std::vector<std::unique_ptr<DeviceOp>>& kernels,
+                                                   std::index_sequence<I...>)
 {
-    build_kernels_helper<DeviceOp, T, arr[I]...>(kernels);
+    add_device_operation_instances_helper<DeviceOp, T, arr[I]...>(kernels);
 }
 
 // Type trait to extract array properties (element type and size).
@@ -58,11 +59,12 @@ struct array_traits<std::array<T, N>>
 // Takes a compile-time array of kernel descriptors and instantiates each one.
 // This is the primary function used by factory implementations.
 template <auto arr, typename DeviceOp>
-constexpr void build_kernels(std::vector<std::unique_ptr<DeviceOp>>& kernels)
+constexpr void add_device_operation_instances(std::vector<std::unique_ptr<DeviceOp>>& kernels)
 {
     using T                 = typename array_traits<decltype(arr)>::value_type;
     constexpr std::size_t N = array_traits<decltype(arr)>::size;
-    build_kernels_impl<DeviceOp, T, N, arr>(kernels, std::make_index_sequence<N>{});
+    add_device_operation_instances_impl<DeviceOp, T, N, arr>(kernels,
+                                                             std::make_index_sequence<N>{});
 }
 
 // Implementation detail for concatenating two arrays at compile-time.
@@ -100,6 +102,38 @@ concat(const std::array<T, N1>& a, const std::array<T, N2>& b, const std::array<
 {
     return concat(concat2(a, b), rest...);
 }
+
+// Counts elements where (index % Shards == ShardIndex).
+template <std::size_t Shards, std::size_t ShardIndex, std::size_t N>
+constexpr std::size_t count_modulo_elements()
+{
+    static_assert(ShardIndex < Shards, "ShardIndex must be less than Shards");
+    std::size_t count = 0;
+    for(std::size_t i = ShardIndex; i < N; i += Shards)
+    {
+        ++count;
+    }
+    return count;
+}
+
+// Compile-time array filter analogous to CK's filter_tuple_by_modulo_t.
+// Selects elements at indices: ShardIndex, ShardIndex+Shards, ShardIndex+2*Shards, ...
+template <auto arr, std::size_t Shards, std::size_t ShardIndex>
+constexpr auto filter_array_by_modulo()
+{
+    using T                         = typename array_traits<decltype(arr)>::value_type;
+    constexpr std::size_t N         = array_traits<decltype(arr)>::size;
+    constexpr std::size_t FilteredN = count_modulo_elements<Shards, ShardIndex, N>();
+
+    std::array<T, FilteredN> result{};
+    std::size_t out_idx = 0;
+    for(std::size_t i = ShardIndex; i < N; i += Shards)
+    {
+        result[out_idx++] = arr[i];
+    }
+    return result;
+}
+
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv
