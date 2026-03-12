@@ -144,12 +144,12 @@ public:
         return getInput(InputNames::V);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    std::shared_ptr<TensorAttributes> get_attn_mask() const
+    std::shared_ptr<TensorAttributes> get_bias() const
     {
         return getInput(InputNames::Bias);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    std::shared_ptr<TensorAttributes> get_scale() const
+    std::shared_ptr<TensorAttributes> get_attn_scale() const
     {
         return getInput(InputNames::Attn_scale);
     }
@@ -305,22 +305,22 @@ public:
         return setInput(InputNames::V, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_attn_mask(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_bias(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Bias, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_attn_mask(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_bias(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::Bias, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_scale(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_attn_scale(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Attn_scale, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_scale(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_attn_scale(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::Attn_scale, std::move(value));
     }
@@ -657,8 +657,8 @@ public:
             get_k()->get_uid(),
             get_v()->get_uid(),
             get_o()->get_uid(),
-            optUid(get_attn_mask()),
-            optUid(get_scale()),
+            optUid(get_bias()),
+            optUid(get_attn_scale()),
             optUid(get_seq_len_q()),
             optUid(get_seq_len_kv()),
             optUid(get_seed()),
@@ -715,11 +715,11 @@ public:
 
         if(fb->attn_mask_tensor_uid().has_value())
         {
-            attr.set_attn_mask(tensorMap.at(fb->attn_mask_tensor_uid().value()));
+            attr.set_bias(tensorMap.at(fb->attn_mask_tensor_uid().value()));
         }
         if(fb->scale_tensor_uid().has_value())
         {
-            attr.set_scale(tensorMap.at(fb->scale_tensor_uid().value()));
+            attr.set_attn_scale(tensorMap.at(fb->scale_tensor_uid().value()));
         }
         if(fb->seq_len_q_tensor_uid().has_value())
         {
