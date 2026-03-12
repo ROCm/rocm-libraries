@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+/**
+ * @file LayerNormNode.hpp
+ * @brief Graph node for layer normalization operations
+ */
+
 #pragma once
 
 #include "Node.hpp"
@@ -12,6 +18,15 @@
 
 namespace hipdnn_frontend::graph
 {
+/**
+ * @class LayerNormNode
+ * @brief Graph node that performs layer normalization
+ *
+ * Validates input tensors, infers output shapes, and serializes the
+ * layer normalization operation to FlatBuffer format.
+ *
+ * @see LayernormAttributes, Graph::layernorm()
+ */
 class LayerNormNode : public BaseNode<LayerNormNode>
 {
 public:
