@@ -17660,8 +17660,15 @@ class KernelWriterAssembly(KernelWriter):
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
       sizeShifter = 1 if dtype.isFloat4() else 0
-      mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit, self, sizeShifter))
-      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile0 // mxUnit// numComp // dim1Divisor, self))
+      numMxKGroups = sizeTile0 // mxUnit
+      if numMxKGroups >= numComp:
+        # K-splitting: enough k_groups to divide among wave components
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit, self, sizeShifter))
+        mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // numComp // dim1Divisor, self))
+      else:
+        # M/N-splitting: not enough k_groups, split tile dimension instead
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit // numComp, self, sizeShifter))
+        mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
       mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
     else:
       mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
