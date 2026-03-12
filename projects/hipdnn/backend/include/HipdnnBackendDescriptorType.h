@@ -235,4 +235,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT = 25,
 
+    /**
+     * @brief Batchnorm training forward operation descriptor (extension)
+     *
+     * Represents a batch normalization training forward operation with
+     * input (X), scale, bias, epsilon, output (Y), optional mean and
+     * inverse variance outputs, optional running statistics, and peer stats.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT = 26,
+
 } hipdnnBackendDescriptorType_t;

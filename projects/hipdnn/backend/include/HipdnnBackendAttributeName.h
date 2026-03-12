@@ -49,6 +49,7 @@
  * - 2500-2599: Matmul operation attributes
  * - 2600-2699: SDPA forward propagation operation attributes
  * - 2700-2799: Layernorm operation attributes
+ * - 2800-2813: Batchnorm training forward operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -797,6 +798,56 @@ typedef enum
 
     /** @brief Math precision (compute data type) for layernorm */
     HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
+
+    /** @} */
+
+    /**
+     * @name Batchnorm Training Forward Operation Attributes (2800-2813)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT = 2800,
+
+    /** @brief Scale tensor for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_SCALE_EXT = 2801,
+
+    /** @brief Bias tensor for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT = 2802,
+
+    /** @brief Epsilon tensor for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT = 2803,
+
+    /** @brief Output tensor (Y) for batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT = 2804,
+
+    /** @brief Previous running mean tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_MEAN_EXT = 2805,
+
+    /** @brief Previous running variance tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_VARIANCE_EXT = 2806,
+
+    /** @brief Momentum tensor (optional, required if running stats provided) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT = 2807,
+
+    /** @brief Batch mean output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT = 2808,
+
+    /** @brief Batch inverse variance output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INV_VARIANCE_EXT = 2809,
+
+    /** @brief Next running mean output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_MEAN_EXT = 2810,
+
+    /** @brief Next running variance output tensor (optional) */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT = 2811,
+
+    /** @brief Compute data type for batchnorm training forward */
+    HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT = 2812,
+
+    /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2813,
 
     /** @} */
 
