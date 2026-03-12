@@ -308,6 +308,7 @@ void loggerShutdown()
     // level so that if/when the logger is restarted it will reread the value from the
     // environment, following the original start-up behavior.
     hipdnn_data_sdk::logging::resetLogLevelCache();
+    hipdnn_data_sdk::logging::resetGraphLogModeCache();
 
     state.loggerInitialized = false;
 }

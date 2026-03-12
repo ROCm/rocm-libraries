@@ -46,6 +46,25 @@ Specifies the file path where logs will be **appended**. If not set, logs are wr
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
 ```
 
+#### HIPDNN_LOG_GRAPH
+
+Controls graph structure logging. When enabled alongside an appropriate log level, graphs are written as JSON files during finalization.
+
+| Value  | Description                                                |
+|--------|------------------------------------------------------------|
+| (unset)| Graph logging disabled (default)                           |
+| `json` | Write graph structures as JSON files                       |
+
+Graph JSON files are written to the same directory as `HIPDNN_LOG_FILE` (if set), or the current working directory. Files are named `graph_<hash>.json` where `<hash>` is derived from the graph content, ensuring identical graphs are not duplicated.
+
+Requires `HIPDNN_LOG_LEVEL=info` (or lower severity threshold) to be active.
+
+**Example:**
+```bash
+export HIPDNN_LOG_LEVEL=info
+export HIPDNN_LOG_GRAPH=json
+```
+
 ### MIOpen Plugin Logging
 
 > [!TIP]

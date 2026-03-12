@@ -9,6 +9,8 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+#include <logging/GraphLogger.hpp>
 #include <unordered_map>
 
 namespace hipdnn_backend
@@ -26,6 +28,13 @@ void GraphDescriptor::finalize()
 
     THROW_IF_NULL(_graph, HIPDNN_STATUS_BAD_PARAM, "GraphDescriptor::finalize: graph is null");
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
+
+    if(hipdnn_data_sdk::logging::isGraphLoggingEnabled())
+    {
+        auto serialized = getSerializedGraph();
+        logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
+                                       serialized.size);
+    }
 }
 
 void GraphDescriptor::buildGraphFromOperations()

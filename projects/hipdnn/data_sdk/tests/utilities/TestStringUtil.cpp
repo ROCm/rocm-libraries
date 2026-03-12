@@ -156,6 +156,56 @@ TEST_F(TestStringUtil, Fnv1aHashKnownValues)
     EXPECT_NE(hash1, hash2);
 }
 
+TEST_F(TestStringUtil, Fnv1aHashBinaryDeterministicBehavior)
+{
+    std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04, 0x05};
+    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), data.size());
+    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), data.size());
+
+    EXPECT_EQ(hash1, hash2);
+    EXPECT_NE(hash1, 0u);
+}
+
+TEST_F(TestStringUtil, Fnv1aHashBinaryHandlesNullPointer)
+{
+    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(static_cast<const uint8_t*>(nullptr), 10);
+    EXPECT_EQ(hash, 0u);
+}
+
+TEST_F(TestStringUtil, Fnv1aHashBinaryHandlesZeroSize)
+{
+    std::vector<uint8_t> data = {0x01};
+    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(data.data(), 0);
+    EXPECT_EQ(hash, 0u);
+}
+
+TEST_F(TestStringUtil, Fnv1aHashBinaryDifferentDataDifferentHashes)
+{
+    std::vector<uint8_t> data1 = {0x01, 0x02, 0x03};
+    std::vector<uint8_t> data2 = {0x01, 0x02, 0x04};
+    std::vector<uint8_t> data3 = {0x01, 0x02};
+
+    auto hash1 = hipdnn_data_sdk::utilities::fnv1aHash(data1.data(), data1.size());
+    auto hash2 = hipdnn_data_sdk::utilities::fnv1aHash(data2.data(), data2.size());
+    auto hash3 = hipdnn_data_sdk::utilities::fnv1aHash(data3.data(), data3.size());
+
+    EXPECT_NE(hash1, hash2);
+    EXPECT_NE(hash1, hash3);
+    EXPECT_NE(hash2, hash3);
+}
+
+TEST_F(TestStringUtil, Fnv1aHashBinaryConsistentWithStringForAscii)
+{
+    // For ASCII data, the binary overload should produce the same hash as the string overload
+    // since both iterate byte-by-byte with the same algorithm
+    const char* testStr = "hello";
+    auto hashStr = hipdnn_data_sdk::utilities::fnv1aHash(testStr);
+    auto hashBin = hipdnn_data_sdk::utilities::fnv1aHash(reinterpret_cast<const uint8_t*>(testStr),
+                                                         std::strlen(testStr));
+
+    EXPECT_EQ(hashStr, hashBin);
+}
+
 // Tests for trim function
 TEST_F(TestStringUtil, TrimRemovesLeadingWhitespace)
 {

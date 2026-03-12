@@ -80,6 +80,35 @@ inline hipdnnSeverity_t stringToSeverityOrOff(const std::string& level)
     return stringToSeverity(level).value_or(HIPDNN_SEV_OFF);
 }
 
+// Graph log mode for controlling graph structure output
+enum class GraphLogMode : uint8_t
+{
+    OFF,
+    JSON
+};
+
+inline GraphLogMode stringToGraphLogModeOrOff(const std::string& mode)
+{
+    std::string normalized = utilities::toLower(utilities::trim(mode));
+    if(normalized == "json")
+    {
+        return GraphLogMode::JSON;
+    }
+    return GraphLogMode::OFF;
+}
+
+HIPDNN_HIDDEN inline std::atomic<GraphLogMode>& getGraphLogModeCache()
+{
+    static std::atomic<GraphLogMode> s_graphLogMode{GraphLogMode::OFF};
+    return s_graphLogMode;
+}
+
+HIPDNN_HIDDEN inline std::atomic<bool>& getGraphLogModeInitialized()
+{
+    static std::atomic<bool> s_initialized{false};
+    return s_initialized;
+}
+
 } // namespace detail
 
 /**
@@ -163,6 +192,62 @@ inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
 inline void resetLogLevelCache()
 {
     detail::getLogLevelInitialized().store(false, std::memory_order_release);
+}
+
+/**
+ * @brief Initialize graph log mode from environment variable HIPDNN_LOG_GRAPH
+ *
+ * Should be called once at startup. Safe to call multiple times.
+ */
+inline void initializeGraphLogMode()
+{
+    if(detail::getGraphLogModeInitialized().load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    std::string graphLogMode = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_GRAPH", "");
+    detail::getGraphLogModeCache().store(detail::stringToGraphLogModeOrOff(graphLogMode),
+                                         std::memory_order_release);
+    detail::getGraphLogModeInitialized().store(true, std::memory_order_release);
+}
+
+/**
+ * @brief Get the current graph log mode
+ *
+ * @return The current graph log mode
+ */
+inline detail::GraphLogMode getGraphLogMode()
+{
+    if(!detail::getGraphLogModeInitialized().load(std::memory_order_acquire))
+    {
+        initializeGraphLogMode();
+    }
+    return detail::getGraphLogModeCache().load(std::memory_order_acquire);
+}
+
+/**
+ * @brief Check if graph logging is enabled
+ *
+ * Graph logging requires both HIPDNN_LOG_GRAPH to be set to a valid mode
+ * and the log level to be at least INFO.
+ *
+ * @return true if graph logging is enabled, false otherwise
+ */
+inline bool isGraphLoggingEnabled()
+{
+    return getGraphLogMode() != detail::GraphLogMode::OFF && isLogLevelEnabled(HIPDNN_SEV_INFO);
+}
+
+/**
+ * @brief Reset graph log mode state
+ *
+ * This resets the graph log mode initialization flag, causing the next
+ * getGraphLogMode() call to re-read from the environment variable.
+ */
+inline void resetGraphLogModeCache()
+{
+    detail::getGraphLogModeInitialized().store(false, std::memory_order_release);
 }
 
 } // namespace hipdnn_data_sdk::logging
