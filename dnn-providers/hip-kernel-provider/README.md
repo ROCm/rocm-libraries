@@ -6,7 +6,7 @@ A hipDNN plugin that provides GPU kernel implementations using HIP and HIPRTC fo
 
 ## Overview
 
-The HIP Kernel Provider is a hipDNN plugin that implements operations using custom HIP kernels compiled at runtime via HIPRTC. It provides an alternative backend to MIOpen for certain operations, with fine-grained control over kernel implementation.
+The HIP Kernel Provider is a hipDNN plugin that implements operations using custom HIP kernels compiled at runtime via HIPRTC.
 
 ## Architecture
 
@@ -63,15 +63,6 @@ After building, run the test suites:
 Kernel source files (`.cpp`, `.hpp`, `.h`) under `kernels/` are embedded as C++ string literals at CMake configure time. This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).
 
 The embedding is handled by the `embed_kernel_sources()` CMake function in `kernels/CMakeLists.txt`.
-
-## Development Status
-
-- [x] HIP/HIPRTC infrastructure (HipProgram, HipKernel)
-- [x] Kernel embedding build system
-- [x] Engine and plan builder framework
-- [ ] Additional operations
-- [ ] Performance optimizations
-- [ ] Auto-tuning infrastructure
 
 ## Contributing
 
