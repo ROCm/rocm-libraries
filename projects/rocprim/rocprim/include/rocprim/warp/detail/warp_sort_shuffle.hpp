@@ -109,6 +109,9 @@ struct warp_shuffle_sort_impl
                     constexpr auto item1 = i;
                     constexpr auto item2 = ItemsPerThread - 1 - i;
 
+                    // This double exchanging is to avoid read after write condition. If we don't
+                    // exchange 2 indices at the same time, then it could happen that the slower
+                    // thread read the already changed k_other[0] in the end.
                     K k1_1 = lane_xor_swap(k[item2], xor_mask);
                     K k1_2 = lane_xor_swap(k[item1], xor_mask);
                     V v1_1 = lane_xor_swap(v[item2], xor_mask);
@@ -191,6 +194,9 @@ struct warp_shuffle_sort_impl
                     constexpr auto item1 = i;
                     constexpr auto item2 = ItemsPerThread - 1 - i;
 
+                    // This double exchanging is to avoid read after write condition. If we don't
+                    // exhange 2 indices at the same time, then it could happen that the slower
+                    // thread read the already changed k_other[0] in the end.
                     K k1_1 = lane_xor_swap(k[item2], xor_mask);
                     K k1_2 = lane_xor_swap(k[item1], xor_mask);
 
@@ -250,18 +256,15 @@ struct warp_shuffle_sort_impl
         swap_if<method>(swap, v[i_l], v[i_r]);
     }
 
-    /// Applies the thread-level compare and swaps.
+    // Applies the thread-level compare and swaps.
     template<unsigned int group_size,
              unsigned int offset,
-             bool         flip,
+             bool         use_mirror_pairing,
              class BinaryFunction,
              class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void tlev_cas(BinaryFunction compare_function, KeyValue&... kv)
     {
-        // Note: we're storing 'group_dir' as unsigned int s.t. the compiler is more
-        // inclined to re-use the results from '__builtin_amdgcn_ubfe'.
-
         // for(unsigned int base = 0; base < ItemsPerThread; base += 2 * offset)
         ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread, 2 * offset>(
             [&](auto base)
@@ -272,8 +275,12 @@ struct warp_shuffle_sort_impl
                     {
                         constexpr unsigned int i_l = base + i;
 
-                        constexpr unsigned int i_r
-                            = flip ? (base + group_size - 1 - i) : (base + i + offset);
+                        // To support forward-only comparisons, the first step of building a bitonic
+                        // sequence pairs the lower half with the reversed (mirrored) upper half.
+                        // Subsequent passes use a standard linear offset.
+                        constexpr unsigned int i_r = use_mirror_pairing
+                                                         ? (base + group_size - 1 - i)
+                                                         : (base + i + offset);
 
                         tlev_cas_single<i_l, i_r>(compare_function, kv...);
                     });
@@ -281,9 +288,9 @@ struct warp_shuffle_sort_impl
     }
 
     template<class BinaryFunction,
-             int  group_size      = ItemsPerThread,
-             int  offset          = group_size / 2,
-             bool first_step_flip = false,
+             int  group_size    = ItemsPerThread,
+             int  offset        = group_size / 2,
+             bool is_first_pass = false,
              class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void tlev_pass(BinaryFunction compare_function, KeyValue&... kv)
@@ -292,8 +299,10 @@ struct warp_shuffle_sort_impl
         //   for(unsigned int offset = group_size / 2; offset > 0; offset /= 2)
         if constexpr(offset > 0)
         {
-            constexpr bool do_flip = first_step_flip && (offset == group_size / 2);
-            tlev_cas<group_size, offset, do_flip>(compare_function, kv...);
+            // Mirror pairing is only required on the first step of the group to
+            // establish the correct bitonic topology.
+            constexpr bool use_mirror = is_first_pass && (offset == group_size / 2);
+            tlev_cas<group_size, offset, use_mirror>(compare_function, kv...);
 
             tlev_pass<BinaryFunction, group_size, offset / 2, false>(compare_function, kv...);
         }
@@ -303,10 +312,12 @@ struct warp_shuffle_sort_impl
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void tlev_sort(BinaryFunction compare_function, KeyValue&... kv)
     {
-        // Implement the following loop using recursion:
+        // Recursively double the group size to build increasingly larger *bitonic* sequences.
         //   for(unsigned int group_size = 2; group_size <= ItemsPerThread; group_size *= 2)
         if constexpr(group_size <= ItemsPerThread)
         {
+            // The very first pass for a new group size must use mirror pairing to properly
+            // pair the two monotonic sequences into a bitonic one.
             tlev_pass<BinaryFunction, group_size, group_size / 2, true>(compare_function, kv...);
             // Recurse...
             tlev_sort<BinaryFunction, group_size * 2, KeyValue...>(compare_function, kv...);
@@ -362,26 +373,26 @@ struct warp_shuffle_sort_impl
         ::rocprim::detail::constexpr_for_lte<1, num_id_bits, 1>(
             [&](auto group_bit)
             {
-                // Each iteration here combines a bitonic sequence of '1 << group_bit'
-                // elements. I.e. the first iteration (group_bit = 1) we have 2 elements
-                // in our bitonic sequence. This bit also indicate the sort direction s.t.
-                // we produce a bitonic sequence of double the size (i.e. group_bit = 2
-                // has 4 elements in the bitonic sequence).
+                // Each iteration builds and merges a bitonic sequence of '1 << group_bit'
+                // elements across lanes.
                 //
-                // Example:
-                //   /\/\ (1) 2 bitonic sequences
-                //     -- This part is sorted in reverse!
-                //   //\\ (2) 1 bitonic sequence
-                //        No part is reversed! This is using 'id_bits[num_id_bits] = 0u'
-                //   //// (3) 1 monotonic sequence
+                // Unlike traditional bitonic sort which alternates sorting directions
+                // (ascending/descending) to build the bitonic topology (/\/\), this is a
+                // FORWARD-ONLY bitonic sort. All lanes sort in the same monotonic direction (////).
+                //
+                // We simulate the bitonic sequence structurally: during the very first step
+                // of a new group size, we pair lanes using a mirrored XOR mask. This folds
+                // the previously sorted monotonic sequences into a bitonic shape, which is
+                // then merged into a larger monotonic sequence by following linear steps.
                 ::rocprim::detail::constexpr_for_gte<group_bit - 1, 0, -1>(
                     [&](auto offset_bit)
                     {
-                        // The pass_bit indicates which direction this lane should sort. For
-                        // example if lane 0 and 1 need to exchange items, then lane 1 needs
-                        // to use the reverse direction of self vs other comparison.
-                        // E.g. lane 0: v[0] (self ) < v[1] (other)
-                        //      lane 1: v[0] (other) < v[1] (self )
+                        // The offset_bit (via is_upper) denotes the role of the current lane
+                        // within the comparison pair. It ensures the smaller element goes to
+                        // the lane with the lower ID, and the larger to the higher ID.
+                        //
+                        // is_upper == 0: This lane is the lower half. It wants the minimum.
+                        // is_upper == 1: This lane is the upper half. It wants the maximum.
                         constexpr bool         is_first_step = (offset_bit == group_bit - 1);
                         constexpr unsigned int xor_mask
                             = is_first_step ? ((1u << group_bit) - 1u) : (1u << offset_bit);

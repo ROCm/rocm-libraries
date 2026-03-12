@@ -52,9 +52,11 @@ struct block_sort_bitonic_impl
     static constexpr int num_wave_bits = Log2<VirtualWaveSize>::VALUE;
     static constexpr int num_id_bits   = Log2<BlockSize>::VALUE;
 
-    // Define block-level compare-and-swap. This family of functions compares
-    // keys between threads and swaps the smallest key (and value) in the specified
-    // direction.
+    // Define block-level compare-and-swap.
+    // This family of functions compares keys across threads using Shared Memory.
+    // Following the forward-only bitonic sort logic:
+    // - 'is_first_step' determines if we use mirror pairing to build a bitonic sequence.
+    // - 'is_upper' denotes if the current thread keeps the min or max value.
     template<bool is_first_step = false, class Storage, class K, class V, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void blev_cas(unsigned int   id,
@@ -77,6 +79,8 @@ struct block_sort_bitonic_impl
         ROCPRIM_UNROLL
         for(unsigned int i = 0u; i < ItemsPerThread; ++i)
         {
+            // If it's the first step, we pair the i-th item of this thread with the 
+            // reversed (ItemsPerThread - 1 - i) item of the partner thread.
             const unsigned int other_i = is_first_step ? (ItemsPerThread - 1 - i) : i;
             const auto         i1      = (id ^ xor_mask) + (other_i * BlockSize);
 
@@ -179,15 +183,20 @@ struct block_sort_bitonic_impl
 
         // We have folded the implementation of:
         //   wlev::bitonic_sort(compare_function, kv...);
-        // into the rest of the block-level algorithm. We cannot simply
-        // call the wave-level sort because for the bitonic property to
-        // presist, we need to reverse the sorting direction of all odd
-        // warps.
+        // into the unified block-level loop.
         //
-        // The trick is that the wave-level implementation already exists
-        // in the block-level implementation. We simply must disable the
-        // block-level logic, which already happens implicitely due to the
-        // loop conditions.
+        // Unlike traditional bitonic sort, this is a FORWARD-ONLY implementation.
+        // We no longer reverse the sorting direction of odd warps. Instead, all
+        // threads sort monotonically, and the bitonic topology is inherently formed
+        // by using mirrored XOR masks during the first step of each group size.
+        //
+        // We cannot simply call the full warp-level sort (`wlev::bitonic_sort`)
+        // once at the beginning. As the sorted sequence grows larger than a single
+        // wavefront, the algorithm must alternate between shared memory and
+        // register shuffles. Thus we fold both warp-level and block-level logic into
+        // this single, unified loop. The loop uses 'group_bit' and 'offset_bit' to
+        // dynamically decide whether to use shared memory or shuffles for the current
+        // step.
         //
         // For a more in-depth explenation of this algorithm, please refer
         // to 'warp_shuffle_sort_impl::bitonic_sort(...)'.
@@ -215,6 +224,9 @@ struct block_sort_bitonic_impl
                         constexpr unsigned int xor_mask
                             = is_first_offset_bit ? ((1u << group_bit) - 1u) : (1u << offset_bit);
 
+                        // Dictates the min/max role of the current thread for forward-only sorting.
+                        // is_upper == 0: This thread is the lower half. It wants the minimum.
+                        // is_upper == 1: This thread is the upper half. It wants the maximum.
                         const unsigned int is_upper = id_bits[offset_bit];
 
                         // Assume that shared storage is ready to write on the very first
@@ -246,9 +258,15 @@ struct block_sort_bitonic_impl
                 ::rocprim::detail::constexpr_for_gte<wave_group_bit - 1, 0, -1>(
                     [&](auto offset_bit)
                     {
-                        constexpr bool         is_first_step = (offset_bit == group_bit - 1);
+                        constexpr bool is_first_step = (offset_bit == group_bit - 1);
+                        // If it's the first step, use a mirrored XOR mask to pair lanes from opposite
+                        // ends of the sequence. This inherently folds two sorted halves into a bitonic
+                        // topology. On all subsequent steps, use a standard linear XOR mask to merge
+                        // the bitonic sequence into a fully sorted monotonic sequence.
                         constexpr unsigned int xor_mask
                             = is_first_step ? ((1u << group_bit) - 1u) : (1u << offset_bit);
+                        // is_upper == 0: This thread is the lower half. It wants the minimum.
+                        // is_upper == 1: This thread is the upper half. It wants the maximum.
                         const unsigned int is_upper = id_bits[offset_bit];
 
                         // Enable packing since we have enough work to hide hazards from
