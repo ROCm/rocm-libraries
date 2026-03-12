@@ -56,7 +56,7 @@ namespace
         PASS_DEBUG(std::cerr << "Scheduling region with movable side effects:\n");
         PASS_DEBUG(for(IRList::iterator it = regionStart; it != regionEnd; ++it) {
             StinkyInstruction& inst = getStinkyInst(it);
-            inst.dump(std::cerr, true, "        ");
+            inst.dump(std::cerr);
         });
         PASS_DEBUG(std::cerr << "\n");
 
@@ -240,7 +240,7 @@ namespace
                 scheduled.push_back(&inst);
 
                 PASS_DEBUG(std::cerr << "Scheduling non-movable side-effect instruction:\n";
-                           inst.dump(std::cerr, true, "        ");
+                           inst.dump(std::cerr);
                            std::cerr << "\n");
 
                 // Start a new region after the side-effect instruction.

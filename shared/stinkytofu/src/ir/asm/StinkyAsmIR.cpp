@@ -51,18 +51,14 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     // StinkyInstruction implementation
     //----------------------------------------------------------------------
-    void StinkyInstruction::dump(bool printDetails, const std::string& prefix) const
+    void StinkyInstruction::dump() const
     {
-        dump(std::cerr, printDetails, prefix);
+        dump(std::cerr);
     }
 
-    void StinkyInstruction::dump(std::ostream&      out,
-                                 bool               printDetails,
-                                 const std::string& prefix) const
+    void StinkyInstruction::dump(std::ostream& out) const
     {
         AsmPrinter printer(out);
-        if(!prefix.empty())
-            out << prefix;
         printer.print(*this);
     }
 
@@ -110,12 +106,6 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     // StinkyInstruction Use-Def Chain Maintenance Implementation
     //----------------------------------------------------------------------
-
-    void StinkyInstruction::dump() const
-    {
-        dump(std::cerr, true);
-    }
-
     void StinkyInstruction::setSrcRegs(const std::vector<StinkyRegister>& newSrcRegs)
     {
         // Remove old use-def links

@@ -195,11 +195,6 @@ namespace stinkytofu
                                         IntrusiveListIterator<IRBase> first,
                                         IntrusiveListIterator<IRBase> last)
     {
-        fprintf(stderr,
-                "[Module] setGroupRange groupName=%s, first=%p, last=%p\n",
-                groupName.c_str(),
-                first.getNodePtr(),
-                last.getNodePtr());
         if(!hasGroup(groupName))
             return;
         auto& groupRange = pImpl->instructionGroups.at(groupName);

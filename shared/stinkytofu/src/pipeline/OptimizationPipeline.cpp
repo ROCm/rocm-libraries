@@ -22,8 +22,8 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/OptimizationPipeline.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
-#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
@@ -32,6 +32,8 @@
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <iostream>
 
@@ -234,6 +236,14 @@ namespace stinkytofu
             passManager.addPass(createCFGBuilderPass());
         }
 
+        // ========== Phase 1.5: Remove WaitCnts ==========
+        if(config.enableWaitCnt)
+        {
+            if(config.verbose)
+                std::cout << "\nPhase 1.5: Removing WaitCnts" << std::endl;
+            passManager.addPass(createStinkyRemoveWaitCntPass());
+        }
+
         // ========== Phase 2: Optimization ==========
         // Run optimizations AFTER CFG (for liveness analysis) but BEFORE scheduling
         // This ensures scheduling works on the final optimized instruction count
@@ -303,6 +313,9 @@ namespace stinkytofu
                     waitCntPass = createStinkyCustomWaitCntPass(*config.customWaitCnt);
                 else
                     waitCntPass = createStinkyConservativeWaitCntPass(); // Fallback
+                break;
+            case PipelineConfig::WaitCntMode::Classical:
+                waitCntPass = createStinkyWaitCntInsertionPass();
                 break;
             }
 

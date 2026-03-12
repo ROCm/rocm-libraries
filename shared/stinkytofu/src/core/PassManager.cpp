@@ -179,6 +179,9 @@ namespace stinkytofu
             dbgCfg->getOutputStreamInBefore().flush();
         }
 
+        // set function GemmTileConfig to pass context GemmTileConfig
+        F.setGemmTileConfig(passCtx.getGemmTileConfig());
+
         for(const auto& pass : passes)
         {
             if(dbgCfg && dbgCfg->shouldPrintBefore(pass->getName()))

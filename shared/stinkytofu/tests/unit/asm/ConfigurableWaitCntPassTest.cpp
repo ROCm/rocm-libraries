@@ -24,11 +24,12 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 using namespace stinkytofu;
 
@@ -66,8 +67,7 @@ protected:
     StinkyInstruction* createDSRead(int destReg, int addrReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::ds_load_b64, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::ds_load_b64, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 2));
         inst->addSrcReg(StinkyRegister("v", addrReg, 1));
@@ -78,8 +78,7 @@ protected:
     StinkyInstruction* createDSRead128(int destReg, int addrReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::ds_load_b128, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::ds_load_b128, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 4));
         inst->addSrcReg(StinkyRegister("v", addrReg, 1));
@@ -90,8 +89,7 @@ protected:
     StinkyInstruction* createDSWrite(int addrReg, int dataReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::ds_write_b64, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::ds_write_b64, arch));
 
         inst->addSrcReg(StinkyRegister("v", addrReg, 2));
         inst->addSrcReg(StinkyRegister("v", dataReg, 1));
@@ -102,7 +100,7 @@ protected:
     StinkyInstruction* createGlobalLoad(int destReg, int addrReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::global_load_dword, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::global_load_dword, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("s", addrReg, 4));
@@ -113,7 +111,7 @@ protected:
     StinkyInstruction* createGlobalStore(int addrReg, int dataReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::global_store_dword, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::global_store_dword, arch));
 
         inst->addSrcReg(StinkyRegister("v", addrReg, 1));
         inst->addSrcReg(StinkyRegister("s", dataReg, 4));
@@ -123,7 +121,7 @@ protected:
     StinkyInstruction* createTensorLoad(int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, arch));
 
         inst->addSrcReg(StinkyRegister("s", src0Reg, 4));
         inst->addSrcReg(StinkyRegister("s", src1Reg, 8));
@@ -134,8 +132,7 @@ protected:
     StinkyInstruction* createVAdd(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -147,8 +144,7 @@ protected:
     StinkyInstruction* createVMul(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -160,8 +156,7 @@ protected:
     StinkyInstruction* createBarrier()
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::s_barrier, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::s_barrier, arch));
         return inst;
     }
 
@@ -373,12 +368,22 @@ protected:
     }
 
     // Helper to run pass with configuration
-    void runPass(const WaitCntConfig& config)
+    void runPass(const WaitCntConfig& config, bool useNewPass = false)
     {
         PassContext passCtx;
         passCtx.setGemmTileConfig(gemmConfig);
-        auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
+        auto pass = useNewPass ? stinkytofu::createStinkyWaitCntInsertionPass()
+                               : stinkytofu::createStinkyCustomWaitCntPass(config);
         pass->run(*func, passCtx);
+    }
+
+    void runFunction(const WaitCntConfig& config, Function& func, bool useNewPass = false)
+    {
+        PassContext passCtx;
+        passCtx.setGemmTileConfig(gemmConfig);
+        auto pass = useNewPass ? stinkytofu::createStinkyWaitCntInsertionPass()
+                               : stinkytofu::createStinkyCustomWaitCntPass(config);
+        pass->run(func, passCtx);
     }
 
     void dumpInsts()
@@ -652,9 +657,8 @@ TEST_F(ConfigurableWaitCntPassTest, CompleteTest_UnrollLoopConfig)
 // Helper function to create ds_load_b32 instruction (32-bit, 1 register)
 StinkyInstruction* createDSReadB32InBlock(BasicBlock* bb, GfxArchID arch, int destReg, int addrReg)
 {
-    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
-    StinkyInstruction*  inst
-        = builder.create(getMCIDByUOp(GFX::ds_load_b32, arch));
+    AsmIRBuilder       builder = AsmIRBuilder(*bb, arch);
+    StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::ds_load_b32, arch));
 
     inst->addDestReg(StinkyRegister("v", destReg, 1));
     inst->addSrcReg(StinkyRegister("v", addrReg, 1)); // DS address is 1 VGPR
@@ -665,9 +669,8 @@ StinkyInstruction* createDSReadB32InBlock(BasicBlock* bb, GfxArchID arch, int de
 StinkyInstruction*
     createVFmacInBlock(BasicBlock* bb, GfxArchID arch, int destReg, int src0Reg, int src1Reg)
 {
-    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
-    StinkyInstruction*  inst
-        = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+    AsmIRBuilder       builder = AsmIRBuilder(*bb, arch);
+    StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
     inst->addDestReg(StinkyRegister("v", destReg, 1));
     inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -679,9 +682,8 @@ StinkyInstruction*
 StinkyInstruction*
     createSSubU32InBlock(BasicBlock* bb, GfxArchID arch, int destReg, int src0Reg, int src1Val)
 {
-    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
-    StinkyInstruction*  inst
-        = builder.create(getMCIDByUOp(GFX::s_sub_u32, arch));
+    AsmIRBuilder       builder = AsmIRBuilder(*bb, arch);
+    StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::s_sub_u32, arch));
 
     inst->addDestReg(StinkyRegister("s", destReg, 1));
     inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
@@ -692,9 +694,8 @@ StinkyInstruction*
 // Helper function to create s_cmp_eq_u32 instruction
 StinkyInstruction* createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int src0Reg, int src1Val)
 {
-    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
-    StinkyInstruction*  inst
-        = builder.create(getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
+    AsmIRBuilder       builder = AsmIRBuilder(*bb, arch);
+    StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
 
     inst->addSrcReg(StinkyRegister("s", src0Reg, 1));
     // For simplicity, we won't add the immediate value in this test
@@ -704,9 +705,8 @@ StinkyInstruction* createSCmpEqU32InBlock(BasicBlock* bb, GfxArchID arch, int sr
 // Helper function to create s_cbranch_scc0 instruction
 StinkyInstruction* createCondBranchInBlock(BasicBlock* bb, GfxArchID arch, const std::string& label)
 {
-    AsmIRBuilder builder = AsmIRBuilder(*bb, arch);
-    StinkyInstruction*  inst
-        = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+    AsmIRBuilder       builder = AsmIRBuilder(*bb, arch);
+    StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
     return inst;
 }
 
@@ -752,10 +752,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_NoLoop)
 
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
-    PassContext   passCtx;
-    passCtx.setGemmTileConfig(gemmConfig);
-    auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
-    pass->run(*noLoopFunc, passCtx);
+    runFunction(config, *noLoopFunc, true);
 
     // Collect waitcnt instructions
     std::vector<WaitCntInfo> waitcnts;
@@ -828,36 +825,41 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     // Current status: SKIPPED - requires iterative dataflow for convergence
 
     TearDown();
-    auto loopFunc = std::make_unique<Function>("test_loop_only");
-    loopFunc->setGemmTileConfig(gemmConfig);
-    BasicBlock* loopBlock = loopFunc->createBasicBlock("loop_start");
+    std::string irString = R"(
+st.func @test_loop_only() {
+^entry:
+  Successors: ^loop_start
+^loop_start:
+  v4 = "st.v_add_f32"(v0, v2) { issueCycles = 1, latencyCycles = 1 }
+  v4 = "st.v_add_f32"(v1, v3) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop_start
+}
+)";
 
-    // Set up loop back-edge: block points to itself
-    loopBlock->addSuccessor(loopBlock);
-    loopBlock->addPredecessor(loopBlock);
+    StinkyIRConverter converter;
+    auto*             loopFunc = converter.convertToFunction(irString);
+
+    ASSERT_NE(loopFunc, nullptr) << "loopFunc should not be nullptr";
+    loopFunc->setGemmTileConfig(gemmConfig);
+
+    // get loop_start block
+    BasicBlock& loopBlock = *std::next(loopFunc->begin());
 
     // Verify this is a loop block
-    EXPECT_TRUE(hasLoopBackEdge(loopBlock)) << "Loop block should have back-edge to itself";
-
-    // Build instructions: v_adds THEN ds_loads (loop pattern)
-    StinkyInstruction* fmac1 = createVFmacInBlock(loopBlock, arch, 4, 0, 2); // v_add v4, v0, v2
-    StinkyInstruction* fmac2 = createVFmacInBlock(loopBlock, arch, 4, 1, 3); // v_add v4, v1, v3
-    createDSReadB32InBlock(loopBlock, arch, 0, 10); // ds_load v0
-    createDSReadB32InBlock(loopBlock, arch, 2, 10); // ds_load v2
-    createDSReadB32InBlock(loopBlock, arch, 1, 10); // ds_load v1
-    createDSReadB32InBlock(loopBlock, arch, 3, 10); // ds_load v3
+    EXPECT_TRUE(hasLoopBackEdge(&loopBlock)) << "Loop block should have back-edge to itself";
 
     // Run the pass
     WaitCntConfig config = WaitCntConfig::standard();
-    PassContext   passCtx;
-    passCtx.setGemmTileConfig(gemmConfig);
-    auto pass = stinkytofu::createStinkyCustomWaitCntPass(config);
-    pass->run(*loopFunc, passCtx);
+    runFunction(config, *loopFunc, true);
 
     // Collect waitcnt instructions
     std::vector<WaitCntInfo> waitcnts;
     int                      position = 0;
-    for(auto& irBase : *loopBlock)
+    for(auto& irBase : loopBlock)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
         if(SWaitCntData* wait = inst.getModifier<SWaitCntData>())
@@ -871,16 +873,17 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     int fmac1Pos = -1;
     int fmac2Pos = -1;
     position     = 0;
-    for(auto& irBase : *loopBlock)
+    for(auto& irBase : loopBlock)
     {
         StinkyInstruction& inst = static_cast<StinkyInstruction&>(irBase);
-        if(&inst == fmac1)
+        if(fmac1Pos == -1 && inst.getUnifiedOpcode() == GFX::v_add_f32)
         {
             fmac1Pos = position;
         }
-        if(&inst == fmac2)
+        else if(fmac2Pos == -1 && inst.getUnifiedOpcode() == GFX::v_add_f32)
         {
             fmac2Pos = position;
+            break;
         }
         position++;
     }
@@ -1273,8 +1276,8 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     testFunc->setGemmTileConfig(gemmConfig);
     BasicBlock* entry  = testFunc->createBasicBlock("entry");
     BasicBlock* block1 = testFunc->createBasicBlock("b1");
-    BasicBlock* block2   = testFunc->createBasicBlock("b2");
-    BasicBlock* block3   = testFunc->createBasicBlock("b3");
+    BasicBlock* block2 = testFunc->createBasicBlock("b2");
+    BasicBlock* block3 = testFunc->createBasicBlock("b3");
 
     // Build Entry: just a branch (conceptually branches to both b1 and b2)
     // We'll connect it properly in the CFG
@@ -1391,8 +1394,8 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
     BasicBlock* entry  = testFunc->createBasicBlock("entry");
     BasicBlock* block1 = testFunc->createBasicBlock("b1");
     BasicBlock* block2 = testFunc->createBasicBlock("b2");
-    BasicBlock* block3   = testFunc->createBasicBlock("b3");
-    BasicBlock* block4   = testFunc->createBasicBlock("b4");
+    BasicBlock* block3 = testFunc->createBasicBlock("b3");
+    BasicBlock* block4 = testFunc->createBasicBlock("b4");
 
     // Build Block 1: ds_read v0, v1, v2
     createDSReadB32InBlock(block1, arch, 0, 10); // v0

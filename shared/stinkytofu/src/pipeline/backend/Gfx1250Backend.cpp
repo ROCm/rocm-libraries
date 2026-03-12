@@ -47,11 +47,22 @@ namespace stinkytofu
             auto config = stinkytofu::PipelineConfig::fromProfile(
                 stinkytofu::PipelineProfile::FullPipeline, optLevel);
 
-            // TODO: Disable waitcnt for now
-            config.enableWaitCnt = false;
+            const auto& moduleOptions = module.getModuleOptions();
+
+            // Use waitcnt insertion
+            config.enableWaitCnt = moduleOptions.EnableWaitCntInsertion;
+            config.waitCntMode   = PipelineConfig::WaitCntMode::Classical;
+
+            // disable all optimzation passes
+            config.enablePeephole         = false;
+            config.enableDCE              = false;
+            config.enableDuplicateElim    = false;
+            config.enableCFGBuilder       = false;
+            config.enableDAGScheduler     = false;
+            config.enableScheduleLastLRs  = false;
+            config.enableScheduleFirstLRs = false;
 
             // Configure GEMM-specific tile parameters
-            const auto& moduleOptions = module.getModuleOptions();
             config.withGemmTileConfig(GFX1250_ARCH,
                                       moduleOptions.TileA0,
                                       moduleOptions.TileB0,

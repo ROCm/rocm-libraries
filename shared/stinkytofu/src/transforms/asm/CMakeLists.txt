@@ -14,4 +14,7 @@ target_sources(stinkytofu PRIVATE
     StinkyDAGSchedulerPass.cpp
     StinkyConfigurableWaitCntPass.cpp
     ScheduleFirstLRsPass.cpp
+    StinkyWaitCntInsertionPass.cpp
+    StinkyRemoveWaitCntPass.cpp
+    StinkyBuildImplicitDependencyPass.cpp
 )

@@ -23,7 +23,11 @@
 #include "stinkytofu/pipeline/Backend.hpp"
 
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 namespace stinkytofu
 {
@@ -31,6 +35,10 @@ namespace stinkytofu
     {
         // Pipeline specs for the member module's architecture (run in order)
         std::vector<BackendRegistry::PipelineSpec> pipelineSpecs;
+
+        // optimized range begin and end
+        IntrusiveListIterator<IRBase> optimizedRangeBegin;
+        IntrusiveListIterator<IRBase> optimizedRangeEnd;
     };
 
     Backend::Backend(StinkyAsmModule& module)
@@ -85,7 +93,16 @@ namespace stinkytofu
 
     bool Backend::runOptimization()
     {
-        return runPipelineSequence();
+        bool success = runPipelineSequence();
+
+        // if range is not empty, reinsert waitcnts in the range
+        if(pImpl->optimizedRangeBegin != IntrusiveListIterator<IRBase>()
+           && pImpl->optimizedRangeEnd != IntrusiveListIterator<IRBase>())
+        {
+            success = reinsertWaitCntsInOptimizedRange();
+        }
+
+        return success;
     }
 
     bool Backend::runOptimizationWithConfig(const PipelineConfig& config,
@@ -103,8 +120,8 @@ namespace stinkytofu
         bool doOptimization = true;
         if(groupName.empty())
         {
-            // TODO: whole module optimization
-            doOptimization = false;
+            // Run the optimization pipeline for the whole module
+            OptimizationPipeline::run(module.getFunction(), config);
         }
         else if(auto groupRange = module.findGroupRange(groupName))
         {
@@ -149,16 +166,18 @@ namespace stinkytofu
                     lastInserted = ir;
                 }
             }
-            if(firstInserted && lastInserted)
+
+            assert(firstInserted && lastInserted && "No IR inserted for group");
+
+            module.setGroupRange(groupName,
+                                 IntrusiveListIterator<IRBase>(firstInserted),
+                                 IntrusiveListIterator<IRBase>(lastInserted));
+
+            if(pImpl->optimizedRangeBegin == IntrusiveListIterator<IRBase>())
             {
-                module.setGroupRange(groupName,
-                                     IntrusiveListIterator<IRBase>(firstInserted),
-                                     IntrusiveListIterator<IRBase>(lastInserted));
+                pImpl->optimizedRangeBegin = IntrusiveListIterator<IRBase>(firstInserted);
             }
-            else
-            {
-                printf("No IR inserted for group %s\n", groupName.c_str());
-            }
+            pImpl->optimizedRangeEnd = IntrusiveListIterator<IRBase>(lastInserted) + 1;
         }
 
         return doOptimization;
@@ -174,6 +193,51 @@ namespace stinkytofu
                 return false;
             }
         }
+        return true;
+    }
+
+    bool Backend::reinsertWaitCntsInOptimizedRange()
+    {
+        BasicBlock* origBB    = pImpl->optimizedRangeBegin->getParent();
+        auto        insertEnd = pImpl->optimizedRangeEnd;
+
+        // Create a temporary Function to hold the IR
+        Function    tempFunc("temp");
+        BasicBlock* bb = tempFunc.createBasicBlock("entry");
+        for(auto it = pImpl->optimizedRangeBegin; it != pImpl->optimizedRangeEnd;)
+        {
+            IRBase* ir = it.getNodePtr();
+            it++;
+            if(dyn_cast<StinkyInstruction>(ir))
+            {
+                bb->appendIR(ir);
+            }
+            else
+            {
+                ir->erase();
+            }
+        }
+
+        PassManager    passManager;
+        GemmTileConfig gemmTileConfig;
+        gemmTileConfig.arch = module.getArch();
+        passManager.setGemmTileConfig(gemmTileConfig);
+        passManager.addPass(createCFGBuilderPass());
+        passManager.addPass(createStinkyRemoveWaitCntPass());
+        passManager.addPass(createStinkyWaitCntInsertionPass());
+        passManager.run(tempFunc);
+
+        // Move IR from temporary function back to module
+        for(auto bbIt = tempFunc.begin(); bbIt != tempFunc.end(); bbIt++)
+        {
+            for(auto it = bbIt->begin(); it != bbIt->end();)
+            {
+                IRBase* ir = it.getNodePtr();
+                it++;
+                origBB->insertIR(insertEnd, ir);
+            }
+        }
+
         return true;
     }
 

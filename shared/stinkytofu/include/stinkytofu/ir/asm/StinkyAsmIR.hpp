@@ -345,6 +345,16 @@ namespace stinkytofu
             return StinkyRegister(RegType::BARRIER, 0, 1);
         }
 
+        static StinkyRegister getMUBUFLoadRegister()
+        {
+            return StinkyRegister(RegType::MUBUF_LOAD, 0, 1);
+        }
+
+        static StinkyRegister getDSReadRegister()
+        {
+            return StinkyRegister(RegType::DS_READ, 0, 1);
+        }
+
         static StinkyRegister getDSWriteRegister()
         {
             return StinkyRegister(RegType::DS_WRITE, 0, 1);
@@ -700,15 +710,8 @@ namespace stinkytofu
             return modifiers;
         }
 
-        void dump(std::ostream& out) const override
-        {
-            dump(out, true);
-        }
+        void dump(std::ostream& out) const override;
 
-        void dump(bool printDetails = false, const std::string& prefix = "") const;
-        void dump(std::ostream&      out,
-                  bool               printDetails = false,
-                  const std::string& prefix       = "") const;
         void dump() const;
 
         // TODO: Review the algorithm and usage.

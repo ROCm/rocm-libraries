@@ -90,6 +90,9 @@ namespace stinkytofu
     private:
         bool runPipelineSequence();
 
+        /// Reinsert waitcnts in the optimized range
+        bool reinsertWaitCntsInOptimizedRange();
+
         struct Impl;
         std::unique_ptr<Impl> pImpl;
         StinkyAsmModule&      module;
