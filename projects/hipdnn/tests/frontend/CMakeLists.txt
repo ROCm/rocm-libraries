@@ -67,7 +67,7 @@ target_compile_definitions(
 add_dependencies(
     public_hipdnn_frontend_tests
     test_good_plugin
-#CWMDBG    test_good_default_plugin
+    test_good_default_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin
