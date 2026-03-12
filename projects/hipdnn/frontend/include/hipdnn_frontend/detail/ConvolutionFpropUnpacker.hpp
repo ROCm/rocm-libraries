@@ -82,6 +82,12 @@ namespace hipdnn_frontend::detail
     }
     attributes.set_compute_data_type(dt);
 
+    // Unpack operation name
+    std::string opName;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrString(opDesc, HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
+    attributes.set_name(opName);
+
     return {};
 }
 

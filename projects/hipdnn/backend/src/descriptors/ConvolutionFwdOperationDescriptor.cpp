@@ -126,6 +126,21 @@ void ConvolutionFwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                     arrayOfElements,
                     "ConvolutionFwdOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "ConvolutionFwdOperationDescriptor::setAttribute(): attributeType is not "
+                       "HIPDNN_TYPE_CHAR");
+        THROW_IF_NULL(arrayOfElements,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "ConvolutionFwdOperationDescriptor::setAttribute(): arrayOfElements is null");
+        THROW_IF_LT(elementCount,
+                    static_cast<int64_t>(0),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "ConvolutionFwdOperationDescriptor::setAttribute(): elementCount is negative");
+        _name = std::string(static_cast<const char*>(arrayOfElements),
+                            static_cast<size_t>(elementCount));
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "ConvolutionFwdOperationDescriptor::setAttribute: attributeName not "
@@ -221,6 +236,35 @@ void ConvolutionFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                     arrayOfElements,
                     "ConvolutionFwdOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+    {
+        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "ConvolutionFwdOperationDescriptor::getAttribute(): attributeType is not "
+                       "HIPDNN_TYPE_CHAR");
+        if(arrayOfElements == nullptr || requestedElementCount == 0)
+        {
+            THROW_IF_NULL(
+                elementCount,
+                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                "ConvolutionFwdOperationDescriptor::getAttribute(): elementCount is null");
+            *elementCount = static_cast<int64_t>(_name.size() + 1);
+            return;
+        }
+        THROW_IF_LT(
+            requestedElementCount,
+            static_cast<int64_t>(0),
+            HIPDNN_STATUS_BAD_PARAM,
+            "ConvolutionFwdOperationDescriptor::getAttribute(): requestedElementCount is negative");
+        auto maxSize = static_cast<size_t>(requestedElementCount);
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            static_cast<char*>(arrayOfElements), _name.c_str(), maxSize);
+        if(elementCount != nullptr)
+        {
+            *elementCount = static_cast<int64_t>(std::min(_name.size() + 1, maxSize));
+        }
+        break;
+    }
     case HIPDNN_ATTR_OPERATION_TYPE_EXT:
         getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
                          attributeType,
@@ -250,6 +294,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
     ConvolutionFwdOperationDescriptor::buildNode() const
 {
     auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
     node->attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT(_data));
     return node;
@@ -267,6 +312,7 @@ std::shared_ptr<ConvolutionFwdOperationDescriptor> ConvolutionFwdOperationDescri
     auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
     desc->_data = *attrs;
     desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
     desc->_xDesc = findTensorInMap(
         tensorMap, attrs->x_tensor_uid, "ConvolutionFwdOperationDescriptor::fromNode: X");
     desc->_wDesc = findTensorInMap(
@@ -286,7 +332,8 @@ std::string ConvolutionFwdOperationDescriptor::toString() const
 {
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "ConvolutionFwdOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", w_uid=" + std::to_string(_data.w_tensor_uid);
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
     str += ", pre_padding=" + vecToString(_data.pre_padding);

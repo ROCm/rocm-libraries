@@ -504,3 +504,115 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_EQ(opTypeCount, 1);
     EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
 }
+
+TEST_F(TestConvolutionFwdOperationFromNode, NamePreservedFromNode)
+{
+    auto node = createStandardNode();
+    node.name = "conv_fprop_1";
+
+    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+
+    // Query the name size
+    int64_t count = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    ASSERT_EQ(count, static_cast<int64_t>(std::string("conv_fprop_1").size() + 1));
+
+    // Retrieve the name
+    std::vector<char> buffer(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data());
+    EXPECT_STREQ(buffer.data(), "conv_fprop_1");
+}
+
+TEST_F(TestConvolutionFwdOperationFromNode, EmptyNamePreservedFromNode)
+{
+    auto node = createStandardNode();
+    // node.name is empty by default
+
+    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+
+    int64_t count = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    EXPECT_EQ(count, 1); // just the null terminator
+}
+
+TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
+{
+    auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
+
+    // Wrap tensor descriptors into HipdnnBackendDescriptor for the C API boundary
+    auto* xPacked = HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_X_UID]);
+    auto* wPacked = HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_W_UID]);
+    auto* yPacked = HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_Y_UID]);
+
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xPacked);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &wPacked);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yPacked);
+
+    // Set convolution parameters
+    std::vector<int64_t> padding = toVec(K_CONV_PADDING);
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(padding.size()),
+                       padding.data());
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(padding.size()),
+                       padding.data());
+    std::vector<int64_t> strideVals = toVec(K_CONV_STRIDE);
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(strideVals.size()),
+                       strideVals.data());
+    std::vector<int64_t> dilationVals = toVec(K_CONV_DILATION);
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_DILATIONS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(dilationVals.size()),
+                       dilationVals.data());
+    auto convMode = static_cast<int64_t>(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
+    auto compType = static_cast<int64_t>(HIPDNN_DATA_FLOAT);
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType);
+
+    // Set the name
+    std::string name = "my_conv_op";
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(name.size()),
+                       name.c_str());
+
+    desc->finalize();
+
+    // Get name size
+    int64_t count = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    ASSERT_EQ(count, static_cast<int64_t>(name.size() + 1));
+
+    // Get name value
+    std::vector<char> buffer(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data());
+    EXPECT_STREQ(buffer.data(), "my_conv_op");
+
+    delete xPacked;
+    delete wPacked;
+    delete yPacked;
+}
+
+TEST_F(TestConvolutionFwdOperationFromNode, BuildNodePreservesName)
+{
+    auto node = createStandardNode();
+    node.name = "test_build_name";
+
+    auto desc = ConvolutionFwdOperationDescriptor::fromNode(node, _tensorMap);
+    auto rebuiltNode = desc->buildNode();
+
+    ASSERT_NE(rebuiltNode, nullptr);
+    EXPECT_EQ(rebuiltNode->name, "test_build_name");
+}

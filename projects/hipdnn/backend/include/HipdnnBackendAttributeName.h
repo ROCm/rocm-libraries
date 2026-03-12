@@ -831,6 +831,15 @@ typedef enum
      */
     HIPDNN_ATTR_OPERATION_TYPE_EXT = 60200,
 
+    /**
+     * @brief Name of an operation descriptor (extension)
+     *
+     * Gets or sets a human-readable name for an operation node, useful for
+     * debugging, logging, and round-tripping through serialized graphs.
+     * Type: HIPDNN_TYPE_CHAR
+     */
+    HIPDNN_ATTR_OPERATION_NAME_EXT = 60300,
+
     /** @} */
 
 } hipdnnBackendAttributeName_t;

@@ -528,7 +528,25 @@ TEST_F(TestUnpackOperation, UnpackOperationSuccessConvFprop)
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
-    // --- 5. Mock destroy for the 3 tensor descriptors ---
+    // --- 5. Mock operation name query ---
+    // getDescriptorAttrString makes two calls: count query then data query
+    const std::string opName = "test_conv_op";
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_, HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(opName.size() + 1)),
+                        Return(HIPDNN_STATUS_SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(opName.size() + 1)),
+                        Invoke([opName](hipdnnBackendDescriptor_t,
+                                        hipdnnBackendAttributeName_t,
+                                        hipdnnBackendAttributeType_t,
+                                        int64_t,
+                                        int64_t*,
+                                        void* arrayOfElements) {
+                            std::memcpy(arrayOfElements, opName.c_str(), opName.size() + 1);
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    // --- 6. Mock destroy for the 3 tensor descriptors ---
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
         .Times(3)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
@@ -588,6 +606,9 @@ TEST_F(TestUnpackOperation, UnpackOperationSuccessConvFprop)
               (std::vector<int64_t>{K_DILATION.begin(), K_DILATION.end()}));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
     EXPECT_EQ(convNode->attributes.compute_data_type, DataType::FLOAT);
+
+    // Verify operation name
+    EXPECT_EQ(convNode->attributes.get_name(), "test_conv_op");
 
     // Verify tensors were registered in the tensor map
     EXPECT_EQ(tensorMap.size(), 3u);

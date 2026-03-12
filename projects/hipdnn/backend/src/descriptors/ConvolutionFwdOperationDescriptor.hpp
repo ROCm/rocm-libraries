@@ -83,6 +83,8 @@ private:
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
+
+    std::string _name;
 };
 
 } // namespace hipdnn_backend
