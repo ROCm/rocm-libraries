@@ -108,7 +108,24 @@ public:
         }
 
         // Determine normalizedDimCount from scale tensor shape
-        auto normalizedDimCount = static_cast<int64_t>(scaleTensor->dims().size());
+        int64_t normalizedDimCount;
+        if(shallowXTensor->dims().size()
+           == scaleTensor->dims().size()) // Dimensions not used by scale have been set to 1
+        {
+            normalizedDimCount = 0;
+            for(size_t i = scaleTensor->dims().size() - 1; i >= 0; --i)
+            {
+                if(scaleTensor->dims()[i] == 1 && shallowXTensor->dims()[i] > 1)
+                {
+                    break;
+                }
+                normalizedDimCount = static_cast<int64_t>(scaleTensor->dims().size() - i);
+            }
+        }
+        else // Dimensions not used by scale have been omitted
+        {
+            normalizedDimCount = static_cast<int64_t>(scaleTensor->dims().size());
+        }
 
         utilities::CpuFpReferenceLayernorm::fprop(*shallowXTensor,
                                                   scaleTensor.get(),

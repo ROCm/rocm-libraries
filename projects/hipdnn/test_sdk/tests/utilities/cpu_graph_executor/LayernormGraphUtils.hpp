@@ -17,6 +17,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                              hipdnn_data_sdk::data_objects::DataType meanInvVarianceDataType,
                              hipdnn_data_sdk::data_objects::DataType computeDataType,
                              const std::vector<int64_t>& dims,
+                             const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
                              bool useTrainingPhase = false)
 {
@@ -26,7 +27,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
     // Scale/bias shape = normalized dims (last N-1 dims for NCHW, i.e., dims[1:])
-    std::vector<int64_t> const normalizedDims(dims.begin() + 1, dims.end());
+    std::vector<int64_t> const normalizedDims(
+        dims.begin() + (static_cast<int64_t>(dims.size()) - normalizedDimCount), dims.end());
     auto normalizedStrides = hipdnn_data_sdk::utilities::generateStrides(normalizedDims);
 
     int64_t uid = 1;
