@@ -1924,31 +1924,35 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
         throw std::runtime_error("Inconsistent dimensions for collapse_contiguous_dims.\n"
                                  + paramstring());
     }
-        
-    for(size_t idx = 0; idx < brick_length.size() - 1; ++idx)
+
+    // Collapse contiguous memory sections:
+    for(size_t idx = brick_length.size(); idx-- > 1;)
     {
         std::cout << idx << std::endl;
-        if(brick_length[idx + 1] * brick_stride[idx + 1] == brick_stride[idx]
-           && brick_length[idx + 1] * field_stride[idx + 1] == field_stride[idx])
+        if(brick_length[idx] * brick_stride[idx] == brick_stride[idx - 1]
+           && brick_length[idx] * field_stride[idx] == field_stride[idx - 1])
         {
             brick_length[idx - 1] *= brick_length[idx];
             brick_length.erase(brick_length.begin() + idx);
+            brick_stride.erase(brick_stride.begin() + idx - 1);
+            field_stride.erase(field_stride.begin() + idx - 1);
+            --idx;
+        }
+    }
+
+    // Also remove all columns where length is 1:
+    for(size_t idx = 0; idx < brick_length.size(); ++idx)
+    {
+        if(brick_length[idx] == 1)
+        {
+            brick_length.erase(brick_length.begin() + idx);
             brick_stride.erase(brick_stride.begin() + idx);
             field_stride.erase(field_stride.begin() + idx);
-            --idx;
         }
     }
 
     std::cout << "post:\n" << paramstring() << std::endl;
         
-    // We should be splitting on exactly one dimension, so we
-    // should end up with at most two dimensions after
-    // collapsing
-    if(brick_length.size() > 2 || brick_stride.size() > 2 || field_stride.size() > 2)
-    {
-        std::cout << "should have at most 2 dims after collapsing" << std::endl;
-        throw std::runtime_error("should have at most 2 dims after collapsing");
-    }
     // Fastest dim is expected to be contiguous
     if(brick_stride.back() != 1 || field_stride.back() != 1)
     {
@@ -2144,30 +2148,30 @@ try
                 std::cout << "hipMemcpy2D:\n";
                 std::cout << "\tvalsize : " << valsize << std::endl;
 
-                size_t dpitch = valsize * brick_stride[0];
+                size_t dpitch = brick_stride_collapsed[0];
                 std::cout << "\tdpitch : " << dpitch << std::endl;
 
-                size_t spitch = valsize * hostDataStride[0];
+                size_t spitch = hostDataStride_collapsed[0];
                 std::cout << "\tspitch : " << spitch << std::endl;
 
-                size_t width = valsize * brick_length[1];
+                size_t width = brick_length_collapsed[1];
                 std::cout << "\twidth : " << width << std::endl;
 
-                size_t height = brick_length[0];
+                size_t height = brick_length_collapsed[0];
                 std::cout << "\theight : " << height << std::endl;
 
                 auto ret = hipMemcpy2D(
                     destDesc->descriptor->data[idx], // destination
-                    dpitch,                          //  dpitch (bytes between starts of rows)
+                    valsize * dpitch,                //  dpitch (bytes between starts of rows)
                     host_offset,                     // source
-                    spitch,                          //  spitch (bytes between starts of rows)
-                    width,                           // width  (bytes in a row)
+                    valsize * spitch,                //  spitch (bytes between starts of rows)
+                    valsize * width,                 // width  (bytes in a row)
                     height,                          // height (how many rows)
                     hipMemcpyHostToDevice);
                 if(ret != hipSuccess)
                 {
-                    std::cout << hipGetErrorString(ret) << " " << ret << std::endl;
-                    std::cout << "hipMemcpy2D failed" << std::endl;
+                    std::cout << "hipMemcpy2D failed: "
+                              << hipGetErrorString(ret) << " " << ret << std::endl;
                     return HIPFFT_INTERNAL_ERROR;
                 }
                 
