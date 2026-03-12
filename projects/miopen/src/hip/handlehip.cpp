@@ -158,7 +158,7 @@ int set_default_device()
 #endif
 
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local unsigned int meopenHandle_current_stream_id = 0;
+static thread_local unsigned int miopenHandle_current_stream_id = 0;
 struct HandleImpl
 {
     // typedef MIOPEN_MANAGE_PTR(hipStream_t, hipStreamDestroy) StreamPtr;
@@ -300,7 +300,7 @@ Handle::Handle(miopenAcceleratorQueue_t stream) : impl(std::make_unique<HandleIm
 
 Handle::Handle() : impl(std::make_unique<HandleImpl>())
 {
-    meopenHandle_current_stream_id = 0;
+    miopenHandle_current_stream_id = 0;
 #if MIOPEN_BUILD_DEV
     this->impl->device      = set_default_device();
     this->impl->root_stream = impl->create_stream();
@@ -330,7 +330,7 @@ Handle::~Handle() {}
 // not MT safe
 void Handle::SetStream(miopenAcceleratorQueue_t streamID) const
 {
-    meopenHandle_current_stream_id = 0;
+    miopenHandle_current_stream_id = 0;
 
     this->impl->root_stream = HandleImpl::reference_stream(streamID);
 
@@ -345,7 +345,7 @@ void Handle::SetStream(miopenAcceleratorQueue_t streamID) const
     MIOPEN_LOG_NQI(*this);
 }
 
-void Handle::SetStreamFromPool(int streamID) const { meopenHandle_current_stream_id = streamID; }
+void Handle::SetStreamFromPool(int streamID) const { miopenHandle_current_stream_id = streamID; }
 
 void Handle::ReserveExtraStreamsInPool(int cnt) const
 {
@@ -378,11 +378,11 @@ void Handle::ReserveExtraStreamsInPool(int cnt) const
 
 miopenAcceleratorQueue_t Handle::GetStream() const
 {
-    if(meopenHandle_current_stream_id == 0)
+    if(miopenHandle_current_stream_id == 0)
         return impl->root_stream.get();
     // locking only if handle in multistream mode
     std::shared_lock<std::shared_timed_mutex> lock(this->impl->stream_pool_mutex);
-    return this->impl->ms_resourse_ptr->stream_pool.at(meopenHandle_current_stream_id - 1).get();
+    return this->impl->ms_resourse_ptr->stream_pool.at(miopenHandle_current_stream_id - 1).get();
 }
 
 void Handle::SetAllocator(miopenAllocatorFunction allocator,
@@ -900,11 +900,11 @@ Handle::CreateSubBuffer(ConstData_t data, std::size_t offset, std::size_t size) 
 
 const rocblas_handle_ptr& Handle::rhandle() const
 {
-    if(meopenHandle_current_stream_id == 0)
+    if(miopenHandle_current_stream_id == 0)
         return this->impl->rhandle_;
     // locking only if handle in multistream mode
     std::shared_lock<std::shared_timed_mutex> lock(this->impl->stream_pool_mutex);
-    return this->impl->ms_resourse_ptr->rhandle_pool.at(meopenHandle_current_stream_id - 1);
+    return this->impl->ms_resourse_ptr->rhandle_pool.at(miopenHandle_current_stream_id - 1);
 }
 
 rocblas_handle_ptr Handle::CreateRocblasHandle(miopenAcceleratorQueue_t stream) const
@@ -920,11 +920,11 @@ rocblas_handle_ptr Handle::CreateRocblasHandle(miopenAcceleratorQueue_t stream) 
 #if MIOPEN_USE_HIPBLASLT
 const hipblasLt_handle_ptr& Handle::HipblasLtHandle() const
 {
-    if(meopenHandle_current_stream_id == 0)
+    if(miopenHandle_current_stream_id == 0)
         return this->impl->hip_blasLt_handle;
     // locking only if handle in multistream mode
     std::shared_lock<std::shared_timed_mutex> lock(this->impl->stream_pool_mutex);
-    return this->impl->ms_resourse_ptr->hhandle_pool.at(meopenHandle_current_stream_id - 1);
+    return this->impl->ms_resourse_ptr->hhandle_pool.at(miopenHandle_current_stream_id - 1);
 }
 
 hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
