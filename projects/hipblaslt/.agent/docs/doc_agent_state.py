@@ -517,7 +517,10 @@ if __name__ == "__main__":
 # ── Unit Tests ─────────────────────────────────────────────────────────
 # Run with: pytest doc_agent_state.py -v
 
-import pytest
+try:
+    import pytest
+except ImportError:
+    pass
 
 
 def test_should_skip_dir_hidden():
