@@ -57,7 +57,6 @@ jobs:
           repository: "ROCm/TheRock"
           sparse-checkout: build_tools
           path: "prejob"
-          ref: users/todavis/ctest_rocblas_on_miopen_filters # TheRock PR 3769
 
       - name: Pre-job cleanup processes on Windows
         if: ${{ runner.os == 'Windows' }}
@@ -69,7 +68,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: users/todavis/ctest_rocblas_on_miopen_filters # TheRock PR 3769
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Run setup test environment workflow
         timeout-minutes: 15
