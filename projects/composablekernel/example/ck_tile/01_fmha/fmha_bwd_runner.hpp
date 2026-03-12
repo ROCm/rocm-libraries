@@ -843,10 +843,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
         lse_buf.ToDevice(lse_host.data());
         dbias_buf.SetZero();
 
-        // non-deterministic kernels use atomic add to write dq
-        // Some block may be skipped with causal mask and dq are not set to zeros
-        // In these cases thus we need to zero out it first
-        if(!deterministic || mask.type != mask_enum::no_mask)
+        if(launcher.needs_zero_dq_acc)
             dq_acc_buf.SetZero();
 
         ck_tile::stream_config stream_config_v{nullptr, true, 0, 0, 1};

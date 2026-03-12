@@ -150,6 +150,19 @@ struct FmhaBwdDQDKDVKernel
         else
             return 1;
     }
+    CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
+    {
+        // Be consistent with convert_dq kernel, though qrqtrdor pipeline doesn't use persistent
+        constexpr bool kUsePersistent__ = kIsDeterministic && !kIsGroupMode;
+
+        // non-deterministic adn persistent kernels use atomic-add to write dq
+        if constexpr(kUsePersistent__ || !kIsDeterministic)
+            return true;
+
+        // Some block may be skipped with causal mask and dq are not set to zeros
+        // In these cases we need to zero out it first
+        return kHasMask;
+    }
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
                                   // arg

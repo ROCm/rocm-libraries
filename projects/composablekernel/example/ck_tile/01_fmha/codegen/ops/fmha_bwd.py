@@ -176,6 +176,13 @@ int fmha_bwd_dq_dk_dv_dq_acc_splits_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const
 }}
 
 template <>
+bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
+{{
+    using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
+    return k_::NeedsZeroDqAcc();
+}}
+
+template <>
 std::string fmha_bwd_dq_dk_dv_get_name_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 {{
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
@@ -192,6 +199,7 @@ fmha_bwd_launcher::fmha_bwd_launcher(const fmha_bwd_traits& t){{
 {F_launcher}
     run = [](fmha_bwd_args, const ck_tile::stream_config&) {{ return -1.0f; }};
     dq_acc_splits = 1;
+    needs_zero_dq_acc = false;
 }}
 
 
@@ -232,6 +240,7 @@ FMHA_BWD_API_INNER_DISPATCH_LAUNCHER = """
         return fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(s, a);
     }};
     dq_acc_splits = fmha_bwd_dq_dk_dv_dq_acc_splits_<dq_dk_dv_trait_, {F_arch.tag}>(t);
+    needs_zero_dq_acc = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_, {F_arch.tag}>();
     return;
 }}
 """
