@@ -125,9 +125,9 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
 
     set(CODE_COVERAGE_IGNORE_REGEX ".*_deps.*|.*tests.*|.*integration_tests.*")
     set(CODE_COVERAGE_OBJECTS
-        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_plugin.so
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_tests
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_integration_tests
+        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_provider.so
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_tests
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_integration_tests
     )
 
     # Creates a coverage target that merges profraw files and generates reports.
@@ -183,7 +183,7 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
-install(TARGETS hip_kernel_plugin EXPORT hip-kernel-plugin
+install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
