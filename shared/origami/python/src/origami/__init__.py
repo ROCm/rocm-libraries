@@ -16,8 +16,10 @@ try:
         transpose_t,
         grid_selection_t,
         reduction_t,
+        prediction_modes_t,
         # Data structures
         dim3_t,
+        tensile_params_t,
         config_t,
         prediction_result_t,
         workgroup_mapping_t,
@@ -75,8 +77,10 @@ __all__ = [
     "transpose_t",
     "grid_selection_t",
     "reduction_t",
+    "prediction_modes_t",
     # Data structures
     "dim3_t",
+    "tensile_params_t",
     "config_t",
     "prediction_result_t",
     "workgroup_mapping_t",

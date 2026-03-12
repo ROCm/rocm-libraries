@@ -81,7 +81,7 @@ namespace TensileLite
                             if(i + 1 < argc && argv[i + 1][0] != '-')
                             {
                                 i++;
-                                std::any parsed = opt.value_semantic->parser()(argv[i]);
+                                std::any parsed         = opt.value_semantic->parser()(argv[i]);
                                 m_vm[canonical].value() = std::move(parsed);
                             }
                             else
@@ -120,8 +120,14 @@ namespace TensileLite
                     std::string canonical = get_canonical_option_name(options[i].opts);
                     if(canonical == "help")
                         continue;
-                    if(!m_vm.count(canonical) || m_vm[canonical].empty())
+                    // Only set default for options that explicitly have one; otherwise
+                    // unspecified options (e.g. convolution-identifier) would get empty
+                    // string and count() would be true with an incomplete value.
+                    if((!m_vm.count(canonical) || m_vm[canonical].empty())
+                       && options[i].value_semantic->has_explicit_default())
+                    {
                         m_vm[canonical].value() = options[i].value_semantic->get_default();
+                    }
                 }
                 return m_vm;
             }

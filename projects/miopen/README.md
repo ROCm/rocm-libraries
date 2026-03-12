@@ -38,10 +38,6 @@ To install MIOpen, you must first install these prerequisites:
 * [ROCm CMake](https://github.com/ROCm/rocm-cmake): provides CMake modules for common build
   tasks needed for the ROCm software stack
 * [Half](http://half.sourceforge.net/): IEEE 754-based, half-precision floating-point library
-* [Boost](http://www.boost.org/): Version 1.79 is recommended, as older versions may need patches to
-  work on newer systems
-  * MIOpen uses `boost-system` and `boost-filesystem` packages to enable persistent
-    [kernel cache](https://rocm.docs.amd.com/projects/MIOpen/en/latest/cache.html)
 * [SQLite3](https://sqlite.org/index.html): A reading and writing performance database
 * lbzip2: A multi-threaded compress or decompress utility
 * [rocBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas): AMD's library for Basic Linear Algebra Subprograms
@@ -330,18 +326,11 @@ switch branches or merge changes in Git to ensure any large binaries are kept in
 
 ## Installing the dependencies manually
 
-If you're using Ubuntu v16, you can install the `Boost` packages using:
+If you're using Ubuntu, you can install the `BZip2` packages using:
 
 ```shell
-sudo apt-get install libboost-dev
-sudo apt-get install libboost-system-dev
-sudo apt-get install libboost-filesystem-dev
+sudo apt-get install libbz2-dev
 ```
-
->[!NOTE]
->By default, MIOpen attempts to build with Boost statically linked libraries. If required, you can build
-with dynamically linked Boost libraries using the `-DBoost_USE_STATIC_LIBS=Off` flag during the
-configuration stage. However, this is not recommended.
 
 You must install the `half` header from the [half website](http://half.sourceforge.net/).
 
