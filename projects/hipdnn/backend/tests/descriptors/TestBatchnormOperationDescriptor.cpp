@@ -17,6 +17,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
 #include <vector>
@@ -25,6 +26,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 class TestBatchnormOperationDescriptor : public ::testing::Test
 {
@@ -140,48 +142,52 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<BatchnormOperationDescriptor>();
-        _xDesc = createFinalizedTensor(
-            K_BATCHNORM_TENSOR_X_UID, K_BATCHNORM_TENSOR_X_DIMS, K_BATCHNORM_TENSOR_X_STRIDES);
+        _xDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_X_UID,
+                                       toVec(K_BATCHNORM_TENSOR_X_DIMS),
+                                       toVec(K_BATCHNORM_TENSOR_X_STRIDES));
         _scaleDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_SCALE_UID,
-                                           K_BATCHNORM_TENSOR_SCALE_DIMS,
-                                           K_BATCHNORM_TENSOR_SCALE_STRIDES);
+                                           toVec(K_BATCHNORM_TENSOR_SCALE_DIMS),
+                                           toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
         _biasDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_BIAS_UID,
-                                          K_BATCHNORM_TENSOR_BIAS_DIMS,
-                                          K_BATCHNORM_TENSOR_BIAS_STRIDES);
+                                          toVec(K_BATCHNORM_TENSOR_BIAS_DIMS),
+                                          toVec(K_BATCHNORM_TENSOR_BIAS_STRIDES));
         _epsilonDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_EPSILON_UID,
-                                             K_BATCHNORM_TENSOR_EPSILON_DIMS,
-                                             K_BATCHNORM_TENSOR_EPSILON_STRIDES);
-        _yDesc = createFinalizedTensor(
-            K_BATCHNORM_TENSOR_Y_UID, K_BATCHNORM_TENSOR_Y_DIMS, K_BATCHNORM_TENSOR_Y_STRIDES);
+                                             toVec(K_BATCHNORM_TENSOR_EPSILON_DIMS),
+                                             toVec(K_BATCHNORM_TENSOR_EPSILON_STRIDES));
+        _yDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_Y_UID,
+                                       toVec(K_BATCHNORM_TENSOR_Y_DIMS),
+                                       toVec(K_BATCHNORM_TENSOR_Y_STRIDES));
         _meanDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_MEAN_UID,
-                                          K_BATCHNORM_TENSOR_MEAN_DIMS,
-                                          K_BATCHNORM_TENSOR_MEAN_STRIDES);
+                                          toVec(K_BATCHNORM_TENSOR_MEAN_DIMS),
+                                          toVec(K_BATCHNORM_TENSOR_MEAN_STRIDES));
         _invVarianceDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_INV_VARIANCE_UID,
-                                                 K_BATCHNORM_TENSOR_INV_VARIANCE_DIMS,
-                                                 K_BATCHNORM_TENSOR_INV_VARIANCE_STRIDES);
-        _prevRunningMeanDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
-                                                     K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_DIMS,
-                                                     K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_STRIDES);
+                                                 toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_DIMS),
+                                                 toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_STRIDES));
+        _prevRunningMeanDesc
+            = createFinalizedTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_STRIDES));
         _prevRunningVarianceDesc
             = createFinalizedTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
-                                    K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_DIMS,
-                                    K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_STRIDES);
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_STRIDES));
         _momentumDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_MOMENTUM_UID,
-                                              K_BATCHNORM_TENSOR_MOMENTUM_DIMS,
-                                              K_BATCHNORM_TENSOR_MOMENTUM_STRIDES);
-        _nextRunningMeanDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID,
-                                                     K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_DIMS,
-                                                     K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_STRIDES);
+                                              toVec(K_BATCHNORM_TENSOR_MOMENTUM_DIMS),
+                                              toVec(K_BATCHNORM_TENSOR_MOMENTUM_STRIDES));
+        _nextRunningMeanDesc
+            = createFinalizedTensor(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID,
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_STRIDES));
         _nextRunningVarianceDesc
             = createFinalizedTensor(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID,
-                                    K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_DIMS,
-                                    K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_STRIDES);
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_STRIDES));
         _peerStatsDesc0 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_0_UID,
-                                                K_BATCHNORM_TENSOR_PEER_STAT_DIMS,
-                                                K_BATCHNORM_TENSOR_PEER_STAT_STRIDES);
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
         _peerStatsDesc1 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_1_UID,
-                                                K_BATCHNORM_TENSOR_PEER_STAT_DIMS,
-                                                K_BATCHNORM_TENSOR_PEER_STAT_STRIDES);
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -247,7 +253,7 @@ TEST_F(TestBatchnormOperationDescriptor, FinalizeSucceedsWithAllOptionalTensors)
 struct FinalizeFailTestParam
 {
     std::string name;
-    std::vector<hipdnnBackendAttributeName_t> attrs_to_skip;
+    std::vector<hipdnnBackendAttributeName_t> attrsToSkip;
 };
 
 class TestBatchnormFinalizeFailMissingRequired
@@ -258,7 +264,7 @@ class TestBatchnormFinalizeFailMissingRequired
 
 TEST_P(TestBatchnormFinalizeFailMissingRequired, FinalizeFailsMissingRequiredTensor)
 {
-    auto param = GetParam();
+    const auto& param = GetParam();
     auto desc = getDescriptor();
 
     std::unordered_map<hipdnnBackendAttributeName_t, const void*> tensorMap = {
@@ -269,7 +275,7 @@ TEST_P(TestBatchnormFinalizeFailMissingRequired, FinalizeFailsMissingRequiredTen
         {HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT, _yDesc.get()},
     };
 
-    for(auto skip : param.attrs_to_skip)
+    for(auto skip : param.attrsToSkip)
     {
         tensorMap.erase(skip);
     }
@@ -454,7 +460,7 @@ class TestBatchnormGetTensor : public TestBatchnormOperationDescriptor,
 
 TEST_P(TestBatchnormGetTensor, GetAttributeTensorDescriptor)
 {
-    auto param = GetParam();
+    const auto& param = GetParam();
     setRequiredAttributes();
     setOptionalMeanInvVariance();
     setRunningStats();
@@ -547,7 +553,7 @@ class TestBatchnormQueryMode : public TestBatchnormOperationDescriptor,
 
 TEST_P(TestBatchnormQueryMode, QueryModeReturnsCorrectCount)
 {
-    auto param = GetParam();
+    const auto& param = GetParam();
     setRequiredAttributes();
     setOptionalMeanInvVariance();
     setRunningStats();
