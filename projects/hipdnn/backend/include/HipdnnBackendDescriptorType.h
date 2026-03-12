@@ -227,6 +227,15 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 24,
 
     /**
+     * @brief Layer normalization operation descriptor
+     *
+     * Represents a layer normalization operation with input (X),
+     * scale, bias, epsilon tensors, output (Y), and optional
+     * mean and inverse variance outputs plus a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT = 25,
+
+    /**
      * @brief Block scale quantize operation descriptor
      *
      * Represents a block scale quantize operation with input (X),
