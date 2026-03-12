@@ -20,9 +20,11 @@
 
 #pragma once
 
+#include <HipdnnAttentionImplementation.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
+#include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPointwiseMode.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -307,6 +309,53 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
         return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert frontend DiagonalAlignment to backend hipdnnDiagonalAlignment_t
+ *
+ * Maps frontend diagonal alignment enum directly to the backend C API enum type
+ * for use with HIPDNN_TYPE_DIAGONAL_ALIGNMENT attributes.
+ *
+ * @param type The frontend DiagonalAlignment value
+ * @return The corresponding hipdnnDiagonalAlignment_t value
+ */
+inline hipdnnDiagonalAlignment_t toBackendDiagonalAlignment(const DiagonalAlignment& type)
+{
+    switch(type)
+    {
+    case DiagonalAlignment::TOP_LEFT:
+        return HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+    case DiagonalAlignment::BOTTOM_RIGHT:
+        return HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
+    default:
+        return HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+    }
+}
+
+/**
+ * @brief Convert frontend AttentionImplementation to backend hipdnnAttentionImplementation_t
+ *
+ * Maps frontend attention implementation enum directly to the backend C API enum type
+ * for use with HIPDNN_TYPE_ATTENTION_IMPLEMENTATION attributes.
+ *
+ * @param type The frontend AttentionImplementation value
+ * @return The corresponding hipdnnAttentionImplementation_t value
+ */
+inline hipdnnAttentionImplementation_t
+    toBackendAttentionImplementation(const AttentionImplementation& type)
+{
+    switch(type)
+    {
+    case AttentionImplementation::AUTO:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+    case AttentionImplementation::COMPOSITE:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT;
+    case AttentionImplementation::UNIFIED:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
+    default:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
     }
 }
 
