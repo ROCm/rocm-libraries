@@ -261,15 +261,22 @@ class HardwarePredicate(Properties.Predicate):
             # Prefer source-like chip IDs (exact-capable rows) before fallback targets.
             # This ensures ordering like:
             #   Equality -> Origami/Predication -> Equality fallback -> Origami/Predication fallback.
-            # Set size is used only as a tie-breaker for equally-ranked chip-ID groups.
             myChipKey = _chipIdSetSortKey(myPciChipIds)
             otherChipKey = _chipIdSetSortKey(otherPciChipIds)
-            if myChipKey != otherChipKey:
-                return myChipKey > otherChipKey
 
+            # Extract the highest rank from each set (first element of the sorted key)
+            myMaxRank = myChipKey[0][0] if myChipKey else -1
+            otherMaxRank = otherChipKey[0][0] if otherChipKey else -1
+
+            # First, compare by maximum rank (higher rank = more specific = comes first)
+            if myMaxRank != otherMaxRank:
+                return myMaxRank > otherMaxRank
+
+            # For same maximum rank, prefer smaller sets (exact chip matches) over multi-chip sets
             if len(myPciChipIds) != len(otherPciChipIds):
                 return len(myPciChipIds) < len(otherPciChipIds)
 
+            # For same rank and same size, compare by full chip key
             return myChipKey > otherChipKey
 
         # If CU properties are empty, then compare processor predicates

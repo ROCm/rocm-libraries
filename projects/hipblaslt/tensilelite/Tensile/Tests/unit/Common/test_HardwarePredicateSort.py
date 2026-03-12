@@ -171,4 +171,4 @@ def test_sort_prefers_exact_chip_over_multi_chip_set():
     mixed = hw(None, ["Device 75a0", "Device 75a3"])
 
     got = sorted([mixed, mi350, mi355])
-    assert got == [mi355, mi350, mixed]
+    assert got == [mi355, mixed, mi350]
