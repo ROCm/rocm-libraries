@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,11 +55,11 @@ struct block_sort_bitonic_impl
     // Define block-level compare-and-swap. This family of functions compares
     // keys between threads and swaps the smallest key (and value) in the specified
     // direction.
-    template<class Storage, class K, class V, class BinaryFunction>
+    template<bool is_first_step = false, class Storage, class K, class V, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void blev_cas(unsigned int   id,
                          Storage&       storage,
-                         bool           dir,
+                         bool           is_upper,
                          BinaryFunction compare_function,
                          unsigned int   xor_mask,
                          K (&k)[ItemsPerThread],
@@ -77,23 +77,24 @@ struct block_sort_bitonic_impl
         ROCPRIM_UNROLL
         for(unsigned int i = 0u; i < ItemsPerThread; ++i)
         {
-            const auto i1   = (id ^ xor_mask) + (i * BlockSize);
-            const K&   k0   = k[i];
+            const unsigned int other_i = is_first_step ? (ItemsPerThread - 1 - i) : i;
+            const auto         i1      = (id ^ xor_mask) + (other_i * BlockSize);
+
             const K    k1   = storage.key[i1];
-            const bool swap = compare_function(dir ? k0 : k1, dir ? k1 : k0);
-            if(swap)
-            {
-                k[i] = k1;
-                v[i] = storage.value[i1];
-            }
+            const V    v1   = storage.value[i1];
+
+            const bool swap = compare_function(is_upper ? k[i] : k1, is_upper ? k1 : k[i]);
+
+            k[i] = swap ? k1 : k[i];
+            v[i] = swap ? v1 : v[i];
         }
     }
 
-    template<class Storage, class K, class BinaryFunction>
+    template<bool is_first_step = false, class Storage, class K, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void blev_cas(unsigned int   id,
                          Storage&       storage,
-                         bool           dir,
+                         bool           is_upper,
                          BinaryFunction compare_function,
                          unsigned int   xor_mask,
                          K (&k)[ItemsPerThread])
@@ -109,19 +110,20 @@ struct block_sort_bitonic_impl
         ROCPRIM_UNROLL
         for(unsigned int i = 0u; i < ItemsPerThread; ++i)
         {
-            const K&   k0   = k[i];
-            const auto i1   = (id ^ xor_mask) + (i * BlockSize);
+            const unsigned int other_i = is_first_step ? (ItemsPerThread - 1 - i) : i;
+            const auto         i1      = (id ^ xor_mask) + (other_i * BlockSize);
             const K    k1   = storage.key[i1];
-            const bool swap = compare_function(dir ? k0 : k1, dir ? k1 : k0);
-            k[i]            = swap ? k1 : k0;
+
+            const bool swap = compare_function(is_upper ? k[i] : k1, is_upper ? k1 : k[i]);
+            k[i]            = swap ? k1 : k[i];
         }
     }
 
-    template<class Storage, class K, class V, class BinaryFunction>
+    template<bool is_first_step = false, class Storage, class K, class V, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static auto blev_cas(unsigned int   id,
                          Storage&       storage,
-                         bool           dir,
+                         bool           is_upper,
                          BinaryFunction compare_function,
                          unsigned int   xor_mask,
                          K&             k,
@@ -132,21 +134,20 @@ struct block_sort_bitonic_impl
 
         ::rocprim::syncthreads();
 
-        const auto i1   = id ^ xor_mask;
-        const K    k1   = storage.key[i1];
-        const bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
-        if(swap)
-        {
-            k = k1;
-            v = storage.value[i1];
-        }
+        const auto i1 = id ^ xor_mask;
+        const K    k1 = storage.key[i1];
+        const V    v1 = storage.value[i1];
+
+        const bool swap = compare_function(is_upper ? k : k1, is_upper ? k1 : k);
+        k               = swap ? k1 : k;
+        v               = swap ? v1 : v;
     }
 
-    template<class Storage, class K, class BinaryFunction>
+    template<bool is_first_step = false, class Storage, class K, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static void blev_cas(unsigned int   id,
                          Storage&       storage,
-                         bool           dir,
+                         bool           is_upper,
                          BinaryFunction compare_function,
                          unsigned int   xor_mask,
                          K&             k)
@@ -157,7 +158,7 @@ struct block_sort_bitonic_impl
 
         const auto i1   = id ^ xor_mask;
         const K    k1   = storage.key[i1];
-        const bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
+        const bool swap = compare_function(is_upper ? k : k1, is_upper ? k1 : k);
         k               = swap ? k1 : k;
     }
 
@@ -194,7 +195,7 @@ struct block_sort_bitonic_impl
         // Thread level sort.
         if constexpr(ItemsPerThread > 1)
         {
-            wlev::tlev_sort(id_bits[0], compare_function, kv...);
+            wlev::tlev_sort(compare_function, kv...);
         }
 
         // Warp & block level sort.
@@ -211,8 +212,10 @@ struct block_sort_bitonic_impl
                     [&](auto offset_bit)
                     {
                         constexpr bool         is_first_offset_bit = offset_bit == group_bit - 1;
-                        constexpr unsigned int offset              = 1u << offset_bit;
-                        const unsigned int     local_dir = id_bits[group_bit] ^ id_bits[offset_bit];
+                        constexpr unsigned int xor_mask
+                            = is_first_offset_bit ? ((1u << group_bit) - 1u) : (1u << offset_bit);
+
+                        const unsigned int is_upper = id_bits[offset_bit];
 
                         // Assume that shared storage is ready to write on the very first
                         // 'blev_cas'-invocation. So, we skip if we're on the first group
@@ -226,8 +229,12 @@ struct block_sort_bitonic_impl
                             ::rocprim::syncthreads();
                         }
 
-                        static_assert(offset >= VirtualWaveSize);
-                        blev_cas(flat_tid, storage, local_dir, compare_function, offset, kv...);
+                        blev_cas<is_first_offset_bit>(flat_tid,
+                                                      storage,
+                                                      is_upper,
+                                                      compare_function,
+                                                      xor_mask,
+                                                      kv...);
                     });
 
                 // 'group_bit' may be smaller than 'num_wave_bits'. We must make sure
@@ -239,8 +246,10 @@ struct block_sort_bitonic_impl
                 ::rocprim::detail::constexpr_for_gte<wave_group_bit - 1, 0, -1>(
                     [&](auto offset_bit)
                     {
-                        constexpr unsigned int offset    = 1u << offset_bit;
-                        const unsigned int     local_dir = id_bits[group_bit] ^ id_bits[offset_bit];
+                        constexpr bool         is_first_step = (offset_bit == group_bit - 1);
+                        constexpr unsigned int xor_mask
+                            = is_first_step ? ((1u << group_bit) - 1u) : (1u << offset_bit);
+                        const unsigned int is_upper = id_bits[offset_bit];
 
                         // Enable packing since we have enough work to hide hazards from
                         // utilizing vcc. Packing allows the compiler to pack multiple items
@@ -251,17 +260,16 @@ struct block_sort_bitonic_impl
                         // relaxed local data sharing.
                         constexpr bool try_pack = true;
 
-                        static_assert(offset < VirtualWaveSize);
-                        wlev::template wlev_cas<try_pack>(local_dir,
-                                                          compare_function,
-                                                          offset,
-                                                          kv...);
+                        wlev::template wlev_cas<is_first_step, try_pack>(is_upper,
+                                                                         compare_function,
+                                                                         xor_mask,
+                                                                         kv...);
                     });
 
                 // Apply thread-level compare and swaps.
                 if constexpr(ItemsPerThread > 1)
                 {
-                    wlev::tlev_pass(id_bits[group_bit], compare_function, kv...);
+                    wlev::tlev_pass(compare_function, kv...);
                 }
             });
     }

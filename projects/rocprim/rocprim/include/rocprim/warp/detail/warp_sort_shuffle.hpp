@@ -133,7 +133,8 @@ struct warp_shuffle_sort_impl
                     K k1 = lane_xor_swap(k[item], xor_mask);
                     V v1 = lane_xor_swap(v[item], xor_mask);
 
-                    const bool swap = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
+                    const bool swap
+                        = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
 
                     swap_if<swap_method::ternary>(swap, k[item], k1);
                     swap_if<swap_method::ternary>(swap, v[item], v1);
@@ -272,8 +273,7 @@ struct warp_shuffle_sort_impl
                         constexpr unsigned int i_l = base + i;
 
                         constexpr unsigned int i_r
-                            = flip ? (base + group_size - 1 - i)
-                                   : (base + i + offset);
+                            = flip ? (base + group_size - 1 - i) : (base + i + offset);
 
                         tlev_cas_single<i_l, i_r>(compare_function, kv...);
                     });
