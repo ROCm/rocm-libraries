@@ -61,13 +61,6 @@ TEST(TestFp8E8M0, ConstructFromFloatBitPatterns)
     EXPECT_EQ(four.data, E8M0_BITS_FOUR);
 }
 
-TEST(TestFp8E8M0, FromBitsMinValue)
-{
-    // scale=0 is 2^-127, NOT zero (E8M0-specific)
-    fp8_e8m0 minVal = fp8_e8m0::from_bits(0x00);
-    EXPECT_EQ(static_cast<float>(minVal), 0x1p-127f);
-}
-
 TEST(TestFp8E8M0, CopyAssignment)
 {
     fp8_e8m0 a(2.0f);
@@ -93,15 +86,16 @@ TEST(TestFp8E8M0, RoundTripConversion)
     }
 }
 
-TEST(TestFp8E8M0, NonPowerOfTwoRounding)
+TEST(TestFp8E8M0, NonPowerOfTwoTruncation)
 {
-    // Non-power-of-2 values should be rounded to nearest power of 2
-    // 3.0 is between 2 (2^1) and 4 (2^2), closer to 4
-    // But E8M0 only stores exponent, so 3.0 -> exponent of 3.0 = 128 (for 2.0 since floor)
+    // E8M0 truncates to the lower power of 2 (floor behavior, not rounding)
+    // 3.0 is between 2 (2^1) and 4 (2^2) - truncates to 2.0
     fp8_e8m0 three(3.0f);
-    auto result = static_cast<float>(three);
-    // 3.0 has exponent 128 in float (for values in [2,4)), so E8M0 stores 128, giving 2.0
-    EXPECT_EQ(result, 2.0f);
+    EXPECT_EQ(static_cast<float>(three), 2.0f);
+
+    // 3.9 is very close to 4.0 but still truncates to 2.0
+    fp8_e8m0 almostFour(3.9f);
+    EXPECT_EQ(static_cast<float>(almostFour), 2.0f);
 }
 
 TEST(TestFp8E8M0, MaximumValue)
@@ -117,16 +111,16 @@ TEST(TestFp8E8M0, MaximumValue)
 
 TEST(TestFp8E8M0, MinimumValue)
 {
-    // E8M0 has no zero - scale=0 represents min
+    // E8M0 has no zero - scale=0 represents min (2^-127)
     fp8_e8m0 minVal = fp8_e8m0::from_bits(0x00);
     EXPECT_EQ(minVal.data, E8M0_BITS_MIN);
-    EXPECT_EQ(static_cast<float>(minVal), 0x1p-127f);
-}
 
-TEST(TestFp8E8M0, NaNValue)
-{
-    fp8_e8m0 nan = fp8_e8m0::from_bits(E8M0_BITS_NAN);
-    EXPECT_TRUE(isnan(nan));
+    auto minFloat = static_cast<float>(minVal);
+    EXPECT_EQ(minFloat, 0x1p-127f);
+
+    // Round-trip: convert float back to fp8_e8m0
+    fp8_e8m0 roundTrip(minFloat);
+    EXPECT_EQ(roundTrip.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, Signbit)

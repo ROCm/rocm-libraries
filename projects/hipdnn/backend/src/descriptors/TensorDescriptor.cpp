@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 #include "TensorDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
@@ -420,6 +420,24 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
     {
         *elementCount = byteSize;
     }
+}
+
+std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
+    const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorT)
+{
+    auto desc = std::make_shared<TensorDescriptor>();
+    desc->_data = tensorT;
+    desc->finalize();
+    return desc;
+}
+
+std::shared_ptr<TensorDescriptor>
+    TensorDescriptor::fromFlatBuffer(hipdnn_data_sdk::data_objects::TensorAttributesT&& tensorT)
+{
+    auto desc = std::make_shared<TensorDescriptor>();
+    desc->_data = std::move(tensorT);
+    desc->finalize();
+    return desc;
 }
 
 hipdnnBackendDescriptorType_t TensorDescriptor::getStaticType()
