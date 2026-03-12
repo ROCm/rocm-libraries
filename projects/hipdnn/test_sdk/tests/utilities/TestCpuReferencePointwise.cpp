@@ -336,11 +336,11 @@ protected:
 
         // Create expected tensor: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
         Tensor<OutputType> expected({5});
-        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(1)), 0);
-        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(4)), 1);
-        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(7)), 2);
-        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(10)), 3);
-        expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(13)), 4);
+        expected.setHostValue(static_cast<OutputType>(static_cast<float>(1)), 0);
+        expected.setHostValue(static_cast<OutputType>(static_cast<float>(4)), 1);
+        expected.setHostValue(static_cast<OutputType>(static_cast<float>(7)), 2);
+        expected.setHostValue(static_cast<OutputType>(static_cast<float>(10)), 3);
+        expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -468,10 +468,10 @@ protected:
         Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
         Tensor<OutputType> output({2, 3, 2, 2}); // Output: [2,3,2,2]
 
-        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1));
+        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_1));
 
         input2.setHostValue(
-            safeTestTypeCast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
+            static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
@@ -584,11 +584,11 @@ protected:
         std::vector<int64_t> outputStrides = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<OutputType> output(outputDims, outputStrides);
 
-        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2));
 
         // Set channel-specific values in input2
         input2.setHostValue(
-            safeTestTypeCast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
+            static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
