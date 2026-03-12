@@ -825,8 +825,8 @@ typedef enum
     /** @brief Transpose parameter for block scale quantize */
     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2805,
 
-    /** @brief Compute data type for block scale quantize */
-    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT = 2806,
+    /** @brief Math precision for block scale quantize */
+    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT = 2806,
 
     /** @} */
 

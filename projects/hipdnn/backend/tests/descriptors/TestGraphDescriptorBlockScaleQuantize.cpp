@@ -55,8 +55,15 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &scaleDesc);
+
+    int32_t blockSize = K_BSQ_BLOCK_SIZE;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                       HIPDNN_TYPE_INT32,
+                       1,
+                       &blockSize);
+
     desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();
     return wrapper;
@@ -134,6 +141,7 @@ TEST_F(TestGraphDescriptorBlockScaleQuantize, BuildFromSingleOperation)
     EXPECT_EQ(attrs->x_tensor_uid, K_BSQ_TENSOR_X_UID);
     EXPECT_EQ(attrs->y_tensor_uid, K_BSQ_TENSOR_Y_UID);
     EXPECT_EQ(attrs->scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->block_size, K_BSQ_BLOCK_SIZE);
 }
 
 TEST_F(TestGraphDescriptorBlockScaleQuantize, ComputeDataTypePreserved)

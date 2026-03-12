@@ -26,6 +26,9 @@ void BlockScaleQuantizeOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "BlockScaleQuantizeOperationDescriptor::finalize() failed: compute data type not "
                   "set");
+    THROW_IF_FALSE(_data.block_size > 0,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "BlockScaleQuantizeOperationDescriptor::finalize() failed: block_size not set");
 
     HipdnnBackendDescriptorImpl<BlockScaleQuantizeOperationDescriptor>::finalize();
 }
@@ -71,17 +74,13 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
-    {
-        int64_t blockSizeInt64 = 0;
-        setScalar(blockSizeInt64,
-                  HIPDNN_TYPE_INT64,
+        setScalar(_data.block_size,
+                  HIPDNN_TYPE_INT32,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::setAttribute()");
-        _data.block_size = static_cast<int32_t>(blockSizeInt64);
         break;
-    }
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT:
         setOptionalScalar<HIPDNN_TYPE_INT64>(_data.axis,
                                              attributeType,
@@ -97,7 +96,7 @@ void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -153,17 +152,14 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
-    {
-        auto blockSizeInt64 = static_cast<int64_t>(_data.block_size);
-        getScalar(blockSizeInt64,
-                  HIPDNN_TYPE_INT64,
+        getScalar(_data.block_size,
+                  HIPDNN_TYPE_INT32,
                   attributeType,
                   requestedElementCount,
                   elementCount,
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT:
         getOptionalScalar<HIPDNN_TYPE_INT64>(_data.axis,
                                              attributeType,
@@ -181,7 +177,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                   arrayOfElements,
                   "BlockScaleQuantizeOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,

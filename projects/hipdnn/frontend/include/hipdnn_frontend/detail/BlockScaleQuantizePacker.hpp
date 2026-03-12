@@ -45,11 +45,11 @@ inline Error createBlockScaleQuantizeOperation(
     // Set block scale quantize parameters
     if(attributes.get_block_size().has_value())
     {
-        int64_t blockSize = static_cast<int64_t>(attributes.get_block_size().value());
+        int32_t blockSize = attributes.get_block_size().value();
         HIPDNN_CHECK_ERROR(
             setDescriptorAttrScalar(opDesc.get(),
                                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
-                                    HIPDNN_TYPE_INT64,
+                                    HIPDNN_TYPE_INT32,
                                     blockSize,
                                     "block_scale_quantize block_size"));
     }
@@ -76,7 +76,7 @@ inline Error createBlockScaleQuantizeOperation(
     }
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT,
+                                                 HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
                                                  attributes.compute_data_type,
                                                  "blockscalequantize compute data type"));
 

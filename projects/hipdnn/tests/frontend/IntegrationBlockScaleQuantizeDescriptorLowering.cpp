@@ -167,6 +167,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
     EXPECT_EQ(bsq->x_tensor_uid, K_BSQ_TENSOR_X_UID);
     EXPECT_EQ(bsq->y_tensor_uid, K_BSQ_TENSOR_Y_UID);
     EXPECT_EQ(bsq->scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
+    
     EXPECT_EQ(bsq->block_size, K_BSQ_BLOCK_SIZE);
 }
 

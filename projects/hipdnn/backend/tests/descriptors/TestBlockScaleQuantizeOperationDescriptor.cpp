@@ -57,11 +57,21 @@ public:
         setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT, _xDesc);
         setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT, _yDesc);
         setIf(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT, _scaleDesc);
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT)
+        if(std::find(skip.begin(), skip.end(),
+                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT)
+           == skip.end())
+        {
+            int32_t blockSize = K_BSQ_BLOCK_SIZE;
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                               HIPDNN_TYPE_INT32,
+                               1,
+                               &blockSize);
+        }
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT)
            == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
-            desc->setAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT,
+            desc->setAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
                                HIPDNN_TYPE_DATA_TYPE,
                                1,
                                &computeType);
@@ -125,29 +135,26 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeWithRequiredAttributes
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
-TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeFailsWithoutXTensor)
+class TestBlockScaleQuantizeOperationDescriptorFinalizeFailsWithout
+    : public TestBlockScaleQuantizeOperationDescriptor,
+      public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
 {
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT});
+};
+
+TEST_P(TestBlockScaleQuantizeOperationDescriptorFinalizeFailsWithout, FinalizeFailsWithout)
+{
+    setAllAttributesExcept({GetParam()});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeFailsWithoutYTensor)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeFailsWithoutScaleTensor)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeFailsWithoutComputeType)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
+INSTANTIATE_TEST_SUITE_P(
+    RequiredAttributes,
+    TestBlockScaleQuantizeOperationDescriptorFinalizeFailsWithout,
+    ::testing::Values(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT,
+                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT,
+                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT,
+                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                      HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT));
 
 // =============================================================================
 // SetAttribute Tests - Tensor Descriptors
@@ -239,7 +246,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -251,8 +258,49 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetComputeDataTypeWrongElement
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+            HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// SetAttribute Tests - Optional Fields
+// =============================================================================
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetAndGetBlockSize)
+{
+    auto desc = getDescriptor();
+    int32_t blockSize = K_BSQ_BLOCK_SIZE;
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                                       HIPDNN_TYPE_INT32,
+                                       1,
+                                       &blockSize));
+
+    ASSERT_EQ(desc->getData().block_size, K_BSQ_BLOCK_SIZE);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetAndGetAxis)
+{
+    auto desc = getDescriptor();
+    int64_t axis = 2;
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       1,
+                                       &axis));
+
+    ASSERT_TRUE(desc->getData().axis.has_value());
+    ASSERT_EQ(desc->getData().axis.value(), 2);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetAndGetTranspose)
+{
+    auto desc = getDescriptor();
+    bool transpose = true;
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &transpose));
+
+    ASSERT_TRUE(desc->getData().transpose);
 }
 
 // =============================================================================
@@ -312,18 +360,94 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeType)
     setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        1,
                                        &elementCount,
                                        &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeBlockSizeAfterFinalize)
+{
+    setAllAttributesExcept();
+    getDescriptor()->finalize();
+    auto desc = getDescriptor();
+
+    int32_t retrieved = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                                       HIPDNN_TYPE_INT32,
+                                       1,
+                                       &elementCount,
+                                       &retrieved));
+    ASSERT_EQ(retrieved, K_BSQ_BLOCK_SIZE);
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeAxisAfterFinalize)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+    int64_t axis = 3;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &axis);
+    desc->finalize();
+
+    int64_t retrieved = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       1,
+                                       &elementCount,
+                                       &retrieved));
+    ASSERT_EQ(retrieved, 3);
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeAxisQueryReturnsZeroWhenAbsent)
+{
+    setAllAttributesExcept();
+    getDescriptor()->finalize();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 0);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTransposeAfterFinalize)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+    bool transpose = true;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &transpose);
+    desc->finalize();
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &retrieved));
+    ASSERT_TRUE(retrieved);
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -421,7 +545,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeTypeQueryRe
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        0,
                                        &elementCount,
@@ -460,6 +584,24 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizePreservesTensorReferen
     ASSERT_EQ(desc->getXDesc()->getData().uid, K_BSQ_TENSOR_X_UID);
     ASSERT_EQ(desc->getYDesc()->getData().uid, K_BSQ_TENSOR_Y_UID);
     ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_BSQ_TENSOR_SCALE_UID);
+}
+
+// =============================================================================
+// Finalize Succeeds Without Optional Fields
+// =============================================================================
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeSucceedsWithoutOptionalAxis)
+{
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT});
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizeSucceedsWithoutOptionalTranspose)
+{
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT});
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
 // =============================================================================
@@ -502,7 +644,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -524,12 +666,34 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithHalfComputeType)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
+}
+
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithBlockSizeAndAxis)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+
+    int64_t axis = 1;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &axis);
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+
+    auto* attrs = node->attributes.AsBlockScaleQuantizeAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_EQ(attrs->block_size, K_BSQ_BLOCK_SIZE);
+    ASSERT_TRUE(attrs->axis.has_value());
+    EXPECT_EQ(attrs->axis.value(), 1);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetTensorDescriptorsOrderIsXYScale)
