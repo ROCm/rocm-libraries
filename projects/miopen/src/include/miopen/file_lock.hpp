@@ -95,7 +95,7 @@ public:
     }
 #endif
 
-    file_lock(const file_lock&) = delete;
+    file_lock(const file_lock&)            = delete;
     file_lock& operator=(const file_lock&) = delete;
 
     file_lock(file_lock&& rhs) noexcept { this->swap(rhs); }

@@ -83,6 +83,11 @@ NB_MODULE(origami, m) {
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
 
+  nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
+      .value("estimation", origami::prediction_modes_t::estimation)
+      .value("simulation", origami::prediction_modes_t::simulation)
+      .export_values();
+
   // Add new struct bindings
   nanobind::class_<origami::dim3_t>(m, "dim3_t")
       .def(nanobind::init<std::size_t, std::size_t, std::size_t>())
@@ -94,18 +99,63 @@ NB_MODULE(origami, m) {
       .def("nk", &origami::dim3_t::nk)
       .def("mnk", &origami::dim3_t::mnk);
 
+  // Tensile-specific parameters (used when prediction_mode == simulation)
+  nanobind::class_<origami::tensile_params_t>(m, "tensile_params_t")
+      .def(nanobind::init<>())
+      .def_rw("depth_u", &origami::tensile_params_t::depth_u)
+      .def_rw("global_split_u", &origami::tensile_params_t::global_split_u)
+      .def_rw("global_accumulation", &origami::tensile_params_t::global_accumulation)
+      .def_rw("local_split_u", &origami::tensile_params_t::local_split_u)
+      .def_rw("direct_to_vgpr_a", &origami::tensile_params_t::direct_to_vgpr_a)
+      .def_rw("direct_to_vgpr_b", &origami::tensile_params_t::direct_to_vgpr_b)
+      .def_rw("direct_to_lds_a", &origami::tensile_params_t::direct_to_lds_a)
+      .def_rw("direct_to_lds_b", &origami::tensile_params_t::direct_to_lds_b)
+      .def_rw("num_loads_coalesced_a", &origami::tensile_params_t::num_loads_coalesced_a)
+      .def_rw("num_loads_coalesced_b", &origami::tensile_params_t::num_loads_coalesced_b)
+      .def_rw("wave_num", &origami::tensile_params_t::wave_num)
+      .def_rw("wave_group_m", &origami::tensile_params_t::wave_group_m)
+      .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
+      .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
+      .def_rw("math_clocks_unrolled_loop", &origami::tensile_params_t::math_clocks_unrolled_loop)
+      .def_rw("swizzle_a", &origami::tensile_params_t::swizzle_a)
+      .def_rw("swizzle_b", &origami::tensile_params_t::swizzle_b)
+      .def_rw("workgroup_mapping_xcc", &origami::tensile_params_t::workgroup_mapping_xcc)
+      .def_rw("workgroup_mapping_xcc_group", &origami::tensile_params_t::workgroup_mapping_xcc_group)
+      .def_rw("global_split_u_coalesced", &origami::tensile_params_t::global_split_u_coalesced)
+      .def_rw("global_split_u_wgm_round_robin", &origami::tensile_params_t::global_split_u_wgm_round_robin);
+
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
       .def_rw("mi", &origami::config_t::mi)
-      .def_rw("custom_mainloop_scheduling", &origami::config_t::custom_mainloop_scheduling)
+      .def_rw("hand_optimized_main_loop", &origami::config_t::hand_optimized_main_loop)
       .def_rw("occupancy", &origami::config_t::occupancy)
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
-      .def_rw("grid_selection", &origami::config_t::grid_selection);
+      .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
+      .def_rw("grid_selection", &origami::config_t::grid_selection)
+      .def_rw("prediction_mode", &origami::config_t::prediction_mode)
+      .def_rw("grvw_a", &origami::config_t::grvw_a)
+      .def_rw("grvw_b", &origami::config_t::grvw_b)
+      .def_rw("gwvw_d", &origami::config_t::gwvw_d)
+      .def_rw("vector_width_a", &origami::config_t::vector_width_a)
+      .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      // Tensile-specific parameters accessed via variant backend
+      .def("tensile",
+           static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
+               &origami::config_t::tensile),
+           nanobind::rv_policy::reference_internal,
+           "Get mutable reference to Tensile params (initializes if not set)")
+      .def("has_tensile_params", &origami::config_t::has_tensile_params,
+           "Check if Tensile params are currently set")
+      .def("set_tensile_params",
+           [](origami::config_t& c, const origami::tensile_params_t& p) {
+             c.backend = p;
+           },
+           "Set Tensile params from a tensile_params_t object");
 
   nanobind::class_<origami::workgroup_mapping_t>(m, "workgroup_mapping_t")
       .def(nanobind::init<>())
@@ -131,6 +181,12 @@ NB_MODULE(origami, m) {
       .def_rw("mi_dtype", &origami::problem_t::mi_dtype)
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
       .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
+
+  nanobind::class_<origami::staggerU_t>(m, "staggerU_t")
+      .def(nanobind::init<>())
+      .def_rw("staggerUMapping", &origami::staggerU_t::staggerUMapping)
+      .def_rw("staggerU", &origami::staggerU_t::staggerU)
+      .def_rw("staggerUStrideShift", &origami::staggerU_t::staggerUStrideShift);
 
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
@@ -175,10 +231,14 @@ NB_MODULE(origami, m) {
         nanobind::arg("compute_clock_khz"),
         "Create hardware object for a specific architecture with specified parameters.");
 
-  m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
+  m.def("datatype_to_bits", 
+        &origami::datatype_to_bits, 
+        "Return the number of bits in a datatype");
+  
   m.def("string_to_datatype",
         &origami::string_to_datatype,
         "Convert a string representation of a datatype into data_type_t enum");
+
   m.def("datatype_to_string",
         &origami::datatype_to_string,
         "Convert data_type_t enum to string representation");
@@ -186,18 +246,34 @@ NB_MODULE(origami, m) {
   m.def("select_config",
         &origami::select_config,
         "Select best configuration based on problem and hardware");
+
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
+
   m.def("select_workgroup_mapping",
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+
+  m.def("select_staggerU",
+        &origami::select_staggerU,
+        "Select best staggerU parameters");
+
+  m.def("rank_configs",
+        &origami::rank_configs,
+        "Rank configurations by performance");
+
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
-  m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
-  m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
+
+  m.def("select_topk_configs",
+        &origami::select_topk_configs,
+        "Select topk configurations");
+
+  m.def("compute_perf_gflops",
+        &origami::compute_perf_gflops,
+        "Compute performance in GFLOPS");
 
   // StreamK functions
   m.def("select_reduction",
@@ -210,7 +286,7 @@ NB_MODULE(origami, m) {
                                const origami::hardware_t&,
                                const origami::config_t&,
                                size_t max_cus)>(&origami::compute_total_latency),
-        "Compute total latency");
+        "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
   m.def("compute_number_matrix_instructions",
         &origami::compute_number_matrix_instructions,
         "Compute the number of matrix instructions required");

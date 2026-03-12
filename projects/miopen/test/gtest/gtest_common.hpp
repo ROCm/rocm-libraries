@@ -52,11 +52,11 @@ public:
         restore = ClearValue();
     }
 
-    ScopedEnvironment()                         = delete;
-    ScopedEnvironment(const ScopedEnvironment&) = delete;
-    ScopedEnvironment(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment()                                    = delete;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment(ScopedEnvironment&&)                 = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&)      = delete;
 
     ~ScopedEnvironment()
     {
@@ -325,6 +325,7 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_DIRECT)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
+MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_BUFFER_SIZE)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_ENFORCE)
 
 // TODO: GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built

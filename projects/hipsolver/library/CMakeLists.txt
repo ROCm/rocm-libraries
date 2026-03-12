@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ if(BUILD_VERBOSE)
   message(STATUS "\t==>CMAKE_EXE_LINKER link flags: " ${CMAKE_EXE_LINKER_FLAGS})
 endif()
 
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   find_package(hip REQUIRED PATHS ${ROCM_PATH} /opt/rocm ${HIP_PATH})
 else()
   find_package(HIP REQUIRED)

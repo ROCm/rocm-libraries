@@ -6,10 +6,11 @@
 import pytest
 import math
 import origami
-import torch
+
+# Skip entire module if torch is not available (selector requires torch)
+torch = pytest.importorskip("torch", reason="torch is required for OrigamiMatmulSelector tests.")
 
 from origami.selector import OrigamiMatmulSelector
-from .conftest import create_config_list
 
 
 class MockConfig:

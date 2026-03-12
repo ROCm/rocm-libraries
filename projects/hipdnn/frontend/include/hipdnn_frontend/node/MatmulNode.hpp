@@ -6,9 +6,10 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/detail/MatmulPacker.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -34,8 +35,8 @@ public:
 
         // Validate minimum dimensionality for matmul operands
         HIPDNN_CHECK_ERROR(validateTensors(a, b, c));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(a, minRank, "Input tensor A"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(b, minRank, "Input tensor B"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(a, minRank, "Input tensor A"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(b, minRank, "Input tensor B"));
 
         const auto& aDims = a->get_dim(); // [..., M, K]
         const auto& bDims = b->get_dim(); // [..., K, N]
@@ -119,6 +120,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createMatmulOperation(attributes, tensorDescs, operations);
     }
 
 private:

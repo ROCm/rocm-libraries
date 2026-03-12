@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <regex>
 
@@ -74,9 +51,9 @@ namespace rocRoller
                 for(auto const& t : {typeC, typeD, typeAcc})
                     rv << "_" << t;
 
-                if(scaleSkipPermlane)
+                if(scaleSkipPermlane != rocRoller::ScaleSkipPermlaneMode::None)
                 {
-                    rv << "_PreSW";
+                    rv << "_PreSW" << toString(scaleSkipPermlane);
                 }
 
                 if(!scalePretileA.empty())
@@ -122,13 +99,10 @@ namespace rocRoller
                 fullName << "_LA" << loadPathA;
                 fullName << "_LB" << loadPathB;
 
-                fullName << "_SD" << storeLDSD;
+                fullName << "_SD" << storePath;
 
                 fullName << "_LSA" << loadPathAScale;
                 fullName << "_LSB" << loadPathBScale;
-
-                fullName << "_UNROLL";
-                rocRoller::streamJoin(fullName, std::vector{unrollX, unrollY}, "x");
 
                 fullName << "_SwizzleScale" << swizzleScale << prefetchScale;
                 fullName << "_SwizzleTileSize" << swizzleTileSize;
@@ -147,12 +121,12 @@ namespace rocRoller
 
                 fullName << "_" << scheduler;
 
-                if(streamK)
+                if(streamK != StreamKMode::None)
                 {
                     fullName << "_SK";
-                    if(streamKTwoTileDPFirst)
+                    if(streamK == StreamKMode::TwoTileDPFirst)
                         fullName << "2TDPFirst";
-                    else if(streamKTwoTile)
+                    else if(streamK == StreamKMode::TwoTile)
                         fullName << "2T";
                 }
 
@@ -184,6 +158,17 @@ namespace rocRoller
             }
 
             std::ostream& operator<<(std::ostream& s, TransposeType const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
+            std::string toString(XYTuple x)
+            {
+                return fmt::format("{}x{}", x.x, x.y);
+            }
+
+            std::ostream& operator<<(std::ostream& s, XYTuple const& x)
             {
                 s << toString(x);
                 return s;
@@ -262,10 +247,9 @@ namespace rocRoller
             {
                 s << "Version:         " << x.version << std::endl;
                 s << "Arch:            " << x.architecture.toString() << std::endl;
-                if(x.streamK)
+                if(x.streamK != StreamKMode::None)
                 {
-                    s << "Algorithm:       StreamK twoTile:" << x.streamKTwoTile
-                      << "(DPFirst:" << x.streamKTwoTileDPFirst << ")" << std::endl;
+                    s << "Algorithm:       StreamK(" << x.streamK << ")" << std::endl;
                 }
                 else
                 {
@@ -281,14 +265,13 @@ namespace rocRoller
                 s << "LDS Padding A:   " << x.padLDSA << std::endl;
                 s << "Load B:          " << x.loadPathB << std::endl;
                 s << "LDS Padding B:   " << x.padLDSB << std::endl;
-                s << "Store D LDS:     " << x.storeLDSD << std::endl;
+                s << "Store D Path:    " << x.storePath << std::endl;
                 s << "Load AScale:     " << x.loadPathAScale << std::endl;
                 s << "Load BScale:     " << x.loadPathBScale << std::endl;
                 s << "Prefetch:        "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
                   << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps
                   << std::endl;
-                s << "Unroll:          X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler:       " << x.scheduler << std::endl;
                 s << "WG size:         " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
                 s << "WG Mapping Dim:  " << x.workgroupMappingDim << std::endl;
@@ -315,6 +298,29 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
+    bool ParseXY(const std::string& arg, XYTuple& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        std::regex  pattern(R"((\d+)x(\d+))");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.x = std::stoi(match[1]);
+            x.y = std::stoi(match[2]);
+        }
+        else
+        {
+            std::cerr << "Invalid format for XxY pair.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
     bool ParseIntPair(const std::string& arg, std::pair<int, int>& x)
     {
         if(arg.empty())

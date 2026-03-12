@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_DRIVER_HPP
 
 #include <half/half.hpp>
-#include "random.hpp"
+#include "../driver/random.hpp"
 
 #include "InputFlags.hpp"
 #include <algorithm>
@@ -132,7 +132,7 @@ struct GPUMem
     }
     int FromGPU(hipStream_t q, void* p)
     {
-        hipDeviceSynchronize();
+        (void)hipDeviceSynchronize();
         _q = q;
         return static_cast<int>(hipMemcpy(p, buf, GetSize(), hipMemcpyDeviceToHost));
     }
@@ -518,7 +518,7 @@ public:
         miopenCreate(&handle);
 #elif MIOPEN_BACKEND_HIP
         hipStream_t s;
-        hipStreamCreate(&s);
+        (void)hipStreamCreate(&s);
         miopenCreateWithStream(&handle, s);
 #endif
 

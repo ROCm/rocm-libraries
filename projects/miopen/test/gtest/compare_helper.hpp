@@ -29,6 +29,7 @@
 #include <limits>
 #include <type_traits>
 #include <utility>
+#include <half/half.hpp>
 
 #include <iostream>
 
@@ -37,9 +38,9 @@
 
 namespace test_helpers {
 template <typename T>
-constexpr bool
-    is_floating_point_tensor = (std::is_same_v<typename T::value_type, half_float::half> ||
-                                std::is_floating_point_v<typename T::value_type>);
+constexpr bool is_floating_point_tensor =
+    (std::is_same_v<typename T::value_type, half_float::half> ||
+     std::is_floating_point_v<typename T::value_type>);
 
 template <class... Ts>
 constexpr bool any_float_tensors()
@@ -83,19 +84,20 @@ bool CompareFloatTensorTuples(LeftTuple const& left,
         ...);
 }
 
-template <class... CpuT, class... GpuT>
-std::enable_if_t<!(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>()), bool>
-Compare(std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double)
+template <typename... CpuT, typename... GpuT>
+bool Compare(std::tuple<CpuT...> const& cpu_result,
+             std::tuple<GpuT...> const& gpu_result,
+             double tolerance)
 {
-    return cpu_result == gpu_result;
-}
-
-template <class... CpuT, class... GpuT>
-std::enable_if_t<(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>()), bool> Compare(
-    std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double tolerance)
-{
-    return CompareFloatTensorTuples(
-        cpu_result, gpu_result, tolerance, std::index_sequence_for<CpuT...>{});
+    if constexpr(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>())
+    {
+        return CompareFloatTensorTuples(
+            cpu_result, gpu_result, tolerance, std::index_sequence_for<CpuT...>{});
+    }
+    else
+    {
+        return cpu_result == gpu_result;
+    }
 }
 
 template <typename T>

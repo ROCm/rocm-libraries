@@ -1,30 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
+#endif
+
 #include "miopen_cstdint.hpp"
 #include "miopen_limits.hpp"
 #include "float_types.h"
@@ -91,7 +71,7 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
         top_h_end = min(top_h_end, static_cast<int>(top_h));
         top_w_end = min(top_w_end, static_cast<int>(top_w));
 
-        FLOAT bot_data[PIX_D_PER_WORK][PIX_H_PER_WORK][PIX_W_PER_WORK] = {FLOAT{0}};
+        FLOAT_ACCUM bot_data[PIX_D_PER_WORK][PIX_H_PER_WORK][PIX_W_PER_WORK] = {FLOAT_ACCUM{0}};
 
         for(int h = top_d_start; h < top_d_end; ++h)
         {
@@ -102,7 +82,8 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
                     unsigned int top_gbl_off =
                         b_id * top_str_b + c_id * top_str_c + h * top_str_d + j * top_str_h + i;
 
-                    FLOAT top_val    = b_id < batch ? top_df[top_gbl_off] : FLOAT{0};
+                    FLOAT_ACCUM top_val =
+                        b_id < batch ? CVT_FLOAT2ACCUM(top_df[top_gbl_off]) : CVT_FP32_2ACCUM(0.0f);
                     index_t mask_idx = b_id < batch
                                            ? mask[top_gbl_off]
                                            : std::numeric_limits<MLO_POOLING_INDEX_TYPE>::max();
@@ -141,7 +122,7 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
                     {
                         unsigned int bot_idx = bot_off + m * bot_str_d + k * bot_str_h + l;
 
-                        bot_df[bot_idx] = bot_data[m][k][l];
+                        bot_df[bot_idx] = CVT_ACCUM2FLOAT(bot_data[m][k][l]);
                     }
                 }
             }

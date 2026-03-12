@@ -43,8 +43,8 @@ if(ROCBLAS_ENABLE_ASAN)
   target_compile_definitions(rocblas-clients-common PRIVATE ASAN_BUILD)
 endif()
 
-if(rocm_smi_FOUND)
-  target_link_libraries(rocblas-clients-common PUBLIC rocm_smi64)
+if(amd_smi_FOUND)
+  target_link_libraries(rocblas-clients-common PUBLIC amd_smi)
 endif()
 target_link_libraries(
   rocblas-clients-common

@@ -229,8 +229,7 @@ struct verify_rnn_api_base
         std::stringstream ss{};
         ss << "./bin/MIOpenDriver rnn_seq ";
 
-        ss << " -F 0 "
-           << " -m ";
+        ss << " -F 0 " << " -m ";
 
         switch(rnnDesc.rnnMode)
         {
@@ -1767,7 +1766,7 @@ protected:
             miopenDropoutGetStatesSize(&handle, &statesSizeInBytes);
 
             void* dropout_state_buf;
-            hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
+            (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(&dropoutDesc,
                                        &handle,
