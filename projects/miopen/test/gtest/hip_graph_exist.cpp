@@ -181,17 +181,12 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
         GTEST_SKIP() << "MIOpenDriver not found at: " << driver_path.string();
     }
 
-    // Check if rocprof is available
+    // Get rocprof command
 #ifdef _WIN32
     const std::string rocprof_cmd = "rocprof.exe";
 #else
     const std::string rocprof_cmd = "rocprof";
 #endif
-    std::string rocprof_check = ExecuteCommand(rocprof_cmd + " --version 2>&1");
-    if(rocprof_check.empty() || rocprof_check.find("rocprof") == std::string::npos)
-    {
-        GTEST_SKIP() << "rocprof not available, skipping test";
-    }
 
     // Capture stderr to reduce test noise and allow verification
     // NOTE: CaptureStderr must be called AFTER all GTEST_SKIP() checks,
@@ -205,13 +200,17 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     std::ostringstream cmd;
 
     // Change to temp directory first, then run rocprof from there
+    // Also set LD_LIBRARY_PATH so MIOpenDriver can find libMIOpen.so
+    auto lib_path = fs::absolute(driver_path).parent_path().parent_path() / "lib";
 #ifdef _WIN32
     cmd << "cd /d \"" << temp_dir << "\" && ";
 #else
     cmd << "cd \"" << temp_dir << "\" && ";
+    cmd << "LD_LIBRARY_PATH=\"" << lib_path.string() << ":$LD_LIBRARY_PATH\" ";
 #endif
 
     // Run rocprof without --output-file (it will use default names: results.json, etc.)
+    // Note: rocprofv1/v2 do NOT support the `--` separator; only rocprofv3 requires it
     cmd << rocprof_cmd << " --hip-trace ";
     cmd << "\"" << fs::absolute(driver_path).string() << "\" " << test_case.driver_type << " ";
     cmd << test_case.driver_args;

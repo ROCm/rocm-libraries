@@ -154,6 +154,10 @@ test_categories:
       - "*/GPU_MIOpenDriver*"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
+      # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
+      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 154.58 sec
+      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 5.48 sec
+      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 8.56 sec
 
     test_files:
       # Quick tests
@@ -343,4 +347,4 @@ execution_settings:
     quick: 300          # 5 minutes 
     standard: 1800      # 30 minutes 
     comprehensive: 7200 # 2 hours 
-    full: 14400         # 4 hours         
+    full: 14400         # 4 hours

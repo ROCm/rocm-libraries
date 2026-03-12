@@ -106,7 +106,11 @@ int Driver::CaptureKernelCapturing(hipGraphFuncPtrType functPtr)
     he = hipStreamEndCapture(q, &hipGraph);
     if(rc != miopenStatusSuccess || he != hipSuccess)
     {
-        (void)hipGraphDestroy(hipGraph);
+        if(hipGraph != nullptr)
+        {
+            (void)hipGraphDestroy(hipGraph);
+            hipGraph = nullptr;
+        }
         if(rc != miopenStatusSuccess)
             return rc;
         return miopenStatusInternalError;
@@ -116,10 +120,12 @@ int Driver::CaptureKernelCapturing(hipGraphFuncPtrType functPtr)
     if(he != hipSuccess)
     {
         (void)hipGraphDestroy(hipGraph);
+        hipGraph = nullptr;
         return miopenStatusInternalError;
     }
 
-    he = hipGraphDestroy(hipGraph);
+    he       = hipGraphDestroy(hipGraph);
+    hipGraph = nullptr; // Prevent double-free in FinalizeKernel()
     if(he != hipSuccess)
     {
         return miopenStatusInternalError;
@@ -150,7 +156,12 @@ int Driver::ExecuteKernel()
         else
         {
             (void)hipGraphExecDestroy(hipGraphExec);
-            (void)hipGraphDestroy(hipGraph);
+            hipGraphExec = nullptr;
+            if(hipGraph != nullptr)
+            {
+                (void)hipGraphDestroy(hipGraph);
+                hipGraph = nullptr;
+            }
             return miopenStatusInternalError;
         }
     }
@@ -169,8 +180,16 @@ void Driver::FinalizeKernel()
     if(use_hip_graph)
     {
         (void)hipStreamSynchronize(q);
-        (void)hipGraphExecDestroy(hipGraphExec);
-        (void)hipGraphDestroy(hipGraph);
+        if(hipGraphExec != nullptr)
+        {
+            (void)hipGraphExecDestroy(hipGraphExec);
+            hipGraphExec = nullptr;
+        }
+        if(hipGraph != nullptr)
+        {
+            (void)hipGraphDestroy(hipGraph);
+            hipGraph = nullptr;
+        }
         if(hipGraphStartEvent != nullptr)
         {
             (void)hipEventDestroy(hipGraphStartEvent);
