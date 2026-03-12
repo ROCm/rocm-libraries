@@ -177,12 +177,19 @@ if(SDPAKERNELPROVIDER_ENABLE_COVERAGE)
         # cmake-format: on
     endfunction()
 
-    add_custom_coverage_target(code_coverage check)
-    add_custom_coverage_target(unit-coverage unit-check)
-    add_custom_coverage_target(integration-coverage integration-check)
+    if(SDPAKERNELPROVIDER_SKIP_TESTS)
+        message(
+            WARNING
+                "\nThe code coverage targets depend on test targets but test targets don't exist because SDPAKERNELPROVIDER_SKIP_TESTS is enabled."
+        )
+    else()
+        add_custom_coverage_target(code_coverage check)
+        add_custom_coverage_target(unit-coverage unit-check)
+        add_custom_coverage_target(integration-coverage integration-check)
 
-    # Alias target
-    add_custom_target(coverage DEPENDS code_coverage COMMENT "Alias for code_coverage")
+        # Alias target
+        add_custom_target(coverage DEPENDS code_coverage COMMENT "Alias for code_coverage")
+    endif()
 
     # Standalone coverage report from existing profdata (does not run tests)
     add_custom_coverage_target(current-coverage "")
