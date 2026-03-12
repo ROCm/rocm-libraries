@@ -96,7 +96,7 @@ inline size_t GetIndexMax(miopenIndexType_t index_type)
 
 // Filtering function matching ctest's run() method exactly
 // This copies the exact logic from pooling_gtest_common.hpp pooling_harness::run()
-// Matching variable names: idx_typ, idx_sz, spt_dim, wide_dataset, full_set
+// Matching variable names: idx_typ, idx_sz, spt_dim, wide_dataset
 inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
                                   int& num_uint16_case,
                                   int& num_uint32_case,
@@ -112,13 +112,12 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
     auto idx_sz  = sizeof(uint8_t);
     int spt_dim  = static_cast<int>(test_case.input_dims.size()) - 2;
     const bool skip_many_configs_with_non_int8_index =
-        apply_index_type_limits;               // (dataset_id == 0) && full_set
-    const bool wide_dataset = is_wide_dataset; // dataset_id == 2 && full_set
-    const bool full_set     = true;            // Always true for Dataset 0
+        apply_index_type_limits;               // dataset_id == 0 behavior
+    const bool wide_dataset = is_wide_dataset; // dataset_id == 2 behavior
 
     // Match ctest run() order exactly:
-    // 1. wsidx == 0 && spt_dim == 3 && max && full_set (not applicable for 2D)
-    if(test_case.wsidx == 0 && spt_dim == 3 && test_case.mode == miopenPoolingMax && full_set)
+    // 1. wsidx == 0 && spt_dim == 3 && max (not applicable for 2D)
+    if(test_case.wsidx == 0 && spt_dim == 3 && test_case.mode == miopenPoolingMax)
     {
         return false;
     }
@@ -129,11 +128,9 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
         return false;
     }
 
-    // 3. wsidx == 0 && average && full_set
+    // 3. wsidx == 0 && average
     if(test_case.wsidx == 0 &&
-       (test_case.mode == miopenPoolingAverage ||
-        test_case.mode == miopenPoolingAverageInclusive) &&
-       full_set)
+       (test_case.mode == miopenPoolingAverage || test_case.mode == miopenPoolingAverageInclusive))
     {
         return false;
     }
@@ -149,7 +146,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
     switch(idx_typ)
     {
     case miopenIndexUint8: {
-        if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) && full_set &&
+        if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) &&
            test_case.mode == miopenPoolingMax)
         {
             return false;
@@ -157,7 +154,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
         break;
     }
     case miopenIndexUint16: {
-        if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) && full_set &&
+        if((spt_dim == 3 || (spt_dim == 2 && test_case.wsidx == 1)) &&
            test_case.mode == miopenPoolingMax)
         {
             return false;
@@ -238,8 +235,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
         }
     }
 
-    // 7. Memory check (matching ctest exactly)
-    if(full_set)
+    // 7. Memory check (matching ctest's full_set=true behavior for this gtest path)
     {
         try
         {
