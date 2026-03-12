@@ -14,8 +14,8 @@
 
 #include <cstddef>
 
-#ifndef CHECK_HIP_ERROR
-#define CHECK_HIP_ERROR(status, message)           \
+#ifndef MIOPEN_GTEST_HIP_ERROR
+#define MIOPEN_GTEST_HIP_ERROR(status, message)    \
     do                                             \
     {                                              \
         hipError_t err = status;                   \
@@ -65,8 +65,8 @@ void gpu_fill(T* d_ptr, T value, size_t size_in_bytes, hipStream_t stream)
 {
     if(value == T{0})
     {
-        CHECK_HIP_ERROR(hipMemsetAsync(d_ptr, 0, size_in_bytes, stream),
-                        "Failed to memset device buffer");
+        MIOPEN_GTEST_HIP_ERROR(hipMemsetAsync(d_ptr, 0, size_in_bytes, stream),
+                               "Failed to memset device buffer");
     }
     else
     {

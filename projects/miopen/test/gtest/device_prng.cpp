@@ -3,6 +3,7 @@
 
 #include "device_prng.hpp"
 
+#include "gtest/gtest_hip_utilities.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -112,33 +113,13 @@ __global__ void sfc64_kernel(T* out, size_t n, uint64_t seed)
 }
 
 template <typename T>
-struct ToDeviceType
-{
-    using type = T;
-};
-
-// Map half_float::half -> __half
-template <>
-struct ToDeviceType<half_float::half>
-{
-    using type = __half;
-};
-
-// Map miopen::bfloat16 -> __bfloat16
-template <>
-struct ToDeviceType<bfloat16>
-{
-    using type = hip_bfloat16;
-};
-
-template <typename T>
 void RandomizeBuffer(T* dev_ptr, size_t size, uint64_t seed, hipStream_t stream)
 {
     if(size == 0)
         return;
 
     int deviceId;
-    hipGetDevice(&deviceId);
+    MIOPEN_GTEST_HIP_ERROR(hipGetDevice(&deviceId), "Failed to get device ID");
 
     hipDeviceProp_t props;
     hipGetDeviceProperties(&props, deviceId);

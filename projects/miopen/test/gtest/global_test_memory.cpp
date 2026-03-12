@@ -5,7 +5,7 @@
 
 #include "get_handle.hpp"
 #include "miopen/miopen.h"
-#include "utils.hpp"
+#include "gtest_hip_utilities.hpp"
 #include "device_prng.hpp"
 
 #include <cstddef>
@@ -18,18 +18,18 @@ namespace test::gtest::global_buffer {
 struct GlobalDeviceMemoryImpl
 {
 
-    GlobalDeviceMemoryImpl() { hipInit(0); }
+    GlobalDeviceMemoryImpl() { MIOPEN_GTEST_HIP_ERROR(hipInit(0), "Failed to initialize HIP"); }
 
     ~GlobalDeviceMemoryImpl()
     {
         if(buffer_ != nullptr)
         {
-            CHECK_HIP_ERROR(hipFree(buffer_), "Failed to free device buffer");
+            MIOPEN_GTEST_HIP_ERROR(hipFree(buffer_), "Failed to free device buffer");
         }
 
         if(host_mirror_ != nullptr)
         {
-            CHECK_HIP_ERROR(hipHostFree(host_mirror_), "Failed to free host mirror buffer");
+            MIOPEN_GTEST_HIP_ERROR(hipHostFree(host_mirror_), "Failed to free host mirror buffer");
         }
     }
 
@@ -41,15 +41,15 @@ struct GlobalDeviceMemoryImpl
         }
     }
 
-    void FreeBuffer()
+    void FreeBuffer() const
     {
         if(buffer_ != nullptr)
         {
-            CHECK_HIP_ERROR(hipFree(buffer_), "Failed to free device buffer");
+            MIOPEN_GTEST_HIP_ERROR(hipFree(buffer_), "Failed to free device buffer");
         }
         if(host_mirror_ != nullptr)
         {
-            CHECK_HIP_ERROR(hipHostFree(host_mirror_), "Failed to free host mirror buffer");
+            MIOPEN_GTEST_HIP_ERROR(hipHostFree(host_mirror_), "Failed to free host mirror buffer");
         }
     }
 
@@ -58,9 +58,10 @@ struct GlobalDeviceMemoryImpl
         FreeBuffer();
         total_size_ = new_size;
 
-        CHECK_HIP_ERROR(hipMalloc(&buffer_, total_size_), "Failed to allocate device buffer");
-        CHECK_HIP_ERROR(hipHostMalloc(&host_mirror_, total_size_, hipHostMallocDefault),
-                        "Failed to allocate host mirror buffer");
+        MIOPEN_GTEST_HIP_ERROR(hipMalloc(&buffer_, total_size_),
+                               "Failed to allocate device buffer");
+        MIOPEN_GTEST_HIP_ERROR(hipHostMalloc(&host_mirror_, total_size_, hipHostMallocDefault),
+                               "Failed to allocate host mirror buffer");
     }
 
     void ReleaseBuffer() { cur_offset_ = 0; }
@@ -124,8 +125,8 @@ void DeviceBufferObject::HostMirror() const
     if(size_bytes_ == 0)
         return;
 
-    CHECK_HIP_ERROR(hipMemcpy(host_mirror_, ptr_, size_bytes_, hipMemcpyDeviceToHost),
-                    "Failed to copy device buffer to host mirror");
+    MIOPEN_GTEST_HIP_ERROR(hipMemcpy(host_mirror_, ptr_, size_bytes_, hipMemcpyDeviceToHost),
+                           "Failed to copy device buffer to host mirror");
 }
 
 void DeviceBufferObject::HostMirrorAsync() const
@@ -140,12 +141,13 @@ void DeviceBufferObject::HostMirrorAsync() const
     }
 
     hipEvent_t e;
-    hipEventCreate(&e);
+    MIOPEN_GTEST_HIP_ERROR(hipEventCreate(&e), "Failed to create HIP event");
 
-    CHECK_HIP_ERROR(hipMemcpyAsync(host_mirror_, ptr_, size_bytes_, hipMemcpyDeviceToHost, stream_),
-                    "Failed to async copy device buffer to host mirror");
+    MIOPEN_GTEST_HIP_ERROR(
+        hipMemcpyAsync(host_mirror_, ptr_, size_bytes_, hipMemcpyDeviceToHost, stream_),
+        "Failed to async copy device buffer to host mirror");
 
-    hipEventRecord(e, stream_);
+    MIOPEN_GTEST_HIP_ERROR(hipEventRecord(e, stream_), "Failed to record HIP event");
     GetInstance().pending_events_[host_mirror_] = e;
 }
 
@@ -160,7 +162,7 @@ bool DeviceBufferObject::HostMirrorReady() const
     hipError_t status = hipEventQuery(it->second);
     if(status == hipSuccess)
     {
-        hipEventDestroy(it->second);
+        MIOPEN_GTEST_HIP_ERROR(hipEventDestroy(it->second), "Failed to destroy HIP event");
         GetInstance().pending_events_.erase(it);
         return true;
     }
@@ -176,9 +178,10 @@ void DeviceBufferObject::HostMirrorWait() const
         return;
     }
 
-    CHECK_HIP_ERROR(hipEventSynchronize(it->second), "Failed to synchronize host mirror event");
+    MIOPEN_GTEST_HIP_ERROR(hipEventSynchronize(it->second),
+                           "Failed to synchronize host mirror event");
 
-    hipEventDestroy(it->second);
+    MIOPEN_GTEST_HIP_ERROR(hipEventDestroy(it->second), "Failed to destroy HIP event");
     GetInstance().pending_events_.erase(it);
 }
 
