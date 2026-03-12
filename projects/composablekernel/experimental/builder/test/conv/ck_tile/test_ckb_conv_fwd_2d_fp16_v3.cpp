@@ -27,7 +27,7 @@ TEST(FwdConvInstances, Create_ConvAlgorithm_Tile_GroupedConvolutionKernel_2D_FP1
             .with_tile_optimizations(TileOptimizations{.num_groups_to_merge = 1,
                                                        .split_image         = false,
                                                        .explicit_gemm       = false,
-                                                       two_stage            = false});
+                                                       .two_stage           = false});
 
     using Builder = ConvBuilder<FwdConvSignature, FwdConvAlgorithm>;
     run_ck_tile_test<Builder>({

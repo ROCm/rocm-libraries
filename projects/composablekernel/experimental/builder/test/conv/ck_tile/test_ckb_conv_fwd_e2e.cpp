@@ -34,7 +34,7 @@ constexpr auto ALGORITHM =
         .with_tile_optimizations(ckt::TileOptimizations{.num_groups_to_merge = 1,
                                                         .split_image         = false,
                                                         .explicit_gemm       = false,
-                                                        two_stage            = false});
+                                                        .two_stage           = false});
 
 using Builder   = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance  = Builder::Instance;
