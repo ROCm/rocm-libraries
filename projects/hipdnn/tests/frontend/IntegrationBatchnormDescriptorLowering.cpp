@@ -44,8 +44,6 @@ constexpr std::array<int64_t, 4> K_TENSOR_DATA_DIMS = {2, 64, 16, 16};
 constexpr std::array<int64_t, 4> K_TENSOR_DATA_STRIDES = {16384, 256, 16, 1};
 constexpr std::array<int64_t, 4> K_TENSOR_PARAM_DIMS = {1, 64, 1, 1};
 constexpr std::array<int64_t, 4> K_TENSOR_PARAM_STRIDES = {64, 1, 1, 1};
-constexpr std::array<int64_t, 1> K_TENSOR_SCALAR_DIMS = {1};
-constexpr std::array<int64_t, 1> K_TENSOR_SCALAR_STRIDES = {1};
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
@@ -98,9 +96,8 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTrip)
     bias->set_uid(K_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(K_TENSOR_EPSILON_UID).set_name("Epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_TENSOR_SCALAR_DIMS)).set_stride(toVec(K_TENSOR_SCALAR_STRIDES));
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(K_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     BatchnormAttributes bnAttrs;
     bnAttrs.set_name("bn_fwd_op");
@@ -235,9 +232,8 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     bias->set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("Epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_TENSOR_SCALAR_DIMS)).set_stride(toVec(K_TENSOR_SCALAR_STRIDES));
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_name("Epsilon");
 
     BatchnormAttributes bnAttrs;
     bnAttrs.set_epsilon(epsilon);
@@ -337,9 +333,8 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
     bias->set_uid(602).set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(603).set_name("Epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_TENSOR_SCALAR_DIMS)).set_stride(toVec(K_TENSOR_SCALAR_STRIDES));
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(603).set_name("Epsilon");
 
     BatchnormAttributes bnAttrs;
     bnAttrs.set_name("minimal_bn").set_epsilon(epsilon);
