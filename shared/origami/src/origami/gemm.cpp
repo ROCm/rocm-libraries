@@ -1248,16 +1248,23 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
 
   // Request amplification (skinny-dimension GEMMs):
   // When one grid dimension is very small (less than 2 tiles), the shared operand's
-  // per-iteration working set is tiny and fits easily in L2. Multiple
-  // wavefronts per CU issue overlapping loads for this shared data, creating
-  // intra-CU L2 hits beyond what cross-CU spatial reuse captures.
-  bool enable_skinny_amp = (grid.m <= 2 && grid.n > grid.m * 8) || 
-                           (grid.n <= 2 && grid.m > grid.n * 8);
-  enable_skinny_amp &= (grid.k == 1) && (grid.b == 1);
-  if (enable_skinny_amp && concurrent_load < l2_cap) {
+  // per-iteration working set fits in L2 but NOT in L1. Multiple wavefronts
+  // per CU issue overlapping loads that miss L1 and hit L2, creating intra-CU
+  // L2 hits beyond what cross-CU spatial reuse captures.
+  {
+    const bool skinny_m = (grid.m <= 2 && grid.n > grid.m * 8);
+    const bool skinny_n = (grid.n <= 2 && grid.m > grid.n * 8);
+    const double shared_per_iter = skinny_m ? a_iter : b_iter;
+    constexpr double l1_capacity = 32 * 1024;
+    bool enable_skinny_amp = (skinny_m || skinny_n);
+    enable_skinny_amp &= (grid.k == 1) && (grid.b == 1);
+    enable_skinny_amp &= (a_temporal && b_temporal);
+    enable_skinny_amp &= (shared_per_iter > l1_capacity);
+    if (enable_skinny_amp && concurrent_load < l2_cap) {
       constexpr double amp_ceiling = 0.6;
       const double headroom = 1.0 - concurrent_load / l2_cap;
       l2_rate += headroom * std::max(amp_ceiling - l2_rate, 0.0);
+    }
   }
 
   l2_rate = clamp01(l2_rate);
