@@ -277,7 +277,7 @@ TEST_P(GPU_Find2Conv_FP32, Find2ConvTest)
                          std::get<3>(param),
                          std::get<4>(param)};
 
-    // Temporary disable 4 test cases.
+    // Temporarily disable 4 test cases.
     // https://amd-hub.atlassian.net/browse/ROCM-2915
     // When the entire test suite is executed, all test cases pass.
     // However, running any of these test cases in isolation results in a failure.
