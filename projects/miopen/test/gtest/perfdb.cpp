@@ -1476,6 +1476,10 @@ protected:
     }
 };
 
+// cppcheck false positive: TEST_F inside anonymous namespace with complex fixture definitions.
+// Known issue: https://trac.cppcheck.net/ticket/9160 (wontfix).
+// Same workaround used in conv_ai_3d_heuristics.cpp.
+// cppcheck-suppress syntaxError
 TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
 {
     std::string logs_root = GetArg(ArgsHelper::logs_path_arg);
