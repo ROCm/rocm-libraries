@@ -305,7 +305,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             gemm_params = device_op_name = instance.split("<")[2].split(">")[1].split(",")
             args = [param.split(":")[1].strip() for param in gemm_params]
 
-            spec = "Default"
+            spec = "Filter1x1Stride1Pad0"
             block_size = int(args[0])
 
             mnk_per_block = args[1].split("x")
