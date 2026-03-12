@@ -67,7 +67,6 @@ function(_hipdnn_generate_secondary_version _version _flatc_flags)
             -DCMAKE_CXX_COMPILER=${_cxx_compiler}
             -DCMAKE_RC_COMPILER=CMAKE_RC_COMPILER-NOTREQUIRED
             -DCMAKE_BUILD_TYPE=Release
-            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         BUILD_COMMAND ${CMAKE_COMMAND} --build ${_flatc_build_dir} --target flatc
         INSTALL_COMMAND ""
         BUILD_BYPRODUCTS ${_flatc_binary}

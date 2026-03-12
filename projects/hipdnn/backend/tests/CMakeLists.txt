@@ -11,10 +11,6 @@ endif()
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-# HIP language is not needed — the library has no device code. The test engine plugin1
-# (hipdnn_test_engine_plugin1) that previously required it is not built.
-# enable_language(HIP) was removed to allow MSVC compilation and ASAN builds.
-
 set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
 set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
 set(TEST_NO_API_VERSION_PLUGIN_NAME "hipdnn_test_no_api_version_plugin_name")
