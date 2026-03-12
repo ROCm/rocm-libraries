@@ -8,30 +8,29 @@ find_package(Threads REQUIRED)
 add_executable(
     public_hipdnn_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationConvForward.cpp
+    IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
+    IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
-    IntegrationConvFpropDescriptorLowering.cpp
-    IntegrationMatmul.cpp
-    IntegrationMatmulDescriptorLowering.cpp
-    IntegrationConvolutionWgradDescriptorLowering.cpp
-    IntegrationBatchnormInferenceDescriptorLowering.cpp
-    IntegrationPointwiseDescriptorLowering.cpp
-    IntegrationConvolutionDgradDescriptorLowering.cpp
-    IntegrationBatchnormBackwardDescriptorLowering.cpp
-    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
-    IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
+    IntegrationMatmulDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationSdpaFpropDescriptorLowering.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
