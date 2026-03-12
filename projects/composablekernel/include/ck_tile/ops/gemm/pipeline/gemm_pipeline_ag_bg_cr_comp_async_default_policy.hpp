@@ -420,6 +420,46 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                                 tile_dstr);
     }
 
+    template <typename Problem, typename ADataType>
+    CK_TILE_DEVICE static constexpr auto GetALdsStoreTensorView(void* smem)
+    {
+        ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
+        constexpr auto a_lds_block_desc = MakeALdsStoreBlockDescriptor<Problem, ADataType>();
+        return make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
+    }
+
+    template <typename Problem, typename ADataType>
+    CK_TILE_DEVICE static constexpr index_t GetALdsBlockSpaceSize()
+    {
+        constexpr auto a_lds_block_desc = MakeALdsStoreBlockDescriptor<Problem, ADataType>();
+        return integer_least_multiple(sizeof(ADataType) * a_lds_block_desc.get_element_space_size(),
+                                      16);
+    }
+
+    template <typename Problem, typename BDataType>
+    CK_TILE_DEVICE static constexpr auto GetBLdsStoreTensorView(void* smem)
+    {
+        BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(smem);
+        constexpr auto b_lds_block_desc = MakeBLdsStoreBlockDescriptor<Problem>();
+        return make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
+    }
+
+    template <typename Problem, typename ADataType>
+    CK_TILE_DEVICE static constexpr auto GetALdsLoadTensorView(void* smem)
+    {
+        ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
+        constexpr auto a_lds_block_desc = MakeALdsLoadBlockDescriptor<Problem, ADataType>();
+        return make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
+    }
+
+    template <typename Problem, typename BDataType>
+    CK_TILE_DEVICE static constexpr auto GetBLdsLoadTensorView(void* smem)
+    {
+        BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(smem);
+        constexpr auto b_lds_block_desc = MakeBLdsLoadBlockDescriptor<Problem>();
+        return make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {

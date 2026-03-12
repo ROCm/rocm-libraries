@@ -306,58 +306,36 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 number<BsLayout::size()>{});
 
             // this pipeline has a pair of LDS buffers per logical tile
-            constexpr index_t smem_size        = Policy::template GetSmemSize<Problem>();
-            auto get_AB_lds_store_tensor_views = [](void* smem) {
-                // A tile in LDS
-                ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
-                constexpr auto a_lds_block_desc =
-                    Policy::template MakeALdsStoreBlockDescriptor<Problem, ADataType>();
-                auto a_lds_block =
-                    make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
+            constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
+            constexpr index_t a_lds_block_space_size_aligned =
+                Policy::template GetALdsBlockSpaceSize<Problem, ADataType>();
 
-                // TODO: LDS alignment should come from Policy!
-                constexpr index_t a_lds_block_space_size_aligned = integer_least_multiple(
-                    sizeof(ADataType) * a_lds_block_desc.get_element_space_size(), 16);
+            // Create LDS store tensor views for buffer 0
+            auto a_lds_store_block0 =
+                Policy::template GetALdsStoreTensorView<Problem, ADataType>(p_smem);
+            auto b_lds_store_block0 = Policy::template GetBLdsStoreTensorView<Problem, BDataType>(
+                static_cast<void*>(static_cast<char*>(p_smem) + a_lds_block_space_size_aligned));
 
-                // B tile in LDS
-                BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(
-                    static_cast<void*>(static_cast<char*>(smem) + a_lds_block_space_size_aligned));
-                constexpr auto b_lds_block_desc =
-                    Policy::template MakeBLdsStoreBlockDescriptor<Problem>();
-                auto b_lds_block =
-                    make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
+            // Create LDS store tensor views for buffer 1
+            void* p_smem_buffer1 = static_cast<char*>(p_smem) + smem_size;
+            auto a_lds_store_block1 =
+                Policy::template GetALdsStoreTensorView<Problem, ADataType>(p_smem_buffer1);
+            auto b_lds_store_block1 =
+                Policy::template GetBLdsStoreTensorView<Problem, BDataType>(static_cast<void*>(
+                    static_cast<char*>(p_smem_buffer1) + a_lds_block_space_size_aligned));
 
-                return make_tuple(std::move(a_lds_block), std::move(b_lds_block));
-            };
-            auto&& [a_lds_store_block0, b_lds_store_block0] = get_AB_lds_store_tensor_views(p_smem);
-            auto&& [a_lds_store_block1, b_lds_store_block1] =
-                get_AB_lds_store_tensor_views(static_cast<char*>(p_smem) + smem_size);
+            // Create LDS load tensor views for buffer 0
+            auto a_lds_load_block0 =
+                Policy::template GetALdsLoadTensorView<Problem, ADataType>(p_smem);
+            auto b_lds_load_block0 = Policy::template GetBLdsLoadTensorView<Problem, BDataType>(
+                static_cast<void*>(static_cast<char*>(p_smem) + a_lds_block_space_size_aligned));
 
-            auto get_AB_lds_load_tensor_views = [](void* smem) {
-                // A tile in LDS
-                ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
-                constexpr auto a_lds_block_desc =
-                    Policy::template MakeALdsLoadBlockDescriptor<Problem, ADataType>();
-                auto a_lds_block =
-                    make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
-
-                // TODO: LDS alignment should come from Policy!
-                constexpr index_t a_lds_block_space_size_aligned = integer_least_multiple(
-                    sizeof(ADataType) * a_lds_block_desc.get_element_space_size(), 16);
-
-                // B tile in LDS
-                BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(
-                    static_cast<void*>(static_cast<char*>(smem) + a_lds_block_space_size_aligned));
-                constexpr auto b_lds_block_desc =
-                    Policy::template MakeBLdsLoadBlockDescriptor<Problem>();
-                auto b_lds_block =
-                    make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
-
-                return make_tuple(std::move(a_lds_block), std::move(b_lds_block));
-            };
-            auto&& [a_lds_load_block0, b_lds_load_block0] = get_AB_lds_load_tensor_views(p_smem);
-            auto&& [a_lds_load_block1, b_lds_load_block1] =
-                get_AB_lds_load_tensor_views(static_cast<char*>(p_smem) + smem_size);
+            // Create LDS load tensor views for buffer 1
+            auto a_lds_load_block1 =
+                Policy::template GetALdsLoadTensorView<Problem, ADataType>(p_smem_buffer1);
+            auto b_lds_load_block1 =
+                Policy::template GetBLdsLoadTensorView<Problem, BDataType>(static_cast<void*>(
+                    static_cast<char*>(p_smem_buffer1) + a_lds_block_space_size_aligned));
 
             // set up LDS tile shapes
             constexpr auto a_lds_shape = []() {
