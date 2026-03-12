@@ -44,7 +44,7 @@ namespace {
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& )
+    friend std::ostream& operator<<(std::ostream& os, const TestParams&)
     {
         os << "none";
         return os;
