@@ -164,7 +164,7 @@ struct HandleImpl
     // typedef MIOPEN_MANAGE_PTR(hipStream_t, hipStreamDestroy) StreamPtr;
     using StreamPtr = std::shared_ptr<typename std::remove_pointer<hipStream_t>::type>;
 
-    HandleImpl() { hipInit(0); }
+    HandleImpl() { (void)hipInit(0); }
 
     StreamPtr create_stream()
     {
@@ -189,7 +189,7 @@ struct HandleImpl
     void elapsed_time(hipEvent_t start, hipEvent_t stop)
     {
         if(enable_profiling)
-            hipEventElapsedTime(&this->profiling_result, start, stop);
+            (void)hipEventElapsedTime(&this->profiling_result, start, stop);
     }
 
     std::function<void(hipEvent_t, hipEvent_t)> elapsed_time_handler()
@@ -203,7 +203,7 @@ struct HandleImpl
     std::string get_device_name() const
     {
         hipDeviceProp_t props{};
-        hipGetDeviceProperties(&props, device);
+        (void)hipGetDeviceProperties(&props, device);
         const std::string name(props.gcnArchName);
         MIOPEN_LOG_NQI("Raw device name: " << name);
         return name; // NOLINT (performance-no-automatic-move)
@@ -409,13 +409,17 @@ Allocator::ManageDataPtr Handle::Create(std::size_t sz) const
 Allocator::ManageDataPtr&
 Handle::WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const
 {
+    WriteTo(data, ddata.get(), sz);
+    return ddata;
+}
+
+void Handle::WriteTo(const void* data, Data_t ddata, std::size_t sz) const
+{
     MIOPEN_HANDLE_LOCK
     this->Finish();
-    auto status =
-        hipMemcpyWithStream(ddata.get(), data, sz, hipMemcpyHostToDevice, this->GetStream());
+    auto status = hipMemcpyWithStream(ddata, data, sz, hipMemcpyHostToDevice, this->GetStream());
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status, "Hip error writing to buffer: ");
-    return ddata;
 }
 
 void Handle::ReadTo(void* data, const Allocator::ManageDataPtr& ddata, std::size_t sz) const
@@ -667,9 +671,11 @@ void Handle::Finish() const
     }
 #else
     // hipStreamSynchronize is broken, so we use hipEventSynchronize instead
-    auto ev = make_hip_event();
-    hipEventRecord(ev.get(), this->GetStream());
-    auto status = hipEventSynchronize(ev.get());
+    auto ev     = make_hip_event();
+    auto status = hipEventRecord(ev.get(), this->GetStream());
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "Failed hip event recording");
+    status = hipEventSynchronize(ev.get());
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status, "Failed hip sychronization");
 #endif
@@ -731,7 +737,7 @@ std::size_t Handle::GetImage3dMaxWidth() const
 std::size_t Handle::GetWavefrontWidth() const
 {
     hipDeviceProp_t props{};
-    hipGetDeviceProperties(&props, this->impl->device);
+    (void)hipGetDeviceProperties(&props, this->impl->device);
     auto result = static_cast<size_t>(props.warpSize);
     return result;
 }

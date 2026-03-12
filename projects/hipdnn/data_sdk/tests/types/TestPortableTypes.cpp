@@ -5,9 +5,11 @@
 /// @brief Typed tests for portable floating-point types.
 ///
 /// This file contains two test fixtures:
-/// - PortableFloatTypes: Common tests for all types (bfloat16, half, fp8_e4m3, fp8_e5m2)
+/// - PortableFloatTypes: Common tests for all types (bfloat16, half, fp8_e4m3, fp8_e5m2, fp8_e8m0)
 /// - MathFloatTypes: Arithmetic and math function tests for bfloat16 and half only
 /// Type-specific tests that cannot be generalized remain in their individual test files.
+/// Note: fp8_e8m0 is an unsigned scale format with unique behavior (no zero, no sign bit,
+/// only powers of 2) - some tests use if constexpr guards to handle these differences.
 
 #include <gtest/gtest.h>
 
@@ -81,16 +83,13 @@ struct PortableTypeTraits<half>
 template <>
 struct PortableTypeTraits<fp8_e4m3>
 {
-    static constexpr float tolerance = 0.2f;
-    static constexpr float large_tolerance = 0.5f;
     static constexpr bool has_infinity = false;
     static constexpr uint8_t one_bits = 0x38;
     static constexpr uint8_t neg_one_bits = 0xB8;
     static constexpr uint8_t zero_bits = 0x00;
     static constexpr uint8_t neg_zero_bits = 0x80;
     static constexpr uint8_t nan_bits = 0x7F;
-    static constexpr uint8_t inf_bits = 0x7F; // No infinity, uses NaN
-    static constexpr uint8_t neg_inf_bits = 0xFF;
+    // Note: fp8_e4m3 has no infinity - those tests are skipped
     using bits_type = uint8_t;
 
     static fp8_e4m3 from_bits(uint8_t bits)
@@ -106,8 +105,6 @@ struct PortableTypeTraits<fp8_e4m3>
 template <>
 struct PortableTypeTraits<fp8_e5m2>
 {
-    static constexpr float tolerance = 0.5f;
-    static constexpr float large_tolerance = 1.0f;
     static constexpr bool has_infinity = true;
     static constexpr uint8_t one_bits = 0x3C;
     static constexpr uint8_t neg_one_bits = 0xBC;
@@ -127,15 +124,47 @@ struct PortableTypeTraits<fp8_e5m2>
         return val.data;
     }
 };
+
+template <>
+struct PortableTypeTraits<fp8_e8m0>
+{
+    static constexpr bool has_infinity = false;
+    static constexpr uint8_t one_bits = 0x7F; // 2^0 = 1.0
+    static constexpr uint8_t nan_bits = 0xFF;
+    // Note: fp8_e8m0 has no zero, negative values, or infinity - those tests are skipped
+    using bits_type = uint8_t;
+
+    static fp8_e8m0 from_bits(uint8_t bits)
+    {
+        return fp8_e8m0::from_bits(bits);
+    }
+    static uint8_t to_bits(fp8_e8m0 val)
+    {
+        return val.data;
+    }
+};
 // NOLINTEND(readability-identifier-naming)
 
 // ============================================================================
-// Test Fixture (bfloat16, half, fp8_e4m3, fp8_e5m2)
+// Test Fixture (bfloat16, half, fp8_e4m3, fp8_e5m2, fp8_e8m0)
 // Common tests for all portable float types
 // ============================================================================
 
 template <typename T>
 class PortableFloatTypes : public ::testing::Test
+{
+};
+
+using PortableTypes = ::testing::Types<bfloat16, half, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
+TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
+
+// ============================================================================
+// Math Float Types Fixture (bfloat16, half)
+// Full arithmetic operations and math functions
+// ============================================================================
+
+template <typename T>
+class MathFloatTypes : public ::testing::Test
 {
 protected:
     using Traits = PortableTypeTraits<T>;
@@ -149,19 +178,6 @@ protected:
     {
         return nearEqual(static_cast<float>(a), static_cast<float>(b), tol);
     }
-};
-
-using PortableTypes = ::testing::Types<bfloat16, half, fp8_e4m3, fp8_e5m2>;
-TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
-
-// ============================================================================
-// Math Float Types Fixture (bfloat16, half)
-// Full arithmetic operations and math functions
-// ============================================================================
-
-template <typename T>
-class MathFloatTypes : public PortableFloatTypes<T>
-{
 };
 
 using MathTypes = ::testing::Types<bfloat16, half>;
@@ -199,16 +215,19 @@ TYPED_TEST(PortableFloatTypes, TypeProperties)
 TYPED_TEST(PortableFloatTypes, ConstructFromFloat)
 {
     using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
 
     T a(1.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
 
-    T b(0.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 0.0f));
+    // fp8_e8m0 zero/negative behavior tested in type-specific tests
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T b(0.0f);
+        EXPECT_EQ(static_cast<float>(b), 0.0f);
 
-    T c(-2.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), -2.0f, Traits::large_tolerance));
+        T c(-2.0f);
+        EXPECT_EQ(static_cast<float>(c), -2.0f);
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, ConstructFromDouble)
@@ -216,25 +235,28 @@ TYPED_TEST(PortableFloatTypes, ConstructFromDouble)
     using T = TypeParam;
 
     T a(1.0);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
 
     T b(2.0);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 2.0f));
+    EXPECT_EQ(static_cast<float>(b), 2.0f);
 }
 
 TYPED_TEST(PortableFloatTypes, ConstructFromIntegral)
 {
     using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
 
     T a(4);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 4.0f, Traits::large_tolerance));
+    EXPECT_EQ(static_cast<float>(a), 4.0f);
 
-    T b(-8);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -8.0f, Traits::large_tolerance));
+    // fp8_e8m0 zero/negative behavior tested in type-specific tests
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T b(-8);
+        EXPECT_EQ(static_cast<float>(b), -8.0f);
 
-    T c(0u);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 0.0f));
+        T c(0u);
+        EXPECT_EQ(static_cast<float>(c), 0.0f);
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, FromBits)
@@ -243,10 +265,14 @@ TYPED_TEST(PortableFloatTypes, FromBits)
     using Traits = PortableTypeTraits<T>;
 
     T one = Traits::from_bits(Traits::one_bits);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(one), 1.0f));
+    EXPECT_EQ(static_cast<float>(one), 1.0f);
 
-    T zero = Traits::from_bits(Traits::zero_bits);
-    EXPECT_EQ(static_cast<float>(zero), 0.0f);
+    // fp8_e8m0 zero_bits = 2^-127 (min), tested in type-specific tests
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T zero = Traits::from_bits(Traits::zero_bits);
+        EXPECT_EQ(static_cast<float>(zero), 0.0f);
+    }
 
     T nan = Traits::from_bits(Traits::nan_bits);
     EXPECT_TRUE(isnan(nan));
@@ -271,9 +297,18 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToFloat)
 {
     using T = TypeParam;
 
-    T a(1.5f);
+    // Use 2.0f which is exact for all types including fp8_e8m0 (power of 2)
+    T a(2.0f);
     auto f = static_cast<float>(a);
-    EXPECT_TRUE(this->nearEqual(f, 1.5f));
+    EXPECT_EQ(f, 2.0f);
+
+    // 1.5f is not exact for fp8_e8m0 (only powers of 2)
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T b(1.5f);
+        auto g = static_cast<float>(b);
+        EXPECT_EQ(g, 1.5f);
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, ExplicitConversionToDouble)
@@ -282,7 +317,7 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToDouble)
 
     T a(2.0f);
     auto d = static_cast<double>(a);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
+    EXPECT_EQ(d, 2.0);
 }
 
 // ============================================================================
@@ -333,13 +368,17 @@ TYPED_TEST(PortableFloatTypes, UnaryNegation)
 {
     using T = TypeParam;
 
-    T a(4.0f);
-    T b = -a;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -4.0f));
+    // fp8_e8m0 does not have unary negation (unsigned type)
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T a(4.0f);
+        T b = -a;
+        EXPECT_EQ(static_cast<float>(b), -4.0f);
 
-    T c(-2.0f);
-    T d = -c;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
+        T c(-2.0f);
+        T d = -c;
+        EXPECT_EQ(static_cast<float>(d), 2.0f);
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, UnaryPlus)
@@ -495,9 +534,13 @@ TYPED_TEST(PortableFloatTypes, PositiveZero)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    T zero = Traits::from_bits(Traits::zero_bits);
-    EXPECT_EQ(static_cast<float>(zero), 0.0f);
-    EXPECT_FALSE(signbit(zero));
+    // fp8_e8m0 has no zero representation - tested in type-specific tests
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T zero = Traits::from_bits(Traits::zero_bits);
+        EXPECT_EQ(static_cast<float>(zero), 0.0f);
+        EXPECT_FALSE(signbit(zero));
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, NegativeZero)
@@ -505,9 +548,13 @@ TYPED_TEST(PortableFloatTypes, NegativeZero)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    T negZero = Traits::from_bits(Traits::neg_zero_bits);
-    EXPECT_EQ(static_cast<float>(negZero), -0.0f);
-    EXPECT_TRUE(signbit(negZero));
+    // fp8_e8m0 has no negative zero - it's unsigned
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        T negZero = Traits::from_bits(Traits::neg_zero_bits);
+        EXPECT_EQ(static_cast<float>(negZero), -0.0f);
+        EXPECT_TRUE(signbit(negZero));
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, QuietNaN)
@@ -546,12 +593,7 @@ TYPED_TEST(PortableFloatTypes, InfinityHandling)
         EXPECT_TRUE(signbit(negInf));
         EXPECT_FALSE(isnan(negInf));
     }
-    else
-    {
-        // For types without infinity (fp8_e4m3), verify inf bits give NaN
-        T val = Traits::from_bits(Traits::inf_bits);
-        EXPECT_FALSE(isinf(val));
-    }
+    // fp8_e4m3 and fp8_e8m0 have no infinity - skipped
 }
 
 // ============================================================================
@@ -692,7 +734,7 @@ TYPED_TEST(PortableFloatTypes, StreamOutput)
     std::ostringstream oss;
     oss << a;
     float parsed = std::stof(oss.str());
-    EXPECT_TRUE(this->nearEqual(parsed, 2.0f));
+    EXPECT_EQ(parsed, 2.0f);
 }
 
 // ============================================================================
@@ -705,7 +747,7 @@ TYPED_TEST(PortableFloatTypes, NumericLimitsBasic)
     using Traits = PortableTypeTraits<T>;
 
     EXPECT_TRUE(std::numeric_limits<T>::is_specialized);
-    EXPECT_TRUE(std::numeric_limits<T>::is_signed);
+    EXPECT_EQ(std::numeric_limits<T>::is_signed, (!std::is_same_v<T, fp8_e8m0>));
     EXPECT_FALSE(std::numeric_limits<T>::is_integer);
     EXPECT_EQ(std::numeric_limits<T>::has_infinity, Traits::has_infinity);
     EXPECT_TRUE(std::numeric_limits<T>::has_quiet_NaN);
@@ -742,7 +784,11 @@ TYPED_TEST(PortableFloatTypes, NumericLimitsLowest)
 
     T lowestVal = std::numeric_limits<T>::lowest();
     EXPECT_TRUE(isfinite(lowestVal));
-    EXPECT_LT(static_cast<float>(lowestVal), 0.0f);
+
+    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    {
+        EXPECT_LT(static_cast<float>(lowestVal), 0.0f);
+    }
 }
 
 TYPED_TEST(PortableFloatTypes, NumericLimitsEpsilon)

@@ -20,6 +20,8 @@ subtrees:
 
 - caption: How to
   entries:
+  - file: how-to/rocThrust-build-for-backends.rst
+    title: Build for different backends
   - file: how-to/use-rocThrust-in-a-project.rst
     title: Add rocThrust to a CMake project
   - file: how-to/run-rocThrust-tests-on-multiple-gpus

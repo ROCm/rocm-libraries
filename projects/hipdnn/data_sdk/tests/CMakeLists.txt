@@ -26,6 +26,7 @@ add_executable(
     types/TestForwardingFunctions.cpp
     types/TestFp8E4M3.cpp
     types/TestFp8E5M2.cpp
+    types/TestFp8E8M0.cpp
     types/TestHalf.cpp
     types/TestPortableTypes.cpp
     types/TestUserDefinedLiterals.cpp
@@ -45,6 +46,7 @@ add_executable(
     utilities/TestTensorIterator.cpp
     utilities/TestTensorView.cpp
     utilities/TestVersionUtils.cpp
+    utilities/TestVersion.cpp
     utilities/TestVisitor.cpp
 )
 

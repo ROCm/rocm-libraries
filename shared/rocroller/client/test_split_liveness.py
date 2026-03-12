@@ -7,19 +7,21 @@
 
 import importlib.util
 import os
-import pathlib
-import pytest
 import subprocess
+from pathlib import Path
 
-from test_gemm_client import gemm, rocm_gfx, SOLUTION_NOT_SUPPORTED_ON_ARCH
+import pytest
+from test_gemm_client import SOLUTION_NOT_SUPPORTED_ON_ARCH, gemm, rocm_gfx
 
 split_liveness_script = (
-    pathlib.Path(__file__).parent.parent / "scripts" / "split_liveness.py"
+    Path(__file__).parent.parent / "scripts" / "split_liveness.py"
 ).resolve()
 
 split_liveness = None
 if split_liveness is None:
-    spec = importlib.util.spec_from_file_location("split_liveness", split_liveness_script)
+    spec = importlib.util.spec_from_file_location(
+        "split_liveness", split_liveness_script
+    )
     split_liveness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(split_liveness)
     del spec
@@ -53,11 +55,11 @@ def test_split_liveness(tmp_path):
 
     if p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
         pytest.skip("GEMM solution not supported on this architecture")
-    assert p.returncode == 0, (
-        f"rocroller-gemm failed\nstdout:\n{p.stdout}\nstderr:\n{p.stderr}"
-    )
+    assert (
+        p.returncode == 0
+    ), f"rocroller-gemm failed\nstdout:\n{p.stdout}\nstderr:\n{p.stderr}"
 
-    live_path = pathlib.Path(str(asm_path) + ".live")
+    live_path = Path(str(asm_path) + ".live")
     assert live_path.exists(), f"Expected .live file at {live_path}"
     assert live_path.stat().st_size > 0, "Expected .live file to be non-empty"
 
@@ -76,13 +78,11 @@ def test_split_liveness(tmp_path):
 
     for reg_type in ["VGPR", "SGPR", "ACCVGPR"]:
         parts = str(live_path).split(".")
-        expected_path = pathlib.Path(
-            parts[0] + "_" + reg_type + "." + ".".join(parts[1:])
-        )
+        expected_path = Path(parts[0] + "_" + reg_type + "." + ".".join(parts[1:]))
 
-        assert expected_path.exists(), (
-            f"Expected split file for {reg_type} at {expected_path}"
-        )
+        assert (
+            expected_path.exists()
+        ), f"Expected split file for {reg_type} at {expected_path}"
 
         lines = expected_path.read_text().splitlines()
         while lines and not lines[-1].strip():
@@ -105,7 +105,7 @@ def test_split_liveness(tmp_path):
 
 
 def test_split_lines():
-    """ Test the split_lines function from the split_liveness script."""
+    """Test the split_lines function from the split_liveness script."""
 
     input_text = """
     ACCVGPR |VGPR   |SGPR  |Instruction
@@ -115,15 +115,30 @@ def test_split_lines():
     input_text = list([line.strip() for line in input_text])
 
     expected_output = {
-        "ACCVGPR": ["ACCVGPR ", "Instruction",
-                    ":       ", " s_nop 0",
-                    "X       ", " v_mul_u32 v2, v1, v3"],
-        "VGPR": ["VGPR   ", "Instruction",
-                 "v::    ", " s_nop 0",
-                 "x_:    ", " v_mul_u32 v2, v1, v3"],
-        "SGPR": ["SGPR  ", "Instruction",
-                 ":x    ", " s_nop 0",
-                 "v^    ", " v_mul_u32 v2, v1, v3"],
+        "ACCVGPR": [
+            "ACCVGPR ",
+            "Instruction",
+            ":       ",
+            " s_nop 0",
+            "X       ",
+            " v_mul_u32 v2, v1, v3",
+        ],
+        "VGPR": [
+            "VGPR   ",
+            "Instruction",
+            "v::    ",
+            " s_nop 0",
+            "x_:    ",
+            " v_mul_u32 v2, v1, v3",
+        ],
+        "SGPR": [
+            "SGPR  ",
+            "Instruction",
+            ":x    ",
+            " s_nop 0",
+            "v^    ",
+            " v_mul_u32 v2, v1, v3",
+        ],
     }
 
     assert split_liveness.split_lines(iter(input_text)) == expected_output

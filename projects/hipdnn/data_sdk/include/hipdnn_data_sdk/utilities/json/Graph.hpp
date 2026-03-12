@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_data_sdk/utilities/json/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
@@ -39,6 +40,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::LayernormAttributes, "LayernormAttributes"},
      {NodeAttributes::RMSNormAttributes, "RMSNormAttributes"},
      {NodeAttributes::BlockScaleDequantizeAttributes, "BlockScaleDequantizeAttributes"},
+     {NodeAttributes::BlockScaleQuantizeAttributes, "BlockScaleQuantizeAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -91,6 +93,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
         nodeJson = *node.attributes_as_BlockScaleDequantizeAttributes();
+        break;
+    case data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+        nodeJson = *node.attributes_as_BlockScaleQuantizeAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -158,6 +163,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::RMSNormAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return to<data_objects::BlockScaleDequantizeAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+            return to<data_objects::BlockScaleQuantizeAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
                 "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
