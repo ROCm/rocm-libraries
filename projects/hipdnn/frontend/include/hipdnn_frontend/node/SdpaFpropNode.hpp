@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/detail/SdpaFpropPacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -232,6 +233,13 @@ public:
         }
 
         return {};
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createSdpaFpropOperation(attributes, tensorDescs, operations);
     }
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
