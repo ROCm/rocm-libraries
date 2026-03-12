@@ -321,6 +321,8 @@ if(HIPBLASLT_ENABLE_HOST)
     set_target_properties(hipblaslt
         PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/library"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
     add_subdirectory(library)
 endif()
