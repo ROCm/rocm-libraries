@@ -15,6 +15,7 @@
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace hipdnn_backend
@@ -166,6 +167,11 @@ void getOptionalInt64(const flatbuffers::Optional<int64_t>& source,
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* context);
+
+std::shared_ptr<TensorDescriptor>
+    findTensorInMap(const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+                    int64_t uid,
+                    const char* context);
 
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
