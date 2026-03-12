@@ -4,11 +4,11 @@
 #pragma once
 
 /**
- * @brief HIP kernel provider plugin-specific execution settings.
+ * @brief SDPA kernel provider plugin-specific execution settings.
  *
- * This structure holds settings that control HIP kernel execution behavior.
+ * This structure holds settings that control SDPA kernel execution behavior.
  * Currently empty - will be extended as plan builders are added.
  */
-struct HipKernelSettings
+struct SdpaKernelSettings
 {
 };

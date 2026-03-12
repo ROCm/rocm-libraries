@@ -3,17 +3,17 @@
 
 #include <gtest/gtest.h>
 
-#include "HipKernelContainer.hpp"
-#include "HipKernelHandle.hpp"
+#include "SdpaKernelContainer.hpp"
+#include "SdpaKernelHandle.hpp"
 
-TEST(TestHipKernelHandle, ConstructsAndDestructsSuccessfully)
+TEST(TestSdpaKernelHandle, ConstructsAndDestructsSuccessfully)
 {
-    HipKernelHandle handle;
+    SdpaKernelHandle handle;
 }
 
-TEST(TestHipKernelHandle, SetAndGetStream)
+TEST(TestSdpaKernelHandle, SetAndGetStream)
 {
-    HipKernelHandle handle;
+    SdpaKernelHandle handle;
 
     EXPECT_EQ(handle.getStream(), nullptr);
 
@@ -24,18 +24,18 @@ TEST(TestHipKernelHandle, SetAndGetStream)
     EXPECT_EQ(handle.getStream(), stream);
 }
 
-TEST(TestHipKernelHandle, GetEngineManagerWithContainer)
+TEST(TestSdpaKernelHandle, GetEngineManagerWithContainer)
 {
-    HipKernelHandle handle;
-    handle.container = std::make_shared<hip_kernel_provider::HipKernelContainer>();
+    SdpaKernelHandle handle;
+    handle.container = std::make_shared<sdpa_kernel_provider::SdpaKernelContainer>();
 
     auto& engineManager = handle.getEngineManager();
     (void)engineManager;
 }
 
-TEST(TestHipKernelHandle, StoreAndRemoveEngineDetailsBuffer)
+TEST(TestSdpaKernelHandle, StoreAndRemoveEngineDetailsBuffer)
 {
-    HipKernelHandle handle;
+    SdpaKernelHandle handle;
 
     auto buffer = std::make_unique<flatbuffers::DetachedBuffer>();
     const void* ptr = buffer->data();
@@ -44,9 +44,9 @@ TEST(TestHipKernelHandle, StoreAndRemoveEngineDetailsBuffer)
     handle.removeEngineDetailsDetachedBuffer(ptr);
 }
 
-TEST(TestHipKernelHandle, RemoveNonExistentBufferDoesNotThrow)
+TEST(TestSdpaKernelHandle, RemoveNonExistentBufferDoesNotThrow)
 {
-    HipKernelHandle handle;
+    SdpaKernelHandle handle;
 
     const void* ptr = reinterpret_cast<const void*>(0x1234);
     EXPECT_NO_THROW(handle.removeEngineDetailsDetachedBuffer(ptr));

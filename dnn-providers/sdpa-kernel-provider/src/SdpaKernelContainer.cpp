@@ -1,11 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "HipKernelContainer.hpp"
+#include "SdpaKernelContainer.hpp"
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace hip_kernel_provider
+namespace sdpa_kernel_provider
 {
 
 // ============================================================================
@@ -17,19 +17,20 @@ namespace hip_kernel_provider
 // 2. Detect hash collisions with other registered engines
 //
 // Example:
-// HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE, "HIP_KERNEL_ENGINE")
+// HIPDNN_REGISTER_ENGINE(SDPA_KERNEL_ENGINE, "SDPA_KERNEL_ENGINE")
 // ============================================================================
 
-const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::getEngineDefinitions()
+const std::vector<SdpaKernelContainer::EngineDefinition>&
+    SdpaKernelContainer::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // ====================================================================
         // Engines will be added here as plan builders are implemented
         // ====================================================================
         // Example:
-        // {HIP_KERNEL_ENGINE_ID, []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<
-        //     HipKernelHandle, HipKernelSettings, HipKernelContext>> {
-        //     auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
+        // {SDPA_KERNEL_ENGINE_ID, []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<
+        //     SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>> {
+        //     auto engine = std::make_unique<SdpaKernelEngine>(SDPA_KERNEL_ENGINE_ID);
         //     engine->addPlanBuilder(std::make_unique<SomePlanBuilder>());
         //     return engine;
         // }}
@@ -39,8 +40,9 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
     return s_engineDefinitions;
 }
 
-uint32_t
-    HipKernelContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines)
+uint32_t SdpaKernelContainer::copyEngineIds(int64_t* engineIds,
+                                            uint32_t maxEngines,
+                                            uint32_t& numEngines)
 {
     const auto& engineDefinitions = getEngineDefinitions();
     auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
@@ -62,12 +64,13 @@ uint32_t
     return totalEngines;
 }
 
-HipKernelContainer::HipKernelContainer()
+SdpaKernelContainer::SdpaKernelContainer()
 {
-    HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Creating SdpaKernelContainer");
 
-    _engineManager = std::make_unique<
-        hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>>();
+    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle,
+                                                                       SdpaKernelSettings,
+                                                                       SdpaKernelContext>>();
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
@@ -75,15 +78,15 @@ HipKernelContainer::HipKernelContainer()
     }
 }
 
-HipKernelContainer::~HipKernelContainer()
+SdpaKernelContainer::~SdpaKernelContainer()
 {
-    HIPDNN_PLUGIN_LOG_INFO("Destroying HipKernelContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Destroying SdpaKernelContainer");
 }
 
-hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>&
-    HipKernelContainer::getEngineManager()
+hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>&
+    SdpaKernelContainer::getEngineManager()
 {
     return *_engineManager;
 }
 
-} // namespace hip_kernel_provider
+} // namespace sdpa_kernel_provider

@@ -13,27 +13,27 @@
 #include <memory>
 #include <unordered_map>
 
-#include "HipKernelContext.hpp"
-#include "HipKernelSettings.hpp"
+#include "SdpaKernelContext.hpp"
+#include "SdpaKernelSettings.hpp"
 
-namespace hip_kernel_provider
+namespace sdpa_kernel_provider
 {
-class HipKernelContainer;
+class SdpaKernelContainer;
 }
 
 /**
- * @brief HIP kernel provider plugin handle.
+ * @brief SDPA kernel provider plugin handle.
  *
  * Inherits from HipdnnEnginePluginHandle for opaque pointer compatibility.
  * Manages the HIP stream and plugin container.
  */
 // NOLINTBEGIN
-struct HipKernelHandle : HipdnnEnginePluginHandle
+struct SdpaKernelHandle : HipdnnEnginePluginHandle
 {
 public:
-    HipKernelHandle() = default;
+    SdpaKernelHandle() = default;
 
-    ~HipKernelHandle() override = default;
+    ~SdpaKernelHandle() override = default;
 
     void setStream(hipStream_t stream)
     {
@@ -45,10 +45,10 @@ public:
         return _stream;
     }
 
-    std::shared_ptr<hip_kernel_provider::HipKernelContainer> container;
+    std::shared_ptr<sdpa_kernel_provider::SdpaKernelContainer> container;
 
-    // Defined in HipKernelHandle.cpp to avoid circular dependency
-    hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>&
+    // Defined in SdpaKernelHandle.cpp to avoid circular dependency
+    hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>&
         getEngineManager();
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,

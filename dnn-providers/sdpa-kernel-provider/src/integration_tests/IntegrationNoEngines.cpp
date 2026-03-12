@@ -16,11 +16,11 @@ namespace
 {
 
 // ============================================================================
-// Test fixture for verifying the HIP kernel plugin has no engines.
+// Test fixture for verifying the SDPA kernel plugin has no engines.
 // Uses the frontend API to load the plugin dynamically and attempt graph builds.
 // ============================================================================
 
-class IntegrationHipKernelNoEngines : public ::testing::Test
+class IntegrationSdpaKernelNoEngines : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -65,7 +65,7 @@ protected:
 // Verify that building a batchnorm inference graph fails (no engines registered)
 // ============================================================================
 
-TEST_F(IntegrationHipKernelNoEngines, BatchnormInferenceGraphBuildFails)
+TEST_F(IntegrationSdpaKernelNoEngines, BatchnormInferenceGraphBuildFails)
 {
     auto graph = hipdnn_test_sdk::utilities::FrontendGraphFactory::createBatchnormInferenceGraph();
 

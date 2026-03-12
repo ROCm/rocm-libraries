@@ -13,7 +13,7 @@ int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
     hipdnn_plugin_sdk::logging::initializeCallbackLogging(
-        "hip_kernel_plugin_integration_tests", hipdnn_test_sdk::utilities::testLoggingCallback);
+        "sdpa_kernel_plugin_integration_tests", hipdnn_test_sdk::utilities::testLoggingCallback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();

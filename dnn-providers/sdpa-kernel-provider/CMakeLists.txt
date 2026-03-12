@@ -9,8 +9,8 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
-project(hip-kernel-provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
+set(SDPA_KERNEL_PLUGIN_VERSION "0.0.1")
+project(sdpa-kernel-provider VERSION ${SDPA_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
 
 if(NOT WIN32)
     # Only set if not already specified by user
@@ -36,7 +36,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
      ${HIP_DIR}/cmake
 )
 
-option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(SDPAKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -45,9 +45,9 @@ if(WIN32)
 else()
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 endif()
-option(HIPKERNELPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
+option(SDPAKERNELPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 
-if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+if(SDPAKERNELPROVIDER_ENABLE_COVERAGE)
     message(VERBOSE "Enabling compile flags for coverage-mapping")
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
@@ -114,14 +114,14 @@ add_subdirectory(src)
 # ============================================================================
 # Code Coverage
 # ============================================================================
-if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+if(SDPAKERNELPROVIDER_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     set(CODE_COVERAGE_IGNORE_REGEX ".*_deps.*|.*tests.*|.*integration_tests.*")
     set(CODE_COVERAGE_OBJECTS
-        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_plugin.so
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_tests
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_integration_tests
+        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libsdpa_kernel_plugin.so
+        -object ./${CMAKE_INSTALL_BINDIR}/sdpa_kernel_plugin_tests
+        -object ./${CMAKE_INSTALL_BINDIR}/sdpa_kernel_plugin_integration_tests
     )
 
     # Creates a coverage target that merges profraw files and generates reports.
@@ -138,20 +138,20 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
         add_custom_target(
             ${TARGET_NAME}
             COMMAND find . -name "*.profraw" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge
-                    -sparse -o ./coverage-report/hip_kernel_provider.profdata
+                    -sparse -o ./coverage-report/sdpa_kernel_provider.profdata
             COMMAND
                 ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage-report/hip_kernel_provider.profdata
+                -instr-profile=./coverage-report/sdpa_kernel_provider.profdata
                 -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} >
-                ./coverage-report/code_cov_hip_kernel_provider.report
+                ./coverage-report/code_cov_sdpa_kernel_provider.report
             COMMAND
                 ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage-report/hip_kernel_provider.profdata
+                -instr-profile=./coverage-report/sdpa_kernel_provider.profdata
                 -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=html
                 --output-dir=coverage-report
             COMMAND
                 ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
-                -instr-profile=./coverage-report/hip_kernel_provider.profdata
+                -instr-profile=./coverage-report/sdpa_kernel_provider.profdata
                 -ignore-filename-regex=${CODE_COVERAGE_IGNORE_REGEX} --format=lcov >
                 ./coverage-report/coverage.info
             ${DEPENDS_CLAUSE}
@@ -177,7 +177,7 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
-install(TARGETS hip_kernel_plugin EXPORT hip-kernel-plugin
+install(TARGETS sdpa_kernel_plugin EXPORT sdpa-kernel-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )

@@ -7,13 +7,13 @@
 #include <memory>
 #include <vector>
 
-#include "HipKernelHandle.hpp"
+#include "SdpaKernelHandle.hpp"
 
-namespace hip_kernel_provider
+namespace sdpa_kernel_provider
 {
 
 /*
- * Container class to manage the instantiation and ownership of all HIP kernel plan builders
+ * Container class to manage the instantiation and ownership of all SDPA kernel plan builders
  * and engines. The class designs use dependency injection to get the components they need
  * in order to function.
  *
@@ -21,11 +21,11 @@ namespace hip_kernel_provider
  * If logic is needed, it should be placed in a separate function that can be called after the
  * container has finished constructing all its components.
  */
-class HipKernelContainer
+class SdpaKernelContainer
 {
 public:
-    HipKernelContainer();
-    ~HipKernelContainer();
+    SdpaKernelContainer();
+    ~SdpaKernelContainer();
 
     // Copy engine IDs into a buffer.
     // If maxEngines == 0: Does not copy, only queries total count.
@@ -33,7 +33,7 @@ public:
     // copied. Returns: Total number of available engines (regardless of maxEngines value).
     static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
 
-    hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>&
+    hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>&
         getEngineManager();
 
 private:
@@ -41,15 +41,15 @@ private:
     {
         int64_t id;
         std::function<std::unique_ptr<
-            hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>>()>
+            hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>()>
             createEngine;
     };
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
 
     std::unique_ptr<
-        hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>>
+        hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>
         _engineManager;
 };
 
-} // namespace hip_kernel_provider
+} // namespace sdpa_kernel_provider

@@ -6,20 +6,20 @@
 #include <hipdnn_plugin_sdk/ExecutionContextBase.hpp>
 #include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
 
-#include "HipKernelSettings.hpp"
+#include "SdpaKernelSettings.hpp"
 
 // Forward declaration
-struct HipKernelHandle;
+struct SdpaKernelHandle;
 
 /**
- * @brief HIP kernel provider plugin execution context.
+ * @brief SDPA kernel provider plugin execution context.
  *
  * Inherits from:
  * - HipdnnEnginePluginExecutionContext: For opaque pointer compatibility
  * - ExecutionContextBase: For plan and settings storage
  */
-struct HipKernelContext
+struct SdpaKernelContext
     : HipdnnEnginePluginExecutionContext,
-      hipdnn_plugin_sdk::ExecutionContextBase<HipKernelHandle, HipKernelSettings>
+      hipdnn_plugin_sdk::ExecutionContextBase<SdpaKernelHandle, SdpaKernelSettings>
 {
 };
