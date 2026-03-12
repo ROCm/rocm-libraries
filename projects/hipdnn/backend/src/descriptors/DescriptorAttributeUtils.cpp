@@ -258,6 +258,19 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
+std::shared_ptr<TensorDescriptor>
+    findTensorInMap(const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+                    int64_t uid,
+                    const char* context)
+{
+    auto it = tensorMap.find(uid);
+    THROW_IF_TRUE(it == tensorMap.end(),
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  std::string(context) + ": tensor UID " + std::to_string(uid)
+                      + " not found in tensor map");
+    return it->second;
+}
+
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
                          hipdnnBackendAttributeType_t attributeType,
@@ -311,116 +324,6 @@ void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
     HipdnnBackendDescriptor::packDescriptor(descSource, arrayOfElements);
 }
 
-void setOptionalFloat(flatbuffers::Optional<float>& target,
-                      hipdnnBackendAttributeType_t attributeType,
-                      int64_t elementCount,
-                      const void* arrayOfElements,
-                      const char* context)
-{
-    checkSetArgs(HIPDNN_TYPE_FLOAT, attributeType, arrayOfElements, context);
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": expected elementCount=1, got "
-                       + std::to_string(elementCount));
-    float value = 0.0F;
-    std::memcpy(&value, arrayOfElements, sizeof(float));
-    target = value;
-}
-
-void getOptionalFloat(const flatbuffers::Optional<float>& source,
-                      hipdnnBackendAttributeType_t attributeType,
-                      int64_t requestedCount,
-                      int64_t* elementCount,
-                      void* arrayOfElements,
-                      const char* context)
-{
-    checkGetArgs(HIPDNN_TYPE_FLOAT, attributeType, context);
-
-    if(!source.has_value())
-    {
-        if(elementCount != nullptr)
-        {
-            *elementCount = 0;
-        }
-        return;
-    }
-
-    if(arrayOfElements == nullptr || requestedCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(context) + ": elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    auto value = source.value();
-    std::memcpy(arrayOfElements, &value, sizeof(float));
-}
-
-void setOptionalInt64(flatbuffers::Optional<int64_t>& target,
-                      hipdnnBackendAttributeType_t attributeType,
-                      int64_t elementCount,
-                      const void* arrayOfElements,
-                      const char* context)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, context);
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": expected elementCount=1, got "
-                       + std::to_string(elementCount));
-    int64_t value = 0;
-    std::memcpy(&value, arrayOfElements, sizeof(int64_t));
-    target = value;
-}
-
-void getOptionalInt64(const flatbuffers::Optional<int64_t>& source,
-                      hipdnnBackendAttributeType_t attributeType,
-                      int64_t requestedCount,
-                      int64_t* elementCount,
-                      void* arrayOfElements,
-                      const char* context)
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, context);
-
-    if(!source.has_value())
-    {
-        if(elementCount != nullptr)
-        {
-            *elementCount = 0;
-        }
-        return;
-    }
-
-    if(arrayOfElements == nullptr || requestedCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(context) + ": elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    auto value = source.value();
-    std::memcpy(arrayOfElements, &value, sizeof(int64_t));
-}
-
 void setOptionalTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                                  flatbuffers::Optional<int64_t>& uidTarget,
                                  hipdnnBackendAttributeType_t attributeType,
@@ -443,10 +346,10 @@ void getOptionalTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSo
     if(!descSource)
     {
         checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
-        if(elementCount != nullptr)
-        {
-            *elementCount = 0;
-        }
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 0;
         return;
     }
     getTensorDescriptor(descSource,
@@ -513,6 +416,11 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
         return;
     }
 
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
     if(elementCount != nullptr)
     {
         *elementCount = count;
@@ -523,6 +431,94 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
     for(int64_t i = 0; i < copyCount; ++i)
     {
         outDescs[i] = HipdnnBackendDescriptor::packDescriptor(descSource[static_cast<size_t>(i)]);
+    }
+}
+
+void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
+                          hipdnnBackendAttributeType_t attributeType,
+                          int64_t elementCount,
+                          const void* arrayOfElements,
+                          const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnDiagonalAlignment_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkDiagonalAlignment(tmp);
+}
+
+void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment source,
+                          hipdnnBackendAttributeType_t attributeType,
+                          int64_t requestedElementCount,
+                          int64_t* elementCount,
+                          void* arrayOfElements,
+                          const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkDiagonalAlignment(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation& target,
+                                hipdnnBackendAttributeType_t attributeType,
+                                int64_t elementCount,
+                                const void* arrayOfElements,
+                                const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnAttentionImplementation_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkAttentionImplementation(tmp);
+}
+
+void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation source,
+                                hipdnnBackendAttributeType_t attributeType,
+                                int64_t requestedElementCount,
+                                int64_t* elementCount,
+                                void* arrayOfElements,
+                                const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkAttentionImplementation(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
     }
 }
 

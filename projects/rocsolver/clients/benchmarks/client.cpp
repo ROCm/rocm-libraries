@@ -665,6 +665,7 @@ try
     if(!argus.perf)
     {
         print_version_info();
+        print_asan_kernel_warning("rocsolver-bench");
 
         rocblas_int device_count = query_device_property();
         if(device_count <= 0)
