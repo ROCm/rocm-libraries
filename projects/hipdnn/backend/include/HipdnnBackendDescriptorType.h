@@ -241,6 +241,6 @@ typedef enum
      * Represents a block scale quantize operation with input (X),
      * output (Y), and scale tensors plus block_size, axis, and transpose parameters.
      */
-    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT,
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT = 26,
 
 } hipdnnBackendDescriptorType_t;
