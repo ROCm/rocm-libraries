@@ -208,7 +208,7 @@ int main(int argc, char* argv[])
     };
 
     const std::map<rng_type_t, std::vector<curandOrdering>> benchmarked_orderings{
-  // clang-format off
+        // clang-format off
         {          CURAND_RNG_PSEUDO_MTGP32,
             {CURAND_ORDERING_PSEUDO_DEFAULT, CURAND_ORDERING_PSEUDO_DYNAMIC}},
         {         CURAND_RNG_PSEUDO_MT19937, {CURAND_ORDERING_PSEUDO_DEFAULT}},
@@ -222,7 +222,7 @@ int main(int argc, char* argv[])
         {CURAND_RNG_QUASI_SCRAMBLED_SOBOL32,  {CURAND_ORDERING_QUASI_DEFAULT}},
         {          CURAND_RNG_QUASI_SOBOL64,  {CURAND_ORDERING_QUASI_DEFAULT}},
         {CURAND_RNG_QUASI_SCRAMBLED_SOBOL64,  {CURAND_ORDERING_QUASI_DEFAULT}},
-  // clang-format on
+        // clang-format on
     };
 
     const std::string benchmark_name_prefix = "device_generate";
