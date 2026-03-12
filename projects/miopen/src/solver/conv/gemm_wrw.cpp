@@ -181,9 +181,6 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
-    if(IsSlow(context, problem))
-        return false;
-
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; });
@@ -414,9 +411,6 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
 {
 #if MIOPEN_USE_GEMM
     if(!GemmWrwBase::IsApplicable(context, problem))
-        return false;
-
-    if(IsSlow(context, problem))
         return false;
 
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
