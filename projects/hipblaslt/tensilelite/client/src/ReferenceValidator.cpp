@@ -377,8 +377,7 @@ namespace TensileLite
             bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
             bool isTF32x1 = (problem.computeInputType() == rocisa::DataType::BFloat16
                 && problem.computeType() == rocisa::DataType::Float
-                && problem.a().dataType() == rocisa::DataType::Float
-                && problem.d().dataType() == rocisa::DataType::Float);
+                && problem.a().dataType() == rocisa::DataType::Float);
             double threshold = -1.0;
             if (isTF32) {
                 threshold = 0.01 * sqrt(double(k));
