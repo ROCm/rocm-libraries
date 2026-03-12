@@ -36,8 +36,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
      ${HIP_DIR}/cmake
 )
 
-option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
-option(SDPAKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(SDPAKERNELPROVIDER_SKIP_TESTS "Skip building tests" OFF)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -54,9 +53,9 @@ if(SDPAKERNELPROVIDER_ENABLE_COVERAGE)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
 endif()
 
-# In superbuild mode, HIPDNN_SKIP_TESTS overrides the local test option
+# HIPDNN_SKIP_TESTS is the superbuild-level variable that controls test skipping
 if(HIPDNN_SKIP_TESTS)
-    set(SDPAKERNELPROVIDER_ENABLE_TESTS OFF)
+    set(SDPAKERNELPROVIDER_SKIP_TESTS ON)
 endif()
 
 list(
@@ -105,9 +104,7 @@ include(ClangTidy)
 
 # Setup testing dependencies
 include(Dependencies)
-if(NOT HIPDNN_SKIP_TESTS)
-    include(Tests)
-endif()
+include(Tests)
 
 if(WIN32)
     set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")

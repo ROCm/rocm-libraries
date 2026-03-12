@@ -1,9 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-include(GoogleTest)
+if(SDPAKERNELPROVIDER_SKIP_TESTS)
+    return()
+endif()
 
-find_package(Python3 COMPONENTS Interpreter)
+include(GoogleTest)
 
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
@@ -190,11 +192,6 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS ${APPEND_FUNCTION_SUFFIX})
-
-    if(SDPAKERNELPROVIDER_ENABLE_COVERAGE)
-        _build_test_environment_list_internal(COVERAGE_ENV)
-        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${COVERAGE_ENV}")
-    endif()
 endfunction() # _add_test_target_internal
 
 # Adds a unit test target

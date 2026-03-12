@@ -54,7 +54,7 @@ if(ENABLE_CLANG_FORMAT)
         COMMAND find . ${CLANG_FORMAT_PRUNE}
                 \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
                 -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
         COMMENT "Checking code format (${PROJECT_NAME})"
     )
@@ -64,7 +64,7 @@ if(ENABLE_CLANG_FORMAT)
         COMMAND find . ${CLANG_FORMAT_PRUNE}
                 \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
                 -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
         COMMENT "Formatting code (${PROJECT_NAME})"
     )
