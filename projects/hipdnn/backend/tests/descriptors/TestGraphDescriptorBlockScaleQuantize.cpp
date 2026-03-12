@@ -62,6 +62,18 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        1,
                        &blockSize);
 
+    int64_t axis = 1;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &axis);
+
+    bool transpose = true;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &transpose);
+
     desc->setAttribute(
         HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
@@ -142,6 +154,9 @@ TEST_F(TestGraphDescriptorBlockScaleQuantize, BuildFromSingleOperation)
     EXPECT_EQ(attrs->y_tensor_uid, K_BSQ_TENSOR_Y_UID);
     EXPECT_EQ(attrs->scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
     EXPECT_EQ(attrs->block_size, K_BSQ_BLOCK_SIZE);
+    EXPECT_TRUE(attrs->axis.has_value());
+    EXPECT_EQ(attrs->axis.value(), 1);
+    EXPECT_TRUE(attrs->transpose);
 }
 
 TEST_F(TestGraphDescriptorBlockScaleQuantize, ComputeDataTypePreserved)

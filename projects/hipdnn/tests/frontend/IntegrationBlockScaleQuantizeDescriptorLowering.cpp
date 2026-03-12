@@ -85,6 +85,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
     BlockScaleQuantizeAttributes bsqAttrs;
     bsqAttrs.set_name("bsq_op");
     bsqAttrs.set_block_size(K_BSQ_BLOCK_SIZE);
+    bsqAttrs.set_axis(1);
+    bsqAttrs.set_transpose(true);
 
     auto [y, scale] = graph->block_scale_quantize(x, std::move(bsqAttrs));
     y->set_uid(K_BSQ_TENSOR_Y_UID).set_output(true).set_name("Y");
@@ -169,6 +171,9 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
     EXPECT_EQ(bsq->scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
     
     EXPECT_EQ(bsq->block_size, K_BSQ_BLOCK_SIZE);
+    EXPECT_TRUE(bsq->axis.has_value());
+    EXPECT_EQ(bsq->axis.value(), 1);
+    EXPECT_TRUE(bsq->transpose);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved

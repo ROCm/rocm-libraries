@@ -429,6 +429,26 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeAxisQueryReturnsZe
     ASSERT_EQ(elementCount, 0);
 }
 
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeAxisQueryReturnsOneWhenPresent)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+    int64_t axis = 1;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &axis);
+    desc->finalize();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTransposeAfterFinalize)
 {
     setAllAttributesExcept();
@@ -553,6 +573,20 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeComputeTypeQueryRe
     ASSERT_EQ(elementCount, 1);
 }
 
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeBlockSizeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                                       HIPDNN_TYPE_INT32,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
     makeFinalized();
@@ -632,9 +666,9 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetTensorDescriptorsReturnsAll
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, K_BSQ_TENSOR_X_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_BSQ_TENSOR_Y_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_BSQ_TENSOR_SCALE_UID);
+    EXPECT_EQ(tensors[0], desc->getXDesc());
+    EXPECT_EQ(tensors[1], desc->getYDesc());
+    EXPECT_EQ(tensors[2], desc->getScaleDesc());
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -696,30 +730,20 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithBlockSizeAndAxis)
     EXPECT_EQ(attrs->axis.value(), 1);
 }
 
-TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetTensorDescriptorsOrderIsXYScale)
+TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
     auto desc = getDescriptor();
 
-    auto tensors = desc->getTensorDescriptors();
-    ASSERT_EQ(tensors.size(), 3);
-    // Verify ordering: [X_EXT, Y_EXT, SCALE_EXT] matches UIDs [40, 41, 42]
-    EXPECT_EQ(tensors[0], desc->getXDesc());
-    EXPECT_EQ(tensors[1], desc->getYDesc());
-    EXPECT_EQ(tensors[2], desc->getScaleDesc());
-}
-
-TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
-{
-    makeFinalized();
-
     auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
     ASSERT_NE(graphOp, nullptr);
 
-    // Verify the returned interface is the same underlying object
+    // Verify the returned interface exposes the same tensor shared_ptrs
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, K_BSQ_TENSOR_X_UID);
+    ASSERT_EQ(tensors[0].get(), desc->getXDesc().get());
+    ASSERT_EQ(tensors[1].get(), desc->getYDesc().get());
+    ASSERT_EQ(tensors[2].get(), desc->getScaleDesc().get());
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
