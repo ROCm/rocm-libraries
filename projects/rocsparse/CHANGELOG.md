@@ -3,18 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-
-## (Unreleased) rocSPARSE 4.3.0
+## rocSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
-* Added `rocsparse_spmv_set_extra` and `rocsparse_spmv_clear_extra` functions to enable residual computation within SpMV operations. These functions allow setting additional gamma scalars and z vectors for fused computations of the form `y = alpha * op(A) * x + beta * y + sum(gamma_i * z_i)`, enabling efficient residual calculations like `r = b - A * x`.
-* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
-* gfx1150, gfx1152 and gfx1153 enabled.
-* Added brain half float mixed precision to `rocsparse_spmv` where A, X, and Y use bfloat16 and the compute type use float.
-* Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
-* Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_csrmm`, `rocsparse_coomm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
-* For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
 * Added `--show-skipped` and `--hide-skipped` command-line options to `rocsparse-test` to control whether skipped test output is displayed.
+* For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
 
 ### Changed
 * Use `std::hypot` in `rocsparse_complex_num<T>::abs` function.
@@ -23,6 +16,20 @@ Documentation for rocSPARSE is available at
 ### Resolved issues
 * Fix issue in `rocsparse_[s|d|c|z]gebsrmv` routine where incorrect results could sometimes be returned.
 * Fix issue in `rocsparse_[s|d|c|z]bsrxmv` routine where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
+
+## rocSPARSE 4.4.0 for ROCm 7.11.0
+
+### Added
+* Added brain half float mixed precision to `rocsparse_spmv` where A, X, and Y use bfloat16 and the compute type use float.
+* Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
+* Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
+* gfx1150, gfx1152 and gfx1153 enabled.
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+
+## rocSPARSE 4.3.0 for ROCm 7.10.0
+
+### Added
+* Added `rocsparse_spmv_set_extra` and `rocsparse_spmv_clear_extra` functions to enable residual computation within SpMV operations. These functions allow setting additional gamma scalars and z vectors for fused computations of the form `y = alpha * op(A) * x + beta * y + sum(gamma_i * z_i)`, enabling efficient residual calculations like `r = b - A * x`.
 
 ## rocSPARSE 4.2.0 for ROCm 7.2.0
 

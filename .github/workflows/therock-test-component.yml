@@ -48,6 +48,7 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: "./build"
       THEROCK_BIN_DIR: "./build/bin"
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
     steps:
       - name: "Fetch 'build_tools' from repository"
         if: ${{ runner.os == 'Windows' }}
@@ -67,7 +68,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 1aaf471098e508d41dfc96a944ccf377643e2e29 # 2026-02-11 commit
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Run setup test environment workflow
         timeout-minutes: 15
@@ -92,7 +93,25 @@ jobs:
           TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
           TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
         run: |
-          ${{ fromJSON(inputs.component).test_script }}
+          # Create logs directory
+          mkdir -p ./test_logs
+
+          # Run test and capture output (still display to console)
+          ${{ fromJSON(inputs.component).test_script }} 2>&1 | tee ./test_logs/test_output.log
+
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') && failure() && github.event_name == 'push' }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --project miopen \
+            --failure_stage test \
+            --platform "${{ inputs.platform }}" \
+            --log-path ./test_logs/test_output.log \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --pr-title "${{ github.event.pull_request.title }}" \
+            --job-name "${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }}/${{ fromJSON(inputs.component).total_shards }})"
 
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.

@@ -26,11 +26,11 @@ add_executable(
     types/TestForwardingFunctions.cpp
     types/TestFp8E4M3.cpp
     types/TestFp8E5M2.cpp
+    types/TestFp8E8M0.cpp
     types/TestHalf.cpp
     types/TestPortableTypes.cpp
     types/TestUserDefinedLiterals.cpp
     utilities/TestAllocators.cpp
-    utilities/TestCallbackLogger.cpp
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
@@ -45,6 +45,8 @@ add_executable(
     utilities/TestTensor.cpp
     utilities/TestTensorIterator.cpp
     utilities/TestTensorView.cpp
+    utilities/TestVersionUtils.cpp
+    utilities/TestVersion.cpp
     utilities/TestVisitor.cpp
 )
 

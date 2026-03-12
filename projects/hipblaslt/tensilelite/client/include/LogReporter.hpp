@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,14 +29,15 @@
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
 
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
+#endif
+
 #include <cstddef>
 #include <string>
 #include <unordered_set>
 
-#include <boost/lexical_cast.hpp>
-#include <boost/program_options.hpp>
-
-namespace po = boost::program_options;
+#include "ProgramOptions.hpp"
 
 namespace TensileLite
 {
@@ -111,6 +112,9 @@ namespace TensileLite
                 return std::shared_ptr<LogReporter>(new LogReporter(level,
                                                                     {BenchmarkRunNumber,
                                                                      ProblemProgress,
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+                                                                     RocProfCounter,
+#endif
                                                                      SolutionProgress,
                                                                      OperationIdentifier,
                                                                      ProblemSizes,

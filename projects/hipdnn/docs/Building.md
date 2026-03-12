@@ -48,6 +48,7 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 - [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library
 - [Google Test](https://github.com/google/googletest) - Unit testing framework
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
+- [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
 
 ## Quick Start Guide
 
@@ -121,11 +122,12 @@ ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 ```
 
-### Building Specific Components
+### Disabling JSON Support
+By default, hipDNN includes JSON serialization support via [nlohmann_json](https://github.com/nlohmann/json). To build without the nlohmann_json dependency:
 ```bash
-# Build without plugins
-cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
+cmake -GNinja -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON ..
 ```
+This disables JSON-based graph serialization and deserialization. FlatBuffer-based serialization remains available.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
@@ -153,6 +155,12 @@ cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
 # Both custom
 cmake -GNinja -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
 ```
+
+### rocm-libraries Superbuild
+
+The superbuild allows you to build hipdnn + dnn-providers in the same build making it easier to do cross project changes.
+
+See [Superbuild](./Superbuild.md) documentation for usage.
 
 ### Clang Tools
 

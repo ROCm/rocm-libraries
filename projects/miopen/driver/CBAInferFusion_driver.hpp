@@ -41,6 +41,7 @@
 #include "../test/cpu_bias.hpp"
 
 #include <miopen/env.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
@@ -281,8 +282,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::ChkLayout_ShortName()
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name!");
     }
 }
 
@@ -291,8 +291,8 @@ void CBAInferFusionDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string
 {
     if((ChkLayout_ShortName()))
     {
-        std::cerr << " Invalid Layout Short Name = " << ChkLayout_ShortName() << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Layout Short Name = " + std::to_string(ChkLayout_ShortName()));
     }
     else
     {
@@ -304,8 +304,7 @@ void CBAInferFusionDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string
         }
         else
         {
-            std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-            exit(EXIT_FAILURE);
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
         }
     }
 }
@@ -360,8 +359,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     fusion_mode = inflags.GetValueInt("fusion_mode");
     if(fusion_mode > 6 || fusion_mode < 0)
     {
-        std::cout << "Fusion mode out of range.\n Exiting..." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Fusion mode out of range");
     }
     if(fusion_mode != miopen_fusion_cba && fusion_mode != miopen_fusion_ca &&
        fusion_mode != miopen_fusion_cb)
@@ -580,8 +578,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::SetBNParametersFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Batch Normalization Mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Mode");
     }
 
     return miopenStatusSuccess;
@@ -641,8 +638,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
         if(in_c % group_count != 0 || out_c % group_count != 0 || group_count > in_c ||
            group_count > out_c)
         {
-            printf("Invalid group number\n");
-            exit(0); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid group number");
         }
     }
 
@@ -748,8 +744,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         status |= runningVariance_dev->ToGPU(q, runningVariance.data());
         if(status != STATUS_SUCCESS)
         {
-            printf("Error copying data to GPU\n");
-            exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusInternalError, "Error copying data to GPU");
         }
     }
     else
@@ -927,8 +922,7 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUBatchNormActivInference()
     miopenError = miopenCompileFusionPlan(GetHandle(), fusePlanDesc);
     if(miopenError != miopenStatusSuccess)
     {
-        std::cerr << "BatchNormActivInference plan not supported." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusNotImplemented, "BatchNormActivInference plan not supported");
     }
 
     size_t workspace_size = 0;
@@ -1024,8 +1018,7 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUConvBatchNormActivInference()
     miopenError = miopenCompileFusionPlan(GetHandle(), fusePlanDesc);
     if(miopenError != miopenStatusSuccess)
     {
-        std::cerr << plan_error_str << " plan not supported." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusNotImplemented, plan_error_str + " plan not supported");
     }
 
     size_t workspace_size = 0;
@@ -1086,11 +1079,9 @@ void CBAInferFusionDriver<Tgpu, Tref>::runGPUConvActivInference()
     miopenError = miopenCompileFusionPlan(GetHandle(), fusePlanDesc);
     if(miopenError != miopenStatusSuccess)
     {
-        if(bias_mode)
-            std::cerr << "ConvBiasActivInference plan not supported." << std::endl;
-        else
-            std::cerr << "ConvActivInference plan not supported." << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusNotImplemented,
+                     bias_mode ? "ConvBiasActivInference plan not supported"
+                               : "ConvActivInference plan not supported");
     }
 
     size_t workspace_size = 0;
@@ -1436,9 +1427,8 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUBNFwdInference()
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
 
     // C+N mode so we are done

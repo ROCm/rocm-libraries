@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -91,19 +68,6 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_FP4)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        GEMMProblem gemm;
-        gemm.waveM = 16;
-        gemm.waveN = 16;
-        gemm.waveK = 64;
-        gemm.macM  = 256;
-        gemm.macN  = 256;
-        gemm.macK  = 128;
-        basicGEMM<FP4, FP4, float>(gemm);
-    }
-
     TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_StreamK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -157,35 +121,14 @@ namespace GEMMTests
     TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_WMMA)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
+        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x16_f16);
         GEMMProblem gemm;
         gemm.waveM = 16;
         gemm.waveN = 16;
         gemm.waveK = 16;
-        basicGEMM<Half>(gemm);
-    }
-
-    TEST_P(GEMMBasicTestSuite, GPU_BasicGEMM_Swizzle)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        GEMMProblem gemm;
-        gemm.waveM          = 16;
-        gemm.waveN          = 16;
-        gemm.waveK          = 64;
-        gemm.macM           = 256;
-        gemm.macN           = 256;
-        gemm.macK           = 64;
-        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.scaleAMode     = Operations::ScaleMode::Separate;
-        gemm.scaleBMode     = Operations::ScaleMode::None;
-        gemm.scaleTypeA     = DataType::E8M0;
-        gemm.scaleBlockSize = 32;
-        gemm.swizzleScale   = true;
-        gemm.swizzleM       = 64;
-        gemm.swizzleK       = 4;
-        gemm.swizzleN       = 64;
-        gemm.swizzleB       = 4;
-        basicGEMM<FP4, FP4, float>(gemm);
+        gemm.wavefrontSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
+        basicGEMM<Half, Half, float>(gemm);
     }
 
     INSTANTIATE_TEST_SUITE_P(GEMMBasicTest, GEMMBasicTestSuite, currentGPUISA());

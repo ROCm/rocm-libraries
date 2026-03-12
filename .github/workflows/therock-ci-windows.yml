@@ -47,7 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 1aaf471098e508d41dfc96a944ccf377643e2e29 # 2026-02-11 commit
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -103,16 +103,14 @@ jobs:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+          cmake_preset: windows-release
         run: |
           # clear cache before build and after download
           ccache -z
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives
+      - name: Build therock-archives and therock-dist
+        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -156,6 +154,19 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && github.event_name == 'push' }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --project miopen \
+            --failure_stage build \
+            --platform windows \
+            --log-path "${{ env.BUILD_DIR }}/logs" \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --pr-title "${{ github.event.pull_request.title }}"
+
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-windows]
@@ -166,3 +177,4 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
       test_type: ${{ inputs.test_type }}
+    secrets: inherit

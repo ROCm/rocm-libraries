@@ -9,19 +9,19 @@ import contextlib
 import functools
 import itertools
 import os
-import pathlib
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import yaml
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
-build = pathlib.Path(__file__).parent.parent / "build"
+build = Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
-    build = pathlib.Path(os.getenv("ROCROLLER_BUILD_DIR"))
+    build = Path(os.getenv("ROCROLLER_BUILD_DIR"))
 
 gemm = (build / "client" / "rocroller-gemm").resolve()
 
@@ -253,7 +253,8 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
+  pretileB: []
 tailLoops: true
 streamK: None
 loadScale_A: BufferToVGPR
@@ -317,7 +318,8 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
+  pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -379,7 +381,8 @@ types:
   scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
-  scaleSkipPermlane: false
+  scaleSkipPermlane: None
+  pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -626,6 +629,54 @@ def test_gemm_options(tmp_path):
             check=True,
         )
 
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--wgs=128x2",
+                "--workgroup_size_x=256",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires pretileScale; client must assert and exit non-zero
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=32x8/32x8",
+            ],
+            check=True,
+        )
+
+    # PreSwizzleScaleGFX950 requires swizzleTileSize (m=32, n=32, k=8); wrong sts must fail
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--scaleSkipPermlane=PreSwizzleScaleGFX950",
+                "--scale_A=Separate",
+                "--scale_B=Separate",
+                "--scaleBlockSize=32",
+                "--sts=64x8/64x8",
+                "--pretileScale",
+            ],
+            check=True,
+        )
+
     # setting tile size via shortcut
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--wgts=1024x2048x4096"]
@@ -633,6 +684,13 @@ def test_gemm_options(tmp_path):
     assert post["mac_m"] == 1024
     assert post["mac_n"] == 2048
     assert post["mac_k"] == 4096
+
+    # setting wg size via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--wgs=64x4"]
+    )
+    assert post["workgroup_size_x"] == 64
+    assert post["workgroup_size_y"] == 4
 
     # setting mi via shortcut
     post = run_and_load_example_yaml(
@@ -728,6 +786,12 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["k"] == 7
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
+
+    # pretileB
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--wgts=256x256x256", "--pretileB=64x128"]
+    )
+    assert post["types"]["pretileB"] == [64, 128]
 
     # setting data initialization modes
     post = run_and_load_example_problem_yaml(
@@ -917,7 +981,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
     if not gemm.exists():
         pytest.skip("rocroller-gemm binary not found")
 
-    kgraph = (pathlib.Path(__file__).parent.parent / "scripts" / "kgraph.py").resolve()
+    kgraph = (Path(__file__).parent.parent / "scripts" / "kgraph.py").resolve()
     if not kgraph.exists():
         pytest.skip("kgraph.py script not found")
 
@@ -927,11 +991,11 @@ def test_kernel_graph_dot_truncation(tmp_path):
     def run_cmd(cmd, env=None, cwd=None):
         return subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True)
 
-    def assert_non_empty(path: pathlib.Path):
+    def assert_non_empty(path: Path):
         assert path.exists(), f"Expected file to exist: {path}"
         assert path.stat().st_size > 0, f"Expected file to be non-empty: {path}"
 
-    def generate_asm(asm_path: pathlib.Path, extra_env: dict):
+    def generate_asm(asm_path: Path, extra_env: dict):
         env = os.environ.copy()
         env.update(extra_env)
 
@@ -957,7 +1021,7 @@ def test_kernel_graph_dot_truncation(tmp_path):
         )
         assert_non_empty(asm_path)
 
-    def run_kgraph(asm_path: pathlib.Path, pdf_path: pathlib.Path):
+    def run_kgraph(asm_path: Path, pdf_path: Path):
         cmd = [str(kgraph), str(asm_path), "-o", str(pdf_path)]
         p = run_cmd(cmd, env=os.environ.copy(), cwd=tmp_path)
         combined = (p.stdout or "") + "\n" + (p.stderr or "")

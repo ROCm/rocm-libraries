@@ -20,6 +20,7 @@
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/env.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/find_controls.hpp>
 #include <miopen/logger.hpp>
@@ -667,10 +668,9 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 
     if(is_gpualloc && inflags.GetValueInt("verify") == 1)
     {
-        std::cerr << "Error: '--gpualloc 1' should not be used with enabled verification. Add "
-                     "'--verify 0' to options."
-                  << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "'--gpualloc 1' should not be used with enabled verification. "
+                     "Add '--verify 0' to options.");
     }
 
     in.SetGpuallocMode(is_gpualloc);
@@ -703,8 +703,8 @@ void ConvDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string layout_va
 {
     if((ChkLayout_ShortName()))
     {
-        std::cerr << " Invalid Layout Short Name = " << ChkLayout_ShortName() << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Layout Short Name = " + std::to_string(ChkLayout_ShortName()));
     }
     else
     {
@@ -716,8 +716,7 @@ void ConvDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string layout_va
         }
         else
         {
-            std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-            exit(EXIT_FAILURE);
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
         }
     }
 }
@@ -732,10 +731,10 @@ void ConvDriver<Tgpu, Tref>::ValidateVectorizedParameters(int vector_dim, int ve
     }
     else
     {
-        std::cerr << "Invalid Tensor Vectorization Parameter Value - "
-                  << "vector_dim:" << vector_dim << ", vector_length:" << vector_length
-                  << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Tensor Vectorization Parameter Value - vector_dim:" +
+                         std::to_string(vector_dim) +
+                         ", vector_length:" + std::to_string(vector_length));
     }
 }
 
@@ -752,8 +751,7 @@ int ConvDriver<Tgpu, Tref>::ChkLayout_ShortName()
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name!");
     }
 }
 
@@ -1170,8 +1168,7 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
         if(in_c % group_count != 0 || out_c % group_count != 0 || group_count > in_c ||
            group_count > out_c)
         {
-            printf("Invalid group number\n");
-            exit(0); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid group number");
         }
     }
 
@@ -3479,10 +3476,8 @@ std::string ConvDriver<Tgpu, Tref>::GetVerificationCacheFileName(
     miopen::LogRange(ss << "_", trans_output_pads, "x");
     ss << "_" << inflags.GetValueInt("pad_val");
     ss << "_" << inflags.GetValueInt("bias");
-    ss << "_"
-       << "GPU" << get_datatype_string(Tgpu{});
-    ss << "_"
-       << "REF" << get_datatype_string(Tref{});
+    ss << "_" << "GPU" << get_datatype_string(Tgpu{});
+    ss << "_" << "REF" << get_datatype_string(Tref{});
 
     return ss.str();
 }

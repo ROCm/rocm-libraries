@@ -96,6 +96,7 @@ void PrecompileSolutions(const Handle& h,
 
 std::ostream& operator<<(std::ostream& os, const ConvSolution& s)
 {
+    os << s.solver_id << ": ";
     std::transform(s.construction_params.begin(),
                    s.construction_params.end(),
                    std::ostream_iterator<std::string>(os, "/"),
@@ -683,11 +684,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
 
     RegisterWithSolver(
         registry, ++id, conv::ConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    Register(registry,
-             ++id,
-             Primitive::Fusion,
-             fusion::ConvWinoRageRxSFused<2, 3>{}.SolverDbId(),
-             miopenConvolutionAlgoWinograd);
+    ++id; // Removed ConvWinoRageRxSFused solver
     Register(registry,
              ++id,
              Primitive::Fusion,

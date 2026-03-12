@@ -34,8 +34,8 @@
 #include <type_traits>
 #include <chrono>
 
-#include <miopen/object.hpp>
 #include <miopen/config.hpp>
+#include <miopen/object.hpp>
 
 #if MIOPEN_USE_ROCTRACER
 #include <roctracer/roctx.h>
@@ -367,33 +367,42 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 #define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
 #endif
 
-MIOPEN_INTERNALS_EXPORT void ClearBufferLog();
+MIOPEN_INTERNALS_EXPORT bool IsLogBufferOn();
+
+MIOPEN_INTERNALS_EXPORT void ClearLogBuffer();
 
 MIOPEN_INTERNALS_EXPORT void BufferLog(std::string line);
 
 MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
 
-#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)            \
-    do                                                                                  \
-    {                                                                                   \
-        std::ostringstream miopen_log_ss;                                               \
-        miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
-                      << __VA_ARGS__ << std::endl;                                      \
-        if(miopen::IsLogging(level, disableQuieting))                                   \
-        {                                                                               \
-            std::cerr << miopen_log_ss.str();                                           \
-        }                                                                               \
-        if(!miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting))            \
-        {                                                                               \
-            if(level < miopen::LoggingLevel::Trace)                                     \
-            {                                                                           \
-                miopen::BufferLog(miopen_log_ss.str());                                 \
-            }                                                                           \
-            if(level == miopen::LoggingLevel::Error)                                    \
-            {                                                                           \
-                miopen::OutputBufferedLogs();                                           \
-            }                                                                           \
-        }                                                                               \
+#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                \
+    do                                                                                      \
+    {                                                                                       \
+        std::ostringstream miopen_log_ss;                                                   \
+        const bool is_logging = miopen::IsLogging(level, disableQuieting);                  \
+        const bool is_logging_i2 =                                                          \
+            miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting);                \
+        const bool buffer_on = miopen::IsLogBufferOn();                                     \
+        if(is_logging || (buffer_on && !is_logging_i2))                                     \
+        {                                                                                   \
+            miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
+                          << __VA_ARGS__ << std::endl;                                      \
+            if(is_logging)                                                                  \
+            {                                                                               \
+                std::cerr << miopen_log_ss.str();                                           \
+            }                                                                               \
+            if(buffer_on && !is_logging_i2)                                                 \
+            {                                                                               \
+                if(level < miopen::LoggingLevel::Trace)                                     \
+                {                                                                           \
+                    miopen::BufferLog(miopen_log_ss.str());                                 \
+                }                                                                           \
+                if(level == miopen::LoggingLevel::Error)                                    \
+                {                                                                           \
+                    miopen::OutputBufferedLogs();                                           \
+                }                                                                           \
+            }                                                                               \
+        }                                                                                   \
     } while(false)
 
 #define MIOPEN_LOG_XQ_(level, disableQuieting, fn_name, ...) \
@@ -424,14 +433,13 @@ MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
 // Warnings in installable builds, errors otherwise.
 #define MIOPEN_LOG_WE(...) MIOPEN_LOG(LogWELevel, __VA_ARGS__)
 
-#define MIOPEN_LOG_DRIVER_COMMAND(driver, ...)                                               \
-    do                                                                                       \
-    {                                                                                        \
-        std::ostringstream miopen_driver_cmd_ss;                                             \
-        miopen_driver_cmd_ss << miopen::LoggingPrefix() << "Command"                         \
-                             << " [" << MIOPEN_GET_FN_NAME << "] " driver " " << __VA_ARGS__ \
-                             << std::endl;                                                   \
-        std::cerr << miopen_driver_cmd_ss.str();                                             \
+#define MIOPEN_LOG_DRIVER_COMMAND(driver, ...)                                                     \
+    do                                                                                             \
+    {                                                                                              \
+        std::ostringstream miopen_driver_cmd_ss;                                                   \
+        miopen_driver_cmd_ss << miopen::LoggingPrefix() << "Command" << " [" << MIOPEN_GET_FN_NAME \
+                             << "] " driver " " << __VA_ARGS__ << std::endl;                       \
+        std::cerr << miopen_driver_cmd_ss.str();                                                   \
     } while(false)
 
 #ifdef _WIN32
