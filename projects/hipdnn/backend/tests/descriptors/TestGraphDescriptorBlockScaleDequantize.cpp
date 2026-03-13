@@ -143,6 +143,11 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, BuildFromSingleOperation)
     EXPECT_EQ(attrs->x_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
     EXPECT_EQ(attrs->scale_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID);
     EXPECT_EQ(attrs->y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
+
+    // Verify operation data fields survive serialization
+    ASSERT_EQ(attrs->block_size.size(), 1);
+    EXPECT_EQ(attrs->block_size[0], K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE);
+    EXPECT_FALSE(attrs->is_negative_scale);
 }
 
 TEST_F(TestGraphDescriptorBlockScaleDequantize, ComputeDataTypePreserved)

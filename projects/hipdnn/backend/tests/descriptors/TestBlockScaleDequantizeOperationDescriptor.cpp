@@ -60,17 +60,6 @@ public:
                                1,
                                blockSize.data());
         }
-        if(std::find(skip.begin(),
-                     skip.end(),
-                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT)
-           == skip.end())
-        {
-            bool isNegativeScale = true;
-            desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
-                               HIPDNN_TYPE_BOOLEAN,
-                               1,
-                               &isNegativeScale);
-        }
         if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT)
            == skip.end())
         {
@@ -259,6 +248,20 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetBlockSize)
                                        HIPDNN_TYPE_INT32,
                                        1,
                                        blockSize.data()));
+
+    // Verify round-trip via getAttribute after finalize
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT});
+    desc->finalize();
+
+    std::vector<int32_t> retrieved(1);
+    int64_t count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                       HIPDNN_TYPE_INT32,
+                                       1,
+                                       &count,
+                                       retrieved.data()));
+    ASSERT_EQ(count, 1);
+    EXPECT_EQ(retrieved, blockSize);
 }
 
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetIsNegativeScale)
@@ -271,6 +274,8 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetIsNegativeScale)
                            HIPDNN_TYPE_BOOLEAN,
                            1,
                            &isNegativeScale));
+
+    ASSERT_EQ(desc->getData().is_negative_scale, true);
 }
 
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetComputeDataType)
@@ -360,17 +365,19 @@ TEST_P(TestBlockScaleDequantizeOperationDescriptorGetTensor,
     auto desc = getDescriptor();
     const auto& tc = GetParam();
 
-    HipdnnBackendDescriptor* retrieved = nullptr;
+    HipdnnBackendDescriptor* rawRetrieved = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        desc->getAttribute(tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &retrieved));
+    ASSERT_NO_THROW(desc->getAttribute(
+        tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &rawRetrieved));
 
     ASSERT_EQ(elementCount, 1);
-    ASSERT_NE(retrieved, nullptr);
+    ASSERT_NE(rawRetrieved, nullptr);
+    std::unique_ptr<HipdnnBackendDescriptor> retrieved(rawRetrieved);
 
     auto tensorImpl = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
-        retrieved, HIPDNN_STATUS_INTERNAL_ERROR, "Failed to unpack retrieved tensor descriptor");
-    delete retrieved;
+        retrieved.get(),
+        HIPDNN_STATUS_INTERNAL_ERROR,
+        "Failed to unpack retrieved tensor descriptor");
 
     ASSERT_NE(tensorImpl, nullptr);
     EXPECT_EQ(tensorImpl->getData().uid, tc.expectedUid);
@@ -423,12 +430,13 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeBlockSize)
     EXPECT_EQ(blockSize, (std::vector<int32_t>{K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE}));
 }
 
-TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeIsNegativeScale)
+TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeIsNegativeScaleDefaultFalse)
 {
+    // is_negative_scale is optional; when not set its default value (false) should round-trip
     makeFinalized();
     auto desc = getDescriptor();
 
-    bool isNegativeScale = false;
+    bool isNegativeScale = true; // initialise to wrong value to confirm it is overwritten
     int64_t elementCount = 0;
     ASSERT_NO_THROW(
         desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
@@ -438,7 +446,31 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeIsNegativeScale)
                            &isNegativeScale));
 
     ASSERT_EQ(elementCount, 1);
-    EXPECT_TRUE(isNegativeScale);
+    EXPECT_FALSE(isNegativeScale);
+}
+
+TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeIsNegativeScaleWhenTrue)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+    bool isNegativeScale = true;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &isNegativeScale);
+    desc->finalize();
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(
+        desc->getAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
+                           HIPDNN_TYPE_BOOLEAN,
+                           1,
+                           &elementCount,
+                           &retrieved));
+
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_TRUE(retrieved);
 }
 
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeComputeType)
@@ -618,10 +650,13 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, ToStringContainsExpectedInfo
 
     std::string str = desc->toString();
     ASSERT_NE(str.find("BlockScaleDequantizeOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=50"), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=51"), std::string::npos);
-    ASSERT_NE(str.find("y_uid=52"), std::string::npos);
-    ASSERT_NE(str.find("is_negative_scale=1"), std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("y_uid=" + std::to_string(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("is_negative_scale=0"), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -646,7 +681,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeProducesCorrectNode
     ASSERT_EQ(attrs->y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
     ASSERT_EQ(attrs->block_size.size(), 1);
     ASSERT_EQ(attrs->block_size[0], K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE);
-    EXPECT_TRUE(attrs->is_negative_scale);
+    EXPECT_FALSE(attrs->is_negative_scale);
 }
 
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeWithHalfComputeType)
@@ -683,9 +718,12 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, TryAsInterfaceReturnsValidGr
     auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
     ASSERT_NE(graphOp, nullptr);
 
+    auto desc = getDescriptor();
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
+    EXPECT_EQ(tensors[0], desc->getXDesc());
+    EXPECT_EQ(tensors[1], desc->getScaleDesc());
+    EXPECT_EQ(tensors[2], desc->getYDesc());
 }
 
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
