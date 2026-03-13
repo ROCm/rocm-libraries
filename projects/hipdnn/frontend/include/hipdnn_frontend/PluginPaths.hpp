@@ -30,8 +30,10 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <iterator>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <hipdnn_frontend/Error.hpp>
@@ -95,6 +97,12 @@ inline std::optional<hipdnnPluginLoadingMode_ext_t>
 template <typename Container>
 inline Error setEnginePluginPaths(const Container& pluginPaths, PluginLoadingMode mode)
 {
+    static_assert(std::is_constructible_v<
+                      std::filesystem::path,
+                      std::decay_t<decltype(*std::begin(std::declval<const Container&>()))>>,
+                  "Container elements must be convertible to std::filesystem::path "
+                  "(e.g., std::filesystem::path, std::string, or const char*)");
+
     auto backendMode = detail::toBackendPluginLoadingMode(mode);
     if(!backendMode)
     {
