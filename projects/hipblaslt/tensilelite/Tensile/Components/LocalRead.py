@@ -885,10 +885,6 @@ class LocalReadMFMA(LocalRead):
 
                             packCodeT = Module() # Allocate temporary module for pack code
                             packCodePreT = Module() # Allocate temporary module for pack code Pre
-                            if (not writer.states.inTailLoop) and kernel["UseF32XEmulation"]:
-                                # non TailLoop case, store packPre (transpose) in packCodeT
-                                # TailLoop case, we need to store transpose code separately to schedule it before ShiftK
-                                packPre = packCodeT
                             localReadCodeT = Module()
 
                             if needPack or numSplitMetadata:
