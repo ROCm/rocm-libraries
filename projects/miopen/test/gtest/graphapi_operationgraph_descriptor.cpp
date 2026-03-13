@@ -107,8 +107,8 @@ using miopen::graphapi::GTestGraphApiExecute;
 
 TEST(CPU_GraphApiOperationGraphDescriptor_NONE, CFunctions)
 {
-    miopenHandle_t handle{nullptr};
-    auto status = miopenCreate(&handle);
+    miopenHandle_t handle = nullptr;
+    auto status           = miopenCreate(&handle);
     ASSERT_EQ(status, miopenStatusSuccess) << "Handle wasn't obtained, cannot continue";
 
     GTestDescriptorSingleValueAttribute<miopenHandle_t, char> handleAttribute{
