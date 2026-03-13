@@ -24,6 +24,9 @@
  #
  ###############################################################################
 
+if (NOT ROCWMMA_SAMPLES_INCLUDE_DIR)
+  set(ROCWMMA_SAMPLES_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
 set(ROCWMMA_COMMUNITY_SAMPLES_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Custom target to build all community samples

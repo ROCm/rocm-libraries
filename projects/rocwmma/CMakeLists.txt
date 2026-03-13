@@ -207,6 +207,9 @@ endif()
 if(ROCWMMA_BUILD_SAMPLES)
   rocm_package_setup_component(samples PARENT clients)
   add_subdirectory(samples)
+elseif(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  rocm_package_setup_component(community_samples PARENT clients)
+  add_subdirectory(samples/community)
 endif()
 
 
