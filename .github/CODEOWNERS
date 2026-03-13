@@ -18,6 +18,7 @@
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/hipdnn-reviewers
 /dnn-providers/hipblaslt-provider/                  @ROCm/hipdnn-reviewers
+/dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
 /projects/composablekernel/                         @ROCm/ck-reviewers
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers

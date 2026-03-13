@@ -238,6 +238,22 @@ inline Error
     return setDescriptorAttrTensorRef(desc, attrName, tensor->get_uid(), tensorDescs, errorContext);
 }
 
+// Creates a tensor descriptor (if needed) and sets it as a tensor reference
+// attribute on the given operation descriptor. No-op if the tensor is null.
+inline Error ensureAndSetOptionalTensorRef(
+    hipdnnBackendDescriptor_t desc,
+    hipdnnBackendAttributeName_t attrName,
+    const std::shared_ptr<graph::TensorAttributes>& tensor,
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
+    const std::string& errorContext)
+{
+    if(!tensor)
+    {
+        return {};
+    }
+    return ensureAndSetTensorRef(desc, attrName, tensor, tensorDescs, errorContext);
+}
+
 // Creates tensor descriptors (if needed) for each element in the array and
 // sets them as a tensor array attribute on the given operation descriptor.
 inline Error ensureAndSetTensorArrayRef(
