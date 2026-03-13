@@ -29,6 +29,8 @@ namespace {
 
 struct TestCase
 {
+    TestCase(int dirMode_, int flatBatchFill_) : dirMode(dirMode_), flatBatchFill(flatBatchFill_) {}
+
     int dirMode;
     int flatBatchFill;
 

@@ -124,7 +124,7 @@ To add your engine name to the official registry:
    - Use UPPER_CASE with underscores
    - Make the name match the value.
 
-2. **Add to Registry**: Submit a PR to add your engine name to [`plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp):
+2. **Add to Registry**: Submit a PR to add your engine name to [`data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp):
    ```cpp
    HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")
    ```

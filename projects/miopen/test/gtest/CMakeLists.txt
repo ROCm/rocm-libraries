@@ -107,10 +107,6 @@ function(add_gtest TEST_NAME TEST_CPP)
       set(MIOPEN_GTEST_PREFIX "Smoke")
     endif()
 
-    if (NOT MIOPEN_TEST_MLIR)
-        add_gtest_negative_filter("*MLIRTest*")
-    endif()
-
     if (NOT MIOPEN_TEST_DBSYNC)
         add_gtest_negative_filter("*DBSync*")
     endif()
@@ -156,10 +152,6 @@ function(add_gtest TEST_NAME TEST_CPP)
       set(MIOPEN_GTEST_PREFIX "")
     else()
       set(MIOPEN_GTEST_PREFIX "Smoke")
-    endif()
-
-    if (NOT MIOPEN_TEST_MLIR)
-        add_gtest_negative_filter("*MLIRTest*")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
