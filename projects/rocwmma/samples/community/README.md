@@ -24,7 +24,16 @@ As samples accumulate, they may be organized into subdirectories by technique or
 - `advanced/` - Complex use cases combining multiple techniques
 - `experimental/` - Cutting-edge research techniques
 
+## Requirements
+
+- **Minimum ROCm version**: 6.0+ recommended (community samples may work with earlier versions)
+- **Minimum hipcc version**: 4.4+ (same as rocWMMA library)
+- **Build system**: CMake 3.10+
+- Samples should be compatible with at least one officially supported GPU architecture
+
 ## Contribution Guidelines
+
+For complete contribution guidelines, see the [Community Samples section in CONTRIBUTING.md](../../CONTRIBUTING.md#community-samples). This README provides a quick reference.
 
 ### What Makes a Good Community Sample?
 
@@ -33,6 +42,7 @@ As samples accumulate, they may be organized into subdirectories by technique or
 3. **Code Quality**: Code should be readable, well-commented, and follow basic C++ best practices
 4. **Builds Successfully**: Must compile with supported ROCm/hipcc versions
 5. **Proper Licensing**: Must include MIT license header and be contributor's original work or properly attributed
+6. **Security**: Does not introduce security vulnerabilities (e.g., buffer overflows, command injection, arbitrary code execution)
 
 ### What is NOT Required
 
@@ -50,33 +60,59 @@ Focus on demonstrating your technique clearly. It's acceptable if your sample on
 
 ## How to Contribute
 
-1. **Write Your Sample**
-   - Place your `.cpp` file directly in `samples/community/` (flat structure initially)
-   - Include a clear comment header explaining:
-     - What the sample demonstrates
-     - Any architecture, data type, or configuration requirements
-     - Known limitations
-     - Author/contributor information (optional)
-   - Add MIT license header to your file
+### Step-by-Step Guide
 
-2. **Update Build Configuration**
+1. **Start with the Template** (Recommended)
+   - Copy `samples/community/template.cpp` as a starting point
+   - The template includes proper license headers and comment structure
+   - Fill in the description, requirements, and limitations sections
+
+2. **Write Your Sample**
+   - Place your `.cpp` file directly in `samples/community/` (flat structure initially)
+   - Use meaningful variable names and add comments explaining non-obvious code
+   - Focus on demonstrating your technique clearly rather than handling all edge cases
+   - **Security note**: Avoid unsafe operations like:
+     - Unchecked buffer accesses or unbounded loops
+     - User-controlled format strings or command execution
+     - Reading from uninitialized memory
+     - Excessive memory allocations that could exhaust system resources
+
+3. **Update Build Configuration**
    - Edit `samples/community/CMakeLists.txt`
    - Add your sample using the `add_community_sample()` function:
      ```cmake
      add_community_sample(your_sample_name ${CMAKE_CURRENT_SOURCE_DIR}/your_sample_name.cpp)
      ```
 
-3. **Update Documentation**
-   - Add an entry to this README documenting your sample:
-     - Sample name and file
-     - Brief description of what it demonstrates
-     - Requirements (architecture, data types, etc.)
-     - Any known limitations
+4. **Update Documentation**
+   - Add an entry to the "Current Community Samples" section below
+   - Use the provided template (see HTML comment in that section)
+   - Include: sample name, file, description, requirements, and known limitations
 
-4. **Submit Pull Request**
+5. **Test Your Sample**
+   - Build with: `cmake -B build . -DROCWMMA_BUILD_COMMUNITY_SAMPLES=ON && cmake --build build`
+   - Run your sample: `./build/projects/rocwmma/samples/community/your_sample_name`
+   - Verify it produces expected output without errors on at least one GPU architecture
+
+6. **Submit Pull Request**
    - Follow the standard PR process outlined in the main CONTRIBUTING.md
    - Provide a clear PR description explaining the technique demonstrated
    - Be responsive to basic code review feedback (readability, licensing, build issues)
+
+### Contribution Checklist
+
+Before submitting your PR, verify:
+
+- [ ] Source file includes MIT license header
+- [ ] File includes clear comment header explaining what the sample demonstrates
+- [ ] Sample specifies requirements (ROCm version, GPU architectures, data types)
+- [ ] Known limitations are documented
+- [ ] Code builds successfully without errors on at least one GPU architecture
+- [ ] CMakeLists.txt updated with `add_community_sample()` call
+- [ ] README.md updated in "Current Community Samples" section
+- [ ] PR description explains the technique and its value
+- [ ] No obvious security issues (buffer overflows, unsafe operations)
+- [ ] Sample can be run successfully: `./build/projects/rocwmma/samples/community/your_sample_name`
 
 ## Building Community Samples
 
@@ -89,6 +125,20 @@ cmake --build build
 # Or build only community samples target
 cmake --build build --target rocwmma_community_samples
 ```
+
+## Running Community Samples
+
+After building, samples are located in:
+```bash
+./build/projects/rocwmma/samples/community/
+```
+
+Run a sample:
+```bash
+./build/projects/rocwmma/samples/community/sample_name
+```
+
+Most samples will display output indicating success or failure. Check the sample's documentation for specific usage instructions.
 
 ## Important Disclaimers
 
@@ -115,7 +165,9 @@ While community samples have reduced requirements, they should still:
 - Follow basic coding standards and be readable
 - Include meaningful comments explaining the technique
 - Build successfully without errors
-- Not introduce security vulnerabilities
+- Not introduce security vulnerabilities (buffer overflows, command injection, unsafe memory access)
+- Use appropriate error checking for GPU API calls (CHECK_HIP_ERROR, etc.)
+- Clearly document any assumptions or prerequisites
 
 ## Sample Lifecycle
 
@@ -130,9 +182,27 @@ While community samples have reduced requirements, they should still:
 - Samples that break due to rocWMMA API changes may be deprecated if not fixed
 
 ### Graduation to Official Samples
-- High-value samples demonstrating important techniques may be considered for promotion
-- Official samples require AMD commitment to ongoing maintenance
-- Promotion involves more thorough review, testing, and documentation
+
+Community samples that prove valuable and widely applicable may be promoted to official samples:
+
+**Criteria for Graduation:**
+- Demonstrates a broadly useful technique or common use case
+- High code quality and comprehensive error handling
+- Works across multiple GPU architectures and data types
+- Well-documented with clear explanations
+- Community validation and positive feedback
+
+**Graduation Process:**
+1. AMD maintainers identify candidate samples for promotion
+2. Sample author is contacted (if identifiable) to discuss promotion
+3. Sample undergoes full code review to official sample standards
+4. Sample is enhanced to support all architectures/types (if needed)
+5. Tests and benchmarks are added
+6. Documentation is added to API Reference Guide
+7. Original community version may be deprecated or removed after transition
+8. AMD commits to ongoing maintenance as an official sample
+
+Graduation is at AMD's discretion and depends on maintenance capacity. Not all valuable community samples will be promoted.
 
 ## Questions?
 

@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -30,15 +30,48 @@ set(ROCWMMA_COMMUNITY_SAMPLES_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 add_custom_target(rocwmma_community_samples)
 
 # Function to add community sample with dependency tracking
+# Community samples use a separate install component to distinguish them from official samples
 function(add_community_sample TARGET_NAME SOURCE_FILE)
-  add_rocwmma_sample(${TARGET_NAME} ${SOURCE_FILE})
+  list(APPEND SOURCE_FILE ${ARGN})
+  add_executable(${TARGET_NAME} ${SOURCE_FILE})
+  target_link_libraries(${TARGET_NAME} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
+  if(UNIX)
+    set_target_properties(${TARGET_NAME} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+    target_link_libraries(${TARGET_NAME} "-fno-rtlib-add-rpath")
+  endif()
+  target_link_libraries(${TARGET_NAME} rocwmma hiprtc::hiprtc)
+  target_include_directories(${TARGET_NAME} PRIVATE
+                             ${CMAKE_CURRENT_SOURCE_DIR}
+                             ${ROCWMMA_SAMPLES_INCLUDE_DIR}
+                             ${ROCWMMA_COMMUNITY_SAMPLES_INCLUDE_DIR})
   add_dependencies(rocwmma_community_samples ${TARGET_NAME})
 
-  # Override install component to separate from official samples
-  set_target_properties(${TARGET_NAME} PROPERTIES
-    INSTALL_COMPONENT "community-samples")
+  # Add support to build the target's assembly files
+  if(ROCWMMA_BUILD_ASSEMBLY)
+    foreach(file_name ${SOURCE_FILE})
+      file(RELATIVE_PATH relative_file_path "${CMAKE_CURRENT_SOURCE_DIR}" "${file_name}")
+      string(REPLACE "../" "__/" relative_file_string "${relative_file_path}")
+      add_custom_command(TARGET ${TARGET_NAME}
+                         POST_BUILD
+                         COMMAND make ARGS ${relative_file_string}.s
+                         COMMAND ${CMAKE_COMMAND} -E copy
+                           "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${TARGET_NAME}.dir/${relative_file_string}.s"
+                           "${CMAKE_CURRENT_BINARY_DIR}/assembly/${relative_file_string}.s"
+                          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    endforeach()
+  endif()
+
+  # Install to separate component to distinguish from official samples
+  rocm_install_targets(
+    TARGETS ${TARGET_NAME}
+    COMPONENT community-samples
+  )
 endfunction()
 
-# Community samples will be added here in the future
-# Example (when samples are added):
+# Community samples will be added here
+# Use template.cpp as a starting point for new samples
+#
+# Example:
 # add_community_sample(example_name ${CMAKE_CURRENT_SOURCE_DIR}/example_name.cpp)
+#
+# Note: template.cpp is not built as a sample - it's only a reference template

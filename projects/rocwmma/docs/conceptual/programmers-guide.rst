@@ -148,7 +148,7 @@ or with all data types. Users are encouraged to adapt these examples for their s
 
 The community samples directory is currently available for contributions. As samples accumulate,
 they may be organized into subdirectories by technique or domain (e.g., fusion/, ml-models/,
-optimizations/, advanced/).
+optimizations/, advanced/, experimental/).
 
 To build community samples, configure with ``-DROCWMMA_BUILD_COMMUNITY_SAMPLES=ON``.
 

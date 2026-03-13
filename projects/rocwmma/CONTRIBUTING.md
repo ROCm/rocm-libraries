@@ -120,24 +120,34 @@ Community samples are **NOT** required to provide:
 
 ### How to Contribute a Community Sample ###
 
-1. Place your sample in `samples/community/`:
+For detailed contribution instructions, checklist, and best practices, see
+[samples/community/README.md](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/samples/community/README.md).
+
+Quick overview:
+
+1. Use `samples/community/template.cpp` as a starting point for your sample
+
+2. Place your sample in `samples/community/`:
    - Initially, samples will be directly in this directory (flat structure)
    - As samples accumulate, maintainers may organize into subdirectories:
      - `fusion/` - Kernel fusion examples
      - `ml-models/` - Machine learning specific applications
      - `optimizations/` - Performance optimization techniques
-     - `advanced/` - Complex use cases
+     - `advanced/` - Complex use cases combining multiple techniques
+     - `experimental/` - Cutting-edge research techniques
 
-2. Add a clear comment header explaining:
+3. Add a clear comment header explaining:
    - What the sample demonstrates
-   - Any limitations or requirements
+   - Any limitations or requirements (GPU architectures, data types, ROCm version)
    - Author/contributor information (optional)
 
-3. Update `samples/community/CMakeLists.txt` to add your sample using `add_community_sample()`
+4. Update `samples/community/CMakeLists.txt` to add your sample using `add_community_sample()`
 
-4. Update `samples/community/README.md` to document your sample
+5. Update `samples/community/README.md` to document your sample
 
-5. Create a pull request following the standard PR process
+6. Test that your sample builds and runs successfully
+
+7. Create a pull request following the standard PR process
 
 ## Code Structure ##
 
