@@ -133,7 +133,7 @@ TEST_F(TestGraphDescriptorBatchnormInference, BuildFromSingleOperation)
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 6);
@@ -178,7 +178,7 @@ TEST_F(TestGraphDescriptorBatchnormInference, ComputeDataTypePreserved)
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    std::unique_ptr<GraphT> graphT(GetGraph(serialized.ptr)->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);

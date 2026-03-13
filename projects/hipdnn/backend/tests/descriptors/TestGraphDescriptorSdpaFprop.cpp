@@ -329,7 +329,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 28);
@@ -424,7 +424,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    std::unique_ptr<GraphT> graphT(GetGraph(serialized.ptr)->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -460,7 +460,7 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     // Only 4 required tensors should be present
     ASSERT_EQ(graphT->nodes.size(), 1);

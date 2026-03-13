@@ -165,7 +165,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromSingleRMSNormOperation)
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 6);
@@ -248,7 +248,7 @@ TEST_F(TestGraphDescriptorRMSNorm, ComputeDataTypePreserved)
 
     auto serialized = desc->getSerializedGraph();
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 

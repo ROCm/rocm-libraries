@@ -136,7 +136,7 @@ TEST_F(TestGraphDescriptorMatmul, BuildFromSingleMatmulOperation)
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -196,7 +196,7 @@ TEST_F(TestGraphDescriptorMatmul, ComputeDataTypePreserved)
 
     auto serialized = desc->getSerializedGraph();
     auto graph = GetGraph(serialized.ptr);
-    auto graphT = graph->UnPack();
+    std::unique_ptr<GraphT> graphT(graph->UnPack());
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
