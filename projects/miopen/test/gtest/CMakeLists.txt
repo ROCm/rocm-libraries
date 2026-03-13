@@ -214,6 +214,15 @@ foreach(SOURCE ${SKIP_TESTS})
     list(REMOVE_ITEM TESTS ${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE})
 endforeach()
 
+# Ensure canonical conv test targets exist for custom tests in test/CMakeLists.txt.
+# These targets are referenced via $<TARGET_FILE:test_conv2d*> in add_custom_test().
+foreach(CONV_TEST conv2d conv2d_find2)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${CONV_TEST}.cpp" AND NOT TARGET test_${CONV_TEST})
+    list(REMOVE_ITEM TESTS "${CMAKE_CURRENT_SOURCE_DIR}/${CONV_TEST}.cpp")
+    add_gtest(test_${CONV_TEST} ${CONV_TEST}.cpp)
+  endif()
+endforeach()
+
 # Common static library speeds up test assembly.
 # Otherwise, all files in ${SOURCES} are rebuilt for each test.
 add_library(miopen_gtest_common STATIC ${SOURCES})
