@@ -1585,7 +1585,7 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list['MiddlePack'
             continue
         pack.next_scheduled_middle_16 = all_middle_16_packs[all_middle_16_packs.index(pack) + 1]
 
-def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead]) -> None:
+def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead], vw: int) -> None:
     """
     For TF32 emulation, data is loaded as fp32 and converted into pairs of bf16 values.
     Each fp32 value is converted into a bf16 approximation and an error term.
@@ -1627,7 +1627,6 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead]) -> 
     # With VW = 1 (no swaps), registers are contiguous. Use simple linear mapping.
     n_lrs = len(local_reads)
     if swap_packs:
-        vw = len(swap_packs) // 4 + 1
         reg_to_lr_map = _build_reg_to_lr_map(vw, n_lrs)
         reg_to_lr = lambda reg: reg_to_lr_map[reg]
     else:
@@ -1779,7 +1778,9 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
 
             if is_tf32_emulation:
                 if is_4x4mfma_tf32:
-                    _hook_up_packs_f32_mfma(packs, local_reads)
+                    is_a = pack_name.startswith("PackA")
+                    vw = kernel["VectorWidthA" if is_a else "VectorWidthB"]
+                    _hook_up_packs_f32_mfma(packs, local_reads, vw)
                 else:
                     _hook_up_packs_f32(packs, all_middle_16_packs, local_reads)
                 _handle_min_pack_quad_cycles(packs)

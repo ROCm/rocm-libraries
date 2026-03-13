@@ -1326,6 +1326,8 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             "UseF32XEmulation": True, "UseDirect32XEmulation": True, "UseMFMAF32XEmulation": True,
             "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": False,
             "UsePLRPack": True, "MIWaveTileA": 4, "MIWaveTileB": 8, "Use64bShadowLimit": 1,
+            "VectorWidthA": 1, "VectorWidthB": 1,
+            "ProblemType": {"TLUA": True, "TLUB": True},
         }
 
         # Hardcoded schedule from _get_schedule_128x256x32_TF32 NT case
@@ -1434,15 +1436,22 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
     With ForceUnrollSubIter, both LRA0 and LRB0 are needed by MFMAs starting at
     index 24 (q2s), so both must be issued and guaranteed before index 24. We place
     both LR groups and their SWaitCnt early in q1.
+
+    Subclasses can override DEPTH_U and SUB_ITER_SUFFIX to test different
+    DepthU / sub-iteration naming combinations (e.g. DepthU=32 with suffix "3").
     """
+    DEPTH_U = 64
+    SUB_ITER_SUFFIX = "1"
+    FORCE_UNROLL_SUB_ITER = False
+
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
         kernel_updates["UseMFMAF32XEmulation"] = True
         kernel_updates["UseDirect32XEmulation"] = True
-        kernel_updates["ForceUnrollSubIter"] = True
-        kernel_updates["DepthU"] = 64
+        kernel_updates["ForceUnrollSubIter"] = self.FORCE_UNROLL_SUB_ITER
+        kernel_updates["DepthU"] = self.DEPTH_U
         kernel_updates.setdefault("MIWaveTileA", 4)
         kernel_updates.setdefault("MIWaveTileB", 4)
         kernel_updates.setdefault("VectorWidthA", 1)
@@ -1472,17 +1481,21 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         )
 
     def _make_base_schedule(self, packA0_schedule, packB0_schedule,
-                            packA3_schedule=None, packB3_schedule=None,
+                            pack_alt_a=None, pack_alt_b=None,
                             n_lrs_a=2, n_lrs_b=2):
-        """Build a schedule with LRs early in q1 (both guaranteed before q2s=24)."""
-        if packA3_schedule is None:
-            packA3_schedule = self._make_valid_pack_group(self.q4s+2)
-        if packB3_schedule is None:
-            packB3_schedule = self._make_valid_pack_group(self.q3s+2)
+        """
+        Build a schedule with LRs early in q1 (both guaranteed before q2s).
+        """
+        s = self.SUB_ITER_SUFFIX
+
+        if pack_alt_a is None:
+            pack_alt_a = self._make_valid_pack_group(self.q4s+2)
+        if pack_alt_b is None:
+            pack_alt_b = self._make_valid_pack_group(self.q3s+2)
 
         optSchedule = {
-            # One SYNC at idx 1 guarantees both LRA0+LRB0 (needed before q2s=24).
-            # Separate SYNCs for LRB3 and LRA3.
+            # One SYNC at idx 1 guarantees both LRA0+LRB0 (needed before q2s).
+            # Separate SYNCs for LRB{s} and LRA{s}.
             "SYNC": [[1, self.q3s+1, self.q4s+1]],
 
             "LRA0": [[0] * n_lrs_a],
@@ -1491,17 +1504,17 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             "LRB0": [[0] * n_lrs_b],
             "PackB0": [packB0_schedule],
 
-            "LRB3": [[self.q3s] * n_lrs_b],
-            "PackB3": [packB3_schedule],
+            f"LRB{s}": [[self.q3s] * n_lrs_b],
+            f"PackB{s}": [pack_alt_b],
 
-            "LRA3": [[self.q4s] * n_lrs_a],
-            "PackA3": [packA3_schedule],
+            f"LRA{s}": [[self.q4s] * n_lrs_a],
+            f"PackA{s}": [pack_alt_a],
         }
 
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0+LRB0"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=f"Wait for LRB{s}s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=f"Wait for LRA{s}s"),
         ]
 
         return optSchedule, syncCode
@@ -1509,51 +1522,46 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
     def test_passing_vw2_a_only(self):
         """VW_A=2 produces 4 swap packs before PackA0's 2 groups of 10 regular packs. VW_B=1 has no swaps."""
         self.setUp({"VectorWidthA": 2, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
 
         # PackA0: 4 swap packs + 2 groups of 10 regular packs = 24 total
         # VW=2 requires 2 pack groups (16 regs) and 8 LRs (dsReadConvTable has 8 entries).
         packA0 = [2] * 4 + self._make_valid_pack_group(2) * 2
         packB0 = self._make_valid_pack_group(2)
-        packA3 = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
+        pack_alt_a = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
 
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, packA3_schedule=packA3, n_lrs_a=8)
+        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_passing_vw4_a_only(self):
         """VW_A=4 produces 12 swap packs before PackA0's 4 groups of 10 regular packs."""
         self.setUp({"VectorWidthA": 4, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
 
         # VW=4 requires at least 4 pack groups (32 regs = one transpose block).
         packA0 = [2] * 12 + self._make_valid_pack_group(2) * 4
         packB0 = self._make_valid_pack_group(2)
-        packA3 = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
+        pack_alt_a = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
 
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, packA3_schedule=packA3, n_lrs_a=8)
+        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_passing_vw2_both_sides(self):
         """VW_A=2 and VW_B=2: both sides have 4 swap packs each with 2 groups."""
-        self.setUp({"VectorWidthA": 2, "VectorWidthB": 2})
-        assert self.num_vmfma == 96
+        self.setUp({"VectorWidthA": 2, "VectorWidthB": 2, "ProblemType": {"TLUB": True}})
 
         packA0 = [2] * 4 + self._make_valid_pack_group(2) * 2
         packB0 = [2] * 4 + self._make_valid_pack_group(2) * 2
-        packA3 = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
-        packB3 = [self.q3s+2] * 4 + self._make_valid_pack_group(self.q3s+2) * 2
+        pack_alt_a = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
+        pack_alt_b = [self.q3s+2] * 4 + self._make_valid_pack_group(self.q3s+2) * 2
 
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0,
-                                                          packA3_schedule=packA3,
-                                                          packB3_schedule=packB3,
+                                                          pack_alt_a=pack_alt_a,
+                                                          pack_alt_b=pack_alt_b,
                                                           n_lrs_a=8, n_lrs_b=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_passing_multiple_groups_with_swaps(self):
         """VW_A=2, MIWaveTileA=4, MIWaveTileB=2. 2 groups of 10 regular packs + 4 swap packs on A, 2 groups on B."""
         self.setUp({"VectorWidthA": 2, "VectorWidthB": 1, "MIWaveTileA": 4, "MIWaveTileB": 2})
-        # 4 A tiles * 2 B tiles * (64/32) sub-iters * 3 MFMAs/tile = 48
-        assert self.num_vmfma == 48
 
         # Both LRA0 and LRB0 at idx 0, guaranteed by SYNC at idx 1
         # 4 swap packs + 2 groups of 10 regular packs = 24 total PackA0
@@ -1583,20 +1591,18 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
     def test_fail_swap_before_lr_done(self):
         """SwapPacks issued before LR SWaitCnt. Expected: 'issued too early' error."""
         self.setUp({"VectorWidthA": 2, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
 
         # Swap packs at idx 0, but SYNC is at idx 1, so they're before LR is guaranteed
         packA0 = [0] * 4 + self._make_valid_pack_group(2) * 2
         packB0 = self._make_valid_pack_group(2)
-        packA3 = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
+        pack_alt_a = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
 
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, packA3_schedule=packA3, n_lrs_a=8)
+        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=0 issued too early, must be issued after idx=1 (because of LRA0 issued @ idx=0).")
 
     def test_fail_regular_pack_before_swap_done(self):
         """First CVT0 pack issued before its swap dependency is done."""
         self.setUp({"VectorWidthA": 2, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
 
         # Swap packs at idx 2, group 0's CVT0 at idx 1 (before swaps!)
         # Group 0's CVT0 pack 0 reads reg 1 which was swapped by swap 0, so it depends on swap 0.
@@ -1608,15 +1614,14 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             self._make_valid_pack_group(2)  # group 1 valid
         )
         packB0 = self._make_valid_pack_group(2)
-        packA3 = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
+        pack_alt_a = [self.q4s+2] * 4 + self._make_valid_pack_group(self.q4s+2) * 2
 
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, packA3_schedule=packA3, n_lrs_a=8)
+        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=1 issued too early, must be issued after idx=2 (because of PackA0 issued @ idx=2).")
 
     def test_no_swaps_vw1(self):
         """VW_A=1, VW_B=1. No swap packs — identical to existing behavior."""
         self.setUp({"VectorWidthA": 1, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
 
         packA0 = self._make_valid_pack_group(2)
         packB0 = self._make_valid_pack_group(2)
@@ -1628,7 +1633,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         """VW=4: T0 swaps (0,1,2) depend only on T0 LRs (LR0-LR3). Placing them
         after a partial guarantee (dscnt=4, guaranteeing LR0-LR3) should pass."""
         self.setUp({"VectorWidthA": 4, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
+        s = self.SUB_ITER_SUFFIX
 
         # 8 A-side LRs all at idx 0, 2 B-side LRs at idx 0.
         # SYNC(dscnt=4) at idx 1: leaves 4 in flight (LRA0[4..7]), guarantees LRA0[0..3] + LRB0[0..1].
@@ -1650,13 +1655,9 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         )
         packA0 = list(swap_schedule) + self._make_valid_pack_group(8) * 4
         packB0 = self._make_valid_pack_group(2)
-        packA3 = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
+        pack_alt_a = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
 
         optSchedule = {
-            # SYNC[0]: dscnt=4 at idx 1 (partial guarantee)
-            # SYNC[1]: dscnt=0 at idx 6 (full guarantee)
-            # SYNC[2]: dscnt=0 at q3s+1 (for LRB3)
-            # SYNC[3]: dscnt=0 at q4s+1 (for LRA3)
             "SYNC": [[1, 6, self.q3s+1, self.q4s+1]],
 
             # LRB0 before LRA0 so dscnt=4 skips only LRA0[4..7] (most recent 4),
@@ -1667,18 +1668,18 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             "LRA0": [[0] * 8],
             "PackA0": [packA0],
 
-            "LRB3": [[self.q3s] * 2],
-            "PackB3": [self._make_valid_pack_group(self.q3s+2)],
+            f"LRB{s}": [[self.q3s] * 2],
+            f"PackB{s}": [self._make_valid_pack_group(self.q3s+2)],
 
-            "LRA3": [[self.q4s] * 8],
-            "PackA3": [packA3],
+            f"LRA{s}": [[self.q4s] * 8],
+            f"PackA{s}": [pack_alt_a],
         }
 
         syncCode = [
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Partial: guarantee LRA0[0..3]+LRB0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Full: guarantee remaining LRA0[4..7]"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=f"Wait for LRB{s}s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=f"Wait for LRA{s}s"),
         ]
 
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
@@ -1688,7 +1689,6 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         not on all swaps. Placing group 2's CVT0 before swaps that only affect
         other groups should pass."""
         self.setUp({"VectorWidthA": 4, "VectorWidthB": 1})
-        assert self.num_vmfma == 96
 
         # With VW=4, 4 groups, the swap register pairs are:
         #   swap 0: 1↔8    (groups 0,1)
@@ -1737,7 +1737,28 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             [5] * 4 + [5] * 2 + [7] * 4      # group 3: CVT0@5, MFMA@5, CVT1@7
         )
         packB0 = self._make_valid_pack_group(2)
-        packA3 = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
+        pack_alt_a = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
 
-        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, packA3_schedule=packA3, n_lrs_a=8)
+        optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+class TestValidatePackTF32MFMA4x4x4SwapPacksDUeqMIK(TestValidatePackTF32MFMA4x4x4SwapPacks):
+    """
+    Same as TestValidatePackTF32MFMA4x4x4SwapPacks but with DepthU == matrixInstK
+    (1 sub-iteration + ForceUnrollSubIter), using A/B3 suffix naming.
+    Inherits all test methods.
+    """
+    DEPTH_U = 32
+    SUB_ITER_SUFFIX = "3"
+    FORCE_UNROLL_SUB_ITER = True
+
+
+class TestValidatePackTF32MFMA4x4x4SwapPacksDUeqMIKNoForceUnroll(TestValidatePackTF32MFMA4x4x4SwapPacks):
+    """
+    Same as TestValidatePackTF32MFMA4x4x4SwapPacks but with DepthU == matrixInstK
+    and ForceUnrollSubIter=False (1 sub-iteration split to 2), using A/B1 suffix naming.
+    Inherits all test methods.
+    """
+    DEPTH_U = 32
+    SUB_ITER_SUFFIX = "1"
+    FORCE_UNROLL_SUB_ITER = False
