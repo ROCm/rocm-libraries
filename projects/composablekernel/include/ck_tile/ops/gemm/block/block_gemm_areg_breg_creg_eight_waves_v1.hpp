@@ -57,6 +57,11 @@ struct BlockGemmARegBRegCRegEightWavesV1
         static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
         static constexpr index_t KIterPerWarp = KPerBlock / (KWarp * WarpGemm::kK);
 
+        // Controls how many MAC clusters (MFMA blocks) we have per wave
+        // If InterWaveSchedulingMacClusters = 1;
+        // Then we group all WarpGemms into single MAC cluster.
+        // But if InterWaveSchedulingMacClusters = 2, then we
+        // split the warp gemms into two groups.
         static constexpr index_t InterWaveSchedulingMacClusters = 1;
 
         static constexpr index_t KPack      = WarpGemm::kKPerThread;
