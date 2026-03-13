@@ -30,6 +30,27 @@ namespace {
 
 struct TestCase
 {
+    TestCase(int dir_mode_,
+             int no_hx_,
+             int no_dhy_,
+             int no_cx_,
+             int no_dcy_,
+             int no_hy_,
+             int no_dhx_,
+             int no_cy_,
+             int no_dcx_)
+        : dir_mode(dir_mode_),
+          no_hx(no_hx_),
+          no_dhy(no_dhy_),
+          no_cx(no_cx_),
+          no_dcy(no_dcy_),
+          no_hy(no_hy_),
+          no_dhx(no_dhx_),
+          no_cy(no_cy_),
+          no_dcx(no_dcx_)
+    {
+    }
+
     int dir_mode;
     int no_hx;
     int no_dhy;
