@@ -958,10 +958,11 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
       interleaved = True
       if interleaved:
-        offset = sId0*2*readSizePerWg if interleaved else sId0*readSizePerWg
-        if offset >= readSizePerWg * tileInfo.localSubtileGrid[0]:
-          offset -= readSizePerWg * tileInfo.localSubtileGrid[0]
-          offset+= loadWidth*waveSize // 2
+        # Space reads by 2 subtiles and apply half-wave offset for 2nd block of subtiles.
+        numSubtiles = tileInfo.localSubtileGrid[0]                                                                                                                                                                                                                          
+        halfWaveBytes = loadWidth * waveSize // 2                                                                                                                                                                                                                           
+        half, rem = divmod(sId0 * 2, numSubtiles)             
+        offset = rem * readSizePerWg + half * halfWaveBytes
       else:
         offset = sId0*readSizePerWg
 
