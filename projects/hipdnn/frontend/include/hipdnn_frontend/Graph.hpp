@@ -77,6 +77,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
@@ -100,6 +101,7 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
@@ -759,6 +761,19 @@ private:
                     }
                     _sub_nodes.emplace_back(std::make_shared<BlockScaleQuantizeNode>(
                         std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+                {
+                    auto attr = CustomOpAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_CustomOpAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    attr.set_compute_data_type(fromSdkType(fbNode->compute_data_type()));
+                    _sub_nodes.emplace_back(
+                        std::make_shared<CustomOpNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -2299,6 +2314,62 @@ public:
             std::make_shared<MatmulNode>(std::move(attributes), graph_attributes));
 
         return c;
+    }
+
+    /** @brief Add a custom operation to the graph
+     *
+     * Custom ops let users coordinate directly with plugins without requiring
+     * hipDNN to understand the operation. hipDNN transports the tensor I/O
+     * topology and an opaque byte payload, and the target plugin interprets
+     * the payload.
+     *
+     * @param inputs Input tensors (variable length)
+     * @param numOutputs Number of output tensors to create
+     * @param attributes Custom op configuration including opaque payload
+     * @return Vector of output tensors
+     *
+     * @note This operation requires a matching custom plugin to find an engine.
+     *       It will fail engine selection unless a plugin is loaded that explicitly
+     *       handles the specified `custom_op_id`.
+     *
+     * @see CustomOpAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::vector<std::shared_ptr<TensorAttributes>>
+        custom_op(std::vector<std::shared_ptr<TensorAttributes>> inputs,
+                  size_t numOutputs,
+                  CustomOpAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("CustomOp_" + attributes.get_custom_op_id() + "_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        for(size_t i = 0; i < inputs.size(); ++i)
+        {
+            if(inputs[i] && inputs[i]->get_name().empty())
+            {
+                inputs[i]->set_name(attributes.get_name() + "::input_" + std::to_string(i));
+            }
+        }
+
+        std::vector<std::shared_ptr<TensorAttributes>> outputTensors;
+        outputTensors.reserve(numOutputs);
+        for(size_t i = 0; i < numOutputs; ++i)
+        {
+            outputTensors.push_back(
+                outputTensor(attributes.get_name() + "::output_" + std::to_string(i)));
+        }
+
+        attributes.set_inputs(std::move(inputs));
+        attributes.set_outputs(outputTensors);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<CustomOpNode>(std::move(attributes), graph_attributes));
+
+        return outputTensors;
     }
 
     /** @brief Scaled dot-product attention forward pass
