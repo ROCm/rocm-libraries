@@ -386,6 +386,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3``
+        | Controls Winograd Rage RxS F(2,3) solution.
+      - | 0: Disable
+        | 1: Enable
+
 Multi-pass Winograd solution control
 ====================================
 
@@ -937,28 +942,6 @@ following table.
 
     * - | ``MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_BIAS_RES_ADD_ACTIV``
         | Controls CK implicit GEMM forward bias residual add activation fused solution.
-      - | 0: Disable
-        | 1: Enable
-
-MLIR solution control
-=====================
-
-The MLIR solution control environment variables for MIOpen are collected in the following table.
-
-.. list-table::
-    :header-rows: 1
-    :widths: 70,30
-
-    * - **Environment variable**
-      - **Value**
-
-    * - | ``MIOPEN_DEBUG_CONV_MLIR_IGEMM_WRW_XDLOPS``
-        | Controls MLIR implicit GEMM weight-gradient XDLOPS solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_MLIR_IGEMM_BWD_XDLOPS``
-        | Controls MLIR implicit GEMM backward XDLOPS solution.
       - | 0: Disable
         | 1: Enable
 

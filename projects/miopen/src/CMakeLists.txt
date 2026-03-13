@@ -105,22 +105,6 @@ set( MIOpen_Source
     getitem_api.cpp
     glu/problem_description.cpp
     glu_api.cpp
-    graphapi/convolution.cpp
-    graphapi/conv_bias_res_add_activ_forward_executor.cpp
-    graphapi/engine.cpp
-    graphapi/enginecfg.cpp
-    graphapi/engineheur.cpp
-    graphapi/execution_plan.cpp
-    graphapi/find_engine.cpp
-    graphapi/graphapi.cpp
-    graphapi/matmul.cpp
-    graphapi/opgraph.cpp
-    graphapi/pointwise.cpp
-    graphapi/reduction.cpp
-    graphapi/reshape.cpp
-    graphapi/rng.cpp
-    graphapi/tensor.cpp
-    graphapi/variant_pack.cpp
     groupnorm_api.cpp
     groupnorm/problem_description.cpp
     handle_api.cpp
@@ -242,12 +226,6 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_wrw_v4r4_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_wrw_v4r4_xdlops_padded_gemm.cpp
     solver/conv/conv_MP_bidirectional_winograd.cpp
-    solver/conv/conv_mlir_igemm_bwd.cpp
-    solver/conv/conv_mlir_igemm_bwd_xdlops.cpp
-    solver/conv/conv_mlir_igemm_fwd.cpp
-    solver/conv/conv_mlir_igemm_fwd_xdlops.cpp
-    solver/conv/conv_mlir_igemm_wrw.cpp
-    solver/conv/conv_mlir_igemm_wrw_xdlops.cpp
     solver/conv/conv_multipass_wino3x3WrW.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_1x1.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
@@ -530,10 +508,13 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c32_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v2_X_X_X_metadata.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_6_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_6_0_metadata.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_7_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_7_0_metadata.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx94x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx12x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_bf16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_fp32_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_X_X_metadata.inc
         kernels/xform_bidirect_winograd_code.inc
         kernels/xform_data_filter.inc
         kernels/xform_kd_cov2.inc
@@ -571,8 +552,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenGetitem.cpp
         kernels/MIOpenKthvalue.cpp
         kernels/MIOpenLayerNorm.cpp
-        kernels/MIOpenLRNBwd.cl
-        kernels/MIOpenLRNFwd.cl
+        kernels/MIOpenLRNBwd.cpp
+        kernels/MIOpenLRNFwd.cpp
         kernels/MIOpenMultiMarginLoss.cpp
         kernels/MIOpenNeuron.cpp
         kernels/MIOpenPReLU.cpp
@@ -681,8 +662,10 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c32_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c32_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_6_0_fp16_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_7_0_fp16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_6_1_fp16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_fp16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_fp32_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_9_0_bf16_fp32acc_f2x3_stride1.s
         kernels/xform_data.s
         kernels/xform_filter.s
         kernels/xform_bidirect_winograd_data.s
@@ -870,14 +853,6 @@ if(MIOPEN_USE_COMGR)
     list(APPEND MIOpen_Source comgr.cpp)
 endif()
 
-if(MIOPEN_USE_MLIR)
-    list(APPEND MIOpen_Source
-        conv/invokers/mlir_impl_gemm.cpp
-        mlir_build.cpp
-        solver/conv/mlir_common.cpp
-        )
-endif()
-
 # build library
 if(MIOPEN_ENABLE_SQLITE)
     add_library( MIOpen
@@ -959,7 +934,6 @@ target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZ
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)
-    # Temporary workaround on rocMLIR not exporting correctly libraries it depends on.
     target_link_libraries(MIOpen PRIVATE ntdll)
 endif()
 
@@ -1039,23 +1013,8 @@ endif()
 
 target_include_directories( MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR} )
 
-# For backward compatibility with ROCm 5.3
-# Build with library libMLIRMIOpen
-if(LIBMLIRMIOPEN)
-    target_link_libraries(MIOpen PRIVATE ${LIBMLIRMIOPEN})
-endif()
-
-# Build with package rocMLIR
-if(rocMLIR_FOUND)
-    target_link_libraries(MIOpen PRIVATE rocMLIR::rockCompiler)
-endif()
-
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
-
-target_internal_library(MIOpen Boost::filesystem)
-target_compile_definitions(MIOpen PRIVATE BOOST_DISABLE_EXPLICIT_SYMBOL_VISIBILITY)
-list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
 
 if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
@@ -1069,14 +1028,6 @@ if(MIOPEN_ENABLE_SQLITE)
     target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 ############################################################
-# MIOpen depends on librt for Boost.Interprocess
-if(NOT WIN32 AND NOT APPLE)
-    find_library(LIBRT rt)
-    if(LIBRT)
-        message(STATUS "Librt: " ${LIBRT})
-        target_internal_library(MIOpen ${LIBRT})
-    endif()
-endif()
 
 if(MIOPEN_USE_ROCTRACER)
     target_include_directories(MIOpen PRIVATE ${ROCTRACER_INCLUDE_DIR})

@@ -30,6 +30,14 @@ namespace {
 
 struct TestCase
 {
+    TestCase(int batch_size_, int seq_len_, int vector_len_, int hidden_size_)
+        : batch_size(batch_size_),
+          seq_len(seq_len_),
+          vector_len(vector_len_),
+          hidden_size(hidden_size_)
+    {
+    }
+
     int batch_size;
     int seq_len;
     int vector_len;

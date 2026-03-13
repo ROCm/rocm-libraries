@@ -116,7 +116,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.1)
+rocm_setup_version(VERSION 3.6.0)
 
 include(TargetFlags)
 
@@ -402,37 +402,6 @@ else()
     message(STATUS "clang-offload-bundler not found")
 endif()
 
-set_var_to_condition(MIOPEN_USE_MLIR_DEFAULT NOT (NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR}))
-option(MIOPEN_USE_MLIR "Use MLIR compilation backend" ${MIOPEN_USE_MLIR_DEFAULT})
-
-if(MIOPEN_USE_MLIR)
-    if(NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR})
-        message(FATAL_ERROR "Potential symbol conflict between mlir and comgr in static build")
-    endif()
-    if(WIN32)
-        # Windows does not support earlier ROCm versions hence no fallback to MLIRMIOpen.
-        find_package(rocMLIR 1.0.0 CONFIG REQUIRED)
-    else()
-        # Try to find package rocMLIR
-        # REQUIRED is omitted since we do not want cmake to abort if the package is not found
-        find_package(rocMLIR 1.0.0 CONFIG)
-        if(NOT rocMLIR_FOUND)
-            message(STATUS "Falling back to find library libMLIRMIOpen")
-            # Backward compatibility with ROCm 5.3
-            # If the rocMLIR package is not found, try to find the library libMLIRMIOpen directly
-            find_library(LIBMLIRMIOPEN MLIRMIOpen REQUIRED)
-            if(NOT LIBMLIRMIOPEN)
-                message(FATAL_ERROR "library libMLIRMIOpen not found, please reinstall dependencies. \
-                Refer to https://github.com/ROCm/MIOpen#installing-the-dependencies")
-            else()
-                message(STATUS "Build with library libMLIRMIOpen: " ${LIBMLIRMIOPEN})
-                set(rocMLIR_VERSION 0.0.1)
-            endif()
-        endif()
-    endif()
-    message(STATUS "Build with rocMLIR::rockCompiler ${rocMLIR_VERSION} ${rocMLIR_DIR}")
-endif()
-
 # Update HIP Runtime Package Dependency
 if(ENABLE_ASAN_PACKAGING)
   set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
@@ -470,10 +439,6 @@ if(MIOPEN_USE_HIPRTC)
     find_package(hiprtc REQUIRED)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
 endif()
-
-option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")

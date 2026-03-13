@@ -409,13 +409,17 @@ Allocator::ManageDataPtr Handle::Create(std::size_t sz) const
 Allocator::ManageDataPtr&
 Handle::WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const
 {
+    WriteTo(data, ddata.get(), sz);
+    return ddata;
+}
+
+void Handle::WriteTo(const void* data, Data_t ddata, std::size_t sz) const
+{
     MIOPEN_HANDLE_LOCK
     this->Finish();
-    auto status =
-        hipMemcpyWithStream(ddata.get(), data, sz, hipMemcpyHostToDevice, this->GetStream());
+    auto status = hipMemcpyWithStream(ddata, data, sz, hipMemcpyHostToDevice, this->GetStream());
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status, "Hip error writing to buffer: ");
-    return ddata;
 }
 
 void Handle::ReadTo(void* data, const Allocator::ManageDataPtr& ddata, std::size_t sz) const
@@ -527,13 +531,9 @@ Program Handle::LoadProgram(const fs::path& program_name,
     std::string orig_params = params; // make a copy for target ID fallback
 
 #if WORKAROUND_ISSUE_3001
-    if(program_name.extension() != ".mlir")
-        params = params + " -mcpu=" + this->GetTargetProperties().Name();
+    params = params + " -mcpu=" + this->GetTargetProperties().Name();
 #else
-    if(program_name.extension() == ".mlir")
-    { // no -mcpu
-    }
-    else if(program_name.extension() == ".s")
+    if(program_name.extension() == ".s")
     {
         params += " -mcpu=" + LcOptionTargetStrings{this->GetTargetProperties()}.targetId;
     }
