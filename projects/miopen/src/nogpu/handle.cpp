@@ -298,7 +298,7 @@ hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
 }
 #endif
 
-MIOPEN_INTERNALS_EXPORT void set_device(int id) {}
+MIOPEN_INTERNALS_EXPORT void set_device(int /*id*/) {}
 MIOPEN_INTERNALS_EXPORT int get_device_id() { return -1; }
 
 } // namespace miopen
