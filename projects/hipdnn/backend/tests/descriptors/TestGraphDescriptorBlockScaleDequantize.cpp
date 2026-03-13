@@ -56,13 +56,13 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        1,
                        &yDesc);
 
-    std::vector<int64_t> blockSize = {K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE};
+    std::vector<int32_t> blockSize = {K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE};
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
-                       HIPDNN_TYPE_INT64,
+                       HIPDNN_TYPE_INT32,
                        1,
                        blockSize.data());
     desc->setAttribute(
-        HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();
     return wrapper;

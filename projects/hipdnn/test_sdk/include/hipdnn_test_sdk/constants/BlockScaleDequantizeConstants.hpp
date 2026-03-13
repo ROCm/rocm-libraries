@@ -24,6 +24,6 @@ constexpr int64_t K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID = 52;
 constexpr std::array<int64_t, 4> K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_DIMS = {1, 1, 64, 128};
 constexpr std::array<int64_t, 4> K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_STRIDES = {8192, 8192, 128, 1};
 
-constexpr int64_t K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE = 32;
+constexpr int32_t K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE = 32;
 
 } // namespace hipdnn_tests::constants

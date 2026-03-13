@@ -821,8 +821,8 @@ typedef enum
     /** @brief Whether scale is negative */
     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT = 2804,
 
-    /** @brief Compute data type for block scale dequantize */
-    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE_EXT = 2805,
+    /** @brief Math precision for block scale dequantize */
+    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT = 2805,
 
     /** @} */
 

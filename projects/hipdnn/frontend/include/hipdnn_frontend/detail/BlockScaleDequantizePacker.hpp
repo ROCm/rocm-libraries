@@ -42,14 +42,12 @@ inline Error createBlockScaleDequantizeOperation(
                                              tensorDescs,
                                              "block_scale_dequantize Y"));
 
-    // Set block_size: convert from int32 (frontend) to int64 (backend C-API)
-    const auto& blockSize32 = attributes.get_block_size();
-    std::vector<int64_t> blockSize64(blockSize32.begin(), blockSize32.end());
+    // Set block_size as int32 (matches backend and FBS schema type)
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrVec(opDesc.get(),
                              HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
-                             HIPDNN_TYPE_INT64,
-                             blockSize64,
+                             HIPDNN_TYPE_INT32,
+                             attributes.get_block_size(),
                              "block_scale_dequantize block_size"));
 
     // Set is_negative_scale
@@ -62,7 +60,7 @@ inline Error createBlockScaleDequantizeOperation(
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE_EXT,
+                                                 HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT,
                                                  attributes.compute_data_type,
                                                  "block_scale_dequantize compute data type"));
 

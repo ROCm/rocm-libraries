@@ -71,8 +71,8 @@ private:
     std::shared_ptr<TensorDescriptor> _scaleDesc;
     std::shared_ptr<TensorDescriptor> _yDesc;
 
-    // Block size stored as int64 for the C-API (converted to int32 for FBS in buildNode)
-    std::vector<int64_t> _blockSize;
+    // Block size stored as int32 (matches the FBS schema type)
+    std::vector<int32_t> _blockSize;
 
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_data_sdk::data_objects::DataType _computeDataType

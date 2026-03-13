@@ -94,7 +94,8 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
 
     BlockScaleDequantizeAttributes attrs;
     attrs.set_name("dequantize_op")
-        .set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE));
+        .set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE))
+        .set_is_negative_scale(true);
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
     y->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID).set_output(true).set_name("Y");
@@ -180,7 +181,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
     EXPECT_EQ(dequant->y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
     ASSERT_EQ(dequant->block_size.size(), 1u);
     EXPECT_EQ(dequant->block_size[0], K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE);
-    EXPECT_FALSE(dequant->is_negative_scale);
+    EXPECT_TRUE(dequant->is_negative_scale);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
