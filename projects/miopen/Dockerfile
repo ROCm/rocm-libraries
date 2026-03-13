@@ -338,12 +338,13 @@ COPY --from=miopen_deps /opt/rocm /opt/rocm
 COPY --from=miopen_deps /usr/local /usr/local
 
 # Install explicit version of tools that are supported for miopen development
-# (clang-format, clang-tidy)
+# (clang-format, clang-tidy, rocprofv3 for HIP Graph tests)
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
     clang-tidy-20 \
     clang-tools-20 \
     llvm-20 \
+    rocprofiler-sdk \
     && rm -rf /var/lib/apt/lists/*
 
 # Workaround for broken clang-tidy in TheRock

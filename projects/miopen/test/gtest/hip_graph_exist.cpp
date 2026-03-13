@@ -141,9 +141,9 @@ protected:
         fs::create_directories(temp_dir);
 
 #ifdef _WIN32
-        rocprof_cmd = "rocprof.exe";
+        rocprof_cmd = "rocprofv3.exe";
 #else
-        rocprof_cmd = "rocprof";
+        rocprof_cmd = "rocprofv3";
 #endif
     }
 
@@ -183,9 +183,9 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
 
     // Get rocprof command
 #ifdef _WIN32
-    const std::string rocprof_cmd = "rocprof.exe";
+    const std::string rocprof_cmd = "rocprofv3.exe";
 #else
-    const std::string rocprof_cmd = "rocprof";
+    const std::string rocprof_cmd = "rocprofv3";
 #endif
 
     // Capture stderr to reduce test noise and allow verification
@@ -209,9 +209,9 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     cmd << "LD_LIBRARY_PATH=\"" << lib_path.string() << ":$LD_LIBRARY_PATH\" ";
 #endif
 
-    // Run rocprof without --output-file (it will use default names: results.json, etc.)
-    // Note: rocprofv1/v2 do NOT support the `--` separator; only rocprofv3 requires it
-    cmd << rocprof_cmd << " --hip-trace ";
+    // Run rocprofv3 with --hip-trace. Note: rocprofv3 requires `--` separator before command
+    // Output format: rocprofv3 creates <name>_hip_api_trace.csv with -f csv option
+    cmd << rocprof_cmd << " --hip-trace -f csv -o " << test_case.test_name << " -- ";
     cmd << "\"" << fs::absolute(driver_path).string() << "\" " << test_case.driver_type << " ";
     cmd << test_case.driver_args;
     // Only add --use_hip_graph 1 if not already in driver_args and expect_graph is true
@@ -235,13 +235,10 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     // Note: rocprof may return non-zero even on success, so we check for output files
     std::cout << "Command return code: " << ret << std::endl;
 
-    // Look for rocprof output files (rocprof creates files with default names in working dir)
+    // Look for rocprofv3 output files
+    // rocprofv3 with -f csv -o <name> creates: <name>_hip_api_trace.csv
     std::vector<std::string> possible_trace_files = {
-        temp_dir + PATH_SEPARATOR + "results.json",
-        temp_dir + PATH_SEPARATOR + "results.hip_stats.csv",
-        temp_dir + PATH_SEPARATOR + "results.csv",
-        temp_dir + PATH_SEPARATOR + "hip_api_trace.txt",
-        temp_dir + PATH_SEPARATOR + "results.txt"};
+        temp_dir + PATH_SEPARATOR + test_case.test_name + "_hip_api_trace.csv"};
 
     std::string trace_file;
 
