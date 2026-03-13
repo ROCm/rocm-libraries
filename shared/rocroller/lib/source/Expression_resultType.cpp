@@ -35,7 +35,7 @@ namespace rocRoller
         //     oldValueCount = 8, newValueCount = 1: Valid, return 8
         //     oldValueCount = 4, newValueCount = 4: Valid, return 4
         //     oldValueCount = 4, newValueCount = 2: INVALID
-        inline bool maybeReplaceValueCount(size_t oldValueCount, size_t newValueCount)
+        inline size_t maybeReplaceValueCount(size_t oldValueCount, size_t newValueCount)
         {
             if(newValueCount != 1)
             {
