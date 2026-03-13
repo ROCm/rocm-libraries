@@ -356,7 +356,7 @@ void CpuActivationPacked(std::size_t num_items, Ts&&... xs)
 }
 
 template <Direction direction, class A, class... Ts>
-void CpuActivationNonPacked(std::size_t num_items, Ts&&... xs)
+[[noreturn]] void CpuActivationNonPacked(std::size_t num_items, Ts&&... xs)
 {
     throw std::runtime_error("CpuActivationNonPacked is not implemented yet");
 }
