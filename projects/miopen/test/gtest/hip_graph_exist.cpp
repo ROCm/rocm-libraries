@@ -158,8 +158,8 @@ protected:
 // Count occurrences of a pattern in a string
 int CountOccurrencesInString(const std::string& text, const std::string& search_string)
 {
-    int count    = 0;
-    size_t pos   = 0;
+    int count  = 0;
+    size_t pos = 0;
     while((pos = text.find(search_string, pos)) != std::string::npos)
     {
         count++;
@@ -256,11 +256,12 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     // :HIP_API: hipGraphLaunch ...
 
     // Count HIP Graph related API calls in the output
-    int stream_begin_capture_count = CountOccurrencesInString(output_content, "hipStreamBeginCapture");
-    int stream_end_capture_count   = CountOccurrencesInString(output_content, "hipStreamEndCapture");
-    int graph_instantiate_count    = CountOccurrencesInString(output_content, "hipGraphInstantiate");
-    int graph_launch_count         = CountOccurrencesInString(output_content, "hipGraphLaunch");
-    int graph_destroy_count        = CountOccurrencesInString(output_content, "hipGraphDestroy");
+    int stream_begin_capture_count =
+        CountOccurrencesInString(output_content, "hipStreamBeginCapture");
+    int stream_end_capture_count = CountOccurrencesInString(output_content, "hipStreamEndCapture");
+    int graph_instantiate_count  = CountOccurrencesInString(output_content, "hipGraphInstantiate");
+    int graph_launch_count       = CountOccurrencesInString(output_content, "hipGraphLaunch");
+    int graph_destroy_count      = CountOccurrencesInString(output_content, "hipGraphDestroy");
 
     // Print results
     std::cout << "\n=== HIP Graph API Call Summary (from AMD_LOG_LEVEL output) ===" << std::endl;
@@ -292,9 +293,9 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
         bool hip_graph_detected = (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
                                    graph_instantiate_count > 0 && graph_launch_count > 0);
 
-        ASSERT_TRUE(hip_graph_detected)
-            << "HIP Graph was not properly created/executed for " << test_case.driver_type
-            << ". Output content:\n" << output_content.substr(0, 2000);
+        ASSERT_TRUE(hip_graph_detected) << "HIP Graph was not properly created/executed for "
+                                        << test_case.driver_type << ". Output content:\n"
+                                        << output_content.substr(0, 2000);
     }
     else
     {
