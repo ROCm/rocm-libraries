@@ -357,31 +357,31 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
         // Local prefetch 1, sync the async load
         __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
         block_sync_lds();
-        static_ford<Sequence<MRepeat, KRepeat>>{}([&](auto mk) {
-            constexpr auto m0     = Number<mk[Number<0>{}]>{};
-            constexpr auto k      = Number<mk[Number<1>{}]>{};
-            constexpr auto k_step = k * xdlops_gemm.KPerXdlops / APackedSize *
-                                    (APackedSize * KPack / xdlops_gemm.K1PerXdlops);
-            static_for<0, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk), 1>{}(
-                [&](auto chunk) {
-                    constexpr auto a_k_step_chunk =
-                        k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
-                    a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
-                                       make_tuple(Number<m0 / MXdlPack>{},
-                                                  I0,
-                                                  Number<m0 % MXdlPack>{},
-                                                  I0,
-                                                  Number<a_k_step_chunk>{}),
-                                       a_block_buf,
-                                       a_thread_desc_,
-                                       make_tuple(Number<m0 / MXdlPack>{},
-                                                  I0,
-                                                  Number<m0 % MXdlPack>{},
-                                                  k,
-                                                  Number<chunk * KThreadChunk>{}),
-                                       a_thread_buf);
-                });
-        });
+        static_ford<
+            Sequence<MRepeat, KRepeat, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk)>>{}(
+            [&](auto mkc) {
+                constexpr auto m0     = Number<mkc[Number<0>{}]>{};
+                constexpr auto k      = Number<mkc[Number<1>{}]>{};
+                constexpr auto chunk  = Number<mkc[Number<2>{}]>{};
+                constexpr auto k_step = k * xdlops_gemm.KPerXdlops / APackedSize *
+                                        (APackedSize * KPack / xdlops_gemm.K1PerXdlops);
+                constexpr auto a_k_step_chunk =
+                    k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
+                a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
+                                   make_tuple(Number<m0 / MXdlPack>{},
+                                              I0,
+                                              Number<m0 % MXdlPack>{},
+                                              I0,
+                                              Number<a_k_step_chunk>{}),
+                                   a_block_buf,
+                                   a_thread_desc_,
+                                   make_tuple(Number<m0 / MXdlPack>{},
+                                              I0,
+                                              Number<m0 % MXdlPack>{},
+                                              k,
+                                              Number<chunk * KThreadChunk>{}),
+                                   a_thread_buf);
+            });
 
         // Initialize C
         c_thread_buf.Clear();
@@ -533,32 +533,33 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
 
                     block_sync_lds();
 
-                    static_ford<Sequence<MRepeat, KRepeat>>{}([&](auto mk) {
-                        constexpr auto m0     = Number<mk[Number<0>{}]>{};
-                        constexpr auto k      = Number<mk[Number<1>{}]>{};
-                        constexpr auto k_step = k * xdlops_gemm.KPerXdlops / APackedSize *
-                                                (APackedSize * KPack / xdlops_gemm.K1PerXdlops);
-                        static_for<0, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk), 1>{}(
-                            [&](auto chunk) {
-                                constexpr auto a_k_step_chunk =
-                                    k_step +
-                                    chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
-                                a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
-                                                   make_tuple(Number<m0 / MXdlPack>{},
-                                                              I0,
-                                                              Number<m0 % MXdlPack>{},
-                                                              I0,
-                                                              Number<a_k_step_chunk>{}),
-                                                   a_block_buf,
-                                                   a_thread_desc_,
-                                                   make_tuple(Number<m0 / MXdlPack>{},
-                                                              I0,
-                                                              Number<m0 % MXdlPack>{},
-                                                              k,
-                                                              Number<chunk * KThreadChunk>{}),
-                                                   a_thread_buf);
-                            });
-                    });
+                    static_ford<Sequence<MRepeat,
+                                         KRepeat,
+                                         xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk)>>{}(
+                        [&](auto mkc) {
+                            constexpr auto m0     = Number<mkc[Number<0>{}]>{};
+                            constexpr auto k      = Number<mkc[Number<1>{}]>{};
+                            constexpr auto chunk  = Number<mkc[Number<2>{}]>{};
+                            constexpr auto k_step = k * xdlops_gemm.KPerXdlops / APackedSize *
+                                                    (APackedSize * KPack / xdlops_gemm.K1PerXdlops);
+                            constexpr auto a_k_step_chunk =
+                                k_step +
+                                chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
+                            a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
+                                               make_tuple(Number<m0 / MXdlPack>{},
+                                                          I0,
+                                                          Number<m0 % MXdlPack>{},
+                                                          I0,
+                                                          Number<a_k_step_chunk>{}),
+                                               a_block_buf,
+                                               a_thread_desc_,
+                                               make_tuple(Number<m0 / MXdlPack>{},
+                                                          I0,
+                                                          Number<m0 % MXdlPack>{},
+                                                          k,
+                                                          Number<chunk * KThreadChunk>{}),
+                                               a_thread_buf);
+                        });
                     HotLoopScheduler();
                     __builtin_amdgcn_sched_barrier(0);
                 };
@@ -687,31 +688,32 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
             __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
             block_sync_lds();
 
-            static_ford<Sequence<MRepeat, KRepeat>>{}([&](auto mk) {
-                constexpr auto m0     = Number<mk[Number<0>{}]>{};
-                constexpr auto k      = Number<mk[Number<1>{}]>{};
-                constexpr auto k_step = k * xdlops_gemm.KPerXdlops / APackedSize *
-                                        (APackedSize * KPack / xdlops_gemm.K1PerXdlops);
-                static_for<0, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk), 1>{}(
-                    [&](auto chunk) {
-                        constexpr auto a_k_step_chunk =
-                            k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
-                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
-                                           make_tuple(Number<m0 / MXdlPack>{},
-                                                      I0,
-                                                      Number<m0 % MXdlPack>{},
-                                                      I0,
-                                                      Number<a_k_step_chunk>{}),
-                                           a_block_buf,
-                                           a_thread_desc_,
-                                           make_tuple(Number<m0 / MXdlPack>{},
-                                                      I0,
-                                                      Number<m0 % MXdlPack>{},
-                                                      k,
-                                                      Number<chunk * KThreadChunk>{}),
-                                           a_thread_buf);
-                    });
-            });
+            static_ford<Sequence<MRepeat,
+                                 KRepeat,
+                                 xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk)>>{}(
+                [&](auto mkc) {
+                    constexpr auto m0     = Number<mkc[Number<0>{}]>{};
+                    constexpr auto k      = Number<mkc[Number<1>{}]>{};
+                    constexpr auto chunk  = Number<mkc[Number<2>{}]>{};
+                    constexpr auto k_step = k * xdlops_gemm.KPerXdlops / APackedSize *
+                                            (APackedSize * KPack / xdlops_gemm.K1PerXdlops);
+                    constexpr auto a_k_step_chunk =
+                        k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
+                    a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
+                                       make_tuple(Number<m0 / MXdlPack>{},
+                                                  I0,
+                                                  Number<m0 % MXdlPack>{},
+                                                  I0,
+                                                  Number<a_k_step_chunk>{}),
+                                       a_block_buf,
+                                       a_thread_desc_,
+                                       make_tuple(Number<m0 / MXdlPack>{},
+                                                  I0,
+                                                  Number<m0 % MXdlPack>{},
+                                                  k,
+                                                  Number<chunk * KThreadChunk>{}),
+                                       a_thread_buf);
+                });
             __builtin_amdgcn_sched_barrier(0);
 
             static_for<0, MRepeat, 1>{}([&](auto m0) {
