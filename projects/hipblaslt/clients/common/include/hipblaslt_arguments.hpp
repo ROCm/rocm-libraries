@@ -42,19 +42,6 @@
 // Predeclare enumerator
 enum hipblaslt_argument : int;
 
-template <typename T>
-struct arg_is_complex_t : std::false_type
-{
-};
-
-template <typename T>
-struct arg_is_complex_t<std::complex<T>> : std::true_type
-{
-};
-
-template <typename T>
-constexpr bool arg_is_complex_v = arg_is_complex_t<T>::value;
-
 /***************************************************************************
  *! \brief Class used to parse command arguments in both client & gtest    *
  * WARNING: If this data is changed, then hipblaslt_common.yaml must also be *
@@ -81,10 +68,9 @@ struct Arguments
     char category[64];
     char known_bug_platforms[64];
 
-    double alpha;
-    double alphai;
-    double beta;
-    double betai;
+    // 32bit
+    float alpha;
+    float beta;
 
     int64_t stride_a[MAX_SUPPORTED_NUM_PROBLEMS]; //  stride_a > transA == 'N' ? lda * K : lda * M
     int64_t stride_b[MAX_SUPPORTED_NUM_PROBLEMS]; //  stride_b > transB == 'N' ? ldb * N : ldb * K
@@ -211,9 +197,7 @@ struct Arguments
     OPER(category) SEP               \
     OPER(known_bug_platforms) SEP    \
     OPER(alpha) SEP                  \
-    OPER(alphai) SEP                  \
     OPER(beta) SEP                   \
-    OPER(betai) SEP                   \
     OPER(stride_a) SEP               \
     OPER(stride_b) SEP               \
     OPER(stride_c) SEP               \
@@ -333,66 +317,35 @@ struct Arguments
     template <typename T>
     T get_alpha() const
     {
-        // Pass both real (alpha) and imaginary (alphai) parts
-        return alpha_isnan<T>() ? T(0) : convert_alpha_beta<T>(alpha, alphai);
+        return alpha_isnan<T>() ? T(0) : convert_alpha_beta<T>(alpha);
     }
 
     template <typename T>
     T get_beta() const
     {
-        // Pass both real (beta) and imaginary (betai) parts
-        return beta_isnan<T>() ? T(0) : convert_alpha_beta<T>(beta, betai);
+        return beta_isnan<T>() ? T(0) : convert_alpha_beta<T>(beta);
     }
 
     template <typename T>
     bool alpha_isnan() const
     {
-        if constexpr(arg_is_complex_v<T>)
-        {
-            return hipblaslt_isnan(alpha) || hipblaslt_isnan(alphai);
-        }
-        else
-        {
-            return hipblaslt_isnan(alpha);
-        }
+        return hipblaslt_isnan(alpha);
     }
 
     template <typename T>
     bool beta_isnan() const
     {
-        if constexpr(arg_is_complex_v<T>)
-        {
-            return hipblaslt_isnan(beta) || hipblaslt_isnan(betai);
-        }
-        else
-        {
-            return hipblaslt_isnan(beta);
-        }
+        return hipblaslt_isnan(beta);
     }
 
 private:
-    template <typename T>
-    static T convert_alpha_beta(double r, double i)
+    template <typename T, typename U>
+    static T convert_alpha_beta(U r)
     {
-        if constexpr(std::is_same_v<T, std::complex<float>>)
-        {
-            return std::complex<float>(static_cast<float>(r), static_cast<float>(i));
-        }
-        else if constexpr(std::is_same_v<T, std::complex<double>>)
-        {
-            auto test = std::complex<double>(r, i); 
-            return std::complex<double>(r, i);
-        }
-        else if constexpr(std::is_same_v<T, hipblasLtHalf>)
-        {
-            return static_cast<hipblasLtHalf>(r);
-        }
-        else
-        {
-            return static_cast<T>(r);
-        }
+        return T(r);
     }
 };
+
 inline bool alpha_isnan_type(const Arguments& arg, hipDataType type)
 {
     switch(type)
@@ -401,10 +354,6 @@ inline bool alpha_isnan_type(const Arguments& arg, hipDataType type)
         return arg.alpha_isnan<float>();
     case HIP_R_64F:
         return arg.alpha_isnan<double>();
-    case HIP_C_32F:
-        return arg.alpha_isnan<std::complex<float>>();
-    case HIP_C_64F:
-        return arg.alpha_isnan<std::complex<double>>();
     case HIP_R_16F:
         return arg.alpha_isnan<hipblasLtHalf>();
     case HIP_R_32I:
@@ -423,10 +372,6 @@ inline bool beta_isnan_type(const Arguments& arg, hipDataType type)
         return arg.beta_isnan<float>();
     case HIP_R_64F:
         return arg.beta_isnan<double>();
-    case HIP_C_32F:
-        return arg.beta_isnan<std::complex<float>>();
-    case HIP_C_64F:
-        return arg.beta_isnan<std::complex<double>>();
     case HIP_R_16F:
         return arg.beta_isnan<hipblasLtHalf>();
     case HIP_R_32I:
@@ -437,22 +382,9 @@ inline bool beta_isnan_type(const Arguments& arg, hipDataType type)
     }
 }
 
-inline void set_alpha_type(computeTypeInterface& h_alpha,
-                           const Arguments&      arg,
-                           hipDataType           typeCompute,
-                           hipDataType           typeA)
+inline void set_alpha_type(computeTypeInterface& h_alpha, const Arguments& arg, hipDataType type)
 {
-    if(typeA == HIP_C_32F)
-    {
-        h_alpha.cf = arg.get_alpha<std::complex<float>>();
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-        h_alpha.cd = arg.get_alpha<std::complex<double>>();
-        return;
-    }
-    switch(typeCompute)
+    switch(type)
     {
     case HIP_R_32F:
         h_alpha.f32 = arg.get_alpha<float>();
@@ -472,22 +404,9 @@ inline void set_alpha_type(computeTypeInterface& h_alpha,
     }
 }
 
-inline void set_beta_type(computeTypeInterface& h_beta,
-                           const Arguments&      arg,
-                           hipDataType           typeCompute,
-                           hipDataType           typeA)
+inline void set_beta_type(computeTypeInterface& h_beta, const Arguments& arg, hipDataType type)
 {
-    if(typeA == HIP_C_32F)
-    {
-        h_beta.cf = arg.get_beta<std::complex<float>>();
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-        h_beta.cd = arg.get_beta<std::complex<double>>();
-        return;
-    }
-    switch(typeCompute)
+    switch(type)
     {
     case HIP_R_32F:
         h_beta.f32 = arg.get_beta<float>();
@@ -507,19 +426,9 @@ inline void set_beta_type(computeTypeInterface& h_beta,
     }
 }
 
-inline void set_computeInterface(computeTypeInterface& src, void* ptr, hipDataType typeCompute, hipDataType typeA)
+inline void set_computeInterface(computeTypeInterface& src, void* ptr, hipDataType type)
 {
-     if(typeA == HIP_C_32F)
-    {
-        src.cf = *(std::complex<float>*)ptr;
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-         src.cd = *(std::complex<double>*)ptr;
-        return;
-    }
-    switch(typeCompute)
+    switch(type)
     {
     case HIP_R_32F:
         src.f32 = *(float*)ptr;
@@ -539,21 +448,9 @@ inline void set_computeInterface(computeTypeInterface& src, void* ptr, hipDataTy
     }
 }
 
-inline void set_computeInterface(computeTypeInterface& src, double value, hipDataType typeCompute, hipDataType typeA)
+inline void set_computeInterface(computeTypeInterface& src, double value, hipDataType type)
 {
-    if(typeA == HIP_C_32F)
-    {
-        src.cf = static_cast<std::complex<float>>(value);
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-        src.cd = static_cast<std::complex<double>>(value);
-        return;
-    }
-
-
-    switch(typeCompute)
+    switch(type)
     {
     case HIP_R_32F:
         src.f32 = static_cast<float>(value);
@@ -574,20 +471,10 @@ inline void set_computeInterface(computeTypeInterface& src, double value, hipDat
 }
 
 inline void
-    mul_computeInterface(computeTypeInterface& dst, computeTypeInterface& src, hipDataType typeCompute , hipDataType typeA)
+    mul_computeInterface(computeTypeInterface& dst, computeTypeInterface& src, hipDataType type)
 {
-        if(typeA == HIP_C_32F)
+    switch(type)
     {
-        dst.cf *= src.f32;
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-        dst.cd *= src.f64;
-        return;
-    }
-    switch(typeCompute)
-    { 
     case HIP_R_32F:
         dst.f32 *= src.f32;
         return;
@@ -614,10 +501,6 @@ inline double get_computeInterface(const computeTypeInterface src, hipDataType t
         return (double)src.f32;
     case HIP_R_64F:
         return (double)src.f64;
-    case HIP_C_32F:
-        return (double)std::abs(src.cf);
-    case HIP_C_64F:
-        return (double)std::abs(src.cd);
     case HIP_R_16F:
         return (double)src.f16;
     case HIP_R_32I:
@@ -965,14 +848,14 @@ namespace ArgumentsHelper
 
     // Specialization for e_alpha
     template <>
-    inline constexpr auto apply<e_alpha> =
+    constexpr auto apply<e_alpha> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("alpha", arg.get_alpha<decltype(T)>());
         };
 
     // Specialization for e_beta
     template <>
-    inline constexpr auto apply<e_beta> =
+    constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };
