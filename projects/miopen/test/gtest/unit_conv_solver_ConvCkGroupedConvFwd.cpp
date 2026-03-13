@@ -115,7 +115,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
     };
 }
 
-auto GetTestParams(miopenDataType_t datatype)
+auto GetTestParams(miopenDataType_t /*datatype*/)
 {
 // Solution is only applicable to devices that default to 64-lane wavefronts
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
