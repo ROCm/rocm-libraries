@@ -831,12 +831,12 @@ struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Interwave,
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
                 }
-                static_ford<Sequence<KRepeatPerCluster, KInner>>{}([&](auto kk_iters) {
-                    constexpr auto k0_inner = Number<kk_iters[Number<0>{}]>{};
-                    constexpr auto k_inner  = Number<kk_iters[Number<1>{}]>{};
-                    static_ford<Sequence<MRepeat, NRepeat>>{}([&](auto mn) {
-                        constexpr auto m0 = Number<mn[Number<0>{}]>{};
-                        constexpr auto n0 = Number<mn[Number<1>{}]>{};
+                static_ford<Sequence<KRepeatPerCluster, KInner, MRepeat, NRepeat>>{}(
+                    [&](auto kkmn) {
+                        constexpr auto k0_inner = Number<kkmn[Number<0>{}]>{};
+                        constexpr auto k_inner  = Number<kkmn[Number<1>{}]>{};
+                        constexpr auto m0       = Number<kkmn[Number<2>{}]>{};
+                        constexpr auto n0       = Number<kkmn[Number<3>{}]>{};
                         vector_type<ComputeTypeA, KPack / A_KRow / KInner> a_thread_vec;
                         vector_type<ComputeTypeB, KPack / B_KRow / KInner> b_thread_vec;
 
@@ -896,7 +896,6 @@ struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Interwave,
                             __builtin_amdgcn_sched_barrier(0);
                         }
                     });
-                });
 
                 __builtin_amdgcn_sched_barrier(0);
                 __builtin_amdgcn_s_setprio(0);

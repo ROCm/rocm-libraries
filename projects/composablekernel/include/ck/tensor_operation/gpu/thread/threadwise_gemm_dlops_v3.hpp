@@ -132,26 +132,24 @@ struct ThreadwiseGemmDlops_km_kn_mn_v3
         else
         {
 
-            static_ford<Sequence<K, Ho, Wo>>{}([&](auto khw) {
-                constexpr auto k = Number<khw[Number<0>{}]>{};
-                constexpr auto h = Number<khw[Number<1>{}]>{};
-                constexpr auto w = Number<khw[Number<2>{}]>{};
-                static_ford<Sequence<E1, E2>>{}([&](auto ee) {
-                    constexpr auto e1 = Number<ee[Number<0>{}]>{};
-                    constexpr auto e2 = Number<ee[Number<1>{}]>{};
-                    constexpr index_t a_offset =
-                        AThreadDesc_E1_K_E2{}.CalculateOffset(a_origin_idx + make_tuple(e1, k, e2));
+            static_ford<Sequence<K, Ho, Wo, E1, E2>>{}([&](auto khwe) {
+                constexpr auto k  = Number<khwe[Number<0>{}]>{};
+                constexpr auto h  = Number<khwe[Number<1>{}]>{};
+                constexpr auto w  = Number<khwe[Number<2>{}]>{};
+                constexpr auto e1 = Number<khwe[Number<3>{}]>{};
+                constexpr auto e2 = Number<khwe[Number<4>{}]>{};
+                constexpr index_t a_offset =
+                    AThreadDesc_E1_K_E2{}.CalculateOffset(a_origin_idx + make_tuple(e1, k, e2));
 
-                    constexpr index_t b_offset = BThreadDesc_E1_N_Ho_Wo_E2{}.CalculateOffset(
-                        b_origin_idx + make_tuple(e1, 0, h, w, e2));
+                constexpr index_t b_offset = BThreadDesc_E1_N_Ho_Wo_E2{}.CalculateOffset(
+                    b_origin_idx + make_tuple(e1, 0, h, w, e2));
 
-                    constexpr index_t c_offset = CThreadDesc_K_N_Ho_Wo{}.CalculateOffset(
-                        c_origin_idx + make_tuple(k, 0, h, w));
+                constexpr index_t c_offset =
+                    CThreadDesc_K_N_Ho_Wo{}.CalculateOffset(c_origin_idx + make_tuple(k, 0, h, w));
 
-                    inner_product<FloatA, FloatB, FloatC>(a_buf[Number<a_offset>{}],
-                                                          b_buf[Number<b_offset>{}],
-                                                          c_buf(Number<c_offset>{}));
-                });
+                inner_product<FloatA, FloatB, FloatC>(a_buf[Number<a_offset>{}],
+                                                      b_buf[Number<b_offset>{}],
+                                                      c_buf(Number<c_offset>{}));
             });
         }
     }
