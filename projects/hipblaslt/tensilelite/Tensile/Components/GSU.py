@@ -22,14 +22,15 @@
 
 from rocisa import countInstruction
 from rocisa.code import Module, Label, RegSet
-from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr, FLATModifiers, EXEC
+from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr, FLATModifiers, EXEC, VCC
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
-    FlatAtomicDecU32, VAndB32, VCmpXEqU32
+    FlatAtomicDecU32, FlatStoreB32, FlatLoadB32, VAndB32, VCmpXEqU32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
+from rocisa.enum import CacheScope
 
 from ..Common import ceilDivide, log2, print2
 from ..Component import Component
@@ -1038,12 +1039,27 @@ class GSUOn(GSU):
     
         tmpS01 = tmpSgpr.idx
 
-        module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True), comment="get atomic_dec value"))
+        # If not set scope=SCOPE_DEV, will cause infinite loop in gfx12
+        if kernel["ISA"][0] == 12:
+            module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True, scope=CacheScope.SCOPE_DEV), comment="get atomic_dec value"))
+        else:
+            module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True), comment="get atomic_dec value"))
         module.add(SWaitCnt(kmcnt=0, comment="wait for atomic_dec value load"))
         module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
         module.add(SCBranchSCC0(labelName=lastGsuWgBusyWaitingLabel.getLabelName(), comment="branch if false"))
-        module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="reset synchronizer"))
-        module.add(SStoreB32(src=sgpr(tmpS01), base=sgpr("SrdSync", 2), soffset=0, smem=SMEMModifiers(glc=True), comment="reset synchronizer"))
+        if kernel["ISA"][0] == 12:
+            tmpV01 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
+            tmpV02 = writer.vgprPool.checkOut(1, preventOverflow=False)
+            module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr("SrdSync+0"), comment="copy SrdSync to vgpr"))
+            module.add(VMovB32(dst=vgpr(tmpV01+1), src=sgpr("SrdSync+1"), comment="copy SrdSync to vgpr"))
+            module.add(VMovB32(dst=vgpr(tmpV02), src=0, comment="reset synchronizer"))
+            module.add(FlatStoreB32(vaddr=vgpr(tmpV01, 2), src=vgpr(tmpV02), flat=FLATModifiers(dlc=True), comment="reset synchronizer"))
+            module.add(SWaitCnt(waitAll=True, comment="Wait for synchronizer reset to complete"))
+            writer.vgprPool.checkIn(tmpV01)
+            writer.vgprPool.checkIn(tmpV02)
+        else:
+            module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="reset synchronizer"))
+            module.add(SStoreB32(src=sgpr(tmpS01), base=sgpr("SrdSync", 2), soffset=0, smem=SMEMModifiers(glc=True), comment="reset synchronizer"))
         module.add(SBranch(labelName=reductionBodyLabel.getLabelName(), comment=""))
 
         return module
@@ -1383,8 +1399,6 @@ class GSUOn(GSU):
         tmpS05 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False)
         tmpS06 = writer.sgprPool.checkOutAligned(4,4, preventOverflow=False)
         tmpS06Res = ContinuousRegister(idx=tmpS06, size=4)
-        tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
-        tmpV02 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
 
         bufferOOB = tmpVgpr.idx + tmpVgpr.size - 1
         storeOffsetSgpr = tmpSgpr.idx
@@ -1411,10 +1425,12 @@ class GSUOn(GSU):
                 #   tmp = Mem[vaddr]
                 #   Mem[vaddr] = ((tmp == 0) | (tmp > vsrc)) ? vsrc : tmp - 1
                 #   vsrc = tmp
+                tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
+                tmpV02 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
                 waveSize = kernel["WavefrontSize"]
                 module.add(VAndB32(dst=vgpr(tmpV01), src0=vgpr("Serial"), src1=waveSize - 1, comment="lane id in the wavefront"))
                 module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr(tmpV01), src1=0, comment="only lane 0 does flat_atomic_dec"))
-                module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr(tmpS02), comment="copy GSU to vgpr"))
+                module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr(tmpS02), comment="copy (GSU - 1) to vgpr"))
                 module.add(VMovB32(dst=vgpr(tmpV02), src=sgpr("SrdSync+0"), comment="copy value of SrdSync to vgpr"))
                 module.add(VMovB32(dst=vgpr(tmpV02+1), src=sgpr("SrdSync+1"), comment="copy value of SrdSync to vgpr"))
                 module.add(FlatAtomicDecU32(vdst=vgpr(tmpV01), vaddr=vgpr(tmpV02, 2), vsrc=vgpr(tmpV01), flat=FLATModifiers(glc=True, thAtomicRt=True), comment=""))
@@ -1423,6 +1439,8 @@ class GSUOn(GSU):
                     module.add(SMovB32(dst=EXEC(), src=-1, comment="restore full exec"))
                 else:
                     module.add(SMovB64(dst=EXEC(), src=-1, comment="restore full exec"))
+                writer.vgprPool.checkIn(tmpV01)
+                writer.vgprPool.checkIn(tmpV02)
             else:
                 module.add(SAtomicDec(dst=sgpr(tmpS02), base=sgpr("SrdSync", 2), smem=SMEMModifiers(glc=True)))
             if kernel["MbskPrefetchMethod"] == 0:
@@ -1567,8 +1585,15 @@ class GSUOn(GSU):
                     module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment=""))
                     module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
 
-                    module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
-                    module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
+                    if kernel["ISA"][0] == 12:
+                        tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
+                        module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr("GSUSync"), comment="copy GSUSync to vgpr"))
+                        module.add(VCmpGEI32(dst=VCC(), src0=0, src1=vgpr(tmpV01), comment=""))
+                        module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=VCC(), comment="protect if OOB"))
+                        writer.vgprPool.checkIn(tmpV01)
+                    else:
+                        module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
+                        module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
 
                     if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
                         module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
@@ -1852,8 +1877,6 @@ class GSUOn(GSU):
         writer.sgprPool.checkIn(tmpS05)
         writer.sgprPool.checkIn(tmpS02)
         writer.sgprPool.checkIn(tmpS01)
-        writer.vgprPool.checkIn(tmpV01)
-        writer.vgprPool.checkIn(tmpV02)
 
         return module
 

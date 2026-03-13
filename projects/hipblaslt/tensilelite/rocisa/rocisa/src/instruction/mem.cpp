@@ -852,8 +852,8 @@ void mem_inst(nb::module_ m_mem)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       std::optional<rocisa::FLATModifiers>,
                       const std::string&>(),
-             nb::arg("src"),
              nb::arg("vaddr"),
+             nb::arg("src"),
              nb::arg("flat")    = std::nullopt,
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::FlatStoreB32& self, const nb::dict&) {
