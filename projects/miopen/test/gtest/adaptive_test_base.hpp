@@ -37,7 +37,7 @@
 
 namespace test::adaptive {
 
-#define HIP_CHECK(exp)                                                                 \
+#define ADAPTIVE_BASE_HIP_CHECK(exp)                                                   \
     if((exp) != hipSuccess)                                                            \
     {                                                                                  \
         MIOPEN_LOG_E(#exp "failed at line: " << __LINE__ << " in file: " << __FILE__); \
@@ -590,7 +590,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, rms_dev, max_dev);
 
-            HIP_CHECK(hipDeviceSynchronize());
+            ADAPTIVE_BASE_HIP_CHECK(hipDeviceSynchronize());
 
             TVerify max = std::max({*max_dev, std::numeric_limits<TVerify>::min()});
             error       = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
@@ -618,7 +618,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, mae_dev);
 
-            HIP_CHECK(hipDeviceSynchronize());
+            ADAPTIVE_BASE_HIP_CHECK(hipDeviceSynchronize());
 
             error = *mae_dev;
         }
@@ -645,7 +645,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, mismatch_dev);
 
-            HIP_CHECK(hipDeviceSynchronize());
+            ADAPTIVE_BASE_HIP_CHECK(hipDeviceSynchronize());
 
             error = *mismatch_dev;
         }
@@ -694,27 +694,27 @@ template <typename T,
           bool CheckNumericProperties = true>
 static void SetUpSharedVerifyData()
 {
-    HIP_CHECK(hipMallocManaged(
+    ADAPTIVE_BASE_HIP_CHECK(hipMallocManaged(
         &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::res_dev,
         sizeof(*AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::res_dev)));
     if constexpr(VER == VerifyOption::rms)
     {
-        HIP_CHECK(hipMallocManaged(
+        ADAPTIVE_BASE_HIP_CHECK(hipMallocManaged(
             &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::rms_dev,
             sizeof(TVerify)));
-        HIP_CHECK(hipMallocManaged(
+        ADAPTIVE_BASE_HIP_CHECK(hipMallocManaged(
             &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::max_dev,
             sizeof(TVerify)));
     }
     else if constexpr(VER == VerifyOption::mae)
     {
-        HIP_CHECK(hipMallocManaged(
+        ADAPTIVE_BASE_HIP_CHECK(hipMallocManaged(
             &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mae_dev,
             sizeof(TVerify)));
     }
     else
     {
-        HIP_CHECK(hipMallocManaged(
+        ADAPTIVE_BASE_HIP_CHECK(hipMallocManaged(
             &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mismatch_dev,
             sizeof(TVerify)));
     }
@@ -729,23 +729,23 @@ template <typename T,
           bool CheckNumericProperties = true>
 static void TearDownSharedVerifyData()
 {
-    HIP_CHECK(
+    ADAPTIVE_BASE_HIP_CHECK(
         hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::res_dev));
     if constexpr(VER == VerifyOption::rms)
     {
-        HIP_CHECK(
+        ADAPTIVE_BASE_HIP_CHECK(
             hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::rms_dev));
-        HIP_CHECK(
+        ADAPTIVE_BASE_HIP_CHECK(
             hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::max_dev));
     }
     else if constexpr(VER == VerifyOption::mae)
     {
-        HIP_CHECK(
+        ADAPTIVE_BASE_HIP_CHECK(
             hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mae_dev));
     }
     else
     {
-        HIP_CHECK(hipFree(
+        ADAPTIVE_BASE_HIP_CHECK(hipFree(
             AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mismatch_dev));
     }
 }
