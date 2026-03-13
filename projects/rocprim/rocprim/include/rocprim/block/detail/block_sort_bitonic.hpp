@@ -79,18 +79,19 @@ struct block_sort_bitonic_impl
         ROCPRIM_UNROLL
         for(unsigned int i = 0u; i < ItemsPerThread; ++i)
         {
-            // If it's the first step, we pair the i-th item of this thread with the 
+            // If it's the first step, we pair the i-th item of this thread with the
             // reversed (ItemsPerThread - 1 - i) item of the partner thread.
             const unsigned int other_i = is_first_step ? (ItemsPerThread - 1 - i) : i;
             const auto         i1      = (id ^ xor_mask) + (other_i * BlockSize);
 
             const K    k1   = storage.key[i1];
-            const V    v1   = storage.value[i1];
 
             const bool swap = compare_function(is_upper ? k[i] : k1, is_upper ? k1 : k[i]);
-
-            k[i] = swap ? k1 : k[i];
-            v[i] = swap ? v1 : v[i];
+            if(swap)
+            {
+                k[i] = k1;
+                v[i] = storage.value[i1];
+            }
         }
     }
 
@@ -140,11 +141,13 @@ struct block_sort_bitonic_impl
 
         const auto i1 = id ^ xor_mask;
         const K    k1 = storage.key[i1];
-        const V    v1 = storage.value[i1];
 
         const bool swap = compare_function(is_upper ? k : k1, is_upper ? k1 : k);
-        k               = swap ? k1 : k;
-        v               = swap ? v1 : v;
+        if(swap)
+        {
+            k = k1;
+            v = storage.value[i1];
+        }
     }
 
     template<bool is_first_step = false, class Storage, class K, class BinaryFunction>

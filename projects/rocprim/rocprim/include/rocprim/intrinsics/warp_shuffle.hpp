@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -245,15 +245,42 @@ template<class V>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 V warp_swizzle_shuffle(V& v, const int mask, const int width = arch::wavefront::min_size())
 {
-    switch(mask)
+    using VV = typename std::remove_cv<V>::type;
+
+    VV   result  = v;
+    bool matched = false;
+
+    // __builtin_amdgcn_ds_swizzle instruction requires the offset to be a compile-time constant, so we
+    // cannot pass a runtime variable `mask` directly.
+    //
+    // According to the AMD ISA documentation, the offsets for the Bitwise XOR swizzle mode is encoded
+    // as `(XOR_MASK << 10) | 0x1F`. We can use this formula to get the offsets from the XOR masks during
+    // complile time.
+    //
+    // So we use a fold expression `(|| ...)` over an integer sequence to generate 31 inline branches at
+    // compile time to generate the corresponding `ds_swizzle_b32` instruction.
+    ::rocprim::detail::constexpr_for_lt<1, 32, 1>(
+        [&](auto i)
+        {
+            if(mask == i)
+            {
+                result  = warp_swizzle<V, (i << 10) | 0x1F>(v);
+                matched = true;
+            }
+        });
+
+    // Fallback branch:
+    // `ds_swizzle_b32` is limited to 32-lane physical boundaries and supports a maximum 5-bit XOR mask
+    // (0 to 31). If the mask is >= 32 (e.g., 32 or 63 in a Wave64), it physically cannot be performed
+    // via swizzle.
+    //
+    // We fall back to the generic `warp_shuffle_xor`, which degrades to `ds_bpermute_b32` (LDS crossbar
+    // routing), it's slower but necessary for cross-half-wave operations.
+    if(!matched)
     {
-        case 1: return warp_swizzle<V, 0x041F>(v);
-        case 2: return warp_swizzle<V, 0x081F>(v);
-        case 4: return warp_swizzle<V, 0x101F>(v);
-        case 8: return warp_swizzle<V, 0x201F>(v);
-        case 16: return warp_swizzle<V, 0x401F>(v);
-        default: return warp_shuffle_xor(v, mask, width);
+        result = warp_shuffle_xor(v, mask, width);
     }
+    return result;
 }
 
 } // namespace detail

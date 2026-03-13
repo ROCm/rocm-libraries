@@ -79,12 +79,14 @@ struct warp_shuffle_sort_impl
         wlev_cas(bool is_upper, BinaryFunction compare_function, unsigned int xor_mask, K& k, V& v)
     {
         K k1 = lane_xor_swap(k, xor_mask);
-        V v1 = lane_xor_swap(v, xor_mask);
 
         const bool swap = compare_function(is_upper ? k : k1, is_upper ? k1 : k);
 
-        swap_if<swap_method::ternary>(swap, k, k1);
-        swap_if<swap_method::ternary>(swap, v, v1);
+        if(swap)
+        {
+            k = k1;
+            v = lane_xor_swap(v, xor_mask);
+        }
     }
 
     /// Compares multiple values between pairs of lanes, where the pairs are selected via
@@ -104,28 +106,25 @@ struct warp_shuffle_sort_impl
         if constexpr(is_first_step && ItemsPerThread > 1)
         {
             ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread / 2, 1>(
-                [&](auto i)
+                [&](auto item)
                 {
-                    constexpr auto item1 = i;
-                    constexpr auto item2 = ItemsPerThread - 1 - i;
+                    constexpr auto other_item = ItemsPerThread - 1 - item;
 
-                    // This double exchanging is to avoid read after write condition. If we don't
-                    // exchange 2 indices at the same time, then it could happen that the slower
-                    // thread read the already changed k_other[0] in the end.
-                    K k1_1 = lane_xor_swap(k[item2], xor_mask);
-                    K k1_2 = lane_xor_swap(k[item1], xor_mask);
-                    V v1_1 = lane_xor_swap(v[item2], xor_mask);
-                    V v1_2 = lane_xor_swap(v[item1], xor_mask);
+                    // To avoid read-after-write conditions, we perform a round-trip exchange.
+                    // First, fetch the paired lane's other_item. By reading the values before
+                    // any local modifications, the original data will be preserved across lanes.
+                    K other_k = lane_xor_swap(k[other_item], xor_mask);
+                    V other_v = lane_xor_swap(v[other_item], xor_mask);
 
-                    const bool swap1
-                        = compare_function(is_upper ? k[item1] : k1_1, is_upper ? k1_1 : k[item1]);
-                    const bool swap2
-                        = compare_function(is_upper ? k[item2] : k1_2, is_upper ? k1_2 : k[item2]);
+                    const bool swap = compare_function(is_upper ? k[item] : other_k,
+                                                       is_upper ? other_k : k[item]);
 
-                    swap_if<swap_method::ternary>(swap1, k[item1], k1_1);
-                    swap_if<swap_method::ternary>(swap1, v[item1], v1_1);
-                    swap_if<swap_method::ternary>(swap2, k[item2], k1_2);
-                    swap_if<swap_method::ternary>(swap2, v[item2], v1_2);
+                    swap_if<swap_method::ternary>(swap, k[item], other_k);
+                    swap_if<swap_method::ternary>(swap, v[item], other_v);
+
+                    // Return the updated value back to the paired lane.
+                    k[other_item] = lane_xor_swap(other_k, xor_mask);
+                    v[other_item] = lane_xor_swap(other_v, xor_mask);
                 });
         }
         else
@@ -134,13 +133,15 @@ struct warp_shuffle_sort_impl
                 [&](auto item)
                 {
                     K k1 = lane_xor_swap(k[item], xor_mask);
-                    V v1 = lane_xor_swap(v[item], xor_mask);
 
                     const bool swap
                         = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
 
-                    swap_if<swap_method::ternary>(swap, k[item], k1);
-                    swap_if<swap_method::ternary>(swap, v[item], v1);
+                    if(swap)
+                    {
+                        k[item] = k1;
+                        v[item] = lane_xor_swap(v[item], xor_mask);
+                    }
                 });
         }
     }
@@ -183,30 +184,24 @@ struct warp_shuffle_sort_impl
                     K          k1 = other_items[other_item];
                     const bool swap
                         = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
-                    swap_if<swap_method::ternary>(swap, k[item], k1);
+                    k[item] = swap ? k1 : k[item];
                 });
         }
         else if constexpr(is_first_step)
         {
             ::rocprim::detail::constexpr_for_lt<0, ItemsPerThread / 2, 1>(
-                [&](auto i)
+                [&](auto item)
                 {
-                    constexpr auto item1 = i;
-                    constexpr auto item2 = ItemsPerThread - 1 - i;
+                    constexpr auto other_item = ItemsPerThread - 1 - item;
 
-                    // This double exchanging is to avoid read after write condition. If we don't
-                    // exhange 2 indices at the same time, then it could happen that the slower
-                    // thread read the already changed k_other[0] in the end.
-                    K k1_1 = lane_xor_swap(k[item2], xor_mask);
-                    K k1_2 = lane_xor_swap(k[item1], xor_mask);
+                    K other_k = lane_xor_swap(k[other_item], xor_mask);
 
-                    const bool swap1
-                        = compare_function(is_upper ? k[item1] : k1_1, is_upper ? k1_1 : k[item1]);
-                    const bool swap2
-                        = compare_function(is_upper ? k[item2] : k1_2, is_upper ? k1_2 : k[item2]);
+                    const bool swap = compare_function(is_upper ? k[item] : other_k,
+                                                       is_upper ? other_k : k[item]);
 
-                    swap_if<swap_method::ternary>(swap1, k[item1], k1_1);
-                    swap_if<swap_method::ternary>(swap2, k[item2], k1_2);
+                    swap_if<swap_method::ternary>(swap, k[item], other_k);
+
+                    k[other_item] = lane_xor_swap(other_k, xor_mask);
                 });
         }
         else
@@ -218,7 +213,7 @@ struct warp_shuffle_sort_impl
                     K          k1   = lane_xor_swap(k[item], xor_mask);
                     const bool swap
                         = compare_function(is_upper ? k[item] : k1, is_upper ? k1 : k[item]);
-                    swap_if<swap_method::ternary>(swap, k[item], k1);
+                    k[item] = swap ? k1 : k[item];
                 });
         }
     }
