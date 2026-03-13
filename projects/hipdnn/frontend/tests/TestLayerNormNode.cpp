@@ -401,6 +401,66 @@ TEST(TestLayerNormNode, InferPropertiesNhwcScaleStridesMatchX)
     EXPECT_EQ(bias->get_stride(), (std::vector<int64_t>{8192, 1, 512, 32}));
 }
 
+TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCount)
+{
+    auto x = makeTensor({2, 3, 5, 7}, {105, 35, 7, 1});
+
+    // normalizedDimCount = 3
+    auto scale = makeTensor({1, 3, 5, 7}, {105, 35, 7, 1});
+    auto bias = makeTensor({1, 3, 5, 7}, {105, 35, 7, 1});
+
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    GraphAttributes graphAttrs;
+    LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
+}
+
+TEST(TestLayerNormNode, InferPropertiesSetsAmbiguousNormalizedDimCount)
+{
+    auto x = makeTensor({2, 1, 5, 7}, {35, 35, 7, 1});
+
+    // normalizedDimCount = 2
+    auto scale = makeTensor({1, 1, 5, 7}, {35, 35, 7, 1});
+    auto bias = makeTensor({1, 1, 5, 7}, {35, 35, 7, 1});
+
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    GraphAttributes graphAttrs;
+    LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 2);
+}
+
+TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCountWithAlternativeLayoutConvention)
+{
+    auto x = makeTensor({2, 3, 5, 7}, {105, 35, 7, 1});
+
+    // normalizedDimCount = 3
+    auto scale = makeTensor({3, 5, 7}, {35, 7, 1});
+    auto bias = makeTensor({3, 5, 7}, {35, 7, 1});
+
+    auto attrs = makeMinimalAttrs(x);
+    attrs.set_scale(scale);
+    attrs.set_bias(bias);
+
+    GraphAttributes graphAttrs;
+    LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
+}
+
 TEST(TestLayerNormNode, InferPropertiesStatsSkippedInInferenceMode)
 {
     // Stats should NOT be inferred during inference phase, even if tensors are provided

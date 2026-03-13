@@ -52,7 +52,8 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                 *tensorMap.at(attributes.y_tensor_uid()),
                                 *tensorMap.at(attributes.epsilon_tensor_uid()),
                                 *tensorMap.at(attributes.scale_tensor_uid()),
-                                *tensorMap.at(attributes.bias_tensor_uid()));
+                                *tensorMap.at(attributes.bias_tensor_uid()),
+                                normalizedDimCount);
 
     std::unordered_map<int64_t, void*> const variantPack = planTensorBundle.toHostVariantPack();
 
@@ -111,7 +112,8 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
                                 *tensorMap.at(attributes.y_tensor_uid()),
                                 *tensorMap.at(attributes.epsilon_tensor_uid()),
                                 *tensorMap.at(attributes.scale_tensor_uid()),
-                                *tensorMap.at(attributes.bias_tensor_uid()));
+                                *tensorMap.at(attributes.bias_tensor_uid()),
+                                normalizedDimCount);
 
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
@@ -182,6 +184,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
                                 *tensorMap.at(attributes.epsilon_tensor_uid()),
                                 *tensorMap.at(attributes.scale_tensor_uid()),
                                 *tensorMap.at(attributes.bias_tensor_uid()),
+                                normalizedDimCount,
                                 meanAttr,
                                 invVarianceAttr);
 
