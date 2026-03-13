@@ -12,7 +12,16 @@
  * backend or plugin messages.
  *
  * Log verbosity is controlled by the `HIPDNN_LOG_LEVEL` environment
- * variable (e.g. `HIPDNN_LOG_LEVEL=info`).
+ * variable. Valid values (case-insensitive):
+ * | Value   | Effect                                      |
+ * |---------|---------------------------------------------|
+ * | `info`  | Informational messages and above             |
+ * | `warn`  | Warnings and above                          |
+ * | `error` | Errors and fatal messages only               |
+ * | `fatal` | Fatal messages only                          |
+ * | `off`   | Disable all logging (default)                |
+ *
+ * Example: `HIPDNN_LOG_LEVEL=warn`
  */
 
 #pragma once
