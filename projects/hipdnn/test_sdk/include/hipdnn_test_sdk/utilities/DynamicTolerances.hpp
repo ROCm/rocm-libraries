@@ -534,59 +534,76 @@ using hipdnn_data_sdk::utilities::ITensor;
 using hipdnn_data_sdk::utilities::TensorView;
 
 /**
- * @brief Computes the 1-norm (sum of absolute values) of a tensor.
+ * @brief Computes the infinity-norm (max absolute row sum) of a matrix tensor.
  *
- * The 1-norm is defined as: ||A||_1 = sum_{i,j} |A[i,j]|
+ * The infinity-norm is defined as: ||A||_inf = max_i (sum_j |A[i,j]|)
  *
- * Uses TensorView's iterator which correctly handles both packed
- * and non-packed (strided) tensor layouts.
+ * This is the appropriate subordinate matrix norm for element-wise error bounds
+ * via Higham's analysis: max_ij |error_ij| <= gamma_k * ||A||_inf * ||B||_inf.
+ *
+ * Uses strides to correctly handle both packed and non-packed tensor layouts.
  *
  * @tparam T The data type of the tensor elements.
- * @param tensor The input tensor.
- * @return The 1-norm as a double.
+ * @param tensor The input tensor (must have at least 2 dimensions).
+ * @return The infinity-norm as a double.
  */
 template <typename T>
-double compute1Norm(ITensor& tensor)
+double computeMatrixInfNorm(ITensor& tensor)
 {
-    TensorView<T> view(tensor);
-    double norm = 0.0;
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
 
-    for(auto it = view.begin(); it != view.end(); ++it)
+    auto rows = dims[dims.size() - 2];
+    auto cols = dims[dims.size() - 1];
+
+    auto rowStride = strides[strides.size() - 2];
+    auto colStride = strides[strides.size() - 1];
+
+    const auto* data = static_cast<const T*>(tensor.rawHostData());
+
+    // For tensors with batch dimensions, compute across all batches
+    auto batchCount = static_cast<int64_t>(tensor.elementCount()) / (rows * cols);
+
+    double maxRowSum = 0.0;
+
+    for(int64_t batch = 0; batch < batchCount; ++batch)
     {
-        norm += static_cast<double>(hipdnn_data_sdk::types::fabs(*it));
+        auto batchOffset = batch * rows * rowStride;
+
+        for(int64_t i = 0; i < rows; ++i)
+        {
+            double rowSum = 0.0;
+            for(int64_t j = 0; j < cols; ++j)
+            {
+                auto idx = batchOffset + i * rowStride + j * colStride;
+                rowSum += static_cast<double>(hipdnn_data_sdk::types::fabs(data[idx]));
+            }
+            maxRowSum = std::max(maxRowSum, rowSum);
+        }
     }
 
-    return norm;
+    return maxRowSum;
 }
 
 /**
  * @brief Calculates the expected tolerance for Matrix Multiplication operations.
  *
- * This function estimates the maximum expected error due to floating-point accumulation during the
- * computation of C = A × B using Higham's error analysis for matrix multiplication.
+ * This function estimates the maximum expected element-wise error due to floating-point
+ * accumulation during the computation of C = A × B using Higham's error analysis.
  *
- * Norm Selection: 1-norm vs Frobenius norm
- * ==========================================
- * We use the 1-norm (sum of absolute values) instead of the Frobenius norm for the following reasons:
+ * Norm Selection: Infinity-norm (max absolute row sum)
+ * =====================================================
+ * We use the infinity-norm ||A||_inf = max_i (sum_j |A[i,j]|) because Higham's element-wise
+ * error bound for matrix multiplication gives:
+ *   max_ij |fl(C)_ij - C_ij| <= gamma_k * ||A||_inf * ||B||_inf
  *
- * 1. Computational Efficiency:
- *    - 1-norm:      ||A||_1 = sum_{i,j} |A[i,j]|            (cost: 1 pass, abs + sum)
- *    - Frobenius:   ||A||_F = sqrt(sum_{i,j} |A[i,j]|^2)   (cost: 1 pass, abs + square + sum + sqrt)
- *    The 1-norm is approximately 2× faster (no squaring, no square root).
- *
- * 2. Tightness Trade-off:
- *    Both norms provide rigorous error bounds based on Higham's analysis. While the Frobenius norm
- *    can give slightly tighter bounds, the difference is typically small in practice, especially
- *    compared to the much looser max-norm approach (which can overestimate by sqrt(m*k)).
- *
- * 3. Practical Validation:
- *    For testing purposes, having a slightly looser but still rigorous bound is acceptable,
- *    especially given the significant computational savings.
+ * This is the correct subordinate matrix norm for bounding the maximum element-wise error,
+ * which is what allClose-style validation checks.
  *
  * Error Bound (Higham's Analysis):
  * =================================
  * For C = A*B where A is m×k and B is k×n:
- *   ||fl(A*B) - A*B|| ≤ γ_k * ||A||_1 * ||B||_1
+ *   max_ij |error_ij| <= γ_k * ||A||_inf * ||B||_inf
  *
  * where γ_k is the error growth factor:
  *   - High Precision (FP32, FP64): γ_k = (2*k*u) / (1 - 2*k*u)  (linear worst-case bound)
@@ -636,13 +653,11 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
 
     auto numberOfAccumulations = static_cast<uint64_t>(k);
 
-    // Compute 1-norms of input matrices
-    // Note: Using 1-norm instead of Frobenius norm for computational efficiency (~2× faster)
-    // while still maintaining rigorous error bounds (see detailed comments above).
-    double normA = compute1Norm<InputType>(a);
-    double normB = compute1Norm<InputType>(b);
+    // Compute infinity-norms of input matrices (max absolute row sum)
+    double normA = computeMatrixInfNorm<InputType>(a);
+    double normB = computeMatrixInfNorm<InputType>(b);
 
-    // Apply Higham's error bound: ||error|| ≤ γ_k * ||A||_1 * ||B||_1
+    // Apply Higham's error bound: max_ij |error_ij| <= γ_k * ||A||_inf * ||B||_inf
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
 
@@ -666,7 +681,7 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
         // Input precision is higher than compute precision, so we have casting error.
         // Each element loses precision proportional to epsilon when cast.
         // Worst-case error contribution from input casting:
-        //   Error ≈ 2 * ||A||_1 * ||B||_1 * epsilon
+        //   Error ≈ 2 * ||A||_inf * ||B||_inf * epsilon
         double castingError = 2.0 * normA * normB * epsilon;
         accumulatedTolerance += castingError;
     }
@@ -680,7 +695,7 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
     if(outputEpsilon > epsilon)
     {
         // The error is bounded by the precision of the OutputType at the final accumulated value.
-        // Maximum possible output magnitude: ||A||_1 * ||B||_1
+        // Maximum possible output magnitude: ||A||_inf * ||B||_inf
         double maxPossibleOutputValue = normA * normB;
         castTolerance = maxPossibleOutputValue * outputEpsilon;
     }

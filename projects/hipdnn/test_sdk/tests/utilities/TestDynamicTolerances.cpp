@@ -1139,8 +1139,8 @@ struct MatmulToleranceTestCase
 {
     std::vector<int64_t> aDims;
     std::vector<int64_t> bDims;
-    double aValue;
-    double bValue;
+    std::vector<double> aRowValues;
+    std::vector<double> bRowValues;
     double expectedTolerance;
     bool expectThrow = false;
 
@@ -1156,25 +1156,43 @@ struct MatmulToleranceTestCase
         {
             os << tc.bDims[i] << (i < tc.bDims.size() - 1 ? ", " : "");
         }
-        os << "], aValue: " << tc.aValue << ", bValue: " << tc.bValue
-           << ", expectedTolerance: " << tc.expectedTolerance
+        os << "], aRowValues: [";
+        for(size_t i = 0; i < tc.aRowValues.size(); ++i)
+        {
+            os << tc.aRowValues[i] << (i < tc.aRowValues.size() - 1 ? ", " : "");
+        }
+        os << "], bRowValues: [";
+        for(size_t i = 0; i < tc.bRowValues.size(); ++i)
+        {
+            os << tc.bRowValues[i] << (i < tc.bRowValues.size() - 1 ? ", " : "");
+        }
+        os << "], expectedTolerance: " << tc.expectedTolerance
            << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
         return os;
     }
 };
 
-// Helper to create a tensor filled with a constant value
+// Helper to create a tensor where each row is filled with a per-row constant value.
+// rowValues[i] specifies the constant value for all elements in row i.
+// This ensures different rows have different sums, exercising the max-row-sum logic
+// in computeMatrixInfNorm.
 template <typename T>
-hipdnn_data_sdk::utilities::Tensor<T> createConstantTensor(const std::vector<int64_t>& dims,
-                                                           double value)
+hipdnn_data_sdk::utilities::Tensor<T>
+    createTensorFromRowValues(const std::vector<int64_t>& dims,
+                              const std::vector<double>& rowValues)
 {
     hipdnn_data_sdk::utilities::Tensor<T> tensor(dims);
-    auto elementCount = tensor.elementCount();
     auto* data = static_cast<T*>(tensor.memory().hostData());
 
-    for(size_t i = 0; i < elementCount; ++i)
+    auto rows = dims[dims.size() - 2];
+    auto cols = dims[dims.size() - 1];
+
+    for(int64_t i = 0; i < rows; ++i)
     {
-        data[i] = static_cast<T>(value);
+        for(int64_t j = 0; j < cols; ++j)
+        {
+            data[i * cols + j] = static_cast<T>(rowValues[static_cast<size_t>(i)]);
+        }
     }
 
     return tensor;
@@ -1186,67 +1204,92 @@ template <typename T>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases();
 
 // Float / Float / Float (High Precision: Linear)
-// Tolerance = gamma(K, u_float) * ||A||_1 * ||B||_1
-// All tensors filled with 1.0, so ||T||_1 = product(dims)
+// Tolerance = gamma(K, u_float) * ||A||_inf * ||B||_inf
+// Row-varying values ensure ||A||_inf != entry_sum / rows
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, float, float>>()
 {
     auto u = hipdnn_data_sdk::types::pow(2.0, -23);
 
-    return {// K=1: A=2x1, B=1x2. ||A||=2, ||B||=2. Tol = gamma(1,u) * 4
-            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 2.0 * 2.0},
-            // K=3: A=2x3, B=3x4. ||A||=6, ||B||=12. Tol = gamma(3,u) * 72
-            {{2, 3}, {3, 4}, 1.0, 1.0, computeGamma(3, u) * 6.0 * 12.0},
-            // K=10: A=2x10, B=10x2. ||A||=20, ||B||=20. Tol = gamma(10,u) * 400
-            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 20.0 * 20.0},
-            // K=100: A=2x100, B=100x2. ||A||=200, ||B||=200. Tol = gamma(100,u) * 40000
-            {{2, 100}, {100, 2}, 1.0, 1.0, computeGamma(100, u) * 200.0 * 200.0}};
+    auto bRowValues100 = std::vector<double>(100, 1.0);
+
+    return {// K=1: A=2x1, rows={1,2}. ||A||_inf=2, B=1x2, rows={1}. ||B||_inf=2
+            {{2, 1}, {1, 2}, {1.0, 2.0}, {1.0}, computeGamma(1, u) * 2.0 * 2.0},
+            // K=3: A=2x3, rows={1,2}. ||A||_inf=6, B=3x4, rows={1,3,0.5}. ||B||_inf=12
+            {{2, 3}, {3, 4}, {1.0, 2.0}, {1.0, 3.0, 0.5}, computeGamma(3, u) * 6.0 * 12.0},
+            // K=10: A=2x10, rows={1,2}. ||A||_inf=20, B=10x2, rows={1..5,1..5}. ||B||_inf=10
+            {{2, 10},
+             {10, 2},
+             {1.0, 2.0},
+             {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+             computeGamma(10, u) * 20.0 * 10.0},
+            // K=100: A=2x100, rows={1,2}. ||A||_inf=200, B=100x2, all 1.0. ||B||_inf=2
+            {{2, 100}, {100, 2}, {1.0, 2.0}, bRowValues100, computeGamma(100, u) * 200.0 * 2.0}};
 }
 
 // Float / Double / Float (Input casting error)
-// Tolerance = gamma(K, u_float) * ||A|| * ||B|| + 2 * ||A|| * ||B|| * u_float
+// Tolerance = gamma(K, u_float) * ||A||_inf * ||B||_inf + 2 * ||A||_inf * ||B||_inf * u_float
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, double, float>>()
 {
     auto u = hipdnn_data_sdk::types::pow(2.0, -23);
 
-    return {// K=1: ||A||=2, ||B||=2. Tol = gamma(1,u)*4 + 2*4*u
-            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 4.0 + 2.0 * 4.0 * u},
-            // K=10: ||A||=20, ||B||=20. Tol = gamma(10,u)*400 + 2*400*u
-            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 400.0 + 2.0 * 400.0 * u}};
+    return {
+        // K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,u)*4 + 2*4*u
+        {{2, 1}, {1, 2}, {1.0, 2.0}, {1.0}, computeGamma(1, u) * 2.0 * 2.0 + 2.0 * 2.0 * 2.0 * u},
+        // K=10: ||A||_inf=20, ||B||_inf=10. Tol = gamma(10,u)*200 + 2*200*u
+        {{2, 10},
+         {10, 2},
+         {1.0, 2.0},
+         {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+         computeGamma(10, u) * 20.0 * 10.0 + 2.0 * 20.0 * 10.0 * u}};
 }
 
 // Half / Float / Float (Output casting error)
-// Tolerance = gamma(K, u_float) * ||A|| * ||B|| + ||A|| * ||B|| * u_half
+// Tolerance = gamma(K, u_float) * ||A||_inf * ||B||_inf + ||A||_inf * ||B||_inf * u_half
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, float, float>>()
 {
     auto uFloat = hipdnn_data_sdk::types::pow(2.0, -23);
     auto uHalf = hipdnn_data_sdk::types::pow(2.0, -10);
 
-    return {// K=1: ||A||=2, ||B||=2. Tol = gamma(1,uFloat)*4 + 4*uHalf
-            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, uFloat) * 4.0 + 4.0 * uHalf},
-            // K=10: ||A||=20, ||B||=20. Tol = gamma(10,uFloat)*400 + 400*uHalf
-            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, uFloat) * 400.0 + 400.0 * uHalf}};
+    return {// K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,uFloat)*4 + 4*uHalf
+            {{2, 1},
+             {1, 2},
+             {1.0, 2.0},
+             {1.0},
+             computeGamma(1, uFloat) * 2.0 * 2.0 + 2.0 * 2.0 * uHalf},
+            // K=10: ||A||_inf=20, ||B||_inf=10. Tol = gamma(10,uFloat)*200 + 200*uHalf
+            {{2, 10},
+             {10, 2},
+             {1.0, 2.0},
+             {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+             computeGamma(10, uFloat) * 20.0 * 10.0 + 20.0 * 10.0 * uHalf}};
 }
 
 // Half / Half / Half (Low Precision: Statistical)
-// Tolerance = gamma(K, u_half) * ||A|| * ||B||
+// Tolerance = gamma(K, u_half) * ||A||_inf * ||B||_inf
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, half, half>>()
 {
     auto u = hipdnn_data_sdk::types::pow(2.0, -10);
 
-    return {// K=1: ||A||=2, ||B||=2
-            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 4.0},
-            // K=10: ||A||=20, ||B||=20
-            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 400.0},
-            // K=100: ||A||=200, ||B||=200
-            {{2, 100}, {100, 2}, 1.0, 1.0, computeGamma(100, u) * 40000.0}};
+    auto bRowValues100 = std::vector<double>(100, 1.0);
+
+    return {// K=1: ||A||_inf=2, ||B||_inf=2
+            {{2, 1}, {1, 2}, {1.0, 2.0}, {1.0}, computeGamma(1, u) * 2.0 * 2.0},
+            // K=10: ||A||_inf=20, ||B||_inf=10
+            {{2, 10},
+             {10, 2},
+             {1.0, 2.0},
+             {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+             computeGamma(10, u) * 20.0 * 10.0},
+            // K=100: ||A||_inf=200, ||B||_inf=2
+            {{2, 100}, {100, 2}, {1.0, 2.0}, bRowValues100, computeGamma(100, u) * 200.0 * 2.0}};
 }
 
 // Bfloat16 / Float / Float (Output casting error)
-// Tolerance = gamma(K, u_float) * ||A|| * ||B|| + ||A|| * ||B|| * u_bf16
+// Tolerance = gamma(K, u_float) * ||A||_inf * ||B||_inf + ||A||_inf * ||B||_inf * u_bf16
 template <>
 std::vector<MatmulToleranceTestCase>
     getMatmulToleranceTestCases<TypeTriple<bfloat16, float, float>>()
@@ -1254,26 +1297,40 @@ std::vector<MatmulToleranceTestCase>
     auto uFloat = hipdnn_data_sdk::types::pow(2.0, -23);
     auto uBf16 = hipdnn_data_sdk::types::pow(2.0, -7);
 
-    return {// K=1: ||A||=2, ||B||=2. Tol = gamma(1,uFloat)*4 + 4*uBf16
-            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, uFloat) * 4.0 + 4.0 * uBf16},
-            // K=10: ||A||=20, ||B||=20. Tol = gamma(10,uFloat)*400 + 400*uBf16
-            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, uFloat) * 400.0 + 400.0 * uBf16}};
+    return {// K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,uFloat)*4 + 4*uBf16
+            {{2, 1},
+             {1, 2},
+             {1.0, 2.0},
+             {1.0},
+             computeGamma(1, uFloat) * 2.0 * 2.0 + 2.0 * 2.0 * uBf16},
+            // K=10: ||A||_inf=20, ||B||_inf=10. Tol = gamma(10,uFloat)*200 + 200*uBf16
+            {{2, 10},
+             {10, 2},
+             {1.0, 2.0},
+             {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+             computeGamma(10, uFloat) * 20.0 * 10.0 + 20.0 * 10.0 * uBf16}};
 }
 
 // Bfloat16 / Bfloat16 / Bfloat16 (Low Precision: Statistical)
-// Tolerance = gamma(K, u_bf16) * ||A|| * ||B||
+// Tolerance = gamma(K, u_bf16) * ||A||_inf * ||B||_inf
 template <>
 std::vector<MatmulToleranceTestCase>
     getMatmulToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
     auto u = hipdnn_data_sdk::types::pow(2.0, -7);
 
-    return {// K=1: ||A||=2, ||B||=2
-            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 4.0},
-            // K=10: ||A||=20, ||B||=20
-            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 400.0},
-            // K=50: ||A||=100, ||B||=100 (K=100 exceeds gamma>=0.5 for bf16)
-            {{2, 50}, {50, 2}, 1.0, 1.0, computeGamma(50, u) * 10000.0}};
+    auto bRowValues50 = std::vector<double>(50, 1.0);
+
+    return {// K=1: ||A||_inf=2, ||B||_inf=2
+            {{2, 1}, {1, 2}, {1.0, 2.0}, {1.0}, computeGamma(1, u) * 2.0 * 2.0},
+            // K=10: ||A||_inf=20, ||B||_inf=10
+            {{2, 10},
+             {10, 2},
+             {1.0, 2.0},
+             {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+             computeGamma(10, u) * 20.0 * 10.0},
+            // K=50: ||A||_inf=100, ||B||_inf=2 (K=100 exceeds gamma>=0.5 for bf16)
+            {{2, 50}, {50, 2}, {1.0, 2.0}, bRowValues50, computeGamma(50, u) * 100.0 * 2.0}};
 }
 
 template <typename Out, typename In, typename Comp>
@@ -1286,15 +1343,15 @@ protected:
 
         if(tc.expectThrow)
         {
-            auto a = createConstantTensor<In>(tc.aDims, tc.aValue);
-            auto b = createConstantTensor<In>(tc.bDims, tc.bValue);
+            auto a = createTensorFromRowValues<In>(tc.aDims, tc.aRowValues);
+            auto b = createTensorFromRowValues<In>(tc.bDims, tc.bRowValues);
 
             EXPECT_THROW((calculateMatmulTolerance<Out, In, Comp>(a, b)), std::exception) << tc;
         }
         else
         {
-            auto a = createConstantTensor<In>(tc.aDims, tc.aValue);
-            auto b = createConstantTensor<In>(tc.bDims, tc.bValue);
+            auto a = createTensorFromRowValues<In>(tc.aDims, tc.aRowValues);
+            auto b = createTensorFromRowValues<In>(tc.bDims, tc.bRowValues);
 
             auto tolerance = calculateMatmulTolerance<Out, In, Comp>(a, b);
             EXPECT_NEAR(tolerance, static_cast<float>(tc.expectedTolerance), 1e-10f) << tc;
@@ -1369,8 +1426,8 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestCalculateMatmulTolerance, ThrowsOnInvalidDimensions)
 {
     // Mismatched dimensions: A is 2x3, B is 4x5 (3 != 4)
-    auto a = createConstantTensor<float>({2, 3}, 1.0);
-    auto b = createConstantTensor<float>({4, 5}, 1.0);
+    auto a = createTensorFromRowValues<float>({2, 3}, {1.0, 2.0});
+    auto b = createTensorFromRowValues<float>({4, 5}, {1.0, 2.0, 3.0, 4.0});
 
     EXPECT_THROW((calculateMatmulTolerance<float, float, float>(a, b)), std::invalid_argument);
 }
@@ -1385,8 +1442,9 @@ TEST(TestCalculateMatmulTolerance, ThrowsOnSingularity)
     // For bfloat16, epsilon = 2^-7 ≈ 7.81e-3
     // K=100: nU = 2*100*7.81e-3 = 1.562 >= 0.01 → statistical bound
     // gamma = 6 * sqrt(200) * 7.81e-3 ≈ 0.663 >= 0.5 → overflow
-    auto a = createConstantTensor<bfloat16>({2, 100}, 1.0);
-    auto b = createConstantTensor<bfloat16>({100, 2}, 1.0);
+    auto bRowValues100 = std::vector<double>(100, 1.0);
+    auto a = createTensorFromRowValues<bfloat16>({2, 100}, {1.0, 2.0});
+    auto b = createTensorFromRowValues<bfloat16>({100, 2}, bRowValues100);
 
     EXPECT_THROW((calculateMatmulTolerance<bfloat16, bfloat16, bfloat16>(a, b)),
                  std::overflow_error);
@@ -1396,11 +1454,12 @@ TEST(TestCalculateMatmulTolerance, ThrowsOnSingularity)
 TEST(TestCalculateMatmulTolerance, ThrowsOnOutputOverflow)
 {
     // Create matrices with very large values that will cause tolerance > half::max
-    // A = 2x10 filled with 1e5, B = 10x2 filled with 1e5
-    // ||A||_1 = 20 * 1e5 = 2e6, ||B||_1 = 20 * 1e5 = 2e6
+    // A = 2x10, rows={1e5, 1e5}. ||A||_inf = 10 * 1e5 = 1e6
+    // B = 10x2, all rows 1e5. ||B||_inf = 2 * 1e5 = 2e5
     // Product will exceed half max (65504)
-    auto a = createConstantTensor<float>({2, 10}, 1.0e5);
-    auto b = createConstantTensor<float>({10, 2}, 1.0e5);
+    auto bRowValues10 = std::vector<double>(10, 1.0e5);
+    auto a = createTensorFromRowValues<float>({2, 10}, {1.0e5, 1.0e5});
+    auto b = createTensorFromRowValues<float>({10, 2}, bRowValues10);
 
     // OutputType = half, so max ≈ 65504
     EXPECT_THROW((calculateMatmulTolerance<half, float, float>(a, b)), std::overflow_error);
