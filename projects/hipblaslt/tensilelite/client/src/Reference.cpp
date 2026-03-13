@@ -813,6 +813,17 @@ namespace TensileLite
             throw std::runtime_error("Unsupported input type.");
         }
 
+#ifdef _WIN32
+        template <typename Accumulator,
+                  typename MathOpAccum,
+                  typename Type,
+                  typename ComputeInputType>
+        inline Accumulator getElement(ContractionProblemGemm const& problem,
+                                      Type const*                   ptr,
+                                      const size_t                  idx,
+                                      void const*                   scalePtr,
+                                      const bool                    conjugate)
+#else // _WIN32
         template <typename Accumulator,
                   typename MathOpAccum,
                   typename Type,
@@ -835,6 +846,7 @@ namespace TensileLite
                                       const size_t                  idx,
                                       void const*                   scalePtr,
                                       const bool                    conjugate)
+#endif // _WIN32
         {
             // case I8/I32/I32, I8 be implicitly cast to int.
             constexpr bool needAccumCast
@@ -867,6 +879,7 @@ namespace TensileLite
             return static_cast<Accumulator>(static_cast<MultT>(static_cast<MathOpMultT>(val)));
         }
 
+#ifndef _WIN32
         template <typename Accumulator,
                   typename MathOpAccum,
                   typename Type,
@@ -895,6 +908,7 @@ namespace TensileLite
 
             return static_cast<Accumulator>(ptr[packIdx].getElement(elemIdx));
         }
+#endif // !_WIN32
 
         template <typename Inputs,
                   typename Accumulator,
@@ -2350,6 +2364,7 @@ namespace TensileLite
 #endif // TENSILE_USE_HALF
 #endif // TENSILE_USE_FP8_BF8
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
             case TypedGemm_F6_S_S::TypeId():
             {
@@ -2428,6 +2443,7 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
+#endif // !_WIN32
             default:;
             }
 

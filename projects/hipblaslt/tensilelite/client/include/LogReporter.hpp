@@ -335,6 +335,7 @@ namespace TensileLite
                                        reinterpret_cast<BFloat8_fnuz const*>(data),
                                        tensor,
                                        reinterpret_cast<BFloat8_fnuz const*>(ptrVal));
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
                     else if(tensor.dataType() == rocisa::DataType::Float6)
                         logTensorTyped(level,
@@ -359,6 +360,7 @@ namespace TensileLite
                                        tensor,
                                        reinterpret_cast<Float4x2 const*>(ptrVal));
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
                     else if(tensor.dataType() == rocisa::DataType::ComplexFloat)
                         logTensorTyped(level,
                                        name,

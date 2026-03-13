@@ -437,6 +437,7 @@ namespace TensileLite
                     initArray<BFloat8_fnuz>(
                         initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
                 case rocisa::DataType::Float6:
                     initArray<Float6x32>(initMode, static_cast<Float6x32*>(array), descriptor);
@@ -452,6 +453,7 @@ namespace TensileLite
                     initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
                     break;
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
                 case rocisa::DataType::MXScale:
                     initArray<MXScale>(initMode, static_cast<MXScale*>(array), descriptor);
                     break;
@@ -468,7 +470,13 @@ namespace TensileLite
                 case rocisa::DataType::Float8BFloat8:
                 case rocisa::DataType::BFloat8Float8:
                 case rocisa::DataType::Float8BFloat8_fnuz:
-                case rocisa::DataType::BFloat8Float8_fnuz:;
+                case rocisa::DataType::BFloat8Float8_fnuz:
+#ifdef _WIN32
+                case rocisa::DataType::Float6:
+                case rocisa::DataType::BFloat6:
+                case rocisa::DataType::Float4:
+#endif // _WIN32
+                ;
                 }
             }
 
@@ -2180,6 +2188,7 @@ namespace TensileLite
         {
             return std::numeric_limits<int8_t>::min();
         }
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Zero>()
@@ -2502,6 +2511,7 @@ namespace TensileLite
             throw std::runtime_error("BadOutput not available for float4.");
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline MXScale DataInitialization::getValue<MXScale, InitMode::Zero>()
@@ -2642,6 +2652,7 @@ namespace TensileLite
             return value == DataInitialization::getValue<int8_t, InitMode::BadInput>();
         }
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline bool DataInitialization::isBadInput<Float6x32>(Float6x32 value)
@@ -2665,6 +2676,7 @@ namespace TensileLite
             return false;
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline bool DataInitialization::isBadInput<MXScale>(MXScale value)
@@ -2751,6 +2763,7 @@ namespace TensileLite
             return value == DataInitialization::getValue<int8_t, InitMode::BadOutput>();
         }
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline bool DataInitialization::isBadOutput<Float6x32>(Float6x32 value)
@@ -2774,6 +2787,7 @@ namespace TensileLite
             return false;
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline float DataInitialization::getTrigValue<float>(int idx, bool useCos, bool useAbs)
@@ -2850,6 +2864,7 @@ namespace TensileLite
             throw std::runtime_error("Trig not available for Int8.");
         }
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getTrigValue<Float6x32>(int idx, bool useCos, bool useAbs)
@@ -2947,6 +2962,7 @@ namespace TensileLite
             return Float4x2(val0, val1);
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline MXScale DataInitialization::getTrigValue<MXScale>(int idx, bool useCos, bool useAbs)
@@ -3221,6 +3237,7 @@ namespace TensileLite
             return getValue<int8_t, InitMode::Random>();
         }
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNarrow>()
@@ -3316,6 +3333,7 @@ namespace TensileLite
             return getValue<Float4x2, InitMode::Random>();
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline MXScale DataInitialization::getValue<MXScale, InitMode::RandomNarrow>()
@@ -3428,6 +3446,7 @@ namespace TensileLite
             return getValueWithUpperLowerBoundInteger<int8_t>();
         }
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNegPosLimited>()
@@ -3525,6 +3544,7 @@ namespace TensileLite
                             getValueWithUpperLowerBoundFP<float>());
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline MXScale DataInitialization::getValue<MXScale, InitMode::RandomNegPosLimited>()
@@ -3613,6 +3633,7 @@ namespace TensileLite
             return static_cast<int8_t>(i);
         }
 
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::ConvertTo<Float6x32>(size_t i)
@@ -3708,6 +3729,7 @@ namespace TensileLite
             return Float4x2(float(i), float(i));
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline MXScale DataInitialization::ConvertTo<MXScale>(size_t i)
@@ -3794,6 +3816,7 @@ namespace TensileLite
         {
             return static_cast<BFloat8_fnuz>(value);
         }
+#ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::convertDoubleTo<Float6x32>(double value)
@@ -3889,6 +3912,7 @@ namespace TensileLite
             return Float4x2(float(value), float(value));
         }
 #endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
 
         template <>
         inline MXScale DataInitialization::convertDoubleTo<MXScale>(double value)

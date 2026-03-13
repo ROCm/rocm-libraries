@@ -30,6 +30,15 @@
 
 #ifdef TENSILE_USE_FP4
 
+#ifdef _WIN32
+
+namespace TensileLite
+{
+    typedef struct Float4{ uint8_t data;} Float4;
+} // end of namespace TensileLite
+
+#else // _WIN32
+
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
@@ -145,5 +154,7 @@ namespace std
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
     }
 } // namespace std
+
+#endif // _WIN32
 
 #endif // TENSILE_USE_FP4

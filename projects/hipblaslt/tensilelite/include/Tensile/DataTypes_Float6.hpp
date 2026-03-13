@@ -30,6 +30,17 @@
 
 #ifdef TENSILE_USE_FP6
 
+#ifdef _WIN32
+
+#include <cstdint>
+
+namespace TensileLite
+{
+    typedef struct Float6{ uint8_t data;} Float6;
+} // end of namespace TensileLite
+
+#else // _WIN32
+
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
@@ -295,5 +306,7 @@ namespace std
         return stream << to_string(a);
     }
 } // namespace std
+
+#endif // _WIN32
 
 #endif // TENSILE_USE_FP6

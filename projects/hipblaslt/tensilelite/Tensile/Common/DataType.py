@@ -25,6 +25,7 @@
 from rocisa.enum import DataTypeEnum
 from functools import lru_cache
 import functools
+import platform
 
 @lru_cache
 def _is8bitFloat(value):
@@ -225,9 +226,9 @@ class DataType:
             'nameAbbrev': 'fp6',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.1875,
-            'hip': 'tensile_float6x32',
+            'hip': 'ERROR' if platform.system() == 'Windows' else 'tensile_float6x32',
             'isComplex': False,
-            'packing': 32,
+            'packing': 1 if platform.system() == 'Windows' else 32,
         },
         {
             'enum': DataTypeEnum.BFloat6,
@@ -235,9 +236,9 @@ class DataType:
             'nameAbbrev': 'bf6',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.1875,
-            'hip': 'tensile_bfloat6x32',
+            'hip': 'ERROR' if platform.system() == 'Windows' else 'tensile_bfloat6x32',
             'isComplex': False,
-            'packing': 32,
+            'packing': 1 if platform.system() == 'Windows' else 32,
         },
         {
             'enum': DataTypeEnum.Float4,
@@ -245,9 +246,9 @@ class DataType:
             'nameAbbrev': 'fp4',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.125,
-            'hip': 'tensile_float4x2',
+            'hip': 'ERROR' if platform.system() == 'Windows' else 'tensile_float4x2',
             'isComplex': False,
-            'packing': 2,
+            'packing': 1 if platform.system() == 'Windows' else 2,
         },
     ]
     lookup = {}
