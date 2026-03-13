@@ -165,7 +165,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
     EXPECT_EQ(yT->name, "Y");
     EXPECT_EQ(yT->dims, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_DIMS));
     EXPECT_EQ(yT->strides, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_STRIDES));
-    EXPECT_FALSE(yT->virtual_);
+    EXPECT_TRUE(yT->virtual_);
 
     // -- Verify block scale dequantize operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
