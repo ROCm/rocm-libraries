@@ -8632,6 +8632,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VSubU32(dst=vgpr(tmp2), src0=vgpr(tmp2), src1=1, comment="GLTr%s: unroll idx - 1"%(tc)))
       bfArgs = (maxGroVgpr, maxGroVgpr, tmp2, tmp)
       module.add(MacroInstruction(name="GLOBAL_OFFSET_%s"%tc, args=bfArgs))
+      # Convert element offset to byte offset (GLOBAL_OFFSET macro computes in elements)
+      module.add(vectorMultiplyBpe(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["bpeGR"]))
 
       module.addSpaceLine()
 
