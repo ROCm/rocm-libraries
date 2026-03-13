@@ -672,3 +672,10 @@ TEST(TestBatchnormInferenceNode, PreValidateAccepts5DSpatialDimensionEqualsOne)
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Inference mode should accept N*D*H*W=1 for 5D tensors (matches PyTorch behavior)";
 }
+
+TEST(TestBatchnormInferenceNode, GetNodeTypeReturnsBatchnormInference)
+{
+    GraphAttributes graphAttrs;
+    BatchnormInferenceNode node(BatchnormInferenceAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE);
+}
