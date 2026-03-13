@@ -10,7 +10,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_eight_waves_base.hpp"
-#include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_eightwarps_policy.hpp"
+#include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_eight_waves_policy.hpp"
 #include "ck_tile/host/concat.hpp"
 
 namespace ck_tile {
@@ -22,7 +22,7 @@ namespace ck_tile {
 // LocalSharedMemoryBuffer: 1
 
 template <typename Problem, typename Policy = GemmABQuantPipelineAgBgCrAsyncPolicy>
-struct ABQuantGemmPipelineAgBgCrEightWarps : public BaseGemmPipelineAgBgCrCompV3<Problem>
+struct ABQuantGemmPipelineAgBgCrEightWaves : public BaseGemmPipelineAgBgCrCompV3<Problem>
 {
     using Base             = BaseGemmPipelineAgBgCrCompV3<Problem>;
     using PipelineImplBase = GemmPipelineAgBgCrEightWavesImplBase<Problem, Policy>;
@@ -123,7 +123,7 @@ struct ABQuantGemmPipelineAgBgCrEightWarps : public BaseGemmPipelineAgBgCrCompV3
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "ABQuantGemmPipelineAgBgCrEightWarps",
+        return concat('_', "ABQuantGemmPipelineAgBgCrEightWaves",
                       concat('x', MPerBlock, NPerBlock, KPerBlock),
                       Problem::kBlockSize,
                       concat('x', MWarps, NWarps),
@@ -137,7 +137,7 @@ struct ABQuantGemmPipelineAgBgCrEightWarps : public BaseGemmPipelineAgBgCrCompV3
         return Policy::template GetSmemSize<Problem>();
     }
 
-    CK_TILE_HOST static std::string Print() { return "ABQuantGemmPipelineAgBgCrEightWarps\n"; }
+    CK_TILE_HOST static std::string Print() { return "ABQuantGemmPipelineAgBgCrEightWaves\n"; }
 
     static constexpr index_t MFMA_INST = MIterPerWarp * NIterPerWarp * KIterPerWarp;
 
