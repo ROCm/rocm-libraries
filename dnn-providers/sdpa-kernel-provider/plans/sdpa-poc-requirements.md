@@ -33,10 +33,11 @@ The plugin must register at least one engine with one plan builder so that hipDN
 
 | Detail | Specification |
 |--------|---------------|
+| Engine class | `SdpaKernelEngine` implementing `IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>` |
 | Engine ID | Registered via `HIPDNN_REGISTER_ENGINE` in `SdpaKernelContainer` |
-| Plan builder | `AsmSdpaBwdPlanBuilder` added to the engine via `addPlanBuilder()` |
+| Plan builder | `AsmSdpaBwdPlanBuilder` added to the engine via `engine->addPlanBuilder()`; engine registered via `engineManager.addEngine()` |
 | Discovery | `hipdnnEnginePluginGetAllEngineIds()` returns at least one ID |
-| Existing tests | The three `TestSdpaKernelContainer` tests that assert zero engines must be updated to assert one engine |
+| Existing tests | The two `TestSdpaKernelContainer` tests that assert zero engines (`CopyEngineIdsReturnsZeroEngines`, `CopyEngineIdsWithBufferReturnsZero`) must be updated to assert one engine |
 
 ### FR-2: Graph Pattern Matching
 
@@ -47,14 +48,13 @@ The plugin must register at least one engine with one plan builder so that hipDN
 - Q/K/V/O/dO tensors are BF16
 - Stats tensor (LSE from forward pass) is FLOAT
 - Q tensor is rank-4 with `dims[3] == 128` (head dimension)
-- `causal_mask == false` and `causal_mask_bottom_right == false`
-- No `left_bound` / `right_bound` set
+- `causal_mask == false` and `causal_mask_bottom_right == false` (these fields are deprecated; also check that no `left_bound` / `right_bound` are set, which is the non-deprecated equivalent)
 - `dropout_probability` is null or 0.0
 - No ALiBi mask (`alibi_mask == false`)
 - No padding mask (`padding_mask == false`)
-- No variable-length sequences (`seq_len_q_tensor_uid == 0`)
+- No variable-length sequences (`seq_len_q` tensor not set — check `!has_value()` on the optional tensor UID, not `== 0`)
 - No bias / dBias tensors
-- Running on gfx942
+- Running on gfx942 (requires `hipGetDeviceProperties` device query — this is a device-level check, not a graph attribute)
 
 **Reject otherwise**, returning zero applicable engine IDs.
 
@@ -86,7 +86,7 @@ A CPU reference implementation for SDPA backward must be created to serve as the
 | Detail | Specification |
 |--------|---------------|
 | Location | `CpuFpReferenceSdpa::backward()` in the test SDK, or a local reference within the provider's test code |
-| Algorithm | Naive SDPA backward: recompute `S = softmax(Q * K^T * scale)`, then `dV = S^T * dO`, `dS = dO * V^T`, `dP = dS * S - S * rowsum(dS * S)` (softmax backward), `dQ = dP * K * scale`, `dK = dP^T * Q * scale` |
+| Algorithm | Naive SDPA backward: recompute `S = softmax(Q * K^T * scale)`, compute `D = rowsum(dO * O)` (numerically preferred form, matches GPU kernel), then `dV = S^T * dO`, `dS = dO * V^T`, `dP = S * (dS - D)` (softmax backward), `dQ = dP * K * scale`, `dK = dP^T * Q * scale` |
 | Inputs | Q, K, V, O, dO, Stats (LSE from forward), attn_scale |
 | Outputs | dQ, dK, dV |
 | Data types | Templated on input type (BF16), compute in float |
@@ -110,7 +110,7 @@ The GPU gradient outputs (dQ, dK, dV) must match the CPU backward reference with
 - dK: GPU vs CPU reference within tolerance
 - dV: GPU vs CPU reference within tolerance
 
-**Forward-pass inputs:** The test must first run a forward pass (either via CPU reference or a known-correct GPU path) to produce the O and Stats (LSE) tensors that the backward kernel requires as input.
+**Forward-pass inputs:** The test must first run a forward pass to produce the O and Stats (LSE) tensors that the backward kernel requires as input. Note: the existing `CpuFpReferenceSdpa::forward()` outputs O but does **not** output Stats (LSE). The test setup must either: (a) augment the CPU forward reference to optionally return LSE, or (b) provide a standalone LSE computation utility that computes `LSE_i = log(sum_j(exp(P_ij)))` per query row from Q, K, and scale.
 
 ### FR-6: Workspace Size Reporting
 
@@ -182,10 +182,10 @@ New source files integrate into the existing CMake targets without restructuring
 | Item | Requirement |
 |------|-------------|
 | New sources | Added to `sdpa_kernel_plugin_impl` OBJECT target in `src/CMakeLists.txt` |
-| `.co` binaries | All three backward `.co` files installed via `install(DIRECTORY asm_kernels/ ...)` |
+| `.co` binaries | All three backward `.co` files installed via `install(DIRECTORY asm_kernels/ ...)`. Note: no `.co` installation infrastructure exists in any provider today — this CMake support must be created from scratch. |
 | `.co` path | Compile definition `AITER_ASM_DIR` set to install prefix; runtime override via `HIPDNN_AITER_ASM_DIR` env var |
-| Unit tests | New test file added to existing `sdpa_kernel_plugin_tests` target |
-| Integration tests | New test file added to existing `sdpa_kernel_plugin_integration_tests` target |
+| Unit tests | New test file added to existing `sdpa_kernel_plugin_tests` target (in `src/tests/`) |
+| Integration tests | New test file added to existing `sdpa_kernel_plugin_integration_tests` target (in `src/integration_tests/`) |
 
 ### ER-4: Code Quality
 
@@ -209,6 +209,8 @@ Each backward kernel arg struct must be verified at compile time to catch layout
 | `fmha_bwd_dq_convert_args` (dQ conversion) | `static_assert` on `sizeof` matching the AITER-defined size |
 
 All structs must use `__attribute__((packed))` with SGPR-aligned padding matching the GPU kernel ABI.
+
+**Note on provenance:** These are AITER-specific per-kernel ABI struct names. CK's `fmha_bwd.hpp` defines a single unified `fmha_bwd_args` struct used for CPU-side launching — it provides semantic reference for field names and purposes, but not the binary layout. The actual GPU kernel ABI structs must be reverse-engineered from AITER source (`mha_bwd.h` / `mha_bwd.cu`), using CK only as a cross-reference.
 
 ### ER-6: AITER Provenance Documentation
 
@@ -332,9 +334,7 @@ The following are explicitly excluded from this POC:
 
 | Document | Path |
 |----------|------|
-| Informal task description | `dnn-providers/sdpa-kernel-provider/plans/sdpa-task.md` |
-| Forward-pass design document | `dnn-providers/sdpa-kernel-provider/plans/aiter-hipdnn-integration-design.md` |
-| Forward-pass integration test plan | `dnn-providers/sdpa-kernel-provider/plans/integration-test-example.md` |
+| POC task breakdown | `dnn-providers/sdpa-kernel-provider/plans/sdpa-poc-tasks.md` |
 | hipDNN backward frontend | `projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaBpropNode.hpp` |
 | Backward attributes | `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp` |
 | Backward FlatBuffer schema | `projects/hipdnn/data_sdk/schemas/sdpa_backward_attributes.fbs` |
