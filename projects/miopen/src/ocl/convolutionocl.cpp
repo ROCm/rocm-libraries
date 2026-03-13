@@ -139,9 +139,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     /// maxSolutionCount "best" solvers only.
     ///
     /// It is also highly desirable to avoid IsApplicable() checks for solutions that go beyond
-    /// maxSolutionCount, i.e. those that are not needed anyway. This optimization is important, for
-    /// example, to avoid applicability checks for MLIR solvers, since these may involve running the
-    /// MIIR compiler, which is very slow.
+    /// maxSolutionCount, i.e. those that are not needed anyway.
     ///
     /// The loop below does all the above at once.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
