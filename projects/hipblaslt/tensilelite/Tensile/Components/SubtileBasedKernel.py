@@ -499,10 +499,12 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
     else:
       module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
     
+    # If interleaved, W0 and W1 get consecutive subtitles otherwise W0 and W1 are spaced by MT0//2 (half subtiles)
     if interleaved:
       module.add(SMovB32(dst=sgpr(tmpSgpr), src=tileInfo.subtileSize*2, comment="%s: bytes loaded per wave"%tc))
     else:
       module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
+
     module.add(VMulLOU32(dst=vgpr(tmp), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="%s: wave partition offset"%tc))
 
     for vgprId in range(len(tileInfo.sharedVgprLROffset)):
@@ -940,8 +942,10 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
   subtileInfo = tileInfo.localSubtiles[linearId]
-  interleaved = True
-  readSize = 2*tileInfo.subtileSize
+  readSizePerWg = 2*tileInfo.subtileSize
+  waveSize = kernel["WavefrontSize"]
+  loadWidth = 16
+
   # Reads mma tiles in a subtile row-major
   # TODO: Check if this ordering can be used for TLU=1
   for mfmaC in range(tileInfo.subtileShape[1]):
@@ -952,11 +956,14 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
       dstVgpr = dstTile.regList.regValues[0]
       numRegs = len(dstTile.regList.regValues)
 
-      offset = sId0*2*readSize if interleaved else sId0*readSize
-      
-      if offset >= readSize * tileInfo.localSubtileGrid[0]:
-        offset -= readSize * tileInfo.localSubtileGrid[0]
-        offset+=512
+      interleaved = True
+      if interleaved:
+        offset = sId0*2*readSizePerWg if interleaved else sId0*readSizePerWg
+        if offset >= readSizePerWg * tileInfo.localSubtileGrid[0]:
+          offset -= readSizePerWg * tileInfo.localSubtileGrid[0]
+          offset+= loadWidth*waveSize // 2
+      else:
+        offset = sId0*readSizePerWg
 
       module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegs), src=vgpr(addrVgpr), ds=DSModifiers(offset=offset),
                             comment="Subtile%s[%u,%u] mfmaId=[%u,%u]"%(tileInfo.tc, sId0, sId1, mfmaR, mfmaC)))
@@ -1083,36 +1090,6 @@ def emitMfmaCode(writer, kernel):
 
   return module
 
-##################################################
-# Debug: Write a VGPR value to D[threadId] for inspection
-#
-# Writes the content of the specified VGPR as a u32 to D[Serial],
-# using flat_store. Uses 2 temp VGPRs from the pool for the address.
-#
-# Usage:
-#   debugExportVgprToD(module, writer, tileInfoA.sharedVgprGROffset[0])
-#
-def debugExportVgprToD(module, writer, vgprIdx, cvtToFloat=True):
-  module.addComment0("DEBUG: Export v%u to D[threadId]" % vgprIdx)
-
-  if cvtToFloat:
-    tmpVgpr = writer.vgprPool.checkOut(2)
-    tmpData = tmpVgpr
-    tmpOffset = tmpVgpr + 1
-    module.add(TextBlock("v_cvt_f32_u32 v%u, v%u // DEBUG: int -> float\n" % (tmpData, vgprIdx)))
-  else:
-    tmpVgpr = writer.vgprPool.checkOut(1)
-    tmpData = vgprIdx
-    tmpOffset = tmpVgpr
-
-  # byte offset = Serial * 4
-  module.add(VLShiftLeftB32(dst=vgpr(tmpOffset), shiftHex=hex(2), src=vgpr("Serial"), comment="DEBUG: byte offset = threadId * 4"))
-  # global_store_dword voffset, vdata, s[base:base+1]
-  module.add(TextBlock("global_store_dword v%u, v%u, s[sgprAddressC:sgprAddressC+1] // DEBUG: store v%u to D[threadId]\n" % (tmpOffset, tmpData, vgprIdx)))
-  module.add(SWaitCnt(vlcnt=0, comment="DEBUG: wait for store"))
-
-  writer.vgprPool.checkIn(tmpVgpr)
-  module.addComment0("DEBUG: End export")
 
 ##################################################
 # Subroutine entry point for main loop impl
