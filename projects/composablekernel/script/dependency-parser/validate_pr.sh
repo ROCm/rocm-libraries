@@ -141,7 +141,48 @@ git log --oneline -1
 
 log_section "Step 2: Rebase on Smart Build Branch"
 log_info "Rebasing pr-${PR_NUMBER} on $SMART_BUILD_BRANCH..."
-git rebase $SMART_BUILD_BRANCH
+
+# Attempt rebase, handling conflicts by accepting PR changes
+if ! git rebase $SMART_BUILD_BRANCH; then
+    log_warn "Rebase conflicts detected, resolving by accepting PR changes..."
+
+    # Loop to handle multiple conflicts during rebase
+    while true; do
+        # Get list of conflicted files
+        CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+
+        if [ -z "$CONFLICTED_FILES" ]; then
+            log_info "No more conflicts, rebase complete"
+            break
+        fi
+
+        log_info "Conflicted files:"
+        echo "$CONFLICTED_FILES"
+
+        # For each conflicted file, accept the PR's version (theirs)
+        while IFS= read -r file; do
+            if [ -f "$file" ]; then
+                log_info "Accepting PR changes for: $file"
+                git checkout --theirs "$file"
+                git add "$file"
+            fi
+        done <<< "$CONFLICTED_FILES"
+
+        # Continue the rebase
+        log_info "Continuing rebase..."
+        if git -c core.editor=true rebase --continue 2>&1 | grep -q "No changes"; then
+            log_warn "No changes after conflict resolution, skipping commit"
+            git rebase --skip
+        elif git rebase --show-current-patch &>/dev/null; then
+            # Still in rebase, continue loop
+            continue
+        else
+            # Rebase complete
+            log_info "Rebase completed"
+            break
+        fi
+    done
+fi
 
 log_info "Rebased commits:"
 git log --oneline -5
