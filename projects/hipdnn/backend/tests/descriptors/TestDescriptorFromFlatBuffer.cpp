@@ -542,16 +542,24 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
 
     // Wrap tensor descriptors into HipdnnBackendDescriptor for the C API boundary
-    auto* xPacked = HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_X_UID]);
-    auto* wPacked = HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_W_UID]);
-    auto* yPacked = HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_Y_UID]);
+    std::unique_ptr<HipdnnBackendDescriptor> xPacked(
+        HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_X_UID]));
+    std::unique_ptr<HipdnnBackendDescriptor> wPacked(
+        HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_W_UID]));
+    std::unique_ptr<HipdnnBackendDescriptor> yPacked(
+        HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_Y_UID]));
+
+    // setAttribute takes void* pointing to a HipdnnBackendDescriptor*, so use raw pointers
+    auto* xRaw = xPacked.get();
+    auto* wRaw = wPacked.get();
+    auto* yRaw = yPacked.get();
 
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xPacked);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xRaw);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &wPacked);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &wRaw);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yPacked);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yRaw);
 
     // Set convolution parameters
     std::vector<int64_t> padding = toVec(K_CONV_PADDING);
@@ -599,10 +607,6 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     desc->getAttribute(
         HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data());
     EXPECT_STREQ(buffer.data(), "my_conv_op");
-
-    delete xPacked;
-    delete wPacked;
-    delete yPacked;
 }
 
 TEST_F(TestConvolutionFwdOperationFromNode, BuildNodePreservesName)
