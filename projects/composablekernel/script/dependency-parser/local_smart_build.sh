@@ -110,20 +110,26 @@ check_prerequisites() {
 
 cmd_analyze() {
     log_info "Step 1: Generating dependency map..."
-    
+
     cd "$BUILD_DIR" || exit 1
-    
-    # Check if compile_commands.json exists
-    if [ ! -f "compile_commands.json" ]; then
-        log_warn "compile_commands.json not found. Running CMake configure..."
-        cmake -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "$WORKSPACE_ROOT"
-    fi
-    
+
+    # Always reconfigure CMake to ensure fresh compile_commands.json
+    log_info "Running CMake configure to generate fresh compile_commands.json..."
+
+    # Use CMAKE flags similar to the dev preset and README recommendations
+    cmake -G Ninja \
+        -DCMAKE_PREFIX_PATH=/opt/rocm \
+        -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DBUILD_DEV=ON \
+        "$WORKSPACE_ROOT"
+
     if [ ! -f "build.ninja" ]; then
-        log_error "build.ninja not found. Please run CMake with -G Ninja"
+        log_error "build.ninja not found after CMake configure"
         exit 1
     fi
-    
+
     log_info "Analyzing dependencies with $PARALLEL workers (this takes ~2 minutes)..."
     python3 "$WORKSPACE_ROOT/script/dependency-parser/main.py" cmake-parse \
         compile_commands.json \
@@ -131,9 +137,9 @@ cmd_analyze() {
         --workspace-root "$WORKSPACE_ROOT" \
         --parallel "$PARALLEL" \
         --output enhanced_dependency_mapping.json
-    
+
     log_info "Dependency map generated: enhanced_dependency_mapping.json ✓"
-    
+
     # Show stats
     local num_files=$(jq '.file_to_executables | length' enhanced_dependency_mapping.json)
     log_info "Mapped $num_files files to executables"
