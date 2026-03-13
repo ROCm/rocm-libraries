@@ -470,10 +470,6 @@ class Solution(collections.abc.Mapping):
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
-      
-      #state["VectorWidthA"] = state["MIWaveTile"][0]
-      #state["StoreVectorWidth"] = state["VectorWidthA"]
-      #state["VectorWidthB"] = state["MIWaveTile"][1]
     
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True

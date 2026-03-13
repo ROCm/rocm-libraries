@@ -1105,23 +1105,6 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module = Module()
   module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based main loop impl")
 
-  # TODO remove #######################
-  # Initialize first 64KB LDS to 0xffffffff
-  #
-  #vtmp = writer.vgprPool.checkOut(1)
-  #vval = writer.vgprPool.checkOutAligned(4,4)
-  #module.add(VLShiftLeftB32(dst=vgpr(vtmp), shiftHex=4, src=vgpr("Serial")))
-  #module.add(VMovB32(dst=vgpr(vval), src="0xffffffff"))
-  #module.add(VMovB32(dst=vgpr(vval+1), src="0xffffffff"))
-  #module.add(VMovB32(dst=vgpr(vval+2), src="0xffffffff"))
-  #module.add(VMovB32(dst=vgpr(vval+3), src="0xffffffff"))
-  #for i in range(16):
-  #  module.add(DSStoreB128(dstAddr=vgpr(vtmp), src=vgpr(vval, 4), ds=DSModifiers(offset=(i * 4096))))
-  #module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""))
-  #writer.vgprPool.checkIn(vtmp)
-  #writer.vgprPool.checkIn(vval)
-  #####################################
-
   
   label = Label("start", comment="")
   module.add(label)
@@ -1150,21 +1133,6 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0))
   module.add(SCBranchSCC0(labelName=label.getLabelName()))
 
-
-  # vtmp = writer.vgprPool.checkOut(1)
-  # module.add(VLShiftRightB32(dst=vgpr(vtmp), shiftHex=hex(6), src=vgpr("Serial")))
-  # # module.add(VMovB32(dst=vgpr(vtmp), src=hex(1)))
-  # module.add(TextBlock("v_cvt_f32_i32 v%u, v%u\n"%(vtmp, vtmp)))
-
-  
-  # for vtiles in writer.states.d.tileInfo.vgprTiles:
-  #   reg = vgpr if vtiles.regList.regPool == writer.vgprPool else accvgpr
-  #   copyInst = VMovB32 if vtiles.regList.regPool == writer.vgprPool else VAccvgprWrite
-  #   for regId in vtiles:
-  #     module.add(copyInst(dst=reg(regId), src=vgpr(vtmp)))
-  #   #module.addComment("%ss used for D mma tile %u: %s"%(regStr, self.states.d.tileInfo.vgprTiles.index(vtiles), str(vtiles)))
-
-  # writer.vgprPool.checkIn(vtmp)
   return module
 
 
