@@ -221,7 +221,6 @@ hipdnnBackendDescriptorType_t BlockScaleQuantizeOperationDescriptor::getStaticTy
 
 std::string BlockScaleQuantizeOperationDescriptor::toString() const
 {
-    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "BlockScaleQuantizeOperationDescriptor: {";
     str += "x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);

@@ -43,16 +43,17 @@ inline Error createBlockScaleQuantizeOperation(
                                              "blockscalequantize SCALE_EXT"));
 
     // Set block scale quantize parameters
-    if(attributes.get_block_size().has_value())
+    if(!attributes.get_block_size().has_value())
     {
-        int32_t blockSize = attributes.get_block_size().value();
-        HIPDNN_CHECK_ERROR(
-            setDescriptorAttrScalar(opDesc.get(),
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
-                                    HIPDNN_TYPE_INT32,
-                                    blockSize,
-                                    "block_scale_quantize block_size"));
+        return {ErrorCode::ATTRIBUTE_NOT_SET, "blockscalequantize block_size is required"};
     }
+    int32_t blockSize = attributes.get_block_size().value();
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrScalar(opDesc.get(),
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
+                                HIPDNN_TYPE_INT32,
+                                blockSize,
+                                "blockscalequantize block_size"));
 
     if(attributes.get_axis().has_value())
     {
@@ -62,23 +63,21 @@ inline Error createBlockScaleQuantizeOperation(
                                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
                                     HIPDNN_TYPE_INT64,
                                     axis,
-                                    "block_scale_quantize axis"));
+                                    "blockscalequantize axis"));
     }
 
-    {
-        bool transpose = attributes.get_transpose();
-        HIPDNN_CHECK_ERROR(
-            setDescriptorAttrScalar(opDesc.get(),
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
-                                    HIPDNN_TYPE_BOOLEAN,
-                                    transpose,
-                                    "block_scale_quantize transpose"));
-    }
+    bool transpose = attributes.get_transpose();
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrScalar(opDesc.get(),
+                                HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                transpose,
+                                "blockscalequantize transpose"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT,
                                                  attributes.compute_data_type,
-                                                 "blockscalequantize compute data type"));
+                                                 "blockscalequantize MATH_PREC"));
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "blockscalequantize operation descriptor"));
