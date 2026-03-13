@@ -247,12 +247,11 @@ struct GridwiseSparseEmbeddingsForwardLayernorm
         };
 
         // first load index
-        ck::static_for<0, DimPerBlock, 1>{}([&](auto i_idx_) {
+        ck::static_ford<Sequence<DimPerBlock, NumEmbeddings>>{}([&](auto ie) {
+            constexpr auto i_idx_       = Number<ie[Number<0>{}]>{};
+            constexpr auto i_embedding_ = Number<ie[Number<1>{}]>{};
             // prefer use s_load
-            ck::static_for<0, NumEmbeddings, 1>{}([&](auto i_embedding_) {
-                index_bufs(i_embedding_)(i_idx_) =
-                    p_indexes[i_embedding_][index_start + i_idx_.value];
-            });
+            index_bufs(i_embedding_)(i_idx_) = p_indexes[i_embedding_][index_start + i_idx_.value];
         });
 
         // load gamma/beta

@@ -538,17 +538,16 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
 
         // Local prefetch A1
         block_sync_lds();
-        static_for<0, LocalPrefetchStages, 1>{}([&](auto m0) {
-            static_ford<Sequence<KRepeat, KGroup>>{}([&](auto kk) {
-                constexpr auto k0  = Number<kk[Number<0>{}]>{};
-                constexpr auto kg0 = Number<kk[Number<1>{}]>{};
-                a_thread_copy_.Run(a_block_desc_m0_m1_m2_k0_k1_k2,
-                                   make_tuple(m0, I0, I0, Number<k0 * KGroup + kg0>{}, I0, I0),
-                                   a_block_buf.At(I0),
-                                   a_thread_desc_,
-                                   make_tuple(m0, I0, I0, k0, I0, Number<kg0 * KPack / KGroup>{}),
-                                   a_thread_buf);
-            });
+        static_ford<Sequence<LocalPrefetchStages, KRepeat, KGroup>>{}([&](auto mkk) {
+            constexpr auto m0  = Number<mkk[Number<0>{}]>{};
+            constexpr auto k0  = Number<mkk[Number<1>{}]>{};
+            constexpr auto kg0 = Number<mkk[Number<2>{}]>{};
+            a_thread_copy_.Run(a_block_desc_m0_m1_m2_k0_k1_k2,
+                               make_tuple(m0, I0, I0, Number<k0 * KGroup + kg0>{}, I0, I0),
+                               a_block_buf.At(I0),
+                               a_thread_desc_,
+                               make_tuple(m0, I0, I0, k0, I0, Number<kg0 * KPack / KGroup>{}),
+                               a_thread_buf);
         });
 
 #if 1

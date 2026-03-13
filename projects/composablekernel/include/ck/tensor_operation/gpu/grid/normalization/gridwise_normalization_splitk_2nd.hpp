@@ -441,10 +441,11 @@ struct GridwiseNormalizationSplitK2nd
                                                          thread_copy_fwd_step_m_k);
             });
 
-            static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                static_ford<Sequence<ThreadBufferNumber, XSrcVectorSize>>{}([&](auto ii) {
-                    constexpr auto iK0 = Number<ii[Number<0>{}]>{};
-                    constexpr auto iK1 = Number<ii[Number<1>{}]>{};
+            static_ford<Sequence<MThreadSliceSize, ThreadBufferNumber, XSrcVectorSize>>{}(
+                [&](auto idx) {
+                    constexpr auto iM  = Number<idx[Number<0>{}]>{};
+                    constexpr auto iK0 = Number<idx[Number<1>{}]>{};
+                    constexpr auto iK1 = Number<idx[Number<2>{}]>{};
                     constexpr auto offset_m_k =
                         thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
 
@@ -458,7 +459,6 @@ struct GridwiseNormalizationSplitK2nd
                         y_thread_buf(iK0)(Number<offset_m_k>{}) *
                         gamma_thread_buf(iK0)(Number<offset_m_k>{});
                 });
-            });
 
             static_for<0, ThreadBufferNumber, 1>{}([&](auto i) {
                 threadwise_beta_load.Run(beta_grid_desc_m_k,
@@ -470,10 +470,11 @@ struct GridwiseNormalizationSplitK2nd
                                                         thread_copy_fwd_step_m_k);
             });
 
-            static_for<0, MThreadSliceSize, 1>{}([&](auto iM) {
-                static_ford<Sequence<ThreadBufferNumber, XSrcVectorSize>>{}([&](auto ii) {
-                    constexpr auto iK0 = Number<ii[Number<0>{}]>{};
-                    constexpr auto iK1 = Number<ii[Number<1>{}]>{};
+            static_ford<Sequence<MThreadSliceSize, ThreadBufferNumber, XSrcVectorSize>>{}(
+                [&](auto idx) {
+                    constexpr auto iM  = Number<idx[Number<0>{}]>{};
+                    constexpr auto iK0 = Number<idx[Number<1>{}]>{};
+                    constexpr auto iK1 = Number<idx[Number<2>{}]>{};
                     constexpr auto offset_m_k =
                         thread_buffer_desc_m_k.CalculateOffset(make_tuple(iM, iK1));
 
@@ -482,7 +483,6 @@ struct GridwiseNormalizationSplitK2nd
                         y_thread_buf(iK0)(Number<offset_m_k>{}) +
                         beta_thread_buf(iK0)(Number<offset_m_k>{});
                 });
-            });
 
             static_for<0, ThreadBufferNumber, 1>{}([&](auto i) {
                 threadwise_y_store.Run(thread_buffer_desc_m_k,

@@ -202,10 +202,11 @@ struct BlockwiseGemmWmmaops_pipeline_base
             using AScaleThreadDesc = decltype(AScaleStruct::scale_thread_desc);
             using BScaleThreadDesc = decltype(BScaleStruct::scale_thread_desc);
 
-            static_for<0, num_scale_m_block, 1>{}([&](auto m0) {
-                static_ford<Sequence<num_scale_n_block, num_scale_k_block>>{}([&](auto nk) {
-                    constexpr auto n0 = Number<nk[Number<0>{}]>{};
-                    constexpr auto k0 = Number<nk[Number<1>{}]>{};
+            static_ford<Sequence<num_scale_m_block, num_scale_n_block, num_scale_k_block>>{}(
+                [&](auto mnk) {
+                    constexpr auto m0 = Number<mnk[Number<0>{}]>{};
+                    constexpr auto n0 = Number<mnk[Number<1>{}]>{};
+                    constexpr auto k0 = Number<mnk[Number<2>{}]>{};
                     constexpr index_t c_offset =
                         CScaleThreadDesc{}.CalculateOffset(make_tuple(k0, m0, n0));
                     constexpr index_t a_offset =
@@ -217,7 +218,6 @@ struct BlockwiseGemmWmmaops_pipeline_base
                         a_scale_struct.scale_thread_bufs(I0)[Number<a_offset>{}] *
                         b_scale_struct.scale_thread_bufs(I0)[Number<b_offset>{}];
                 });
-            });
         }
 
         __device__ void Clear()

@@ -261,54 +261,49 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v3<BlockGemmPipelineSched
 
             // Stage 1
             // global read more
-            static_for<0, buffer_load_stages_more, 1>{}([&](auto /*i*/) {
-                static_for<0, num_mfma_perstage, 1>{}([&](auto imfma) {
-                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            static_ford<Sequence<buffer_load_stages_more, num_mfma_perstage>>{}([&](auto ii) {
+                constexpr auto imfma = Number<ii[Number<1>{}]>{};
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
-                    if constexpr(imfma % buffer_load_issue_point_interval_more == 0)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-                    }
+                if constexpr(imfma % buffer_load_issue_point_interval_more == 0)
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                }
 
-                    if constexpr(imfma >= (num_mfma_perstage - num_ds_read_a_mfma_perstage))
-                    {
-                        __builtin_amdgcn_sched_group_barrier(
-                            0x100, ds_read_a_mfma_rate, 0); // DS read
-                    }
-                });
+                if constexpr(imfma >= (num_mfma_perstage - num_ds_read_a_mfma_perstage))
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x100, ds_read_a_mfma_rate, 0); // DS read
+                }
             });
 
             // global read less
-            static_for<0, (num_total_stages - 2 - buffer_load_stages_more), 1>{}([&](auto /*i*/) {
-                static_for<0, num_mfma_perstage, 1>{}([&](auto imfma) {
-                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-                    if constexpr(imfma % buffer_load_issue_point_interval_less == 0)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-                    }
-                    if constexpr(imfma >= (num_mfma_perstage - num_ds_read_a_mfma_perstage))
-                    {
-                        __builtin_amdgcn_sched_group_barrier(
-                            0x100, ds_read_a_mfma_rate, 0); // DS read
-                    }
-                });
+            static_ford<Sequence<(num_total_stages - 2 - buffer_load_stages_more),
+                                 num_mfma_perstage>>{}([&](auto ii) {
+                constexpr auto imfma = Number<ii[Number<1>{}]>{};
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                if constexpr(imfma % buffer_load_issue_point_interval_less == 0)
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                }
+                if constexpr(imfma >= (num_mfma_perstage - num_ds_read_a_mfma_perstage))
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x100, ds_read_a_mfma_rate, 0); // DS read
+                }
             });
 
             // Stage 2, Sync
             // lds synchronization, prefetch next loop local A
-            static_for<0, num_ds_read_a_prefetch_stages, 1>{}([&](auto /*i*/) {
-                static_for<0, num_mfma_perstage, 1>{}([&](auto imfma) {
-                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-                    if constexpr(imfma % buffer_load_issue_point_interval_stage2 == 0)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-                    }
-                    if constexpr(imfma >= (num_mfma_perstage - num_ds_read_a_mfma_perstage))
-                    {
-                        __builtin_amdgcn_sched_group_barrier(
-                            0x100, ds_read_a_mfma_rate, 0); // DS read
-                    }
-                });
+            static_ford<Sequence<num_ds_read_a_prefetch_stages, num_mfma_perstage>>{}([&](auto ii) {
+                constexpr auto imfma = Number<ii[Number<1>{}]>{};
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                if constexpr(imfma % buffer_load_issue_point_interval_stage2 == 0)
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                }
+                if constexpr(imfma >= (num_mfma_perstage - num_ds_read_a_mfma_perstage))
+                {
+                    __builtin_amdgcn_sched_group_barrier(0x100, ds_read_a_mfma_rate, 0); // DS read
+                }
             });
         }
         else
