@@ -2075,13 +2075,22 @@ namespace
         // push 2 activation arguments
         std::visit(
             [&inputs, &prob](auto val) {
-                inputs.activationArgs.push_back((decltype(val))prob.act0);
-                inputs.activationArgs.push_back((decltype(val))prob.act1);
+                using ValType = decltype(val);
+                if constexpr (std::is_constructible_v<ValType, float>)
+                {
+                    inputs.activationArgs.push_back(static_cast<ValType>(prob.act0));
+                    inputs.activationArgs.push_back(static_cast<ValType>(prob.act1));
+                }
+                else
+                {
+                    inputs.activationArgs.push_back(prob.act0);
+                    inputs.activationArgs.push_back(prob.act1);
+                }
                 if(prob.k)
-                    inputs.alpha = *(decltype(val)*)(prob.alpha);
+                    inputs.alpha = *(ValType*)(prob.alpha);
                 else
                     inputs.alpha = val;
-                inputs.beta = *(decltype(val)*)(prob.beta);
+                inputs.beta = *(ValType*)(prob.beta);
             },
             argument_vals.at(compute_type));
 
