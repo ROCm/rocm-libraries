@@ -986,6 +986,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
               for j in range(instPerPackA):
                 iterCode.add(packItems.pop(0))
                 curPackIdx += 1
+              for j in range(instPerPackB):
+                iterCode.add(packItems.pop(0))
+                curPackIdx += 1
             else:
               iterCode.add(SNop(waitState=0, comment="VALU packing writes to be consumed by matrix instruction"))
               curPackIdx += 1
