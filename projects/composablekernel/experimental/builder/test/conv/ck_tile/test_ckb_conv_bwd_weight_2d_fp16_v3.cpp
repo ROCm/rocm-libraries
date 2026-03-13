@@ -99,7 +99,7 @@ TEST(BwdWeight_2D_FP16_NHWGC, Create)
     });
 }
 
-TEST(ElementWiseOp, Create)
+TEST(ElementWiseOp, CreateBwdWeightTwoStageElementwiseOp)
 {
     cku::run_ck_tile_test<ElementwiseOpBuilder>({"elementwise_kernel",
                                                  "4096_256_4_4_64_4_256",

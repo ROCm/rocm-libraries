@@ -70,9 +70,9 @@ struct ConvTileFactory
         GroupedConvTraitsType::FixedGemmParams::TilePartitionerGroupNum,
         GroupedConvTraitsType::FixedGemmParams::TilePartitionerM01>;
 
-    using WorkspaceDataType = std::conditional_t<OPTIMIZATIONS.two_stage,
-                                                 typename Types::AccDataType,
-                                                 typename Types::EDataType>;
+    using ConvOutDataType = std::conditional_t<OPTIMIZATIONS.two_stage,
+                                               typename Types::AccDataType,
+                                               typename Types::EDataType>;
 
     using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
         GroupedConvTraitsType::FixedGemmParams::kPadM,
@@ -109,7 +109,7 @@ struct ConvTileFactory
                                          typename Types::BDataType,
                                          typename Types::DsDataTypes,
                                          typename Types::AccDataType,
-                                         WorkspaceDataType,
+                                         ConvOutDataType,
                                          typename GroupedConvTraitsType::ImplicitGemmDsLayout,
                                          typename GroupedConvTraitsType::FixedGemmParams::ELayout,
                                          typename Ops::CDEElementwiseOp,
