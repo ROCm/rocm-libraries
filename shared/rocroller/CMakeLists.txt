@@ -184,7 +184,7 @@ endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
     if(ROCROLLER_ENABLE_FETCH)
-        block(SCOPE_FOR VARIABLES)
+        block(SCOPE_FOR VARIABLES PROPAGATE yaml_cpp_SOURCE_DIR)
             # option() honors existing variables
             set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
