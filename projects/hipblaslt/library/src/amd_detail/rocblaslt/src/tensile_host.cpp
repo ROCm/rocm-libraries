@@ -283,7 +283,6 @@ namespace
         {
             switch(computeType)
             {
-            case rocisa::DataType::Half:
             case rocisa::DataType::Float:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::BFloat16:
@@ -300,6 +299,12 @@ namespace
             {
                 *alpha = read_scalar_from_ptr<double>(alphaPtr);
                 *beta  = read_scalar_from_ptr<double>(betaPtr);
+                break;
+            }
+            case rocisa::DataType::Half:
+            {
+                *alpha = read_scalar_from_ptr<hipblasLtHalf>(alphaPtr);
+                *beta  = read_scalar_from_ptr<hipblasLtHalf>(betaPtr);
                 break;
             }
             case rocisa::DataType::Int32:
@@ -2195,6 +2200,14 @@ namespace
                     inputs.activationArgs.push_back(T_compute(prob.act1));
                 },
                 it->second);
+        }
+
+        // convert alpha and beta to float if compute type is half
+        if(prob.compute_type == rocblaslt_compute_f16)
+        {
+            inputs.activationArgs = {prob.act0, prob.act1};
+            inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
+            inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }
 
         return inputs;
