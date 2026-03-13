@@ -2,9 +2,7 @@
 
 ## Objective
 
-Prove that AITER ASM Flash Attention v3 backward kernels can be extracted, adapted without an AITER dependency, and launched through hipDNN's plugin pipeline to produce correct SDPA backward-pass gradient results on MI300X.
-
-Backward is the priority because IREE/Fusilli will not have backward attention until end of summer — this is the gap the SDPA kernel provider must fill first.
+Prove that AITER ASM Flash Attention v3 forward kernels can be extracted, adapted without an AITER dependency, and launched through hipDNN's plugin pipeline to produce correct SDPA forward-pass attention output on MI300X.
 
 ## Scope
 
@@ -12,7 +10,7 @@ Backward is the priority because IREE/Fusilli will not have backward attention u
 |-----------|-------------|
 | Platform | gfx942 (MI300X) only |
 | Data type | BF16 only |
-| Direction | Backward pass only |
+| Direction | Forward pass only |
 | Kernel variant | hd128, non-causal, no dropout, no paged attention, no ALiBi, no variable-length sequences, batch mode (not group mode) |
 | Starting point | Existing plugin skeleton (handle, container, context, settings, entry point, build system, test infra) |
 | Branch model | Feature branch off `rocm-libraries` |
@@ -29,73 +27,51 @@ Backward is the priority because IREE/Fusilli will not have backward attention u
 
 ### FR-1: Engine and Plan Builder Registration
 
-The plugin must register at least one engine with one plan builder so that hipDNN can discover and dispatch SDPA backward work to it.
+The plugin must register at least one engine with one plan builder so that hipDNN can discover and dispatch SDPA forward work to it.
 
 | Detail | Specification |
 |--------|---------------|
 | Engine class | `SdpaKernelEngine` implementing `IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>` |
 | Engine ID | Registered via `HIPDNN_REGISTER_ENGINE` in `SdpaKernelContainer` |
-| Plan builder | `AsmSdpaBwdPlanBuilder` added to the engine via `engine->addPlanBuilder()`; engine registered via `engineManager.addEngine()` |
+| Plan builder | `AsmSdpaFwdPlanBuilder` added to the engine via `engine->addPlanBuilder()`; engine registered via `engineManager.addEngine()` |
 | Discovery | `hipdnnEnginePluginGetAllEngineIds()` returns at least one ID |
 | Existing tests | The two `TestSdpaKernelContainer` tests that assert zero engines (`CopyEngineIdsReturnsZeroEngines`, `CopyEngineIdsWithBufferReturnsZero`) must be updated to assert one engine |
 
 ### FR-2: Graph Pattern Matching
 
-`AsmSdpaBwdPlanBuilder::isApplicable()` must correctly accept graphs matching the POC configuration and reject all others.
+`AsmSdpaFwdPlanBuilder::isApplicable()` must correctly accept graphs matching the POC configuration and reject all others.
 
 **Accept when all of the following hold:**
-- Single-node graph with `NodeAttributes::SdpaBackwardAttributes`
-- Q/K/V/O/dO tensors are BF16
-- Stats tensor (LSE from forward pass) is FLOAT
+- Single-node graph with `NodeAttributes::SdpaAttributes`
+- Q/K/V tensors are BF16
 - Q tensor is rank-4 with `dims[3] == 128` (head dimension)
 - `causal_mask == false` and `causal_mask_bottom_right == false` (these fields are deprecated; also check that no `left_bound` / `right_bound` are set, which is the non-deprecated equivalent)
 - `dropout_probability` is null or 0.0
 - No ALiBi mask (`alibi_mask == false`)
 - No padding mask (`padding_mask == false`)
 - No variable-length sequences (`seq_len_q` tensor not set — check `!has_value()` on the optional tensor UID, not `== 0`)
-- No bias / dBias tensors
+- No attention mask / bias tensor (`attn_mask` tensor not set)
+- No paged attention (`page_table_k` / `page_table_v` tensors not set)
 - Running on gfx942 (requires `hipGetDeviceProperties` device query — this is a device-level check, not a graph attribute)
 
 **Reject otherwise**, returning zero applicable engine IDs.
 
-### FR-3: ASM Kernel Loading and Multi-Kernel Dispatch
+### FR-3: ASM Kernel Loading and Dispatch
 
-The backward pass requires a sequence of kernel launches. The plugin must load pre-compiled `.co` binaries and orchestrate them in the correct order.
-
-**Kernel sequence:**
-
-| Step | Kernel | `.co` file | Purpose |
-|------|--------|-----------|---------|
-| 1 | O * dO precompute | `bwd_hd128_odo_bf16.co` | Compute `D = rowsum(O * dO)` intermediate (`[B, H, S_q]`, float) |
-| 2 | Main backward | `bwd_hd128_bf16_a32_rtne.co` | Compute dK, dV, and dQ accumulator (float) |
-| 3 | dQ type conversion | `bwd_hd128_dq_convert_bf16_rtne.co` | Convert dQ from float accumulator to BF16 output |
-
-All `.co` files are copied from AITER `hsa/gfx942/fmha_v3_bwd/`.
+The forward pass requires a single kernel launch. The plugin must load a pre-compiled `.co` binary and launch it.
 
 | Detail | Specification |
 |--------|---------------|
-| Load mechanism | `hipModuleLoad` + `hipModuleGetFunction` per kernel |
+| Kernel | Forward attention |
+| `.co` file | `fwd_hd128_bf16_rtne.co` (from AITER `hsa/gfx942/fmha_v3_fwd/MI300/`) |
+| Load mechanism | `hipModuleLoad` + `hipModuleGetFunction` |
 | Launch mechanism | `hipModuleLaunchKernel` with `HIP_LAUNCH_PARAM_BUFFER_POINTER` |
-| Execution order | Steps 1 → 2 → 3, serialized on the same HIP stream |
-| Module lifecycle | Load all three on plan build, unload on plan/context destruction |
+| Module lifecycle | Load on plan build, unload on plan/context destruction |
+| Arguments | Populated `fmha_fwd_v3_args` struct with Q/K/V input pointers, O/LSE output pointers, strides, scale, GQA ratio, and control flags |
 
-### FR-4: CPU Backward Reference
+### FR-4: Correct Computation
 
-A CPU reference implementation for SDPA backward must be created to serve as the test oracle. `CpuFpReferenceSdpa` currently only has `forward()` — a `backward()` method does not exist.
-
-| Detail | Specification |
-|--------|---------------|
-| Location | `CpuFpReferenceSdpa::backward()` in the test SDK, or a local reference within the provider's test code |
-| Algorithm | Naive SDPA backward: recompute `S = softmax(Q * K^T * scale)`, compute `D = rowsum(dO * O)` (numerically preferred form, matches GPU kernel), then `dV = S^T * dO`, `dS = dO * V^T`, `dP = S * (dS - D)` (softmax backward), `dQ = dP * K * scale`, `dK = dP^T * Q * scale` |
-| Inputs | Q, K, V, O, dO, Stats (LSE from forward), attn_scale |
-| Outputs | dQ, dK, dV |
-| Data types | Templated on input type (BF16), compute in float |
-| GQA support | Must handle `num_heads_q != num_heads_kv` (GQA ratio) by broadcasting K/V heads and reducing dK/dV gradients |
-| Precision | Not required to be fast — correctness only |
-
-### FR-5: Correct Computation
-
-The GPU gradient outputs (dQ, dK, dV) must match the CPU backward reference within BF16 tolerance for at least the three test configurations below.
+The GPU attention output (O) must match the CPU reference within BF16 tolerance for at least the three test configurations below. Verification uses hipDNN's `IntegrationGraphVerificationHarness` — the harness automatically runs the graph on CPU via `CpuReferenceGraphExecutor` and compares against GPU results using registered tolerances.
 
 | Config | B | H_q | H_kv | S_q | S_kv | D | Description |
 |--------|---|-----|------|-----|------|---|-------------|
@@ -103,45 +79,35 @@ The GPU gradient outputs (dQ, dK, dV) must match the CPU backward reference with
 | 2 | 2 | 8 | 8 | 512 | 512 | 128 | Medium MHA |
 | 3 | 1 | 8 | 2 | 256 | 256 | 128 | GQA (ratio 4) |
 
-**Tolerance:** `atol = 1e-2`, `rtol = 1e-2`. BF16 has ~7 mantissa bits; the tiled backward kernel accumulates in float but converts to BF16 for output, introducing rounding divergence from the naive CPU implementation.
+**Tolerance:** `atol = 1e-2`, `rtol = 1e-2`. BF16 has ~7 mantissa bits; the tiled forward kernel accumulates in float but converts to BF16 for output, introducing rounding divergence from the naive CPU implementation.
 
-**Validation per output:**
-- dQ: GPU vs CPU reference within tolerance
-- dK: GPU vs CPU reference within tolerance
-- dV: GPU vs CPU reference within tolerance
+**Validation:** O tensor — GPU vs CPU reference within tolerance, verified via `registerValidator()` + `verifyGraph()`.
 
-**Forward-pass inputs:** The test must first run a forward pass to produce the O and Stats (LSE) tensors that the backward kernel requires as input. Note: the existing `CpuFpReferenceSdpa::forward()` outputs O but does **not** output Stats (LSE). The test setup must either: (a) augment the CPU forward reference to optionally return LSE, or (b) provide a standalone LSE computation utility that computes `LSE_i = log(sum_j(exp(P_ij)))` per query row from Q, K, and scale.
+### FR-5: Workspace Size Reporting
 
-### FR-6: Workspace Size Reporting
-
-The backward plan must report the correct workspace size for the intermediate buffers needed by the multi-kernel sequence.
-
-| Buffer | Size formula | Purpose |
-|--------|-------------|---------|
-| D (O*dO intermediate) | `B * H_q * S_q * sizeof(float)` | Output of odo kernel, input to main backward kernel |
-| dQ accumulator | `B * H_q * S_q * D * sizeof(float)` | Float accumulator for dQ, input to dq_convert kernel |
+The forward plan must report the correct workspace size. The forward pass is a single kernel that reads Q/K/V and writes O and Stats directly — no intermediate buffers are needed.
 
 | Detail | Specification |
 |--------|---------------|
-| Total workspace | Sum of D buffer and dQ accumulator sizes |
-| Pre-build query | `IPlanBuilder::getMaxWorkspaceSize()` returns the total based on graph tensor dimensions |
-| Post-build query | `IPlan::getWorkspaceSize()` returns the same value from the built plan |
-| Layout | Plugin manages sub-allocation within the workspace (e.g., D at offset 0, dQ_acc at offset `sizeof_D_buffer`) |
+| Total workspace | 0 bytes (no intermediate buffers required) |
+| Pre-build query | `IPlanBuilder::getMaxWorkspaceSize()` returns 0 |
+| Post-build query | `IPlan::getWorkspaceSize()` returns 0 |
 
-### FR-7: Clean Rejection
+### FR-6: Clean Rejection
 
 The plugin must return zero applicable engines (not crash, not throw) for graphs that do not match the POC configuration.
 
 | Rejection case | Expected behavior |
 |----------------|-------------------|
 | Non-SDPA graph (e.g., BatchNorm) | Zero applicable engines |
-| Forward SDPA graph (`SdpaAttributes`) | Zero applicable engines |
-| Backward SDPA with FP16 tensors | Zero applicable engines |
-| Backward SDPA with `causal_mask == true` | Zero applicable engines |
-| Backward SDPA with `hd != 128` | Zero applicable engines |
-| Backward SDPA on non-gfx942 hardware | Zero applicable engines |
-| Backward SDPA with dropout | Zero applicable engines |
-| Backward SDPA with bias/dBias tensors | Zero applicable engines |
+| Backward SDPA graph (`SdpaBackwardAttributes`) | Zero applicable engines |
+| Forward SDPA with FP16 tensors | Zero applicable engines |
+| Forward SDPA with `causal_mask == true` | Zero applicable engines |
+| Forward SDPA with `hd != 128` | Zero applicable engines |
+| Forward SDPA on non-gfx942 hardware | Zero applicable engines |
+| Forward SDPA with dropout | Zero applicable engines |
+| Forward SDPA with attention mask / bias tensor | Zero applicable engines |
+| Forward SDPA with paged attention | Zero applicable engines |
 
 ---
 
@@ -182,7 +148,7 @@ New source files integrate into the existing CMake targets without restructuring
 | Item | Requirement |
 |------|-------------|
 | New sources | Added to `sdpa_kernel_plugin_impl` OBJECT target in `src/CMakeLists.txt` |
-| `.co` binaries | All three backward `.co` files installed via `install(DIRECTORY asm_kernels/ ...)`. Note: no `.co` installation infrastructure exists in any provider today — this CMake support must be created from scratch. |
+| `.co` binary | Forward `.co` file installed via `install(DIRECTORY asm_kernels/ ...)`. Note: no `.co` installation infrastructure exists in any provider today — this CMake support must be created from scratch. |
 | `.co` path | Compile definition `AITER_ASM_DIR` set to install prefix; runtime override via `HIPDNN_AITER_ASM_DIR` env var |
 | Unit tests | New test file added to existing `sdpa_kernel_plugin_tests` target (in `src/tests/`) |
 | Integration tests | New test file added to existing `sdpa_kernel_plugin_integration_tests` target (in `src/integration_tests/`) |
@@ -200,17 +166,15 @@ Code must pass the project's existing quality gates.
 
 ### ER-5: Kernel Arg Struct Verification
 
-Each backward kernel arg struct must be verified at compile time to catch layout drift.
+The forward kernel arg struct must be verified at compile time to catch layout drift.
 
 | Struct | Check |
 |--------|-------|
-| `fmha_bwd_v3_args` (main backward) | `static_assert` on `sizeof` matching the AITER-defined size |
-| `fmha_bwd_odo_args` (O*dO precompute) | `static_assert` on `sizeof` matching the AITER-defined size |
-| `fmha_bwd_dq_convert_args` (dQ conversion) | `static_assert` on `sizeof` matching the AITER-defined size |
+| `fmha_fwd_v3_args` (forward kernel) | `static_assert` on `sizeof` matching the AITER-defined size |
 
-All structs must use `__attribute__((packed))` with SGPR-aligned padding matching the GPU kernel ABI.
+The struct must use `__attribute__((packed))` with SGPR-aligned padding matching the GPU kernel ABI.
 
-**Note on provenance:** These are AITER-specific per-kernel ABI struct names. CK's `fmha_bwd.hpp` defines a single unified `fmha_bwd_args` struct used for CPU-side launching — it provides semantic reference for field names and purposes, but not the binary layout. The actual GPU kernel ABI structs must be reverse-engineered from AITER source (`mha_bwd.h` / `mha_bwd.cu`), using CK only as a cross-reference.
+**Note on provenance:** This is an AITER-specific per-kernel ABI struct name. CK's forward attention code may define a separate unified struct used for CPU-side launching — it provides semantic reference for field names and purposes, but not the binary layout. The actual GPU kernel ABI struct must be reverse-engineered from AITER source (`mha_fwd.h` / `mha_fwd.cu`), using CK only as a cross-reference.
 
 ### ER-6: AITER Provenance Documentation
 
@@ -235,11 +199,11 @@ Document how AITER selects which attention kernel to dispatch for a given proble
 
 | Topic | Expected content |
 |-------|-----------------|
-| Dispatch logic | How does AITER's `mha_bwd.cu` / Python layer choose between backward kernel variants? |
-| Decision tree | Which parameters drive selection (dtype, head dim, causal, group mode, platform, accumulator precision)? |
-| CSV metadata | How does the codegen CSV define the available variants? |
-| Kernel count | How many backward `.co` variants exist for each platform? |
-| Multi-kernel orchestration | How does AITER sequence the odo, main bwd, and dq_convert kernels? Are all three always needed? |
+| Dispatch logic | How does AITER's `mha_fwd.cu` / Python layer choose between forward kernel variants? |
+| Decision tree | Which parameters drive selection (dtype, head dim, causal, group mode, platform, rounding mode)? |
+| CSV metadata | How does the codegen CSV (`fmha_fwd.csv`) define the available variants? |
+| Kernel count | How many forward `.co` variants exist for each platform (MI300 vs MI308)? |
+| MI300 vs MI308 | How does AITER select between MI300 and MI308 subdirectories? What distinguishes them (CU count tuning)? |
 
 ### RD-2: CK and ASM Kernel Relationship
 
@@ -248,7 +212,7 @@ Document the relationship between CK (Composable Kernel) tile-based kernels and 
 | Topic | Expected content |
 |-------|-----------------|
 | When CK is used | Which attention configurations use CK tile kernels vs. ASM kernels? |
-| Backward coverage | Does CK have backward attention kernels? What is their coverage vs. ASM? |
+| Forward coverage | Does CK have forward attention kernels? What is their coverage vs. ASM? |
 | Fallback behavior | Does AITER fall back to CK when no ASM kernel matches? |
 | Performance delta | Qualitative comparison (ASM is faster for specific configs; CK provides broader coverage) |
 | Dependency implications | What does using CK kernels mean for build time, binary size, and dependencies? |
@@ -259,12 +223,12 @@ Provide the data needed to create an incremental plan for expanding beyond the P
 
 | Topic | Expected content |
 |-------|-----------------|
-| Priority variants | Which additional backward kernel variants to add next (causal? hd192? FP8? gfx950?) |
-| Forward pass | Assessment of AITER's forward ASM kernels and effort to integrate as a complement to IREE/Fusilli |
+| Priority variants | Which additional forward kernel variants to add next (causal? hd192? FP8? gfx950? group mode?) |
+| Backward pass | Assessment of AITER's backward ASM kernels (3-kernel pipeline: odo, main bwd, dq_convert) and effort to integrate |
 | Build time impact | Estimated impact of adding CK tile kernels as a fallback |
-| Coverage gaps | What backward SDPA configurations would remain uncovered after adding ASM kernels? |
+| Coverage gaps | What forward SDPA configurations would remain uncovered after adding ASM kernels? |
 | Maintainability | Risks of maintaining copied ASM binaries vs. building from AITER source |
-| Variant suffixes | Document what `pddv`, `pssk`, `psskddv`, `swa` suffixes mean and when each is needed |
+| MI308 support | Effort to support MI308 kernel variants alongside MI300 |
 
 ---
 
@@ -273,12 +237,11 @@ Provide the data needed to create an incremental plan for expanding beyond the P
 | Dependency | Type | Notes |
 |------------|------|-------|
 | MI300X (gfx942) hardware | Test infrastructure | Required for integration tests; unit tests run on any platform |
-| AITER repository access | One-time | Needed to extract `.co` binaries, kernel arg structs, and reference the source files |
+| AITER repository access | One-time | Needed to extract `.co` binary, kernel arg struct, and reference the source files |
 | Plugin SDK version | API stability | Assumes current `EnginePluginImpl.inl` and interface versions |
 | Existing plugin skeleton | Starting point | Handle, container, context, settings, entry point, build system are complete |
 | ROCm toolchain | Build dependency | HIP runtime and ROCm clang compiler |
-| Forward-pass outputs for test inputs | Test setup | Integration tests need O and Stats (LSE) tensors as backward inputs; these must be produced by a known-correct forward pass (CPU reference `CpuFpReferenceSdpa::forward()` or equivalent) |
-| AITER backward kernel ABI | Reverse engineering | The backward arg structs (`fmha_bwd_v3_args`, odo args, dq_convert args) must be reverse-engineered from AITER source (`mha_bwd.h` / `mha_bwd.cu`) and CK reference (`fmha_bwd.hpp`) |
+| AITER forward kernel ABI | Reverse engineering | The forward arg struct (`fmha_fwd_v3_args`) must be reverse-engineered from AITER source (`mha_fwd.h` / `mha_fwd.cu`) |
 
 ---
 
@@ -288,22 +251,22 @@ The following are explicitly excluded from this POC:
 
 | Item | Rationale |
 |------|-----------|
-| Forward pass | IREE/Fusilli provides forward coverage; forward can be added post-POC to complement it |
+| Backward pass | Multi-kernel pipeline (odo + main bwd + dq_convert); significantly more complex; deferred to post-POC |
 | FP16 / FP8 data types | Additional kernel variants and arg handling; deferred to post-POC |
-| Head dimensions other than 128 | Requires additional `.co` binaries and config entries |
-| Causal masking | Requires different `.co` variants and mask-aware arg setup |
+| Head dimensions other than 128 | Requires additional `.co` binaries (e.g., hd192x128 variants) |
+| Causal masking | Requires different `.co` variants (`fwd_hd128_bf16_causal_rtne.co`) and mask-aware arg setup |
 | Dropout | Requires seed/offset tensors, dropout mask, and additional kernel arg fields |
-| Bias / dBias gradients | Requires bias tensor handling and dBias output |
-| Paged attention | Requires separate plan builder and different kernel family |
+| Attention mask / bias tensors | Requires bias tensor handling and additional kernel args |
+| Paged attention | Requires page table tensors and different kernel family |
 | ALiBi masking | Requires bias tensor handling |
 | Variable-length sequences | Requires group-mode `.co` variants and sequence-length tensors |
+| Group mode | Requires group-mode `.co` variants (`fwd_hd128_bf16_rtne_group.co`) |
 | Non-gfx942 platforms | Requires platform-specific `.co` binaries |
+| MI308 kernel variants | Requires MI300 vs MI308 runtime selection logic |
 | Performance benchmarking | POC validates correctness only; performance is a post-POC concern |
-| Multi-kernel selection logic | Only one kernel variant per step; no dispatch logic needed |
+| Multi-kernel selection logic | Only one kernel variant; no dispatch logic needed |
 | Production error handling | POC uses basic error checking; robust error reporting is post-POC |
 | Backward-compatible API surface | No public API commitments from the POC |
-| Sliding window attention (`swa` variants) | Post-POC expansion |
-| Persistent variants (`pddv`, `pssk`, `psskddv`) | Post-POC; need RD-3 analysis first to understand when they apply |
 
 ---
 
@@ -312,17 +275,16 @@ The following are explicitly excluded from this POC:
 | ID | Criterion | Verification Method |
 |----|-----------|-------------------|
 | FR-1 | Plugin reports at least one engine ID | `hipdnnEnginePluginGetAllEngineIds()` returns count >= 1; updated unit tests pass |
-| FR-2 | `isApplicable()` returns true for BF16 hd128 non-causal backward SDPA on gfx942 | Unit tests with matching `SdpaBackwardAttributes` graph configurations |
-| FR-3 | All three backward kernels load and launch without HIP errors | Integration test completes without `hipModule*` failures |
-| FR-4 | CPU backward reference produces correct gradients | Verified against a known analytical case or cross-checked with an independent implementation |
-| FR-5 | GPU dQ, dK, dV match CPU reference (atol=1e-2, rtol=1e-2) for all 3 configs | `IntegrationGpuSdpaKernelBwdBfp16` parameterized test suite passes |
-| FR-6 | Workspace size equals `D_buffer + dQ_acc_buffer` | Unit test asserts `getWorkspaceSize()` output; integration test allocates and passes workspace |
-| FR-7 | Non-matching graphs return zero applicable engines | Unit tests with forward SDPA, non-SDPA, FP16, causal, non-gfx942 graphs |
+| FR-2 | `isApplicable()` returns true for BF16 hd128 non-causal forward SDPA on gfx942 | Unit tests with matching `SdpaAttributes` graph configurations |
+| FR-3 | Forward kernel loads and launches without HIP errors | Integration test completes without `hipModule*` failures |
+| FR-4 | GPU O matches CPU reference (atol=1e-2, rtol=1e-2) for all 3 configs | `IntegrationGpuSdpaKernelFwdBfp16` parameterized test suite passes via `verifyGraph()` |
+| FR-5 | Workspace size equals 0 | Unit test asserts `getWorkspaceSize()` returns 0 |
+| FR-6 | Non-matching graphs return zero applicable engines | Unit tests with backward SDPA, non-SDPA, FP16, causal, non-gfx942 graphs |
 | ER-1 | No AITER references in CMake or includes | Grep-based check; CI build without AITER installed |
 | ER-2 | Full plugin lifecycle works end-to-end | Integration test exercises create -> set stream -> get engines -> build -> execute -> destroy |
-| ER-3 | `ninja` builds without errors; all three `.co` files are installed | Build succeeds; `.co` files present at install prefix |
+| ER-3 | `ninja` builds without errors; `.co` file is installed | Build succeeds; `.co` file present at install prefix |
 | ER-4 | `ninja check_format`, `ninja tidy` pass; zero `-Werror` warnings | CI quality gates |
-| ER-5 | `static_assert` on all backward kernel arg struct sizes compiles | Build succeeds |
+| ER-5 | `static_assert` on forward kernel arg struct size compiles | Build succeeds |
 | ER-6 | Each adapted file has AITER provenance comment | Code review |
 | RD-1 | AITER kernel selection analysis document exists | Document review |
 | RD-2 | CK/ASM relationship document exists | Document review |
@@ -335,9 +297,10 @@ The following are explicitly excluded from this POC:
 | Document | Path |
 |----------|------|
 | POC task breakdown | `dnn-providers/sdpa-kernel-provider/plans/sdpa-poc-tasks.md` |
-| hipDNN backward frontend | `projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaBpropNode.hpp` |
-| Backward attributes | `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp` |
-| Backward FlatBuffer schema | `projects/hipdnn/data_sdk/schemas/sdpa_backward_attributes.fbs` |
-| CPU forward reference | `projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp` |
-| CK backward args reference | `projects/composablekernel/example/ck_tile/01_fmha/fmha_bwd.hpp` |
-| AITER backward `.co` kernels | `aiter/hsa/gfx942/fmha_v3_bwd/` |
+| hipDNN forward frontend | `projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFpropNode.hpp` |
+| Forward attributes | `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` |
+| Forward FlatBuffer schema | `projects/hipdnn/data_sdk/schemas/sdpa_attributes.fbs` |
+| Integration test harness pattern | `dnn-providers/miopen-provider/integration_tests/IntegrationGraphVerificationHarness.hpp` |
+| AITER forward arg struct | `aiter/csrc/include/mha_fwd.h` |
+| AITER forward `.co` kernels | `aiter/hsa/gfx942/fmha_v3_fwd/MI300/` |
+| AITER forward CSV metadata | `aiter/hsa/gfx942/fmha_v3_fwd/fmha_fwd.csv` |
