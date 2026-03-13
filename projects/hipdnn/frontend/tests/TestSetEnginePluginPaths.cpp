@@ -85,6 +85,29 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAbsoluteSuccess)
     EXPECT_TRUE(error.is_good());
 }
 
+TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveSuccess)
+{
+    std::vector<std::filesystem::path> paths
+        = {"/path/to/plugin_a", "/path/to/plugin_b", "/path/to/plugins"};
+
+    // Expected strings after std::filesystem::path conversion
+    std::vector<std::string> expectedStrings;
+    expectedStrings.reserve(paths.size());
+    for(const auto& p : paths)
+    {
+        expectedStrings.push_back(p.string());
+    }
+
+    EXPECT_CALL(*_mockBackend,
+                setEnginePluginPathsExt(paths.size(),
+                                        pathArrayMatches(expectedStrings, paths.size()),
+                                        HIPDNN_PLUGIN_LOADING_ADDITIVE))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    EXPECT_TRUE(error.is_good());
+}
+
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveBackendFailure)
 {
     std::array<const char*, 2> paths = {"/some/path1", "/some/path2"};
