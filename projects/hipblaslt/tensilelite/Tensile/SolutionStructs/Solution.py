@@ -3735,18 +3735,6 @@ class Solution(collections.abc.Mapping):
         ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
         # unset DtlPlusLdsBuf
         state["DtlPlusLdsBuf"] = 0
-      state["LdsAlignPow2"] = True
-      # For LDS size != pow(2)
-      if state["MaxLDS"] & (state["MaxLDS"]-1) != 0 and ldsNumBytesAB > state["MaxLDS"]:
-        # AAMMBB layout
-        # print("AAMMBB layout")
-        state["LdsAlignPow2"] = False
-        state["LdsOffsetA_Blk"] = state["LdsOffsetA"] + ldsNumBytesAlignedA
-        state["LdsOffsetMetadata"] = state["LdsOffsetA_Blk"] + ldsNumBytesAlignedA
-        state["LdsOffsetMetadata_Blk"] = state["LdsOffsetMetadata"] + ldsNumBytesAlignedMetadata
-        state["LdsOffsetB"] = state["LdsOffsetMetadata_Blk"] + ldsNumBytesAlignedMetadata
-        state["LdsOffsetB_Blk"] = state["LdsOffsetB"] + ldsNumBytesAlignedB
-        ldsNumBytesAB = state["LdsOffsetB_Blk"] + ldsNumBytesB
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
