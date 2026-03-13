@@ -39,8 +39,6 @@
 #include <iostream>
 
 #ifdef _WIN32
-#define popen _popen
-#define pclose _pclose
 #define PATH_SEPARATOR "\\"
 #else
 #define PATH_SEPARATOR "/"
@@ -132,19 +130,12 @@ class GPU_HipGraphExistTest_FP32 : public testing::TestWithParam<HipGraphTestCas
 {
 protected:
     std::string temp_dir;
-    std::string rocprof_cmd;
 
     void SetUp() override
     {
         // Create temporary directory for test outputs
         temp_dir = (fs::temp_directory_path() / "miopen_hip_graph_test").string();
         fs::create_directories(temp_dir);
-
-#ifdef _WIN32
-        rocprof_cmd = "rocprofv3.exe";
-#else
-        rocprof_cmd = "rocprofv3";
-#endif
     }
 
     void TearDown() override
@@ -164,6 +155,19 @@ protected:
     }
 };
 
+// Count occurrences of a pattern in a string
+int CountOccurrencesInString(const std::string& text, const std::string& search_string)
+{
+    int count    = 0;
+    size_t pos   = 0;
+    while((pos = text.find(search_string, pos)) != std::string::npos)
+    {
+        count++;
+        pos += search_string.length();
+    }
+    return count;
+}
+
 void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_dir)
 {
     // Use the same GPU mask as other MIOpenDriver tests
@@ -181,106 +185,85 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
         GTEST_SKIP() << "MIOpenDriver not found at: " << driver_path.string();
     }
 
-    // Get rocprof command
-#ifdef _WIN32
-    const std::string rocprof_cmd = "rocprofv3.exe";
-#else
-    const std::string rocprof_cmd = "rocprofv3";
-#endif
-
     // Capture stderr to reduce test noise and allow verification
     // NOTE: CaptureStderr must be called AFTER all GTEST_SKIP() checks,
     // otherwise GetCapturedStderr() won't be called and stderr will remain
     // redirected, causing issues for subsequent tests.
     testing::internal::CaptureStderr();
 
-    // Construct rocprof command
-    std::string driver_output = temp_dir + PATH_SEPARATOR + test_case.test_name + "_output.txt";
+    // Build the command to run MIOpenDriver with AMD_LOG_LEVEL for HIP API tracing
+    // AMD_LOG_LEVEL=4 enables debug level logging which includes HIP API calls
+    std::string output_file = temp_dir + PATH_SEPARATOR + test_case.test_name + "_output.txt";
 
     std::ostringstream cmd;
 
-    // Change to temp directory first, then run rocprof from there
-    // Also set LD_LIBRARY_PATH so MIOpenDriver can find libMIOpen.so
+    // Set up environment and library path
     auto lib_path = fs::absolute(driver_path).parent_path().parent_path() / "lib";
 #ifdef _WIN32
     cmd << "cd /d \"" << temp_dir << "\" && ";
+    cmd << "set AMD_LOG_LEVEL=4 && ";
 #else
     cmd << "cd \"" << temp_dir << "\" && ";
+    cmd << "AMD_LOG_LEVEL=4 ";
     cmd << "LD_LIBRARY_PATH=\"" << lib_path.string() << ":$LD_LIBRARY_PATH\" ";
 #endif
 
-    // Run rocprofv3 with --hip-trace. Note: rocprofv3 requires `--` separator before command
-    // Output format: rocprofv3 creates <name>_hip_api_trace.csv with -f csv option
-    cmd << rocprof_cmd << " --hip-trace -f csv -o " << test_case.test_name << " -- ";
+    // Run MIOpenDriver directly (no need for rocprof)
     cmd << "\"" << fs::absolute(driver_path).string() << "\" " << test_case.driver_type << " ";
     cmd << test_case.driver_args;
+
     // Only add --use_hip_graph 1 if not already in driver_args and expect_graph is true
     if(test_case.expect_graph && test_case.driver_args.find("--use_hip_graph") == std::string::npos)
     {
         cmd << " --use_hip_graph 1";
     }
-    cmd << " ";
-#ifdef _WIN32
-    cmd << "> \"" << driver_output << "\" 2>&1";
-#else
-    cmd << "2>&1 | tee \"" << driver_output << "\"";
-#endif
+
+    // Capture both stdout and stderr to the output file
+    cmd << " > \"" << output_file << "\" 2>&1";
 
     std::cout << "Executing command: " << cmd.str() << std::endl;
 
     // Execute the command
     int ret = std::system(cmd.str().c_str());
 
-    // Check if command executed successfully
-    // Note: rocprof may return non-zero even on success, so we check for output files
     std::cout << "Command return code: " << ret << std::endl;
 
-    // Look for rocprofv3 output files
-    // rocprofv3 with -f csv -o <name> creates: <name>_hip_api_trace.csv
-    std::vector<std::string> possible_trace_files = {
-        temp_dir + PATH_SEPARATOR + test_case.test_name + "_hip_api_trace.csv"};
-
-    std::string trace_file;
-
-    // List directory contents for debugging
-    std::cout << "Checking directory: " << temp_dir << std::endl;
-    std::cout << "Directory contents:" << std::endl;
-    for(const auto& entry : fs::directory_iterator(temp_dir))
+    // Read the output file
+    std::string output_content;
     {
-        std::cout << "  " << entry.path().filename().string() << std::endl;
-    }
-
-    // Find the trace file
-    for(const auto& file : possible_trace_files)
-    {
-        if(fs::exists(file) && fs::file_size(file) > 0)
+        std::ifstream output_stream(output_file);
+        if(output_stream.is_open())
         {
-            trace_file = file;
-            std::cout << "Found trace file: " << trace_file << " (size: " << fs::file_size(file)
-                      << " bytes)" << std::endl;
-            break;
+            std::ostringstream ss;
+            ss << output_stream.rdbuf();
+            output_content = ss.str();
         }
     }
 
-    // If no trace file found, fail with helpful message
-    if(trace_file.empty())
+    // Check if command executed successfully
+    // MIOpenDriver should return 0 on success
+    if(ret != 0)
     {
-        // Get captured stderr before failing
         std::string captured_stderr = testing::internal::GetCapturedStderr();
-        FAIL() << "rocprof did not generate trace file. "
-               << "Expected files like results.json or results.hip_stats.csv in " << temp_dir;
+        std::cout << "Driver output:\n" << output_content << std::endl;
+        FAIL() << "MIOpenDriver failed with return code " << ret;
     }
 
-    // Parse the trace file for HIP Graph API calls
-    // Note: MIOpen uses Stream Capture API, not explicit Graph Construction API
-    int stream_begin_capture_count = CountOccurrences(trace_file, "hipStreamBeginCapture");
-    int stream_end_capture_count   = CountOccurrences(trace_file, "hipStreamEndCapture");
-    int graph_instantiate_count    = CountOccurrences(trace_file, "hipGraphInstantiate");
-    int graph_launch_count         = CountOccurrences(trace_file, "hipGraphLaunch");
-    int graph_destroy_count        = CountOccurrences(trace_file, "hipGraphDestroy");
+    // Parse the output for HIP Graph API calls
+    // AMD_LOG_LEVEL=4 will print HIP API calls like:
+    // :HIP_API: hipStreamBeginCapture ...
+    // :HIP_API: hipGraphInstantiate ...
+    // :HIP_API: hipGraphLaunch ...
+
+    // Count HIP Graph related API calls in the output
+    int stream_begin_capture_count = CountOccurrencesInString(output_content, "hipStreamBeginCapture");
+    int stream_end_capture_count   = CountOccurrencesInString(output_content, "hipStreamEndCapture");
+    int graph_instantiate_count    = CountOccurrencesInString(output_content, "hipGraphInstantiate");
+    int graph_launch_count         = CountOccurrencesInString(output_content, "hipGraphLaunch");
+    int graph_destroy_count        = CountOccurrencesInString(output_content, "hipGraphDestroy");
 
     // Print results
-    std::cout << "\n=== HIP Graph API Call Summary ===" << std::endl;
+    std::cout << "\n=== HIP Graph API Call Summary (from AMD_LOG_LEVEL output) ===" << std::endl;
     std::cout << "hipStreamBeginCapture: " << stream_begin_capture_count << std::endl;
     std::cout << "hipStreamEndCapture:   " << stream_end_capture_count << std::endl;
     std::cout << "hipGraphInstantiate:   " << graph_instantiate_count << std::endl;
@@ -310,7 +293,8 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
                                    graph_instantiate_count > 0 && graph_launch_count > 0);
 
         ASSERT_TRUE(hip_graph_detected)
-            << "HIP Graph was not properly created/executed for " << test_case.driver_type;
+            << "HIP Graph was not properly created/executed for " << test_case.driver_type
+            << ". Output content:\n" << output_content.substr(0, 2000);
     }
     else
     {
