@@ -579,6 +579,7 @@ class Timeline:
         Populates all timelines with deep copies of the instructions from schedule_info.
         """
         assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
+        assert kernel.get("LocalSplitU", 1) == 1, "Only LocalSplitU=1 cases are supported by validator."
 
         swap_global_read_order = kernel["SwapGlobalReadOrder"]
         is_tf32_emulation = kernel.get("UseF32XEmulation", False)
