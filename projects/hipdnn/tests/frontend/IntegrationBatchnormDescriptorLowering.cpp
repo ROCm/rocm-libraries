@@ -196,24 +196,65 @@ TEST_F(IntegrationBatchnormDescriptorLowering, BatchnormGraphRoundTripAllOptiona
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_BIAS_UID), 0u);
     auto* biasT = tensorMap[K_BATCHNORM_INTEG_TENSOR_BIAS_UID];
     EXPECT_EQ(biasT->name, "Bias");
+    EXPECT_EQ(biasT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(biasT->dims, toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
+    EXPECT_EQ(biasT->strides, toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
 
-    // Verify output tensors
+    // Verify Y tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_Y_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID]->name, "Y");
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID]->name, "Mean");
-    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID]->name, "InvVariance");
+    auto* yT = tensorMap[K_BATCHNORM_INTEG_TENSOR_Y_UID];
+    EXPECT_EQ(yT->name, "Y");
+    EXPECT_EQ(yT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(yT->dims, toVec(K_BATCHNORM_INTEG_DATA_DIMS));
+    EXPECT_EQ(yT->strides, toVec(K_BATCHNORM_INTEG_DATA_STRIDES));
 
-    // Verify running stats tensors
+    // Verify Mean tensor
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_MEAN_UID), 0u);
+    auto* meanT = tensorMap[K_BATCHNORM_INTEG_TENSOR_MEAN_UID];
+    EXPECT_EQ(meanT->name, "Mean");
+    EXPECT_EQ(meanT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_FALSE(meanT->dims.empty());
+    EXPECT_FALSE(meanT->strides.empty());
+
+    // Verify InvVariance tensor
+    ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID), 0u);
+    auto* invVarT = tensorMap[K_BATCHNORM_INTEG_TENSOR_INV_VARIANCE_UID];
+    EXPECT_EQ(invVarT->name, "InvVariance");
+    EXPECT_EQ(invVarT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_FALSE(invVarT->dims.empty());
+    EXPECT_FALSE(invVarT->strides.empty());
+
+    // Verify PrevRunMean tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID]->name, "PrevRunMean");
+    auto* prevRunMeanT = tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_MEAN_UID];
+    EXPECT_EQ(prevRunMeanT->name, "PrevRunMean");
+    EXPECT_EQ(prevRunMeanT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(prevRunMeanT->dims, toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
+    EXPECT_EQ(prevRunMeanT->strides, toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+
+    // Verify PrevRunVar tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID]->name, "PrevRunVar");
+    auto* prevRunVarT = tensorMap[K_BATCHNORM_INTEG_TENSOR_PREV_RUNNING_VARIANCE_UID];
+    EXPECT_EQ(prevRunVarT->name, "PrevRunVar");
+    EXPECT_EQ(prevRunVarT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(prevRunVarT->dims, toVec(K_BATCHNORM_INTEG_PARAM_DIMS));
+    EXPECT_EQ(prevRunVarT->strides, toVec(K_BATCHNORM_INTEG_PARAM_STRIDES));
+
+    // Verify NextRunMean tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID]->name, "NextRunMean");
+    auto* nextRunMeanT = tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_MEAN_UID];
+    EXPECT_EQ(nextRunMeanT->name, "NextRunMean");
+    EXPECT_EQ(nextRunMeanT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_FALSE(nextRunMeanT->dims.empty());
+    EXPECT_FALSE(nextRunMeanT->strides.empty());
+
+    // Verify NextRunVar tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID]->name, "NextRunVar");
+    auto* nextRunVarT = tensorMap[K_BATCHNORM_INTEG_TENSOR_NEXT_RUNNING_VARIANCE_UID];
+    EXPECT_EQ(nextRunVarT->name, "NextRunVar");
+    EXPECT_EQ(nextRunVarT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_FALSE(nextRunVarT->dims.empty());
+    EXPECT_FALSE(nextRunVarT->strides.empty());
 
     // -- Verify batchnorm forward operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);

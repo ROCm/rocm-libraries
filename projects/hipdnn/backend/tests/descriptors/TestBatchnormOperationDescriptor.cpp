@@ -668,204 +668,9 @@ TEST_F(TestBatchnormOperationDescriptor, GetAttributeComputeType)
 }
 
 // =============================================================================
-// GetAttribute Query Mode (elementCount=0) Tests - individual tests per attribute
+// GetAttribute Query Mode (elementCount=0) Tests
+// Tensor query mode is covered by TestBatchnormOperationDescriptorGetTensor::QueryModeReturnsOne
 // =============================================================================
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorScaleQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_SCALE_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorBiasQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorEpsilonQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorMeanQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorInvVarianceQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INV_VARIANCE_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorPrevRunMeanQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_MEAN_EXT,
-                                      HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                      0,
-                                      &elementCount,
-                                      nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorPrevRunVarQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_VARIANCE_EXT,
-                                      HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                      0,
-                                      &elementCount,
-                                      nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorMomentumQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  &elementCount,
-                                                  nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorNextRunMeanQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_MEAN_EXT,
-                                      HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                      0,
-                                      &elementCount,
-                                      nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestBatchnormOperationDescriptor, GetAttributeTensorNextRunVarQueryReturnsOne)
-{
-    setAllAttributesExcept();
-    setOptionalMeanInvVariance();
-    setRunningStats();
-    getDescriptor()->finalize();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        getDescriptor()->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT,
-                                      HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                      0,
-                                      &elementCount,
-                                      nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
 
 TEST_F(TestBatchnormOperationDescriptor, GetAttributeMathPrecQueryReturnsOne)
 {
@@ -955,6 +760,31 @@ TEST_F(TestBatchnormOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_EQ(desc->getInvVarianceDesc()->getData().uid, K_BATCHNORM_TENSOR_INV_VARIANCE_UID);
 }
 
+TEST_F(TestBatchnormOperationDescriptor, FinalizePreservesTensorReferencesWithRunningStats)
+{
+    setAllAttributesExcept();
+    setOptionalMeanInvVariance();
+    setRunningStats();
+    auto desc = getDescriptor();
+    desc->finalize();
+
+    ASSERT_NE(desc->getPrevRunningMeanDesc(), nullptr);
+    ASSERT_NE(desc->getPrevRunningVarianceDesc(), nullptr);
+    ASSERT_NE(desc->getMomentumDesc(), nullptr);
+    ASSERT_NE(desc->getNextRunningMeanDesc(), nullptr);
+    ASSERT_NE(desc->getNextRunningVarianceDesc(), nullptr);
+
+    ASSERT_EQ(desc->getPrevRunningMeanDesc()->getData().uid,
+              K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID);
+    ASSERT_EQ(desc->getPrevRunningVarianceDesc()->getData().uid,
+              K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID);
+    ASSERT_EQ(desc->getMomentumDesc()->getData().uid, K_BATCHNORM_TENSOR_MOMENTUM_UID);
+    ASSERT_EQ(desc->getNextRunningMeanDesc()->getData().uid,
+              K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID);
+    ASSERT_EQ(desc->getNextRunningVarianceDesc()->getData().uid,
+              K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID);
+}
+
 // =============================================================================
 // IGraphOperation Interface Tests
 // =============================================================================
@@ -985,11 +815,24 @@ TEST_F(TestBatchnormOperationDescriptor, GetTensorDescriptorsWithAllOptionals)
     setAllAttributesExcept();
     setOptionalMeanInvVariance();
     setRunningStats();
-    getDescriptor()->finalize();
+    auto desc = getDescriptor();
+    desc->finalize();
 
-    auto tensors = getDescriptor()->getTensorDescriptors();
+    auto tensors = desc->getTensorDescriptors();
     // 5 required + 2 (mean, inv_var) + 5 (running stats)
     ASSERT_EQ(tensors.size(), 12u);
+    EXPECT_EQ(tensors[0].get(), desc->getXDesc().get());
+    EXPECT_EQ(tensors[1].get(), desc->getScaleDesc().get());
+    EXPECT_EQ(tensors[2].get(), desc->getBiasDesc().get());
+    EXPECT_EQ(tensors[3].get(), desc->getEpsilonDesc().get());
+    EXPECT_EQ(tensors[4].get(), desc->getYDesc().get());
+    EXPECT_EQ(tensors[5].get(), desc->getMeanDesc().get());
+    EXPECT_EQ(tensors[6].get(), desc->getInvVarianceDesc().get());
+    EXPECT_EQ(tensors[7].get(), desc->getPrevRunningMeanDesc().get());
+    EXPECT_EQ(tensors[8].get(), desc->getPrevRunningVarianceDesc().get());
+    EXPECT_EQ(tensors[9].get(), desc->getMomentumDesc().get());
+    EXPECT_EQ(tensors[10].get(), desc->getNextRunningMeanDesc().get());
+    EXPECT_EQ(tensors[11].get(), desc->getNextRunningVarianceDesc().get());
 }
 
 TEST_F(TestBatchnormOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -1102,6 +945,18 @@ TEST_F(TestBatchnormOperationDescriptor, GetPeerStatsTensorArray)
     ASSERT_EQ(elementCount, 2);
     ASSERT_NE(retrieved[0], nullptr);
     ASSERT_NE(retrieved[1], nullptr);
+
+    auto peerDesc0 = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        retrieved[0], HIPDNN_STATUS_INTERNAL_ERROR, "Failed to unpack peer stats 0");
+    delete retrieved[0];
+    auto peerDesc1 = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        retrieved[1], HIPDNN_STATUS_INTERNAL_ERROR, "Failed to unpack peer stats 1");
+    delete retrieved[1];
+
+    ASSERT_NE(peerDesc0, nullptr);
+    ASSERT_NE(peerDesc1, nullptr);
+    EXPECT_EQ(peerDesc0->getData().uid, K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(peerDesc1->getData().uid, K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
 }
 
 // =============================================================================

@@ -143,52 +143,99 @@ public:
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
     }
 
+    // Creates a finalized op using the standard fixture tensors, with optional overrides
+    std::unique_ptr<HipdnnBackendDescriptor>
+        makeOp(HipdnnBackendDescriptor* meanDesc = nullptr,
+               HipdnnBackendDescriptor* invVarianceDesc = nullptr,
+               HipdnnBackendDescriptor* prevRunningMeanDesc = nullptr,
+               HipdnnBackendDescriptor* prevRunningVarianceDesc = nullptr,
+               HipdnnBackendDescriptor* momentumDesc = nullptr,
+               HipdnnBackendDescriptor* nextRunningMeanDesc = nullptr,
+               HipdnnBackendDescriptor* nextRunningVarianceDesc = nullptr,
+               std::vector<HipdnnBackendDescriptor*> peerStatsDescs = {},
+               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT) const
+    {
+        return createFinalizedBatchnormOp(_xDesc.get(),
+                                          _scaleDesc.get(),
+                                          _biasDesc.get(),
+                                          _epsilonDesc.get(),
+                                          _yDesc.get(),
+                                          meanDesc,
+                                          invVarianceDesc,
+                                          prevRunningMeanDesc,
+                                          prevRunningVarianceDesc,
+                                          momentumDesc,
+                                          nextRunningMeanDesc,
+                                          nextRunningVarianceDesc,
+                                          std::move(peerStatsDescs),
+                                          computeType);
+    }
+
 protected:
     std::unique_ptr<HipdnnBackendDescriptor> _wrapper = nullptr;
     mutable MockHandle _mockHandle;
 
+    // Standard tensors used across tests
+    std::unique_ptr<HipdnnBackendDescriptor> _xDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _scaleDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _biasDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _epsilonDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _yDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _meanDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _invVarianceDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _peerStatsDesc0;
+    std::unique_ptr<HipdnnBackendDescriptor> _peerStatsDesc1;
+
     void SetUp() override
     {
         _wrapper = createDescriptor<GraphDescriptor>();
+        _xDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_X_UID,
+                                       toVec(K_BATCHNORM_TENSOR_X_DIMS),
+                                       toVec(K_BATCHNORM_TENSOR_X_STRIDES));
+        _scaleDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_SCALE_UID,
+                                           toVec(K_BATCHNORM_TENSOR_SCALE_DIMS),
+                                           toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
+        _biasDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_BIAS_UID,
+                                          toVec(K_BATCHNORM_TENSOR_BIAS_DIMS),
+                                          toVec(K_BATCHNORM_TENSOR_BIAS_STRIDES));
+        _epsilonDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_EPSILON_UID,
+                                             toVec(K_BATCHNORM_TENSOR_EPSILON_DIMS),
+                                             toVec(K_BATCHNORM_TENSOR_EPSILON_STRIDES));
+        _yDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_Y_UID,
+                                       toVec(K_BATCHNORM_TENSOR_Y_DIMS),
+                                       toVec(K_BATCHNORM_TENSOR_Y_STRIDES));
+        _meanDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_MEAN_UID,
+                                          toVec(K_BATCHNORM_TENSOR_MEAN_DIMS),
+                                          toVec(K_BATCHNORM_TENSOR_MEAN_STRIDES));
+        _invVarianceDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_INV_VARIANCE_UID,
+                                                 toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_DIMS),
+                                                 toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_STRIDES));
+        _peerStatsDesc0 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_0_UID,
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
+        _peerStatsDesc1 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_1_UID,
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
+                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
     }
 
     void TearDown() override
     {
         _wrapper.reset();
+        _xDesc.reset();
+        _scaleDesc.reset();
+        _biasDesc.reset();
+        _epsilonDesc.reset();
+        _yDesc.reset();
+        _meanDesc.reset();
+        _invVarianceDesc.reset();
+        _peerStatsDesc0.reset();
+        _peerStatsDesc1.reset();
     }
 };
 
 TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
 {
-    auto xDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_X_UID,
-                                       toVec(K_BATCHNORM_TENSOR_X_DIMS),
-                                       toVec(K_BATCHNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_SCALE_UID,
-                                           toVec(K_BATCHNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_BIAS_UID,
-                                          toVec(K_BATCHNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_BATCHNORM_TENSOR_BIAS_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_BATCHNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_BATCHNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_Y_UID,
-                                       toVec(K_BATCHNORM_TENSOR_Y_DIMS),
-                                       toVec(K_BATCHNORM_TENSOR_Y_STRIDES));
-    auto meanDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_MEAN_UID,
-                                          toVec(K_BATCHNORM_TENSOR_MEAN_DIMS),
-                                          toVec(K_BATCHNORM_TENSOR_MEAN_STRIDES));
-    auto invVarianceDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_INV_VARIANCE_UID,
-                                                 toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_DIMS),
-                                                 toVec(K_BATCHNORM_TENSOR_INV_VARIANCE_STRIDES));
-
-    auto opDesc = createFinalizedBatchnormOp(xDesc.get(),
-                                             scaleDesc.get(),
-                                             biasDesc.get(),
-                                             epsilonDesc.get(),
-                                             yDesc.get(),
-                                             meanDesc.get(),
-                                             invVarianceDesc.get());
+    auto opDesc = makeOp(_meanDesc.get(), _invVarianceDesc.get());
 
     auto desc = getDescriptor();
     setHandle();
@@ -231,35 +278,8 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
 
 TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_X_UID,
-                                       toVec(K_BATCHNORM_TENSOR_X_DIMS),
-                                       toVec(K_BATCHNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_SCALE_UID,
-                                           toVec(K_BATCHNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_BIAS_UID,
-                                          toVec(K_BATCHNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_BATCHNORM_TENSOR_BIAS_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_BATCHNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_BATCHNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_Y_UID,
-                                       toVec(K_BATCHNORM_TENSOR_Y_DIMS),
-                                       toVec(K_BATCHNORM_TENSOR_Y_STRIDES));
-    auto opDesc = createFinalizedBatchnormOp(xDesc.get(),
-                                             scaleDesc.get(),
-                                             biasDesc.get(),
-                                             epsilonDesc.get(),
-                                             yDesc.get(),
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             {},
-                                             HIPDNN_DATA_HALF);
+    auto opDesc = makeOp(
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, {}, HIPDNN_DATA_HALF);
 
     auto desc = getDescriptor();
     setHandle();
@@ -278,43 +298,10 @@ TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
 {
-    auto xDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_X_UID,
-                                       toVec(K_BATCHNORM_TENSOR_X_DIMS),
-                                       toVec(K_BATCHNORM_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_SCALE_UID,
-                                           toVec(K_BATCHNORM_TENSOR_SCALE_DIMS),
-                                           toVec(K_BATCHNORM_TENSOR_SCALE_STRIDES));
-    auto biasDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_BIAS_UID,
-                                          toVec(K_BATCHNORM_TENSOR_BIAS_DIMS),
-                                          toVec(K_BATCHNORM_TENSOR_BIAS_STRIDES));
-    auto epsilonDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_EPSILON_UID,
-                                             toVec(K_BATCHNORM_TENSOR_EPSILON_DIMS),
-                                             toVec(K_BATCHNORM_TENSOR_EPSILON_STRIDES));
-    auto yDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_Y_UID,
-                                       toVec(K_BATCHNORM_TENSOR_Y_DIMS),
-                                       toVec(K_BATCHNORM_TENSOR_Y_STRIDES));
-    auto peerStatsDesc0 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_0_UID,
-                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
-                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
-    auto peerStatsDesc1 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_1_UID,
-                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
-                                                toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
-
     std::vector<HipdnnBackendDescriptor*> peerStatsDescs
-        = {peerStatsDesc0.get(), peerStatsDesc1.get()};
-    auto opDesc = createFinalizedBatchnormOp(xDesc.get(),
-                                             scaleDesc.get(),
-                                             biasDesc.get(),
-                                             epsilonDesc.get(),
-                                             yDesc.get(),
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             nullptr,
-                                             peerStatsDescs);
+        = {_peerStatsDesc0.get(), _peerStatsDesc1.get()};
+    auto opDesc
+        = makeOp(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, peerStatsDescs);
 
     auto desc = getDescriptor();
     setHandle();
