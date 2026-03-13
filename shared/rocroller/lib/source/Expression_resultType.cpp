@@ -26,22 +26,39 @@ namespace rocRoller
 {
     namespace Expression
     {
+        // This function takes in an old value count and a new value count and either returns the old or the new.
+        // Note that the value count of each operand in an expression must either be 1
+        // or equal to all other non-1 value counts in the expression.
+        // For example:
+        //     oldValueCount = 1, newValueCount = 1: Valid, return 1
+        //     oldValueCount = 1, newValueCount = 16: Valid, return 16
+        //     oldValueCount = 8, newValueCount = 1: Valid, return 8
+        //     oldValueCount = 4, newValueCount = 4: Valid, return 4
+        //     oldValueCount = 4, newValueCount = 2: INVALID
+        inline bool maybeReplaceValueCount(size_t oldValueCount, size_t newValueCount)
+        {
+            if(newValueCount != 1)
+            {
+                if(oldValueCount == 1)
+                    return newValueCount;
+                else
+                    AssertFatal(oldValueCount == newValueCount,
+                                "Each operand's value count in an expression must either "
+                                "be 1 or equal to all other non-1 value counts\n",
+                                ShowValue(oldValueCount),
+                                ShowValue(newValueCount));
+            }
+
+            return oldValueCount;
+        }
+
         inline size_t broadcastValueCount(std::vector<ResultType> operands)
         {
             size_t valueCount = 1;
             for(auto operand : operands)
             {
-                if(operand.valueCount != 1)
-                {
-                    if(valueCount == 1)
-                        valueCount = operand.valueCount;
-                    else
-                        AssertFatal(valueCount == operand.valueCount,
-                                    "Each operand's value count in an expression must either "
-                                    "be 1 or equal to all other non-1 value counts\n",
-                                    ShowValue(valueCount),
-                                    ShowValue(operand.valueCount));
-                }
+                // Decide if we should update our value count based on the value count of this operand
+                valueCount = maybeReplaceValueCount(valueCount, operand.valueCount);
             }
 
             return valueCount;
@@ -393,19 +410,8 @@ namespace rocRoller
                     actualNumRegister
                         = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
 
-                    if(operandValueCount != 1)
-                    {
-                        // Each value count of an operand in an expression
-                        // must either be 1 or equal to all other non-1 value counts
-                        if(valueCount == 1)
-                            valueCount = operandValueCount;
-                        else
-                            AssertFatal(valueCount == operandValueCount,
-                                        "Each operand's value count in an expression must either "
-                                        "be 1 or equal to all other non-1 value counts",
-                                        ShowValue(valueCount),
-                                        ShowValue(operandValueCount));
-                    }
+                    // Decide if we should update our value count based on the value count of this operand
+                    valueCount = maybeReplaceValueCount(valueCount, operandValueCount);
                 }
 
                 AssertFatal(expectedNumRegister == actualNumRegister,
