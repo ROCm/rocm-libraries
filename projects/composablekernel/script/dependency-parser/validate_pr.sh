@@ -198,21 +198,38 @@ fi
 echo ""
 echo "Total changed files: $NUM_FILES"
 
-log_section "Step 4: Smart Build Test Selection"
+log_section "Step 4: Generate Fresh Dependency Map"
 cd "$BUILD_DIR" || exit 1
 
-log_info "Checking for smart build dependency map..."
-if [ ! -f "smart_build_test_deps.json" ]; then
-    log_warn "smart_build_test_deps.json not found, using enhanced_dependency_mapping.json"
-    SMART_MAP="enhanced_dependency_mapping.json"
-else
-    SMART_MAP="smart_build_test_deps.json"
-fi
+log_info "Configuring CMake to generate compile_commands.json..."
+cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | grep -v "^-- " || true
 
-if [ ! -f "$SMART_MAP" ]; then
-    log_error "No dependency map found. Please run dependency analysis first."
+if [ ! -f "compile_commands.json" ]; then
+    log_error "CMake configuration failed - compile_commands.json not generated"
     exit 1
 fi
+
+log_info "Generating fresh dependency map for PR validation..."
+START_TIME=$(date +%s)
+python3 ../script/dependency-parser/main.py cmake-parse \
+    compile_commands.json \
+    --workspace-root .. \
+    --output enhanced_dependency_mapping.json
+
+if [ ! -f "enhanced_dependency_mapping.json" ]; then
+    log_error "Dependency map generation failed"
+    exit 1
+fi
+
+END_TIME=$(date +%s)
+DEP_TIME=$((END_TIME - START_TIME))
+log_info "Dependency map generated in ${DEP_TIME} seconds"
+
+SMART_MAP="enhanced_dependency_mapping.json"
+SMART_FILES=$(jq '.file_to_executables | length' $SMART_MAP)
+log_info "Dependency map tracks $SMART_FILES files"
+
+log_section "Step 5: Smart Build Test Selection"
 
 log_info "Running smart build test selection..."
 python3 ../script/dependency-parser/main.py select \
@@ -238,7 +255,7 @@ if [ "$SKIP_LEGACY" = true ]; then
     exit 0
 fi
 
-log_section "Step 5: Full Build (for Legacy Method)"
+log_section "Step 6: Full Build (for Legacy Method)"
 if [ "$SKIP_BUILD" = true ]; then
     log_warn "Skipping build (--skip-build specified)"
     log_info "Using existing build artifacts..."
@@ -256,7 +273,7 @@ else
     fi
 fi
 
-log_section "Step 6: Legacy Dependency Analysis"
+log_section "Step 7: Legacy Dependency Analysis"
 log_info "Generating legacy dependency map (ninja -t deps)..."
 python3 ../script/dependency-parser/main.py parse build.ninja
 
@@ -268,7 +285,7 @@ fi
 LEGACY_FILES=$(jq '.file_to_executables | length' enhanced_dependency_mapping.json)
 log_info "Legacy map tracks $LEGACY_FILES files"
 
-log_section "Step 7: Legacy Test Selection"
+log_section "Step 8: Legacy Test Selection"
 log_info "Running legacy test selection..."
 python3 ../script/dependency-parser/main.py select \
     enhanced_dependency_mapping.json \
@@ -285,7 +302,7 @@ echo ""
 echo "Legacy Method Results:"
 jq '{changed_files: .changed_files | length, tests_selected: .tests_to_run | length, statistics}' pr${PR_NUMBER}_legacy_tests.json
 
-log_section "Step 8: Compare Results"
+log_section "Step 9: Compare Results"
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║                    VALIDATION RESULTS                          ║"
