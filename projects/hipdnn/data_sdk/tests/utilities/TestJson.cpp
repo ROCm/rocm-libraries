@@ -140,6 +140,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid block scale quantize graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid custom op graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
