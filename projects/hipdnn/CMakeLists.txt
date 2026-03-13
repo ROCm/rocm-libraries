@@ -205,6 +205,7 @@ add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
 add_subdirectory(data_sdk)
+add_subdirectory(flatbuffers_sdk)
 
 if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)

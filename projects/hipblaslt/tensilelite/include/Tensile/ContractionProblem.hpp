@@ -322,7 +322,7 @@ namespace TensileLite
         using Inputs   = ContractionInputs;
 
         ContractionProblemGemm()
-            : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT) {};
+            : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT){};
 
         /**
          * Represents a pair of free indices in a tensor contraction.
@@ -354,7 +354,7 @@ namespace TensileLite
                 : a(xa)
                 , b(xb)
                 , aMirror(aMirror)
-                , bMirror(bMirror) {};
+                , bMirror(bMirror){};
             size_t a, b; //! positions in a or b tensor
             bool   aMirror, bMirror;
         };
@@ -401,30 +401,6 @@ namespace TensileLite
                                            double beta,
                                            bool   unused,
                                            size_t batchCount);
-
-        static ContractionProblemGemm GEMM_Strides(bool             transA,
-                                                   bool             transB,
-                                                   rocisa::DataType aType,
-                                                   rocisa::DataType bType,
-                                                   rocisa::DataType cType,
-                                                   rocisa::DataType dType,
-                                                   size_t           m,
-                                                   size_t           n,
-                                                   size_t           k,
-                                                   size_t           batchSize,
-                                                   size_t           lda,
-                                                   size_t           aStride,
-                                                   size_t           ldb,
-                                                   size_t           bStride,
-                                                   size_t           ldc,
-                                                   size_t           cStride,
-                                                   size_t           ldd,
-                                                   size_t           dStride,
-                                                   double           beta,
-                                                   TensorOps const& aOps,
-                                                   TensorOps const& bOps,
-                                                   TensorOps const& cOps,
-                                                   TensorOps const& dOps);
 
         /**
          * Create a ContractionProblemGemm representing a batched SGEMM, with
@@ -604,9 +580,8 @@ namespace TensileLite
                                TensorOps const&        dOps,
                                size_t                  workspaceSize = 0
                                );
-        
-        
-         //! Returns size given original index assignment (in range
+
+        //! Returns size given original index assignment (in range
         //! 0..NumIndicesC+boundSizes)
         size_t size(size_t idx) const;
 
@@ -1037,26 +1012,6 @@ namespace TensileLite
             return m_activationNoGuard;
         }
 
-        void setAOps(TensorOps const& newAOps)
-        {
-            m_aOps = newAOps; 
-        }
-
-        void setBOps(TensorOps const& newBOps)
-        {
-            m_bOps = newBOps; 
-        }
-
-        void setCOps(TensorOps const& newCOps)
-        {
-            m_cOps = newCOps; 
-        }
-
-        void setDOps(TensorOps const& newDOps)
-        {
-            m_dOps = newDOps; 
-        }
-
         // Get/set ContractionProblem parameters
         ContractionProblemParameters& setParams()
         {
@@ -1305,17 +1260,13 @@ namespace TensileLite
                                  std::vector<rocisa::DataType>& biasDataTypeWhiteList,
                                  std::vector<int>&              biasSrcWhiteList,
                                  bool                           isGroupedGemm,
-                                 size_t                         maxWorkspaceBytes,
-                                 TensorOps const&               aOps,
-                                 TensorOps const&               bOps,
-                                 TensorOps const&               cOps,
-                                 TensorOps const&               dOps);
+                                 size_t                         maxWorkspaceBytes);
 
     private:
-        TensorOps m_aOps;
-        TensorOps m_bOps;
-        TensorOps m_cOps;
-        TensorOps m_dOps;
+        TensorOps        m_aOps;
+        TensorOps        m_bOps;
+        TensorOps        m_cOps;
+        TensorOps        m_dOps;
 
         std::string m_sumNames;
         std::string m_operationIdentifier;
@@ -1409,7 +1360,7 @@ namespace TensileLite
     {
     public:
         ContractionProblemGroupedGemm()
-            : ContractionProblem(0) {};
+            : ContractionProblem(0){};
         std::vector<ContractionProblemGemm> gemms;
         virtual std::string                 description() const
         {
@@ -1475,8 +1426,8 @@ namespace TensileLite
         void const* scaleD        = nullptr;
         void const* scaleAlphaVec = nullptr;
 
-        unsigned char const* metadata   = nullptr;
-        void const*          compressed = nullptr;
+        unsigned char const* metadata = nullptr;
+        void const* compressed        = nullptr;
 
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);
@@ -1484,8 +1435,8 @@ namespace TensileLite
         std::vector<ConstantVariant> activationArgs;
 
         // Workspace
-        void* ws           = nullptr;
-        void* Synchronizer = nullptr;
+        void*                ws           = nullptr;
+        void*                Synchronizer = nullptr;
 
         std::vector<size_t> maxElements;
         size_t              workspaceSize;
