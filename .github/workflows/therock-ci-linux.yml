@@ -5,7 +5,7 @@ on:
     inputs:
       cmake_options:
         type: string
-      project_to_test:
+      projects_to_test:
         type: string
       test_type:
         type: string
@@ -38,20 +38,12 @@ jobs:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
-      - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: "ROCm/composable_kernel"
-          path: "composable_kernel"
-
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 6a91147f22b525b79b19e909ea832d4f21e71306 # 2026-01-14 commit
+          ref: faeb8f95793a8e671bf857582c992e232f3804da # 2026-03-03
 
       - name: Install python deps
         run: |
@@ -103,11 +95,8 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build TheRock/build --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-archives and therock-dist
+        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -142,13 +131,29 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && github.event_name == 'push' }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --project miopen \
+            --failure_stage build \
+            --platform linux \
+            --log-path TheRock/build/logs \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --pr-title "${{ github.event.pull_request.title }}"
+
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu'}}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      project_to_test: ${{ inputs.project_to_test }}
+      projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
+    secrets: inherit

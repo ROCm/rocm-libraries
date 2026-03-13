@@ -73,7 +73,7 @@ namespace ck_tile::reflect::conv {
 // There is a lot we still need to do:
 //
 // TODO: Generalize type support for all tensors and accumulator.
-// TODO: Describe all tensros.
+// TODO: Describe all tensors.
 // TODO: Include the full generalization of the signature from the input schema.
 // TODO: Include the full generalization of the algorithm from the input schema.
 struct ConvTraits
@@ -88,7 +88,7 @@ struct ConvTraits
     builder::ElementwiseOperation weight_element_op;
     builder::ElementwiseOperation output_element_op;
 
-    builder::GemmPadding gemm_padding;
+    std::optional<builder::GemmPadding> gemm_padding = std::nullopt;
     builder::ConvSpecialization conv_specialization;
 
     // --- Algorithm Information ---
@@ -102,8 +102,16 @@ struct ConvTraits
 
     OutputTileTransferInfo c_tile_transfer;
 
+    std::optional<int> num_gemm_k_prefetch_stage = std::nullopt;
+
     builder::PipelineVersion pipeline_version;
     builder::PipelineScheduler pipeline_scheduler;
+
+    std::optional<int> max_transpose_transfer_src_scalar_per_vector = std::nullopt;
+    std::optional<int> max_transpose_transfer_dst_scalar_per_vector = std::nullopt;
+    std::optional<int> num_groups_to_merge                          = std::nullopt;
+    std::optional<bool> do_pad_gemm_m                               = std::nullopt;
+    std::optional<bool> do_pad_gemm_n                               = std::nullopt;
 };
 
 } // namespace ck_tile::reflect::conv

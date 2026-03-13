@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -451,8 +428,8 @@ namespace rocRoller
             co_yield func(val);
     }
 
-    template <typename T>
-    Generator<T> take(size_t n, Generator<T> gen)
+    template <std::ranges::input_range T>
+    Generator<std::ranges::range_value_t<T>> take(size_t n, T gen)
     {
         auto it = gen.begin();
         for(size_t i = 0; i < n && it != gen.end(); ++i, ++it)
@@ -493,6 +470,52 @@ namespace rocRoller
     inline constexpr bool empty(Range range)
     {
         return range.begin() == range.end();
+    }
+
+    template <std::ranges::forward_range ARange, std::ranges::forward_range... Rest>
+    Generator<std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+        zip(ARange const& a, Rest const&... rest)
+    {
+        if constexpr(sizeof...(Rest) == 0)
+        {
+            for(auto const& el : a)
+                co_yield std::make_tuple(el);
+        }
+        else
+        {
+            auto aIter = a.begin();
+
+            auto restGen  = zip(rest...);
+            auto restIter = restGen.begin();
+
+            for(; aIter != a.end() && restIter != restGen.end(); ++aIter, ++restIter)
+            {
+                co_yield std::tuple_cat(std::make_tuple(*aIter), *restIter);
+            }
+        }
+    }
+
+    template <std::ranges::input_range ARange, std::ranges::input_range... Rest>
+    Generator<std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+        zip(ARange&& a, Rest&&... rest)
+    {
+        if constexpr(sizeof...(Rest) == 0)
+        {
+            for(auto& el : a)
+                co_yield std::make_tuple(el);
+        }
+        else
+        {
+            auto aIter = a.begin();
+
+            auto restGen  = zip(rest...);
+            auto restIter = restGen.begin();
+
+            for(; aIter != a.end() && restIter != restGen.end(); ++aIter, ++restIter)
+            {
+                co_yield std::tuple_cat(std::make_tuple(*aIter), *restIter);
+            }
+        }
     }
 
 }

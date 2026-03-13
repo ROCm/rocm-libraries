@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -633,6 +633,12 @@ try
             "                           Indicates if matrix B should be transposed.\n"
             "                           ")
 
+        ("norm_type",
+         value<char>()->default_value('1'),
+            "1 (or O) = one-norm, F = Frobenius, I = infinity-norm, M = max element.\n"
+            "                           Specifies which matrix norm to compute.\n"
+            "                           ")
+
         ("uplo",
          value<char>()->default_value('U'),
             "U = upper, L = lower.\n"
@@ -659,6 +665,7 @@ try
     if(!argus.perf)
     {
         print_version_info();
+        print_asan_kernel_warning("rocsolver-bench");
 
         rocblas_int device_count = query_device_property();
         if(device_count <= 0)
@@ -687,6 +694,7 @@ try
     argus.validate_eorder("eorder");
     argus.validate_esort("esort");
     argus.validate_itype("itype");
+    argus.validate_norm_type("norm_type");
     argus.validate_rfinfo_mode("rfinfo_mode");
 
     // prepare logging infrastructure and ignore environment variables

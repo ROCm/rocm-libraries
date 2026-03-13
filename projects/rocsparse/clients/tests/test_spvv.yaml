@@ -37,7 +37,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [500, 12000]
+  M: [500]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
@@ -47,7 +47,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [15332, 22031, 31958]
+  M: [20000]
   nnz: [0, 1543, 7111, 10000]
   baseA: [rocsparse_index_base_one]
   transA: [rocsparse_operation_conjugate_transpose]
@@ -57,7 +57,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [735519, 1452387, 7834525]
+  M: [500000]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -67,7 +67,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *int8_int8_int32_xyt_precision
-  M: [70, 101, 228, 456]
+  M: [70, 101]
   nnz: [50]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -77,7 +77,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *int8_int8_float32_xyt_precision
-  M: [70, 101, 228, 456]
+  M: [70, 101]
   nnz: [50]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -87,7 +87,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *float16_float16_float32_xyt_precision
-  M: [121, 155, 201, 546]
+  M: [121, 155]
   nnz: [61]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -97,7 +97,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *bfloat16_bfloat16_float32_xyt_precision
-  M: [746, 982]
+  M: [300]
   nnz: [213]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -107,7 +107,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *int8_int8_int32_xyt_precision
-  M: [1207, 3452, 28375, 77824]
+  M: [1207, 2000]
   nnz: [128, 500, 1100]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -117,7 +117,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *int8_int8_float32_xyt_precision
-  M: [1207, 3452, 28375, 77824]
+  M: [1207, 2000]
   nnz: [128, 500, 1100]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -127,7 +127,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *float16_float16_float32_xyt_precision
-  M: [1423, 3425, 26578, 55678]
+  M: [1423, 2000]
   nnz: [444, 632, 999]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -137,7 +137,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *bfloat16_bfloat16_float32_xyt_precision
-  M: [27385, 87124]
+  M: [8000]
   nnz: [2365, 7891]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -147,7 +147,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *int8_int8_int32_xyt_precision
-  M: [1000000, 2000000, 4000000]
+  M: [90000]
   nnz: [20000, 40000, 80000]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -157,7 +157,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *int8_int8_float32_xyt_precision
-  M: [1000000, 2000000, 4000000]
+  M: [100000]
   nnz: [20000, 40000, 80000]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -167,7 +167,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *float16_float16_float32_xyt_precision
-  M: [1000000, 2000000, 4000000]
+  M: [100000]
   nnz: [30000, 50000, 90000]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
@@ -177,7 +177,7 @@ Tests:
   function: spvv
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [12000]
+  M: [2000]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]

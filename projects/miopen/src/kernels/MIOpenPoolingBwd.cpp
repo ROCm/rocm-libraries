@@ -1,30 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
+#endif
+
 #include "miopen_cstdint.hpp"
 #include "miopen_limits.hpp"
 #include "float_types.h"
@@ -258,7 +238,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
                          : (y + mlo_pad1 - MLO_POOLING_KERNEL_SZ1) / MLO_POOLING_STRIDE1 + 1;
     int top_df_off = b * mlo_topdf_batch_str + o * mlo_topdf_channel_str;
 
-    FLOAT res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
+    FLOAT_ACCUM res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
     FLOAT top_df_val;
     index_t mask_val;
     // load tiles
@@ -314,7 +294,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
             int lt_x = max(0, lt_x1);
 
             // find and sum up all tops that have been influenced by particular bot
-            res[k][l] = 0;
+            res[k][l] = FLOAT_ACCUM{0};
 
             for(int th = tt_y; th < tt_y + (MLO_POOLING_KERNEL_SZ1 + MLO_POOLING_STRIDE1 - 1) /
                                                MLO_POOLING_STRIDE1;
@@ -349,7 +329,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
 
                     if(match)
                     {
-                        FLOAT add_val = lcl_top_df[lcl_idx];
+                        FLOAT_ACCUM add_val = CVT_FLOAT2ACCUM(lcl_top_df[lcl_idx]);
                         res[k][l] += add_val;
                     }
                 }
@@ -365,7 +345,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
         {
             if((bt_y + k) < mlo_bot_height && (bt_x + l) < mlo_bot_width)
             {
-                bot_df[bot_df_off + k * mlo_botdf_str + l] = res[k][l];
+                bot_df[bot_df_off + k * mlo_botdf_str + l] = CVT_ACCUM2FLOAT(res[k][l]);
             }
         }
     }

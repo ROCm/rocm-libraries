@@ -5,15 +5,27 @@
 ## Documentation
 
 - [Quick Start Guide](#quick-start-guide)
+  - [Prerequisites](#prerequisites)
+  - [Install](#install)
 - [API Example](#api-example)
+  - [Python API](#python-api)
+  - [C++ API](#c-api)
 - [Supported GPUs](#supported-gpus)
 - [Build and Install](#build-and-install)
-  - [C++](#build-and-install-origami-c)
   - [Python](#build-and-install-origami-python)
+  - [C++](#build-and-install-origami-c)
+  - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
 - [Contribute](#contribute)
+- [How to Cite](#how-to-cite)
 
 ## Quick Start Guide
+
+### Prerequisites
+
+**ROCm/HIP**: This package requires ROCm/HIP to be installed on your system. ROCm cannot be installed via pip and must be installed separately. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions. Ensure `CMAKE_PREFIX_PATH` includes your ROCm install (default: `/opt/rocm`).
+
+### Install
 
 ```bash
 pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
@@ -133,7 +145,10 @@ int main() {
 | gfx942 | MI325X, MI300X, MI300A | ✔️ | ✔️ |
 | gfx950 | MI355X, MI350X | ✔️ | ✔️ |
 | gfx1100 | Radeon RX 7900 XTX, Radeon RX 7900 XT, Radeon RX 7900 GRE, Radeon RX 7900 | ✔️ | |
+| gfx1150 | AMD Strix Point iGPU | ✔️ | |
 | gfx1151 | Radeon RX 8000 series | ✔️ | |
+| gfx1152 | AMD Radeon 840M iGPU | ✔️ | |
+| gfx1153 | AMD Radeon 820M iGPU | ✔️ | |
 | gfx1201 | Radeon RX 8900 XTX, Radeon RX 8900 XT, Radeon RX 8800 XT, Radeon RX 8800, Radeon RX 8700 XT, Radeon RX 8700, Radeon RX 8600 XT, Radeon RX 8600 | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
@@ -142,13 +157,28 @@ For more information on GPU hardware specifications, check out [ROCm documentati
 
 ### Build and Install Origami (Python)
 
-Origami provides Python bindings that allow you to use Origami's functionality directly from Python. Install directly from the rocm-libraries repository without cloning:
+Origami provides Python bindings that allow you to use Origami's functionality directly from Python.
+
+#### Installation
+
+Install directly from the rocm-libraries repository (this could take some time due to the size of the rocm-libraries repo):
 
 ```bash
 pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
 ```
 
-If you have cloned the repository:
+To efficiently install directly from the rocm-libraries repository use do the following:
+
+```bash
+TEMP_DIR=$(mktemp -d)
+git clone --no-checkout --filter=blob:none --sparse https://github.com/ROCm/rocm-libraries.git $TEMP_DIR
+git -C $TEMP_DIR sparse-checkout set shared/origami
+git -C $TEMP_DIR checkout develop
+pip install $TEMP_DIR/shared/origami/python -v
+rm -rf $TEMP_DIR
+```
+
+If you have already cloned the repository:
 
 ```bash
 cd shared/origami/python
@@ -158,6 +188,12 @@ pip install -e .
 The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings.
 
 #### CMake Build (Alternative)
+
+When building with CMake, you'll need to manually install the Python dependencies listed in `shared/origami/python/requirements.txt`:
+
+```bash
+pip install -r shared/origami/python/requirements.txt
+```
 
 Build Python bindings using CMake from the `shared/origami` directory:
 
@@ -217,23 +253,60 @@ cmake --install build/
 
 ## Origami Tests
 
+### Build and Run All Tests
+
+Build with both C++ and Python tests enabled:
+
 ```bash
 cd shared/origami
 
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-  -DORIGAMI_BUILD_TESTING=ON
+  -DORIGAMI_BUILD_TESTING=ON \
+  -DORIGAMI_ENABLE_PYTHON=ON
 
 cmake --build build/ --parallel
 
-# Run tests
+cd build/
 ctest --output-on-failure
 ```
 
 > [!NOTE]
 > Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
+
+### Running Specific Tests
+
+Run only C++ tests:
+
+```bash
+./build/tests/origami-tests
+```
+
+Run a specific C++ test by name:
+
+```bash
+./build/tests/origami-tests "Origami: select_config_mnk unit test"
+```
+
+Run only Python tests (from `shared/origami/python`):
+
+```bash
+pip install -e .
+python -m pytest tests/ -v
+```
+
+Run Python tests excluding slow tests:
+
+```bash
+python -m pytest tests/ -m "not slow"
+```
+
+Run selector tests (requires torch):
+
+```bash
+python -m pytest tests/test_selector.py -v
+```
 
 ## Contribute
 

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,6 +54,75 @@ ROCSOLVER_BEGIN_NAMESPACE
 // **********************************************************
 // device functions that are used by many kernels
 // **********************************************************
+
+// NaN helpers
+template <typename T, std::enable_if_t<std::is_integral<T>{}, int> = 0>
+__device__ __host__ inline bool rocblas_isnan(T)
+{
+    return false;
+}
+
+template <typename T,
+          std::enable_if_t<
+              !std::is_integral<T>{}
+                  && !rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
+              int> = 0>
+__device__ __host__ inline bool rocblas_isnan(T arg)
+{
+    return std::isnan(arg);
+}
+
+template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ __host__ inline bool rocblas_isnan(const T& arg)
+{
+    return rocblas_isnan(std::real(arg)) || rocblas_isnan(std::imag(arg));
+}
+
+__device__ __host__ inline bool rocblas_isnan(rocblas_half arg)
+{
+    union
+    {
+        rocblas_half fp;
+        uint16_t data;
+    } x = {arg};
+    // NaN if exponent is all 1s and mantissa is non-zero (IEEE 754 half)
+    return (~x.data & 0x7c00) == 0 && (x.data & 0x03ff) != 0;
+}
+
+__device__ __host__ inline bool rocblas_isnan(rocblas_bfloat16 arg)
+{
+    // NaN if exponent is all 1s and mantissa is non-zero
+    return (~arg.data & 0x7f80) == 0 && (arg.data & 0x007f) != 0;
+}
+
+// max that propagates NaNs consistently:
+//   rocblas_max_nan( 1,   NaN ) = NaN
+//   rocblas_max_nan( NaN, 1   ) = NaN
+template <typename T, std::enable_if_t<std::is_integral<T>{}, int> = 0>
+__device__ __host__ inline T rocblas_max_nan(T x, T y)
+{
+    return y >= x ? y : x;
+}
+
+template <typename T,
+          std::enable_if_t<
+              !std::is_integral<T>{}
+                  && !rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
+              int> = 0>
+__device__ __host__ inline T rocblas_max_nan(T x, T y)
+{
+    return (rocblas_isnan(y) || y >= x) ? y : x;
+}
+
+__device__ __host__ inline rocblas_half rocblas_max_nan(rocblas_half x, rocblas_half y)
+{
+    return (rocblas_isnan(y) || float(y) >= float(x)) ? y : x;
+}
+
+__device__ __host__ inline rocblas_bfloat16 rocblas_max_nan(rocblas_bfloat16 x, rocblas_bfloat16 y)
+{
+    return (rocblas_isnan(y) || float(y) >= float(x)) ? y : x;
+}
 
 template <typename S, typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ S aabs(T val)
@@ -861,9 +930,10 @@ template <typename T, typename I, typename U>
 ROCSOLVER_KERNEL void reset_info(T* info, const I n, U val, I incr = 0)
 {
     I idx = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
+    I stride = hipGridDim_x * static_cast<I>(hipBlockDim_x);
 
-    if(idx < n)
-        info[idx] = T(val) + incr * idx;
+    for(I i = idx; i < n; i += stride)
+        info[i] = T(val) + incr * i;
 }
 
 template <typename T, typename I, typename S, typename U>

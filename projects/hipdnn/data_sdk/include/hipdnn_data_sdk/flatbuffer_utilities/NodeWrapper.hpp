@@ -8,7 +8,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class INodeWrapper
@@ -75,24 +75,34 @@ public:
     {
         switch(attributesType())
         {
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BatchnormAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt);
-        case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
-            return typeid(hipdnn_data_sdk::data_objects::PointwiseAttributes);
-        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-            return typeid(hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes);
-        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-            return typeid(hipdnn_data_sdk::data_objects::BatchnormAttributes);
-        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-            return typeid(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::LayernormAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return typeid(hipdnn_data_sdk::data_objects::MatmulAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::PointwiseAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::RMSNormAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::SdpaAttributes);
         default:
             throw std::invalid_argument("Node attributes type is not recognized");
         }
@@ -120,4 +130,14 @@ private:
 
     const hipdnn_data_sdk::data_objects::Node* _shallowNode = nullptr;
 };
-}
+
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using INodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper;
+using NodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper;
+} // namespace hipdnn_plugin_sdk

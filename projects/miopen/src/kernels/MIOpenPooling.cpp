@@ -1,30 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
+#endif
+
 #include "miopen_cstdint.hpp"
 #include "pooling_functions.h"
 
@@ -58,10 +38,11 @@ constexpr auto MLO_BOT_DATA_SZ0 =
 constexpr auto MLO_BOT_DATA_SZ1 =
     (MLO_POOLING_N_VERT_OUT_PIX - 1) * MLO_POOLING_STRIDE1 + MLO_POOLING_KERNEL_SZ1;
 
-// Let's use extended-precision accumulator only in FP16 pooling and only for averaging.
+// Let's use extended-precision accumulator for FP16 averaging and always for BF16.
+// BF16 uses ushort which doesn't work correctly with signed comparisons in max pooling.
 // For all other ops and datatypes, redefine macros used for accum-float conversion
 // and accum types, so they do nothing, i.e. treate FLOAT_ACCUM as FLOAT.
-#if !(AVERAGE_OPS && MIOPEN_USE_FP16)
+#if !((AVERAGE_OPS && MIOPEN_USE_FP16) || MIOPEN_USE_BFP16)
 #define MIOPEN_USE_NATIVE_DATATYPE_ACCUM 1
 #endif
 
@@ -126,10 +107,17 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
             bool vis_x = run_x >= 0 && run_x < mlo_bot_width;
             bool vis   = vis_x && vis_y;
 
+#if MIOPEN_USE_BFP16
+            bot_data[j][i] = vis ? bot[bot_gbl_off]
+                             : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX //
+                                 ? /* MAX */ FLOAT{0xFF7F}             // -max bf16
+                                 : /* AVG */ FLOAT{0};
+#else
             bot_data[j][i] = vis ? bot[bot_gbl_off]
                              : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX //
                                  ? /* MAX */ FLOAT{-MAX_VAL}
                                  : /* AVG */ FLOAT{0};
+#endif
         }
     }
 

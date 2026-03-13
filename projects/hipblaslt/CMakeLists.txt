@@ -15,17 +15,18 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
 
-include(dependencies)
+include(fetch_rocm_cmake)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.2.0" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.2.2" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -65,17 +66,17 @@ option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile pytho
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
-    # rocm-smi is not presently available on Windows so we do not require it.
-    cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
+    # amd-smi is not presently available on Windows so we do not require it.
+    cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
+    option(HIPBLASLT_ENABLE_TSAN "Build hipBLASLt with thread sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
-    option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+    option(HIPBLASLT_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -127,13 +128,15 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_ROCM_SMI)
-    find_package(rocm_smi REQUIRED)
+if(HIPBLASLT_ENABLE_AMD_SMI)
+    find_package(amd_smi REQUIRED)
 else()
-    find_package(rocm_smi)
+    find_package(amd_smi)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    # NOTE: CMake should automatically detect the Fortran compiler via standard CMake search paths.
+    # Unfortunately, TheRock for Windows will not compile without an explicit set here.
     if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
         set(CMAKE_Fortran_COMPILER  "gfortran")
     endif()
@@ -151,12 +154,12 @@ if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_LLVM)
+if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE)
-    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN"))
+if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
+    if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
             OUTPUT_VARIABLE ASAN_LIB_PATH
@@ -171,7 +174,23 @@ if(HIPBLASLT_ENABLE_DEVICE)
             message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
         endif()
         # Disable a few asan options to get builds going but these should be addressed
-        set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+    elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
+        execute_process(
+            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so
+            OUTPUT_VARIABLE TSAN_LIB_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+        # If TSAN_LIB_PATH is libclang_rt.tsan-x86_64.so
+        # rather than /path/to/libclang_rt.tsan-x86_64.so then
+        # we failed to locate it and HAS_PARENT_PATH is false.
+        cmake_path(HAS_PARENT_PATH TSAN_LIB_PATH result)
+        if(NOT result)
+            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so ")
+        endif()
+        # Disable a few tsan options to get builds going but these should be addressed
+        set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
     endif()
 endif()
 
@@ -179,7 +198,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     set(HIPBLASLT_PYTHON_DEPS "rocisa")
     set(hipblaslt_python_dev Development.Module)
     hipblaslt_find_python("${hipblaslt_python_dev}")
-    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${asan_opts}")
+    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${san_opts}")
 else()
     hipblaslt_find_python("${hipblaslt_python_dev}")
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
@@ -196,15 +215,15 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
                 set(ROCROLLER_ENABLE_CLIENT OFF)
                 option(YAML_CPP_INSTALL "" ON)
                 set(BUILD_TESTING OFF)
-                set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
                 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
                 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
             endblock()
+            target_link_options(rocroller PRIVATE "LINKER:--exclude-libs,ALL")
         endif()
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_MSGPACK)
+if(NOT HIPBLASLT_ENABLE_YAML)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)
     find_package(msgpack-cxx CONFIG)
@@ -220,11 +239,18 @@ if(HIPBLASLT_ENABLE_MSGPACK)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: This is a temporary solution to prevent the installation of the origami license files.
-    block(SCOPE_FOR VARIABLES)
-        set(ORIGAMI_ENABLE_INSTALL OFF)
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
-    endblock()
+    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
+    # Re-enable once origami is available in TheRock.
+    # if(HIPBLASLT_ENABLE_THEROCK)
+    #     find_package(origami REQUIRED)
+    if(FALSE)
+    else()
+        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+        block(SCOPE_FOR VARIABLES)
+            set(ORIGAMI_ENABLE_INSTALL OFF)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+        endblock()
+    endif()
 endif()
 
 add_subdirectory(tensilelite)
@@ -239,7 +265,7 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
-    if(HIPBLASLT_ENABLE_MSGPACK)
+    if(NOT HIPBLASLT_ENABLE_YAML)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
@@ -255,7 +281,7 @@ if(HIPBLASLT_ENABLE_HOST)
             ${rocTracer}
     )
 
-    if(HIPBLASLT_ENABLE_ASAN)
+    if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
 
@@ -295,6 +321,8 @@ if(HIPBLASLT_ENABLE_HOST)
     set_target_properties(hipblaslt
         PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/library"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
     add_subdirectory(library)
 endif()
@@ -365,7 +393,8 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE)
+# Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
@@ -409,7 +438,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench-extop-amax
         COMPONENT benchmarks
     )
-    if(HIPBLASLT_ENABLE_LLVM)
+    if(HIPBLASLT_ENABLE_YAML)
         rocm_install(
             TARGETS
                 hipblaslt-sequence
@@ -431,6 +460,25 @@ if(HIPBLASLT_ENABLE_CLIENT)
     rocm_install(
         FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/bench/sequence.yaml"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+
+    rocm_install(
+        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/hipblaslt-perf"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+    
+    # Install all Python modules required by hipblaslt-perf
+    rocm_install(
+        FILES 
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/bench.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/bench_sample.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/generator.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/performance"
         COMPONENT benchmarks
     )
 
@@ -493,6 +541,8 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_ext_bgradb
             sample_hipblaslt_gemm_dgelu_bgrad
             sample_hipblaslt_gemm_dgelu_bgrad_ext
+            sample_hipblaslt_gemm_drelu_bgrad
+            sample_hipblaslt_gemm_drelu_bgrad_ext
             sample_hipblaslt_gemm_is_tuned_ext
             sample_hipblaslt_gemm_tuning_wgm_ext
             sample_hipblaslt_gemm_with_scale_a_b

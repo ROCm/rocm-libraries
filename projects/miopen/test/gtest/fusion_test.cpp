@@ -109,6 +109,12 @@ TEST_P(GPU_FusionSetArg_FP16, TestSetArgApiCall)
         static_cast<miopenFusionPlanDescriptor_t>(&(cba_float::fusePlanDesc));
     miopenFusionOpDescriptor_t conv_op = static_cast<miopenFusionOpDescriptor_t>(convOp.get());
 
+    size_t workspace_size = 0;
+    miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+    EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
+              miopenStatusSuccess)
+        << "Workspace size for a non-compiled fusion plan failure";
+
     EXPECT_EQ(miopenCompileFusionPlan(&handle, fusion_plan), 0);
     EXPECT_EQ(miopenSetOpArgsConvForward(fusion_args,
                                          conv_op,
@@ -117,10 +123,10 @@ TEST_P(GPU_FusionSetArg_FP16, TestSetArgApiCall)
                                          cba_float::wei_dev.get()),
               0);
 
-    size_t workspace_size = 0;
-    miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+    workspace_size = 0;
     EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
-              miopenStatusSuccess);
+              miopenStatusSuccess)
+        << "Workspace size for a compiled fusion plan failure";
 
     cba_float::wspace.resize(workspace_size);
 
@@ -190,6 +196,7 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
 }
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3)
 
 // The test uses a specific fusion configuration that triggers the solver.
 // ConvCKIgemmGrpFwdBiasActivFused
@@ -252,20 +259,26 @@ public:
                 << "ConvCKIgemmGrpFwdBiasActivFused solver is not supported on this device";
         }
         miopen::solver::debug::TuningIterationScopedLimiter tuning_limit{5};
-        auto&& handle = get_handle();
+        auto&& handle         = get_handle();
+        size_t workspace_size = 0;
+        miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
         {
             ScopedEnvironment<bool> find_mode_env1(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1, false);
+            ScopedEnvironment<bool> find_mode_env2(MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3, false);
             ASSERT_TRUE(
                 IsOnlyConvCKIgemmGrpFwdBiasActivFusedSolverApplicable(cba_base::fusePlanDesc))
                 << "Test configuration is invalid as other solvers are applicable. Please update "
                    "the test case.";
+            EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
+                      miopenStatusSuccess)
+                << "Workspace size for a non-compiled fusion plan failure";
             EXPECT_EQ(miopenCompileFusionPlan(&handle, fusion_plan), miopenStatusSuccess);
         }
 
-        size_t workspace_size = 0;
-        miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+        workspace_size = 0;
         EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
-                  miopenStatusSuccess);
+                  miopenStatusSuccess)
+            << "Workspace size for a compiled fusion plan failure";
 
         // This test requires a case with a non-zero workspace size.
         // If this check fails, the test configuration needs to be updated

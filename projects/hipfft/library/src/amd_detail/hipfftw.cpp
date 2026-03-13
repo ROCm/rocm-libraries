@@ -20,7 +20,7 @@
 
 #include "hipfft/hipfftw.h"
 #include "../../../shared/array_validator.h"
-#include "../../../shared/data_layout.h"
+#include "../../../shared/client_data_layout_helpers.h"
 #include "../../../shared/environment.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "rocfft/rocfft.h"

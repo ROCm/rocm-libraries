@@ -11,4 +11,5 @@
 
 extern const char* const PLUGIN_NAME;
 extern const char* const PLUGIN_VERSION;
+extern const char* const PLUGIN_API_VERSION;
 extern const hipdnnPluginType_t PLUGIN_TYPE;

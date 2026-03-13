@@ -207,6 +207,12 @@ namespace TensileLite
         {
             return SolutionVector<MySolution>();
         }
+
+        // Get the library filename for debug output (if available)
+        virtual std::string getLibraryFileName() const
+        {
+            return "";
+        }
     };
 
 } // namespace TensileLite

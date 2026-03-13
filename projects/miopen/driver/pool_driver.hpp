@@ -36,6 +36,7 @@
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
@@ -45,6 +46,7 @@
 #include <float.h>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 template <typename T>
@@ -66,7 +68,7 @@ public:
         miopenCreateTensorDescriptor(&dOutputTensor);
 
         miopenCreatePoolingDescriptor(&poolDesc);
-        data_type = (sizeof(Tgpu) == 4) ? miopenFloat : miopenHalf;
+        InitDataType<Tgpu>();
     }
 
     int AddCmdLineArgs() override;
@@ -353,8 +355,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Pooling Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Pooling Mode");
     }
 
     if((inflags.GetValueStr("pad_mode")) == "same")
@@ -371,8 +372,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Padding Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Padding Mode");
     }
 
     if((inflags.GetValueStr("index_type")) == "miopenIndexUint8")
@@ -393,8 +393,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Index Data Type\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Index Data Type");
     }
 
     in_filename  = inflags.GetValueStr("in_data");
@@ -461,6 +460,12 @@ float16 RanGenInput()
         return static_cast<T>(0.0);
     return prng::gen_canonical<T>();
 #endif
+}
+
+template <>
+bfloat16 RanGenInput()
+{
+    return prng::gen_canonical<bfloat16>();
 }
 } // namespace detail
 
@@ -688,10 +693,11 @@ int PoolDriver_impl<Tgpu, Tref, Index>::RunBackwardGPU()
 template <typename Tgpu, typename Tref, typename Index>
 int PoolDriver_impl<Tgpu, Tref, Index>::VerifyForward()
 {
-    const Tref tolerance =          //
-        sizeof(Tgpu) == 8   ? 1e-6  // double
-        : sizeof(Tgpu) == 4 ? 1e-5  // float
-                            : 5e-3; // half
+    const Tref tolerance =                                              //
+        sizeof(Tgpu) == 8                     ? 1e-6                    // double
+        : sizeof(Tgpu) == 4                   ? 1e-5                    // float
+        : std::is_same<Tgpu, bfloat16>::value ? static_cast<Tref>(5e-2) // bfloat16
+                                              : 5e-3;                   // half
 
     pooling_math_stats stats;
     bool match = false;
@@ -748,8 +754,11 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyBackward()
 {
     float ulps_tolerance = 4;
     Tref diff_tolerance  = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? static_cast<Tref>(1e-6)
+                           : std::is_same<Tgpu, bfloat16>::value    ? static_cast<Tref>(5e-2)
                                                                     : static_cast<Tref>(5e-3);
-    double rms_tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? 1e-6 : 5e-3;
+    double rms_tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? 1e-6
+                           : std::is_same<Tgpu, bfloat16>::value    ? 5e-2
+                                                                    : 5e-3;
 
     pooling_math_stats stats;
     bool match = false;
