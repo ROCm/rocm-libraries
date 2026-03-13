@@ -1,6 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+// assuming all operands are Arch VGRPs
+.macro _v_mfma_f32_32x32x16_f16_vvv0 arg_dst:req, arg_A:req, arg_B:req
+    .long 0xd3d50000 + \arg_dst
+    .long 0x02020100 + \arg_A + (\arg_B << 9)
+.endm
+
+// assuming all operands are Arch VGRPs
+.macro _v_mfma_f32_32x32x16_bf16_vvv0 arg_dst:req, arg_A:req, arg_B:req
+    .long 0xd3b70000 + \arg_dst
+    .long 0x02020100 + \arg_A + (\arg_B << 9)
+.endm
+
+.macro _s_setreg_imm32_b32 arg_reg_id:req, arg_offset:req, arg_size:req, arg_imm32:req
+    .long 0xba7f0000 + \arg_reg_id + (\arg_offset << 6) + ((\arg_size - 1) << 11)
+    .long \arg_imm32
+.endm
+
 v_lshlrev_b32 v1, 7, v0
 s_getpc_b64 [s8, s9]
 label_6:
@@ -66,14 +83,11 @@ s_and_b32 s5, s28, 131072
 s_cbranch_scc0 label_12
 s_load_dwordx4 [s76, s77, s78, s79], [s2, s3], 216
 label_12:
-.long 0xba7f0241
-.long 0x00000000 // encoding fixup: s_setreg_imm32_b32 hwreg(1, 9, 1), 0
+_s_setreg_imm32_b32 1, 9, 1, 0
 s_bitcmp1_b32 s28, 3
 s_cbranch_scc0 label_13
-.long 0xba7f1901
-.long 0x0000000f // encoding fixup: s_setreg_imm32_b32 hwreg(1, 4, 4), 15
-.long 0xba7f1801
-.long 0x00000000 // encoding fixup: s_setreg_imm32_b32 hwreg(1, 0, 4), 0
+_s_setreg_imm32_b32 1, 4, 4, 15
+_s_setreg_imm32_b32 1, 0, 4, 0
 label_13:
 s_waitcnt lgkmcnt(0)
 s_bitcmp1_b32 s28, 6
@@ -376,6 +390,7 @@ s_mov_b32 s18, s10
 s_setpc_b64 [s36, s37]
 .align 32
 label_22:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_lshl_b32 s20, s20, 2
 s_setprio 1
 s_waitcnt lgkmcnt(0) & vmcnt(24)
@@ -459,6 +474,7 @@ s_mov_b32 s29, label_23 - label_1
 s_branch label_46
 .align 32
 label_23:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 .align 8
@@ -537,6 +553,7 @@ s_mov_b32 s29, label_24 - label_1
 s_branch label_47
 .align 32
 label_24:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_mov_b32 s29, label_56 - label_1
 s_sub_u32 s11, s11, 16
 s_cbranch_scc1 label_50
@@ -623,6 +640,7 @@ s_mov_b32 s29, label_25 - label_1
 s_branch label_48
 .align 32
 label_25:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 .align 8
@@ -701,6 +719,7 @@ s_mov_b32 s29, label_26 - label_1
 s_branch label_49
 .align 32
 label_26:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_lshl_b32 s20, s20, 2
 s_setprio 1
 s_waitcnt lgkmcnt(0) & vmcnt(24)
@@ -784,6 +803,7 @@ s_mov_b32 s29, label_27 - label_1
 s_branch label_46
 .align 32
 label_27:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 .align 8
@@ -862,6 +882,7 @@ s_mov_b32 s29, label_28 - label_1
 s_branch label_47
 .align 32
 label_28:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_mov_b32 s29, label_65 - label_1
 s_sub_u32 s11, s11, 16
 s_cbranch_scc1 label_50
@@ -948,6 +969,7 @@ s_mov_b32 s29, label_29 - label_1
 s_branch label_48
 .align 32
 label_29:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 .align 8
@@ -1026,6 +1048,7 @@ s_mov_b32 s29, label_30 - label_1
 s_branch label_49
 .align 32
 label_30:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_lshl_b32 s20, s20, 2
 s_setprio 1
 s_waitcnt lgkmcnt(0) & vmcnt(24)
@@ -1109,6 +1132,7 @@ s_mov_b32 s29, label_31 - label_1
 s_branch label_46
 .align 32
 label_31:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 .align 8
@@ -1187,6 +1211,7 @@ s_mov_b32 s29, label_32 - label_1
 s_branch label_47
 .align 32
 label_32:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_mov_b32 s29, label_74 - label_1
 s_sub_u32 s11, s11, 16
 s_cbranch_scc1 label_50
@@ -1273,6 +1298,7 @@ s_mov_b32 s29, label_33 - label_1
 s_branch label_48
 .align 32
 label_33:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 .align 8
@@ -1351,6 +1377,7 @@ s_mov_b32 s29, label_22 - label_1
 s_branch label_49
 .align 32
 label_34:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_lshl_b32 s20, s20, 2
 s_setprio 1
 s_waitcnt lgkmcnt(0) & vmcnt(32)
@@ -1380,6 +1407,7 @@ v_pk_fma_f16 v154, v112, -1.0, v17 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v155, v111, -1.0, v106 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v109, -1.0, v108 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v110, -1.0, v107 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_79:
 s_sub_u32 s3, s3, 4
@@ -1409,6 +1437,7 @@ s_mov_b32 s29, label_35 - label_1
 s_branch label_46
 .align 32
 label_35:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 s_barrier
@@ -1429,6 +1458,7 @@ v_pk_fma_f16 v97, v97, 1.0, v101 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v109, -1.0, v112 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v110, -1.0, v111 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_mfma_f32_16x16x16_f16 [v44, v45, v46, v47], [v96, v97], [v68, v69], [v44, v45, v46, v47]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_80:
 s_sub_u32 s3, s3, 4
@@ -1459,6 +1489,7 @@ s_mov_b32 s29, label_36 - label_1
 s_branch label_47
 .align 32
 label_36:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_mov_b32 s29, label_81 - label_1
 s_sub_u32 s11, s11, 16
 s_cbranch_scc1 label_51
@@ -1491,6 +1522,7 @@ v_pk_fma_f16 v154, v120, -1.0, v113 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v155, v119, -1.0, v114 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v117, -1.0, v116 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v118, -1.0, v115 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_82:
 s_sub_u32 s2, s2, 4
@@ -1520,6 +1552,7 @@ s_mov_b32 s29, label_37 - label_1
 s_branch label_48
 .align 32
 label_37:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 s_barrier
@@ -1540,6 +1573,7 @@ v_pk_fma_f16 v95, v95, 1.0, v99 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v117, -1.0, v120 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v118, -1.0, v119 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_mfma_f32_16x16x16_f16 [v48, v49, v50, v51], [v96, v97], [v68, v69], [v48, v49, v50, v51]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_83:
 s_sub_u32 s2, s2, 4
@@ -1570,6 +1604,7 @@ s_mov_b32 s29, label_38 - label_1
 s_branch label_49
 .align 32
 label_38:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_lshl_b32 s20, s20, 2
 s_setprio 1
 s_waitcnt lgkmcnt(0) & vmcnt(32)
@@ -1599,6 +1634,7 @@ v_pk_fma_f16 v154, v127, -1.0, v122 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v155, v125, -1.0, v124 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v126, -1.0, v123 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v128, -1.0, v121 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_84:
 s_sub_u32 s3, s3, 4
@@ -1628,6 +1664,7 @@ s_mov_b32 s29, label_39 - label_1
 s_branch label_46
 .align 32
 label_39:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 s_barrier
@@ -1648,6 +1685,7 @@ v_pk_fma_f16 v97, v97, 1.0, v101 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v126, -1.0, v127 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v128, -1.0, v125 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_mfma_f32_16x16x16_f16 [v44, v45, v46, v47], [v96, v97], [v68, v69], [v44, v45, v46, v47]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_85:
 s_sub_u32 s3, s3, 4
@@ -1678,6 +1716,7 @@ s_mov_b32 s29, label_40 - label_1
 s_branch label_47
 .align 32
 label_40:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_mov_b32 s29, label_86 - label_1
 s_sub_u32 s11, s11, 16
 s_cbranch_scc1 label_51
@@ -1710,6 +1749,7 @@ v_pk_fma_f16 v154, v107, -1.0, v17 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v155, v111, -1.0, v109 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v106, -1.0, v108 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v110, -1.0, v112 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_87:
 s_sub_u32 s2, s2, 4
@@ -1739,6 +1779,7 @@ s_mov_b32 s29, label_41 - label_1
 s_branch label_48
 .align 32
 label_41:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 s_barrier
@@ -1759,6 +1800,7 @@ v_pk_fma_f16 v95, v95, 1.0, v99 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v106, -1.0, v107 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v110, -1.0, v111 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_mfma_f32_16x16x16_f16 [v48, v49, v50, v51], [v96, v97], [v68, v69], [v48, v49, v50, v51]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_88:
 s_sub_u32 s2, s2, 4
@@ -1789,6 +1831,7 @@ s_mov_b32 s29, label_42 - label_1
 s_branch label_49
 .align 32
 label_42:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_lshl_b32 s20, s20, 2
 s_setprio 1
 s_waitcnt lgkmcnt(0) & vmcnt(32)
@@ -1818,6 +1861,7 @@ v_pk_fma_f16 v154, v115, -1.0, v113 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v155, v119, -1.0, v117 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v114, -1.0, v116 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v118, -1.0, v120 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_89:
 s_sub_u32 s3, s3, 4
@@ -1847,6 +1891,7 @@ s_mov_b32 s29, label_43 - label_1
 s_branch label_46
 .align 32
 label_43:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 s_barrier
@@ -1867,6 +1912,7 @@ v_pk_fma_f16 v97, v97, 1.0, v101 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v114, -1.0, v115 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v118, -1.0, v119 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_mfma_f32_16x16x16_f16 [v44, v45, v46, v47], [v96, v97], [v68, v69], [v44, v45, v46, v47]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_90:
 s_sub_u32 s3, s3, 4
@@ -1897,6 +1943,7 @@ s_mov_b32 s29, label_44 - label_1
 s_branch label_47
 .align 32
 label_44:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_mov_b32 s29, label_91 - label_1
 s_sub_u32 s11, s11, 16
 s_cbranch_scc1 label_51
@@ -1929,6 +1976,7 @@ v_pk_fma_f16 v154, v121, -1.0, v122 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v155, v125, -1.0, v126 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v124, -1.0, v123 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v128, -1.0, v127 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_92:
 s_sub_u32 s2, s2, 4
@@ -1958,6 +2006,7 @@ s_mov_b32 s29, label_45 - label_1
 s_branch label_48
 .align 32
 label_45:
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 1
 s_waitcnt lgkmcnt(0)
 s_barrier
@@ -1978,6 +2027,7 @@ v_pk_fma_f16 v95, v95, 1.0, v99 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v156, v124, -1.0, v121 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_pk_fma_f16 v157, v128, -1.0, v125 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 1, 1]
 v_mfma_f32_16x16x16_f16 [v48, v49, v50, v51], [v96, v97], [v68, v69], [v48, v49, v50, v51]
+_v_mfma_f32_32x32x16_f16_vvv0 254, 254, 254
 s_setprio 2
 label_93:
 s_sub_u32 s2, s2, 4
@@ -2659,7 +2709,7 @@ s_cbranch_scc0 label_96
 label_95:
 s_barrier
 s_setprio 0
-ds_read_b64 [v24, v25], v3 offset:0
+ds_read_b64 [v24, v25], v3
 ds_read_b64 [v22, v23], v3 offset:256
 ds_read_b64 [v32, v33], v3 offset:512
 ds_read_b64 [v30, v31], v3 offset:768
@@ -2724,7 +2774,7 @@ s_setprio 0
 ds_read_b64 [v78, v79], v83 offset:55816
 ds_read_b64 [v82, v83], v83 offset:57352
 ds_read_b32 v80, v80 offset:58888
-ds_read_b64 [v28, v29], v3 offset:0
+ds_read_b64 [v28, v29], v3
 ds_read_b64 [v26, v27], v3 offset:256
 ds_read_b64 [v36, v37], v3 offset:512
 ds_read_b64 [v34, v35], v3 offset:768
