@@ -2163,7 +2163,7 @@ class KernelWriterAssembly(KernelWriter):
         moduleWg.addComment0("init: add agpr [%u...%u) to pool" % \
                             (0, numAccvgprs))
 
-      if kernel["StreamK"] == 0:
+      if kernel["StreamK"] == 0 and not kernel["UseSubtileImpl"]:
         moduleWg.add(self.localReadAddresses(kernel, tPA, tPB, tPM))
         moduleWg.add(self.localWriteAddresses(kernel, tPA, tPB, tPM))
 

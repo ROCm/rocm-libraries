@@ -489,6 +489,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
   tmp = writer.vgprPool.checkOut(2)
   tmp1 = tmp + 1
 
+  interleaved = True
   if tileInfo.loadRatioGR == 1.0:
     # W0 W2
     # W1 W3
@@ -497,7 +498,11 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
       module.add(VAndB32(dst=vgpr(tmp), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
     else:
       module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-    module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
+    
+    if interleaved:
+      module.add(SMovB32(dst=sgpr(tmpSgpr), src=tileInfo.subtileSize*2, comment="%s: bytes loaded per wave"%tc))
+    else:
+      module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
     module.add(VMulLOU32(dst=vgpr(tmp), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="%s: wave partition offset"%tc))
 
     for vgprId in range(len(tileInfo.sharedVgprLROffset)):
@@ -509,6 +514,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
     module.add(VAndB32(dst=vgpr(tmp1), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId & 1"%tc))
     module.add(VMulLOU32(dst=vgpr(tmp1), src1=vgpr(tmp1), src0=sgpr(tmpSgpr), comment="%s: interleave offset"%tc))
 
+    
     module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
     module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
     module.add(VMulLOU32(dst=vgpr(tmp), src1=vgpr(tmp), src0=sgpr(tmpSgpr), comment="%s: wave pair offset"%tc))
@@ -934,7 +940,10 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
   subtileInfo = tileInfo.localSubtiles[linearId]
-
+  interleaved = True
+  readSize = 2*tileInfo.subtileSize
+  # Reads mma tiles in a subtile row-major
+  # TODO: Check if this ordering can be used for TLU=1
   for mfmaC in range(tileInfo.subtileShape[1]):
     for mfmaR in range(tileInfo.subtileShape[0]):
       mfmaId = tileInfo.getSubtileShapeLinearId(mfmaC, mfmaR)
@@ -942,7 +951,13 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
       dstTile = tileInfo.vgprTiles[subtileInfo.localReadMap[mfmaId]]
       dstVgpr = dstTile.regList.regValues[0]
       numRegs = len(dstTile.regList.regValues)
-      offset = sId0*2*tileInfo.subtileSize
+
+      offset = sId0*2*readSize if interleaved else sId0*readSize
+      
+      if offset >= readSize * tileInfo.localSubtileGrid[0]:
+        offset -= readSize * tileInfo.localSubtileGrid[0]
+        offset+=512
+
       module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegs), src=vgpr(addrVgpr), ds=DSModifiers(offset=offset),
                             comment="Subtile%s[%u,%u] mfmaId=[%u,%u]"%(tileInfo.tc, sId0, sId1, mfmaR, mfmaC)))
 
@@ -1010,8 +1025,8 @@ def globalReadPtrUpdates(tc, writer, kernel):
   module.add(SAddU32(dst=sgpr("Srd%s"%tc), src0=sgpr("Srd%s"%tc), src1=inc))
   module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0))
 
-  module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=inc))
-  #module.add(SSubBU32(dst=sgpr("Srd%s+3"%tc), src0=sgpr("Srd%s+3"%tc), src1=0))
+  # TODOBS: commented out for now, need to re-enable
+  #module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=inc))
 
   return module
 
@@ -1034,10 +1049,14 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
   opDSize = len(vgprTileD.regList.regValues)
 
   accvgprAlias = vgpr if kernel["MIArchVgpr"] else accvgpr
+
+  aOperand = vgpr(vgprBStart,opBSize) if kernel["SourceSwap"] else vgpr(vgprAStart,opASize)
+  bOperand = vgpr(vgprAStart,opASize) if kernel["SourceSwap"] else vgpr(vgprBStart,opBSize)
+    
   module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,32,1], mfma1k=False, \
                              acc=accvgprAlias(vgprDStart,opDSize), \
-                             a=vgpr(vgprAStart,opBSize), \
-                             b=vgpr(vgprBStart,opBSize), \
+                             a=aOperand, \
+                             b=bOperand, \
                              acc2=accvgprAlias(vgprCStart,opCSize), \
                              comment=comment))
   return module
@@ -1057,12 +1076,43 @@ def emitMfmaCode(writer, kernel):
   for mmak in range(atileInfo.localMMATileGrid[1]):
     for mma1 in range(btileInfo.localMMATileGrid[0]):
       for mma0 in range(atileInfo.localMMATileGrid[0]):
-        atiles = atileInfo.vgprTiles[mma0 + mmak * atileInfo.localMMATileGrid[0]]
-        btiles = btileInfo.vgprTiles[mma1 + mmak * btileInfo.localMMATileGrid[0]]
-        dtiles = dtileInfo.vgprTiles[mma0 + mma1 * dtileInfo.localMMATileGrid[0]]
+        atiles = atileInfo.vgprTiles[mmak + mma0 * atileInfo.localMMATileGrid[1]]
+        btiles = btileInfo.vgprTiles[mmak + mma1 * btileInfo.localMMATileGrid[1]]
+        dtiles = dtileInfo.vgprTiles[mma0 + mma1 * dtileInfo.localMMATileGrid[1]]
         module.add(emitMfmaInstruction(writer, kernel, atiles, btiles, dtiles, dtiles, "Emit MMFA code for MMA tiles C[%u, %u] += A[%u, %u] * B[%u, %u]"%(mma0, mma1, mma0, mmak, mmak, mma1)))
 
   return module
+
+##################################################
+# Debug: Write a VGPR value to D[threadId] for inspection
+#
+# Writes the content of the specified VGPR as a u32 to D[Serial],
+# using flat_store. Uses 2 temp VGPRs from the pool for the address.
+#
+# Usage:
+#   debugExportVgprToD(module, writer, tileInfoA.sharedVgprGROffset[0])
+#
+def debugExportVgprToD(module, writer, vgprIdx, cvtToFloat=True):
+  module.addComment0("DEBUG: Export v%u to D[threadId]" % vgprIdx)
+
+  if cvtToFloat:
+    tmpVgpr = writer.vgprPool.checkOut(2)
+    tmpData = tmpVgpr
+    tmpOffset = tmpVgpr + 1
+    module.add(TextBlock("v_cvt_f32_u32 v%u, v%u // DEBUG: int -> float\n" % (tmpData, vgprIdx)))
+  else:
+    tmpVgpr = writer.vgprPool.checkOut(1)
+    tmpData = vgprIdx
+    tmpOffset = tmpVgpr
+
+  # byte offset = Serial * 4
+  module.add(VLShiftLeftB32(dst=vgpr(tmpOffset), shiftHex=hex(2), src=vgpr("Serial"), comment="DEBUG: byte offset = threadId * 4"))
+  # global_store_dword voffset, vdata, s[base:base+1]
+  module.add(TextBlock("global_store_dword v%u, v%u, s[sgprAddressC:sgprAddressC+1] // DEBUG: store v%u to D[threadId]\n" % (tmpOffset, tmpData, vgprIdx)))
+  module.add(SWaitCnt(vlcnt=0, comment="DEBUG: wait for store"))
+
+  writer.vgprPool.checkIn(tmpVgpr)
+  module.addComment0("DEBUG: End export")
 
 ##################################################
 # Subroutine entry point for main loop impl
@@ -1077,12 +1127,28 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module = Module()
   module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for subtile based main loop impl")
 
+  # TODO remove #######################
+  # Initialize first 64KB LDS to 0xffffffff
+  #
+  #vtmp = writer.vgprPool.checkOut(1)
+  #vval = writer.vgprPool.checkOutAligned(4,4)
+  #module.add(VLShiftLeftB32(dst=vgpr(vtmp), shiftHex=4, src=vgpr("Serial")))
+  #module.add(VMovB32(dst=vgpr(vval), src="0xffffffff"))
+  #module.add(VMovB32(dst=vgpr(vval+1), src="0xffffffff"))
+  #module.add(VMovB32(dst=vgpr(vval+2), src="0xffffffff"))
+  #module.add(VMovB32(dst=vgpr(vval+3), src="0xffffffff"))
+  #for i in range(16):
+  #  module.add(DSStoreB128(dstAddr=vgpr(vtmp), src=vgpr(vval, 4), ds=DSModifiers(offset=(i * 4096))))
+  #module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""))
+  #writer.vgprPool.checkIn(vtmp)
+  #writer.vgprPool.checkIn(vval)
+  #####################################
 
+  
   label = Label("start", comment="")
   module.add(label)
 
   if not isNLL:
-    #module.add(Label("testL", comment=""))
     module.add(globalReadDoSubtile('A', writer, kernel))
     module.add(globalReadDoSubtile('B', writer, kernel))
     module.add(SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all subtile GRs to complete"))
@@ -1106,6 +1172,21 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0))
   module.add(SCBranchSCC0(labelName=label.getLabelName()))
 
+
+  # vtmp = writer.vgprPool.checkOut(1)
+  # module.add(VLShiftRightB32(dst=vgpr(vtmp), shiftHex=hex(6), src=vgpr("Serial")))
+  # # module.add(VMovB32(dst=vgpr(vtmp), src=hex(1)))
+  # module.add(TextBlock("v_cvt_f32_i32 v%u, v%u\n"%(vtmp, vtmp)))
+
+  
+  # for vtiles in writer.states.d.tileInfo.vgprTiles:
+  #   reg = vgpr if vtiles.regList.regPool == writer.vgprPool else accvgpr
+  #   copyInst = VMovB32 if vtiles.regList.regPool == writer.vgprPool else VAccvgprWrite
+  #   for regId in vtiles:
+  #     module.add(copyInst(dst=reg(regId), src=vgpr(vtmp)))
+  #   #module.addComment("%ss used for D mma tile %u: %s"%(regStr, self.states.d.tileInfo.vgprTiles.index(vtiles), str(vtiles)))
+
+  # writer.vgprPool.checkIn(vtmp)
   return module
 
 
