@@ -94,7 +94,7 @@ template <typename T>
     int64_t count = 0;
     auto countStatus = hipdnnBackend()->backendGetAttribute(
         desc, attrName, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
-    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
     {
         value.clear();
         return {};
@@ -106,6 +106,11 @@ template <typename T>
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
                 "Failed to get count for " + errorContext
                     + " Backend error: " + backendErrMsg.data()};
+    }
+    if(count <= 0)
+    {
+        value.clear();
+        return {};
     }
 
     std::vector<char> buffer(static_cast<size_t>(count));
