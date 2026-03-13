@@ -274,8 +274,8 @@ struct HandleImpl
 
 Handle::Handle(miopenAcceleratorQueue_t stream) : impl(std::make_unique<HandleImpl>())
 {
-    miopenHandle_current_stream_id{0};
-    this->impl->device = get_device_id();
+    miopenHandle_current_stream_id = 0;
+    this->impl->device             = get_device_id();
 
     if(stream == nullptr)
         this->impl->root_stream = HandleImpl::reference_stream(nullptr);
