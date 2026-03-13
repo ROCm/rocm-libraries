@@ -1,5 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+#pragma once
+
 #include "hipdnn_backend.h"
 
 namespace hipdnn_backend
