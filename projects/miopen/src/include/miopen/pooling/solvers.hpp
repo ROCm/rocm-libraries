@@ -307,12 +307,12 @@ struct PoolingFwdNCHWTransposingSolver
 
     inline static auto GetTransposes()
     {
-        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
             {
                 &Problem::GetXDesc,
                 &Problem::GetXDesc,
                 &InvokeParams::xDesc,
-                {&InvokeParams::x},
+                {.as_input = &InvokeParams::x},
                 "NCDHW",
                 true,
             },
@@ -320,16 +320,11 @@ struct PoolingFwdNCHWTransposingSolver
                 &Problem::GetYDesc,
                 &Problem::GetYDesc,
                 &InvokeParams::yDesc,
-                {},
+                {.as_output = &InvokeParams::y},
                 "NCDHW",
                 false,
             },
         }};
-
-        // Before C++20 you can't aggregate initialize non-first union element
-        ret[1].as_output = &InvokeParams::y;
-
-        return ret;
     }
 };
 
@@ -464,12 +459,12 @@ struct PoolingBwdNCHWTransposingSolver
 
     inline static auto GetTransposes()
     {
-        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
             {
                 &Problem::GetXDesc,
                 &Problem::GetXDesc,
                 &InvokeParams::dxDesc,
-                {},
+                {.as_output = &InvokeParams::dx},
                 "NCDHW",
                 false,
             },
@@ -477,16 +472,11 @@ struct PoolingBwdNCHWTransposingSolver
                 &Problem::GetYDesc,
                 &Problem::GetYDesc,
                 &InvokeParams::dyDesc,
-                {&InvokeParams::dy},
+                {.as_input = &InvokeParams::dy},
                 "NCDHW",
                 true,
             },
         }};
-
-        // Before C++20 you can't aggregate initialize non-first union element
-        ret[0].as_output = &InvokeParams::dx;
-
-        return ret;
     }
 };
 

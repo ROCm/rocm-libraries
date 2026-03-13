@@ -46,10 +46,12 @@ add_executable(
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
+    descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
