@@ -143,6 +143,7 @@ set(others_test_source
   memory_model_gtest.cpp
   # rocsolver logging
   logging_gtest.cpp
+  asan_helpers_gtest.cpp
   # helpers
   #common/client_environment_helpers.cpp
 )

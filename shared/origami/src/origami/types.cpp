@@ -30,7 +30,7 @@ double runtime_options::read_heuristics_variance_from_env() {
   if (const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE")) {
     try {
       double val = std::stod(env);
-      if (std::isfinite(val) && val > 0.0) { return val; }
+      if (std::isfinite(val) && val >= 0.0) { return val; }
     } catch (...) {
       // fall through to default
     }
