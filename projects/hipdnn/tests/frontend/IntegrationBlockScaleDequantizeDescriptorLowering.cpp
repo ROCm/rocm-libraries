@@ -98,7 +98,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
         .set_is_negative_scale(true);
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
-    y->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID).set_output(true).set_name("Y");
+    y->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID).set_name("Y");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -208,7 +208,6 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, AutoAssignedUidsPreser
     attrs.set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE));
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
-    y->set_output(true);
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
