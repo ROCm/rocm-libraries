@@ -5,6 +5,7 @@
 #ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
 namespace hipdnn_data_sdk::data_objects
@@ -16,9 +17,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
 {
     tensorAttrJson["uid"] = tensorAttr.uid();
     tensorAttrJson["data_type"] = tensorAttr.data_type();
-    tensorAttrJson["dims"] = *tensorAttr.dims();
-    tensorAttrJson["strides"] = *tensorAttr.strides();
-    tensorAttrJson["name"] = tensorAttr.name()->c_str();
+    tensorAttrJson["dims"] = tensorAttr.dims();
+    tensorAttrJson["strides"] = tensorAttr.strides();
+    tensorAttrJson["name"] = tensorAttr.name();
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
 
     // Serialize TensorValue union if present

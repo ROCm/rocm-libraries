@@ -236,7 +236,7 @@ inline detail::GraphLogMode getGraphLogMode()
  */
 inline bool isGraphLoggingEnabled()
 {
-    return getGraphLogMode() != detail::GraphLogMode::OFF && isLogLevelEnabled(HIPDNN_SEV_INFO);
+    return getGraphLogMode() != detail::GraphLogMode::OFF;
 }
 
 /**

@@ -35,6 +35,17 @@ NLOHMANN_JSON_NAMESPACE_END
 
 namespace flatbuffers
 {
+
+inline void to_json(nlohmann::json& json, const String* str)
+{
+    if(str == nullptr)
+    {
+        return;
+    }
+
+    json = str->str();
+}
+
 template <class T>
 // NOLINTNEXTLINE(readability-identifier-naming)
 void to_json(nlohmann::json& vectorList, const Vector<T>* vec)
