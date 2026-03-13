@@ -29,6 +29,17 @@ static bool containsPluginByFilename(const std::vector<fs::path>& loadedPaths,
         });
 }
 
+// Check if any loaded path resides in the same folder as expectedPath.
+static bool containsPluginByFolder(const std::vector<fs::path>& loadedPaths,
+                                   const std::string& expectedPath)
+{
+    fs::path expectedFolder = fs::path(expectedPath).parent_path();
+    return std::any_of(
+        loadedPaths.begin(), loadedPaths.end(), [&expectedFolder](const fs::path& loaded) {
+            return loaded.parent_path() == expectedFolder;
+        });
+}
+
 TEST(IntegrationFrontendSetPluginPathsExt, EmptyPathsAdditive)
 {
     // Reset plugin paths from any prior test to ensure clean state
@@ -41,48 +52,47 @@ TEST(IntegrationFrontendSetPluginPathsExt, EmptyPathsAdditive)
     auto error = setEnginePluginPaths(emptyPaths, PluginLoadingMode::MODE_ADDITIVE);
     ASSERT_TRUE(error.is_good());
 
-    hipdnnHandle_t handle = nullptr;
-    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
+    auto [handle, err] = createHipdnnHandle();
+    ASSERT_TRUE(err.is_good());
 
     std::vector<fs::path> loadedPaths;
-    error = getLoadedEnginePluginPaths(handle, loadedPaths);
+    error = getLoadedEnginePluginPaths(*handle, loadedPaths);
     ASSERT_TRUE(error.is_good());
 
-    std::string expectedPluginPath = getDefaultPluginPath();
+    std::string expectedPluginPath = testDefaultGoodPluginPath();
 
     EXPECT_EQ(loadedPaths.size(), 1);
     EXPECT_TRUE(containsPluginByFilename(loadedPaths, expectedPluginPath));
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
 
 TEST(IntegrationFrontendSetPluginPathsExt, AbsoluteLoadsOnlyCustom)
 {
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+        "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
+
     const auto& pluginFilePath = testGoodPluginPath();
     std::array<const char*, 1> paths = {pluginFilePath.c_str()};
 
     auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
     ASSERT_TRUE(error.is_good());
 
-    hipdnnHandle_t handle = nullptr;
-    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
+    auto [handle, err] = createHipdnnHandle();
+    ASSERT_TRUE(err.is_good());
 
     std::vector<fs::path> loadedPaths;
-    error = getLoadedEnginePluginPaths(handle, loadedPaths);
+    error = getLoadedEnginePluginPaths(*handle, loadedPaths);
     ASSERT_TRUE(error.is_good());
 
     EXPECT_EQ(loadedPaths.size(), 1);
 
     auto defaultPluginPath
-        = fs::path("hipdnn_plugins/engines")
-          / hipdnn_data_sdk::utilities::getLibraryName("test_good_default_plugin");
-    const auto& testPluginPath = testGoodPluginPath();
+        = (fs::path("hipdnn_plugins/engines")
+           / hipdnn_data_sdk::utilities::getLibraryName("test_good_default_plugin"))
+              .string();
 
-    EXPECT_FALSE(containsPluginByFilename(loadedPaths, defaultPluginPath.string()));
-    EXPECT_TRUE(containsPluginByFilename(loadedPaths, testPluginPath));
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+    EXPECT_FALSE(containsPluginByFolder(loadedPaths, defaultPluginPath));
+    EXPECT_FALSE(containsPluginByFolder(loadedPaths, testDefaultGoodPluginPath()));
+    EXPECT_TRUE(containsPluginByFilename(loadedPaths, testGoodPluginPath()));
 }
 
 TEST(IntegrationFrontendSetPluginPathsExt, AdditiveLoadsBothDefaultAndCustom)
@@ -97,74 +107,18 @@ TEST(IntegrationFrontendSetPluginPathsExt, AdditiveLoadsBothDefaultAndCustom)
     auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
     ASSERT_TRUE(error.is_good());
 
-    hipdnnHandle_t handle = nullptr;
-    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
+    auto [handle, err] = createHipdnnHandle();
+    ASSERT_TRUE(err.is_good());
 
     std::vector<fs::path> loadedPaths;
-    error = getLoadedEnginePluginPaths(handle, loadedPaths);
+    error = getLoadedEnginePluginPaths(*handle, loadedPaths);
     ASSERT_TRUE(error.is_good());
 
     EXPECT_GE(loadedPaths.size(), 2);
 
-    auto defaultPluginPath = getDefaultPluginPath();
+    auto defaultPluginPath = testDefaultGoodPluginPath();
     const auto& testPluginPath = testGoodPluginPath();
 
     EXPECT_TRUE(containsPluginByFilename(loadedPaths, defaultPluginPath));
     EXPECT_TRUE(containsPluginByFilename(loadedPaths, testPluginPath));
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-}
-
-TEST(IntegrationFrontendGetPluginPathsExt, GetLoadedPluginPathsAfterAbsolute)
-{
-    const auto& pluginFilePath = testGoodPluginPath();
-    std::array<const char*, 1> setPaths = {pluginFilePath.c_str()};
-
-    auto error = setEnginePluginPaths(setPaths, PluginLoadingMode::MODE_ABSOLUTE);
-    ASSERT_TRUE(error.is_good());
-
-    hipdnnHandle_t handle = nullptr;
-    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
-
-    std::vector<fs::path> loadedPaths;
-    error = getLoadedEnginePluginPaths(handle, loadedPaths);
-    ASSERT_TRUE(error.is_good());
-
-    EXPECT_EQ(loadedPaths.size(), 1);
-    EXPECT_TRUE(containsPluginByFilename(loadedPaths, pluginFilePath));
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
-}
-
-TEST(IntegrationFrontendGetPluginPathsExt, GetLoadedPluginPathsAfterAdditive)
-{
-    // Reset plugin paths from any prior test to ensure clean state
-    setEnginePluginPaths(std::vector<fs::path>{}, PluginLoadingMode::MODE_ABSOLUTE);
-
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
-        "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
-
-    const std::array<const char*, 1> paths = {getTestPluginCustomDir().c_str()};
-    auto error = setEnginePluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
-    ASSERT_TRUE(error.is_good());
-
-    hipdnnHandle_t handle = nullptr;
-    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
-
-    std::vector<fs::path> loadedPaths;
-    error = getLoadedEnginePluginPaths(handle, loadedPaths);
-    ASSERT_TRUE(error.is_good());
-
-    EXPECT_GE(loadedPaths.size(), 2);
-
-    auto defaultPluginPath = getDefaultPluginPath();
-    const auto& testPluginPath = testGoodPluginPath();
-
-    EXPECT_TRUE(containsPluginByFilename(loadedPaths, defaultPluginPath));
-    EXPECT_TRUE(containsPluginByFilename(loadedPaths, testPluginPath));
-
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
