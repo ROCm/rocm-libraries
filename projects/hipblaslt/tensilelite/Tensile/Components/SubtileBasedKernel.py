@@ -1172,7 +1172,7 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0))
   module.add(SCBranchSCC0(labelName=label.getLabelName()))
 
-  module.add(Label("sebvince", ""))   
+
   # vtmp = writer.vgprPool.checkOut(1)
   # module.add(VLShiftRightB32(dst=vgpr(vtmp), shiftHex=hex(6), src=vgpr("Serial")))
   # # module.add(VMovB32(dst=vgpr(vtmp), src=hex(1)))
