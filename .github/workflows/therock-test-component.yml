@@ -49,6 +49,7 @@ jobs:
       THEROCK_BIN_DIR: "./build/bin"
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+      TEST_COMPONENT: ${{ fromJSON(inputs.component).job_name }}
     steps:
       - name: "Fetch 'build_tools' from repository"
         if: ${{ runner.os == 'Windows' }}
