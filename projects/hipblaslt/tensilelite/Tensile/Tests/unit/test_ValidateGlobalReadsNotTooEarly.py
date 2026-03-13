@@ -37,9 +37,6 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
     """
     validator_passes = [add_gr_not_too_early_constraints]
 
-    def setUp(self):
-        super().setUp()
-
     def test_basic(self):
         """
         LRA0 at 0, LRB0 at 1. SWaitCnt(dscnt=0) at 3, SBarrier at 4.
@@ -729,8 +726,8 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
     """
     validator_passes = [add_gr_not_too_early_constraints]
 
-    def setUp(self):
-        super().setUp()
+    def setup_method(self, method=None):
+        super().setup_method(method)
         self.kernel["DtlPlusLdsBuf"] = True
 
     def test_basic(self):

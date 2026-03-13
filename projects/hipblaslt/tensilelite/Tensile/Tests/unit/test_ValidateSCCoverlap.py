@@ -33,8 +33,8 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
     def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
         return verify_scc_overlap(sched, kernel_dict, codePathIdx)
 
-    def setUp(self):
-        super().setUp()
+    def setup_method(self, method=None):
+        super().setup_method(method)
         self.kernel["MIWaveTileA"] = 4
         self.kernel["MIWaveTileB"] = 4
         
