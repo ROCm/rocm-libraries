@@ -803,12 +803,12 @@ protected:
                         _, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, _, _, _))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}), Return(HIPDNN_STATUS_SUCCESS)))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}),
-                            Invoke([this](hipdnnBackendDescriptor_t,
-                                          hipdnnBackendAttributeName_t,
-                                          hipdnnBackendAttributeType_t,
-                                          int64_t,
-                                          int64_t*,
-                                          void* arrayOfElements) {
+                            Invoke([](hipdnnBackendDescriptor_t,
+                                      hipdnnBackendAttributeName_t,
+                                      hipdnnBackendAttributeType_t,
+                                      int64_t,
+                                      int64_t*,
+                                      void* arrayOfElements) {
                                 std::memcpy(arrayOfElements, K_PADDING.data(), 2 * sizeof(int64_t));
                             }),
                             Return(HIPDNN_STATUS_SUCCESS)));
@@ -819,12 +819,12 @@ protected:
                         _, HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, _, _, _))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}), Return(HIPDNN_STATUS_SUCCESS)))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}),
-                            Invoke([this](hipdnnBackendDescriptor_t,
-                                          hipdnnBackendAttributeName_t,
-                                          hipdnnBackendAttributeType_t,
-                                          int64_t,
-                                          int64_t*,
-                                          void* arrayOfElements) {
+                            Invoke([](hipdnnBackendDescriptor_t,
+                                      hipdnnBackendAttributeName_t,
+                                      hipdnnBackendAttributeType_t,
+                                      int64_t,
+                                      int64_t*,
+                                      void* arrayOfElements) {
                                 std::memcpy(arrayOfElements, K_PADDING.data(), 2 * sizeof(int64_t));
                             }),
                             Return(HIPDNN_STATUS_SUCCESS)));
@@ -835,12 +835,12 @@ protected:
                         _, HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, _, _, _))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}), Return(HIPDNN_STATUS_SUCCESS)))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}),
-                            Invoke([this](hipdnnBackendDescriptor_t,
-                                          hipdnnBackendAttributeName_t,
-                                          hipdnnBackendAttributeType_t,
-                                          int64_t,
-                                          int64_t*,
-                                          void* arrayOfElements) {
+                            Invoke([](hipdnnBackendDescriptor_t,
+                                      hipdnnBackendAttributeName_t,
+                                      hipdnnBackendAttributeType_t,
+                                      int64_t,
+                                      int64_t*,
+                                      void* arrayOfElements) {
                                 std::memcpy(arrayOfElements, K_STRIDE.data(), 2 * sizeof(int64_t));
                             }),
                             Return(HIPDNN_STATUS_SUCCESS)));
@@ -851,12 +851,12 @@ protected:
             backendGetAttribute(_, HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, _, _, _))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}), Return(HIPDNN_STATUS_SUCCESS)))
             .WillOnce(DoAll(SetArgPointee<4>(int64_t{2}),
-                            Invoke([this](hipdnnBackendDescriptor_t,
-                                          hipdnnBackendAttributeName_t,
-                                          hipdnnBackendAttributeType_t,
-                                          int64_t,
-                                          int64_t*,
-                                          void* arrayOfElements) {
+                            Invoke([](hipdnnBackendDescriptor_t,
+                                      hipdnnBackendAttributeName_t,
+                                      hipdnnBackendAttributeType_t,
+                                      int64_t,
+                                      int64_t*,
+                                      void* arrayOfElements) {
                                 std::memcpy(
                                     arrayOfElements, K_DILATION.data(), 2 * sizeof(int64_t));
                             }),
@@ -936,7 +936,7 @@ protected:
     }
 
     // Executes unpackOperation and returns the result
-    std::pair<std::shared_ptr<graph::INode>, Error> executeUnpack()
+    static std::pair<std::shared_ptr<graph::INode>, Error> executeUnpack()
     {
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
         GraphAttributes graphAttrs;
