@@ -112,7 +112,8 @@ fi
 
 # Setup
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR/../.."
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+BUILD_DIR="$PROJECT_ROOT/build"
 OUTPUT_FILE="$BUILD_DIR/pr${PR_NUMBER}_validation_results.txt"
 
 log_section "Validation Configuration"
