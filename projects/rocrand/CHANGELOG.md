@@ -9,6 +9,10 @@ Documentation for rocRAND is available at
 
 * Fixed dynamic ordering support for threefry generators.
 
+### Changed
+
+* Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
+
 ## rocRAND 4.2.0 for ROCm 7.2
 
 ### Removed
