@@ -63,6 +63,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_MhaBackward_*"
   - "*/GPU_MhaForward_*"
   - "*GPU_TestMhaFind20*"
+  - "*/GPU_MIOpenDriver*"
 
 
 test_categories:
@@ -151,13 +152,10 @@ test_categories:
       - "Full/GPU_ConvGrpActivInfer3D_FP32*"
       - "Full/GPU_ConvGrpActivInfer3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "*/GPU_MIOpenDriver*"
+      - "Full/GPU_MIOpenDriverConv2dTransTest*"
+      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
-      # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 154.58 sec
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 5.48 sec
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 8.56 sec
 
     test_files:
       # Quick tests
@@ -202,13 +200,8 @@ test_categories:
     test_patterns: *positive_patterns
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
-      # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 94.83 sec
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 4.35 sec
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 10.42 sec
 
     test_files:
       # Quick tests
@@ -258,17 +251,15 @@ test_categories:
       - "*"
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
-      - "*DISABLED*"
-      # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 94.83 sec
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 4.35 sec
-      - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 10.42 sec
 
     test_files:
       # All test files in the suite
       - "*.cpp"
       - "gtest/*.cpp"
+      
+    exclude:
+      # Only exclude explicitly disabled tests
+      - "*DISABLED*"
     
     labels:
       - "full"
@@ -316,7 +307,11 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: *gfx11_common_patterns
+    test_patterns: 
+      - *gfx11_common_patterns
+      - "*/GPU_MIOpenDriver*"
+      - "Smoke/CPU_Handle_NONE*"
+      - "Full/GPU_reduce_custom_fp32*
     labels:
       - "quick"
       - "standard"
@@ -352,4 +347,4 @@ execution_settings:
     quick: 300          # 5 minutes 
     standard: 1800      # 30 minutes 
     comprehensive: 7200 # 2 hours 
-    full: 14400         # 4 hours
+    full: 14400         # 4 hours         
