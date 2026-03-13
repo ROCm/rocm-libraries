@@ -277,6 +277,7 @@ using KernelTypesCompAsync16x16x128 = ::testing::Types<CompAsyncConfig16x16x128<
 using KernelTypesCompAsyncEightWaves =
     ::testing::Types<CompAsyncEightWavesConfig<Row, Col, Row, F8>>;
 
+// clang-format off
 using KernelTypesCompV6 = ::testing::Types<
     std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,        I256,        I256,         I64,        I32,        I32,        I16, Intrawave,        CompV6>,
     std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I256,        I256,         I64,        I32,        I32,        I16, Intrawave,        CompV6>,
