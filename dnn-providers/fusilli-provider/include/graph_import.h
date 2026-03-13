@@ -15,6 +15,7 @@
 #define FUSILLI_PLUGIN_SRC_GRAPH_IMPORT_H
 
 #include <fusilli.h>
+#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
@@ -155,6 +156,11 @@ private:
       FUSILLI_CHECK_ERROR(
           importConvWGradAttr(node.attributes_as_ConvolutionWrwAttributes()));
       break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::
+        ConvolutionBwdAttributes:
+      FUSILLI_CHECK_ERROR(
+          importConvDGradAttr(node.attributes_as_ConvolutionBwdAttributes()));
+      break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
       FUSILLI_CHECK_ERROR(
           importPointwiseAttr(node.attributes_as_PointwiseAttributes()));
@@ -230,6 +236,38 @@ private:
     // Import node output.
     FUSILLI_CHECK_ERROR(
         importNodeOutput(hipDnnConvWrwAttr->dw_tensor_uid(), "dw", dw));
+
+    return fusilli::ok();
+  }
+
+  fusilli::ErrorObject importConvDGradAttr(
+      const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes
+          *hipDnnConvBwdAttr) {
+    // Import node inputs.
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> dy,
+        importNodeInput(hipDnnConvBwdAttr->dy_tensor_uid(), "dy"));
+    FUSILLI_ASSIGN_OR_RETURN(
+        std::shared_ptr<fusilli::TensorAttr> w,
+        importNodeInput(hipDnnConvBwdAttr->w_tensor_uid(), "w"));
+
+    // Fusilli only supports symmetric padding.
+    if (!std::ranges::equal(*hipDnnConvBwdAttr->pre_padding(),
+                            *hipDnnConvBwdAttr->post_padding())) // C++20
+      return fusilli::error(fusilli::ErrorCode::AttributeNotSet,
+                            "Conv dgrad node with asymmetric padding found.");
+    // Import node.
+    auto fusilliConvDGradAttr =
+        fusilli::ConvDGradAttr()
+            .setPadding(*hipDnnConvBwdAttr->post_padding())
+            .setStride(*hipDnnConvBwdAttr->stride())
+            .setDilation(*hipDnnConvBwdAttr->dilation());
+    std::shared_ptr<fusilli::TensorAttr> dx =
+        fusilliGraph.convDGrad(dy, w, fusilliConvDGradAttr);
+
+    // Import node output.
+    FUSILLI_CHECK_ERROR(
+        importNodeOutput(hipDnnConvBwdAttr->dx_tensor_uid(), "dx", dx));
 
     return fusilli::ok();
   }

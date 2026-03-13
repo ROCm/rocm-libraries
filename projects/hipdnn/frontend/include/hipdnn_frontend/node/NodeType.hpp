@@ -25,7 +25,8 @@ enum class NodeType
     RMS_NORM,
     SDPA_FPROP,
     BLOCK_SCALE_QUANTIZE,
-    BLOCK_SCALE_DEQUANTIZE
+    BLOCK_SCALE_DEQUANTIZE,
+    CUSTOM_OP
 };
 
 } // namespace hipdnn_frontend::graph

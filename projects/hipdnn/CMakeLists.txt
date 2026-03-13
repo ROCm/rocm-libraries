@@ -212,6 +212,7 @@ set(HIPDNN_NO_RTTI_OPTIONS
 )
 
 add_subdirectory(data_sdk)
+add_subdirectory(flatbuffers_sdk)
 
 if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)
