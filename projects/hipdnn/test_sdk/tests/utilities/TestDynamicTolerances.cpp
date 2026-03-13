@@ -1128,3 +1128,280 @@ TEST(TestCalculateConvFpropTolerance, ThrowsOnOutputOverflow)
     EXPECT_THROW((calculateConvFpropTolerance<half, float, float>(-val, val, -val, val, dims)),
                  std::overflow_error);
 }
+
+// =================================================================================================
+// TestCalculateMatmulTolerance
+// =================================================================================================
+
+using namespace hipdnn_test_sdk::utilities::matmul;
+
+struct MatmulToleranceTestCase
+{
+    std::vector<int64_t> aDims;
+    std::vector<int64_t> bDims;
+    double aValue;
+    double bValue;
+    double expectedTolerance;
+    bool expectThrow = false;
+
+    friend std::ostream& operator<<(std::ostream& os, const MatmulToleranceTestCase& tc)
+    {
+        os << "aDims: [";
+        for(size_t i = 0; i < tc.aDims.size(); ++i)
+        {
+            os << tc.aDims[i] << (i < tc.aDims.size() - 1 ? ", " : "");
+        }
+        os << "], bDims: [";
+        for(size_t i = 0; i < tc.bDims.size(); ++i)
+        {
+            os << tc.bDims[i] << (i < tc.bDims.size() - 1 ? ", " : "");
+        }
+        os << "], aValue: " << tc.aValue << ", bValue: " << tc.bValue
+           << ", expectedTolerance: " << tc.expectedTolerance
+           << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
+        return os;
+    }
+};
+
+// Helper to create a tensor filled with a constant value
+template <typename T>
+hipdnn_data_sdk::utilities::Tensor<T> createConstantTensor(const std::vector<int64_t>& dims,
+                                                           double value)
+{
+    hipdnn_data_sdk::utilities::Tensor<T> tensor(dims);
+    auto elementCount = tensor.elementCount();
+    auto* data = static_cast<T*>(tensor.memory().hostData());
+
+    for(size_t i = 0; i < elementCount; ++i)
+    {
+        data[i] = static_cast<T>(value);
+    }
+
+    return tensor;
+}
+
+using hipdnn_test_sdk::utilities::computeGamma;
+
+template <typename T>
+std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases();
+
+// Float / Float / Float (High Precision: Linear)
+// Tolerance = gamma(K, u_float) * ||A||_1 * ||B||_1
+// All tensors filled with 1.0, so ||T||_1 = product(dims)
+template <>
+std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, float, float>>()
+{
+    auto u = hipdnn_data_sdk::types::pow(2.0, -23);
+
+    return {// K=1: A=2x1, B=1x2. ||A||=2, ||B||=2. Tol = gamma(1,u) * 4
+            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 2.0 * 2.0},
+            // K=3: A=2x3, B=3x4. ||A||=6, ||B||=12. Tol = gamma(3,u) * 72
+            {{2, 3}, {3, 4}, 1.0, 1.0, computeGamma(3, u) * 6.0 * 12.0},
+            // K=10: A=2x10, B=10x2. ||A||=20, ||B||=20. Tol = gamma(10,u) * 400
+            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 20.0 * 20.0},
+            // K=100: A=2x100, B=100x2. ||A||=200, ||B||=200. Tol = gamma(100,u) * 40000
+            {{2, 100}, {100, 2}, 1.0, 1.0, computeGamma(100, u) * 200.0 * 200.0}};
+}
+
+// Float / Double / Float (Input casting error)
+// Tolerance = gamma(K, u_float) * ||A|| * ||B|| + 2 * ||A|| * ||B|| * u_float
+template <>
+std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, double, float>>()
+{
+    auto u = hipdnn_data_sdk::types::pow(2.0, -23);
+
+    return {// K=1: ||A||=2, ||B||=2. Tol = gamma(1,u)*4 + 2*4*u
+            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 4.0 + 2.0 * 4.0 * u},
+            // K=10: ||A||=20, ||B||=20. Tol = gamma(10,u)*400 + 2*400*u
+            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 400.0 + 2.0 * 400.0 * u}};
+}
+
+// Half / Float / Float (Output casting error)
+// Tolerance = gamma(K, u_float) * ||A|| * ||B|| + ||A|| * ||B|| * u_half
+template <>
+std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, float, float>>()
+{
+    auto uFloat = hipdnn_data_sdk::types::pow(2.0, -23);
+    auto uHalf = hipdnn_data_sdk::types::pow(2.0, -10);
+
+    return {// K=1: ||A||=2, ||B||=2. Tol = gamma(1,uFloat)*4 + 4*uHalf
+            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, uFloat) * 4.0 + 4.0 * uHalf},
+            // K=10: ||A||=20, ||B||=20. Tol = gamma(10,uFloat)*400 + 400*uHalf
+            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, uFloat) * 400.0 + 400.0 * uHalf}};
+}
+
+// Half / Half / Half (Low Precision: Statistical)
+// Tolerance = gamma(K, u_half) * ||A|| * ||B||
+template <>
+std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, half, half>>()
+{
+    auto u = hipdnn_data_sdk::types::pow(2.0, -10);
+
+    return {// K=1: ||A||=2, ||B||=2
+            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 4.0},
+            // K=10: ||A||=20, ||B||=20
+            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 400.0},
+            // K=100: ||A||=200, ||B||=200
+            {{2, 100}, {100, 2}, 1.0, 1.0, computeGamma(100, u) * 40000.0}};
+}
+
+// Bfloat16 / Float / Float (Output casting error)
+// Tolerance = gamma(K, u_float) * ||A|| * ||B|| + ||A|| * ||B|| * u_bf16
+template <>
+std::vector<MatmulToleranceTestCase>
+    getMatmulToleranceTestCases<TypeTriple<bfloat16, float, float>>()
+{
+    auto uFloat = hipdnn_data_sdk::types::pow(2.0, -23);
+    auto uBf16 = hipdnn_data_sdk::types::pow(2.0, -7);
+
+    return {// K=1: ||A||=2, ||B||=2. Tol = gamma(1,uFloat)*4 + 4*uBf16
+            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, uFloat) * 4.0 + 4.0 * uBf16},
+            // K=10: ||A||=20, ||B||=20. Tol = gamma(10,uFloat)*400 + 400*uBf16
+            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, uFloat) * 400.0 + 400.0 * uBf16}};
+}
+
+// Bfloat16 / Bfloat16 / Bfloat16 (Low Precision: Statistical)
+// Tolerance = gamma(K, u_bf16) * ||A|| * ||B||
+template <>
+std::vector<MatmulToleranceTestCase>
+    getMatmulToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
+{
+    auto u = hipdnn_data_sdk::types::pow(2.0, -7);
+
+    return {// K=1: ||A||=2, ||B||=2
+            {{2, 1}, {1, 2}, 1.0, 1.0, computeGamma(1, u) * 4.0},
+            // K=10: ||A||=20, ||B||=20
+            {{2, 10}, {10, 2}, 1.0, 1.0, computeGamma(10, u) * 400.0},
+            // K=50: ||A||=100, ||B||=100 (K=100 exceeds gamma>=0.5 for bf16)
+            {{2, 50}, {50, 2}, 1.0, 1.0, computeGamma(50, u) * 10000.0}};
+}
+
+template <typename Out, typename In, typename Comp>
+class TestCalculateMatmulTolerance : public ::testing::TestWithParam<MatmulToleranceTestCase>
+{
+protected:
+    void verifyTolerance()
+    {
+        const auto& tc = GetParam();
+
+        if(tc.expectThrow)
+        {
+            auto a = createConstantTensor<In>(tc.aDims, tc.aValue);
+            auto b = createConstantTensor<In>(tc.bDims, tc.bValue);
+
+            EXPECT_THROW((calculateMatmulTolerance<Out, In, Comp>(a, b)), std::exception) << tc;
+        }
+        else
+        {
+            auto a = createConstantTensor<In>(tc.aDims, tc.aValue);
+            auto b = createConstantTensor<In>(tc.bDims, tc.bValue);
+
+            auto tolerance = calculateMatmulTolerance<Out, In, Comp>(a, b);
+            EXPECT_NEAR(tolerance, static_cast<float>(tc.expectedTolerance), 1e-10f) << tc;
+        }
+    }
+};
+
+using TestCalculateMatmulToleranceFp32 = TestCalculateMatmulTolerance<float, float, float>;
+TEST_P(TestCalculateMatmulToleranceFp32, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateMatmulToleranceFp32,
+    ::testing::ValuesIn(getMatmulToleranceTestCases<TypeTriple<float, float, float>>()));
+
+using TestCalculateMatmulToleranceInputDouble = TestCalculateMatmulTolerance<float, double, float>;
+TEST_P(TestCalculateMatmulToleranceInputDouble, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateMatmulToleranceInputDouble,
+    ::testing::ValuesIn(getMatmulToleranceTestCases<TypeTriple<float, double, float>>()));
+
+using TestCalculateMatmulToleranceComputeFloatFp16
+    = TestCalculateMatmulTolerance<half, float, float>;
+TEST_P(TestCalculateMatmulToleranceComputeFloatFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateMatmulToleranceComputeFloatFp16,
+    ::testing::ValuesIn(getMatmulToleranceTestCases<TypeTriple<half, float, float>>()));
+
+using TestCalculateMatmulToleranceFp16 = TestCalculateMatmulTolerance<half, half, half>;
+TEST_P(TestCalculateMatmulToleranceFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateMatmulToleranceFp16,
+    ::testing::ValuesIn(getMatmulToleranceTestCases<TypeTriple<half, half, half>>()));
+
+using TestCalculateMatmulToleranceComputeFloatBfp16
+    = TestCalculateMatmulTolerance<bfloat16, float, float>;
+TEST_P(TestCalculateMatmulToleranceComputeFloatBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateMatmulToleranceComputeFloatBfp16,
+    ::testing::ValuesIn(getMatmulToleranceTestCases<TypeTriple<bfloat16, float, float>>()));
+
+using TestCalculateMatmulToleranceBfp16
+    = TestCalculateMatmulTolerance<bfloat16, bfloat16, bfloat16>;
+TEST_P(TestCalculateMatmulToleranceBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateMatmulToleranceBfp16,
+    ::testing::ValuesIn(getMatmulToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()));
+
+// Test dimension validation
+TEST(TestCalculateMatmulTolerance, ThrowsOnInvalidDimensions)
+{
+    // Mismatched dimensions: A is 2x3, B is 4x5 (3 != 4)
+    auto a = createConstantTensor<float>({2, 3}, 1.0);
+    auto b = createConstantTensor<float>({4, 5}, 1.0);
+
+    EXPECT_THROW((calculateMatmulTolerance<float, float, float>(a, b)), std::invalid_argument);
+}
+
+// Note: K=0 validation test removed. Tensor constructor's validateAllPositive() rejects
+// dimension <= 0 before calculateMatmulTolerance is reached, so K=0 cannot be tested
+// through the public API with real tensors.
+
+// Test that large K with low-precision type causes gamma >= 0.5 overflow
+TEST(TestCalculateMatmulTolerance, ThrowsOnSingularity)
+{
+    // For bfloat16, epsilon = 2^-7 ≈ 7.81e-3
+    // K=100: nU = 2*100*7.81e-3 = 1.562 >= 0.01 → statistical bound
+    // gamma = 6 * sqrt(200) * 7.81e-3 ≈ 0.663 >= 0.5 → overflow
+    auto a = createConstantTensor<bfloat16>({2, 100}, 1.0);
+    auto b = createConstantTensor<bfloat16>({100, 2}, 1.0);
+
+    EXPECT_THROW((calculateMatmulTolerance<bfloat16, bfloat16, bfloat16>(a, b)),
+                 std::overflow_error);
+}
+
+// Test that extreme values cause output overflow
+TEST(TestCalculateMatmulTolerance, ThrowsOnOutputOverflow)
+{
+    // Create matrices with very large values that will cause tolerance > half::max
+    // A = 2x10 filled with 1e5, B = 10x2 filled with 1e5
+    // ||A||_1 = 20 * 1e5 = 2e6, ||B||_1 = 20 * 1e5 = 2e6
+    // Product will exceed half max (65504)
+    auto a = createConstantTensor<float>({2, 10}, 1.0e5);
+    auto b = createConstantTensor<float>({10, 2}, 1.0e5);
+
+    // OutputType = half, so max ≈ 65504
+    EXPECT_THROW((calculateMatmulTolerance<half, float, float>(a, b)), std::overflow_error);
+}
