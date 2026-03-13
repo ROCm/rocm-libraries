@@ -205,41 +205,28 @@ INSTANTIATE_TEST_SUITE_P(
 
 
 
-class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<int, bool, hipfftXtSubFormat>>
+class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat>>
 {};
 
 
 // FIXME: is this just for pre-transform?
-// FIXME: use enums here.
-// real/complex, tx direction (0=forward, 1=backward), copy direction (d2h = 0, h2d=1), subformat
-static std::vector<std::tuple<bool, int, int, hipfftXtSubFormat>> goodlist =
+// real/complex, tx direction, subformat
+static std::vector<std::tuple<bool, int, hipfftXtSubFormat>> in_goodlist =
 {
     // real/complex must be inplace 
-    // {1, 0, HIPFFT_XT_FORMAT_INPLACE}, // bad?
-    {1, 0, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    {1, 1, 1, HIPFFT_XT_FORMAT_INPLACE},
-    // {1, 1, 0, HIPFFT_XT_FORMAT_INPLACE}, // bad?
-    // {1, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED}, // bad?
-    // complex/complex: 
-    // {0, 0, HIPFFT_XT_FORMAT_INPUT}, // bad?
-    // {0, 0, HIPFFT_XT_FORMAT_OUTPUT}, // bad?
-    // {0, 1, HIPFFT_XT_FORMAT_INPUT}, // bad?
-    // {0, 1, HIPFFT_XT_FORMAT_OUTPUT}, // bad?
-    {0, 0, 1, HIPFFT_XT_FORMAT_INPLACE},
-    {0, 0, 0, HIPFFT_XT_FORMAT_INPLACE},
-    {0, 0, 0, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    {0, 0, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    {0, 1, 0, HIPFFT_XT_FORMAT_INPLACE},
-    {0, 1, 0, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    {0, 1, 1, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    {0, 1, 1, HIPFFT_XT_FORMAT_INPLACE},
+    {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
+    {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    // complex/complex can be in-place or out-of-place
+    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
+    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPUT},
+    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT}
 };
 
 TEST_P(hipfftxtunitdesc, desccreation)
 {
-
-    const int direction = std::get<0>(GetParam());
-    const bool realcomplex = std::get<1>(GetParam());
+    const bool realcomplex = std::get<0>(GetParam());
+    const int direction = std::get<1>(GetParam());
     const hipfftXtSubFormat format = std::get<2>(GetParam());
 
     if(verbose > 0)
@@ -415,10 +402,6 @@ TEST_P(hipfftxtunitdesc, desccreation)
                           std::vector<size_t> batchlengths,
                           const std::vector<size_t> &hostdiststrides) -> void  {
         using lint = decltype(batchlengths)::value_type;
-        const size_t nelem = std::accumulate(batchlengths.begin(),
-                                             batchlengths.end(),
-                                             static_cast<lint>(1),
-                                             std::multiplies<lint>());
         // FIXME: just have the 2D case right now.
         for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
         {
@@ -520,40 +503,13 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                        reinterpret_cast<void*>(mydesc),
                                        copydir);
         }
-        const decltype(goodlist)::value_type v = {realcomplex, forward, h2d, format};
-        std::stringstream vstrings;
-        vstrings << std::get<0>(v) << ":" <<(std::get<0>(v) ? "rc": "cc")
-                 << " " << std::get<1>(v) << ":" << (std::get<1>(v) ? "forward" : "backward")
-                 << " " << std::get<2>(v) << ":" << (std::get<2>(v) ? "h2d" : "d2h")
-                 << " " << format_name(format);
-        if(verbose > 2)
-        {
-            std::cout << vstrings.str() << "\n";
-            std::cout <<  (h2d ? "H2D" : "D2H") << "\n";
-        }
-        const bool isgood = std::find(goodlist.begin(), goodlist.end(), v) != goodlist.end();
-
-        // FIXME: need a plan here.
-        if(!isgood)
-            GTEST_SKIP() << "cufftxt doesn't support this";
         
-        if(isgood)
-        {
-           ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
+        const decltype(in_goodlist)::value_type v = {realcomplex, forward, format};
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
                                                  << " failed with code "
                                                  << hipfft_rt
-                                                 << " (" << hipfftResult_string(hipfft_rt) << "): "
-                                                 << vstrings.str();
-        }
-        else
-        {
-            ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy " <<  (h2d ? "H2D" : "D2H")
-                                                 << " should not have succeeded with code "
-                                                 << hipfft_rt
-                                                 << " (" << hipfftResult_string(hipfft_rt) << "): "
-                                                 << vstrings.str();
-        }
-
+                                             << " (" << hipfftResult_string(hipfft_rt) << ")";
+        
         std::cout << "finished hipfftXtMemcpy\n";
 
         // A host copy of the individual distributed GPU buffers:
@@ -633,16 +589,19 @@ TEST_P(hipfftxtunitdesc, desccreation)
                 // if(std::all_of(bufidx.begin() + 1, bufidx.end(),
                 //                [](const size_t idx ) { return idx == 0; })) 
                 {
-                    std::cout << hostidx[0]
-                              << " " << hostidx[1]
-                              << " " << hostidx[2]
-                              << " -> "
-                              << bufidx[0]
-                              << " " << bufidx[1]
-                              << " " << bufidx[2]
-                              << " " << bufidx[3]
-                              << "\t" << std::flush;
-
+                    if(verbose > 3)
+                    {
+                        std::cout << hostidx[0]
+                                  << " " << hostidx[1]
+                                  << " " << hostidx[2]
+                                  << " -> "
+                                  << bufidx[0]
+                                  << " " << bufidx[1]
+                                  << " " << bufidx[2]
+                                  << " " << bufidx[3]
+                                  << "\t" << std::flush;
+                    }
+                    
                     const size_t hostoffset = std::inner_product(std::begin(hostidx),
                                                                  std::end(hostidx),
                                                                  std::begin(hostdiststrides), 0);
@@ -655,10 +614,29 @@ TEST_P(hipfftxtunitdesc, desccreation)
                     {
                         const double* hostbufr = (double*) hostbuf.data();
                         const auto hostval = hostbufr[hostoffset];
-                        std::cout << hostoffset << " -> " << hostval << "\t" << std::flush;
                         const double* gpubufr = (double*) hostbufparts[igpu].data();
                         const auto gpuval = gpubufr[gpuoffset];
-                        std::cout << gpuoffset << " -> " << gpuval << "\n" << std::flush;
+                        if(verbose > 3)
+                        {
+                            std::cout << hostoffset << " -> " << hostval << "\t" << std::flush;
+                            std::cout << gpuoffset << " -> " << gpuval << "\n" << std::flush;
+                        }
+                        EXPECT_EQ(hostval, gpuval);
+                    }
+                    else
+                    {
+                        const std::complex<double>* hostbufr
+                            = (std::complex<double>*) hostbuf.data();
+                        const auto hostval = hostbufr[hostoffset];
+                        const std::complex<double>* gpubufr
+                            = (std::complex<double>*) hostbufparts[igpu].data();
+                        const auto gpuval = gpubufr[gpuoffset];
+                        if(verbose > 3)
+                        {
+                            std::cout << hostoffset << " -> " << hostval << "\t" << std::flush;
+                            std::cout << gpuoffset << " -> " << gpuval << "\n" << std::flush;
+                        }
+                        EXPECT_EQ(hostval, gpuval);
                     }
 
                 }
@@ -679,17 +657,10 @@ TEST_P(hipfftxtunitdesc, desccreation)
 INSTANTIATE_TEST_SUITE_P(
     hipfftxttest,
     hipfftxtunitdesc,
-    ::testing::Combine(
-        ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
-        ::testing::Values(true, false),
-        ::testing::Values(HIPFFT_XT_FORMAT_INPUT,
-                          HIPFFT_XT_FORMAT_OUTPUT,
-                          HIPFFT_XT_FORMAT_INPLACE,
-                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-        ),
+    ::testing::ValuesIn(in_goodlist),
     [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
-        const int direction = std::get<0>(info.param);
-        const bool realcomplex = std::get<1>(info.param);
+        const bool realcomplex = std::get<0>(info.param);
+        const int direction = std::get<1>(info.param);
         const hipfftXtSubFormat format = std::get<2>(info.param);
         std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += realcomplex ? "rc" : "cc";
