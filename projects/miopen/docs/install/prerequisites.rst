@@ -28,5 +28,7 @@ all types of MIOpen installations.
   * Minimum version for post-ROCm 3.5
     `master-rocm-3.5 <https://github.com/ROCm/rocBLAS/tree/master-rocm-3.5>`_
 
+* `Multi-Level Intermediate Representation (MLIR) <https://github.com/ROCm/rocMLIR>`_, with an
+  MIOpen dialect to support and complement kernel development
 * :doc:`Composable Kernel <composable_kernel:index>`: A C++ templated device library for
   GEMM-like and reduction-like operators.

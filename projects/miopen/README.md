@@ -47,6 +47,8 @@ To install MIOpen, you must first install these prerequisites:
 * [hipBLASLt](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt): AMD's flexible Basic Linear Algebra Subprograms
   (BLAS) API.
 * [hipBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas): AMD's (BLAS) marshalling library.
+* [Multi-Level Intermediate Representation (MLIR)](https://github.com/ROCm/rocMLIR) with its
+  MIOpen dialect to support and complement kernel development
 * [Composable Kernel](https://github.com/ROCm/composable_kernel): A C++ templated device library
   for GEMM-like and reduction-like operators.
 

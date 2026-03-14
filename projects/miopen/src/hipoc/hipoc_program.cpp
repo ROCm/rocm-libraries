@@ -32,6 +32,7 @@
 #include <miopen/kernel.hpp>
 #include <miopen/kernel_warnings.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/mlir_build.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/temp_file.hpp>
@@ -234,6 +235,14 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
     {
         hsaco_file = HipBuild(dir.value(), filename, src, params, target);
     }
+#if MIOPEN_USE_MLIR
+    else if(filename.extension() == ".mlir")
+    {
+        std::vector<char> buffer;
+        MiirGenBin(params, buffer);
+        WriteFile(buffer, hsaco_file);
+    }
+#endif
     else
     {
         params += " " + GetCodeObjectVersionOption();
@@ -275,6 +284,12 @@ void HIPOCProgramImpl::BuildCodeObjectInMemory(const std::string& params,
         {
             comgr::BuildAsm(filename.string(), src, params, target, binary);
         }
+#if MIOPEN_USE_MLIR
+        else if(filename.extension() == ".mlir")
+        {
+            MiirGenBin(params, binary);
+        }
+#endif
         else
         {
             comgr::BuildOcl(filename.string(), src, params, target, binary);
@@ -288,6 +303,8 @@ void HIPOCProgramImpl::BuildCodeObjectInMemory(const std::string& params,
 void HIPOCProgramImpl::BuildCodeObject(std::string params, const std::string& kernel_src)
 {
     const auto src = [&]() -> std::string_view {
+        if(program.extension() == ".mlir")
+            return {}; // MLIR solutions do not use source code.
         if(!kernel_src.empty())
             return kernel_src;
         return GetKernelSrc(program);
