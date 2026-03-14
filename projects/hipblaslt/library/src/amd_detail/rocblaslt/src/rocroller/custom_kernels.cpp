@@ -448,59 +448,59 @@ void preloadCustomKernels(SolutionCache& cache)
 
             mxfp4Kernel.swizzleA = true;
 
-            params.workgroupTile = {64, 64, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_64x64x256",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   getCoPath() / "rr_custom_kernels.co"));
+            // params.workgroupTile = {64, 64, 256};
+            // cache.addKernel(mxfp4Kernel,
+            //                 params,
+            //                 createCustomGemmKernel("wave_mxfp4_dynamic_gemm_64x64x256",
+            //                                        mxfp4Kernel,
+            //                                        params.workgroupTile,
+            //                                        {256, 2, 1},
+            //                                        getCoPath() / "rr_custom_kernels.co"));
 
-            params.workgroupTile = {128, 32, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_128x32x256",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   getCoPath() / "rr_custom_kernels.co"));
+            // params.workgroupTile = {128, 32, 256};
+            // cache.addKernel(mxfp4Kernel,
+            //                 params,
+            //                 createCustomGemmKernel("wave_mxfp4_dynamic_gemm_128x32x256",
+            //                                        mxfp4Kernel,
+            //                                        params.workgroupTile,
+            //                                        {256, 2, 1},
+            //                                        getCoPath() / "rr_custom_kernels.co"));
 
-            params.workgroupTile = {224, 160, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_224x160x256",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {64, 4, 1},
-                                                   getCoPath() / "rr_custom_kernels.co"));
+            // params.workgroupTile = {224, 160, 256};
+            // cache.addKernel(mxfp4Kernel,
+            //                 params,
+            //                 createCustomGemmKernel("wave_mxfp4_dynamic_gemm_224x160x256",
+            //                                        mxfp4Kernel,
+            //                                        params.workgroupTile,
+            //                                        {64, 4, 1},
+            //                                        getCoPath() / "rr_custom_kernels.co"));
 
-            params.workgroupTile = {256, 160, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x160x256",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   getCoPath() / "rr_custom_kernels.co"));
+            // params.workgroupTile = {256, 160, 256};
+            // cache.addKernel(mxfp4Kernel,
+            //                 params,
+            //                 createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x160x256",
+            //                                        mxfp4Kernel,
+            //                                        params.workgroupTile,
+            //                                        {256, 2, 1},
+            //                                        getCoPath() / "rr_custom_kernels.co"));
 
-            params.workgroupTile = {256, 192, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x192x256",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {64, 4, 1},
-                                                   getCoPath() / "rr_custom_kernels.co"));
+            // params.workgroupTile = {256, 192, 256};
+            // cache.addKernel(mxfp4Kernel,
+            //                 params,
+            //                 createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x192x256",
+            //                                        mxfp4Kernel,
+            //                                        params.workgroupTile,
+            //                                        {64, 4, 1},
+            //                                        getCoPath() / "rr_custom_kernels.co"));
 
-            params.workgroupTile = {256, 224, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x224x256",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {64, 4, 1},
-                                                   getCoPath() / "rr_custom_kernels.co"));
+            // params.workgroupTile = {256, 224, 256};
+            // cache.addKernel(mxfp4Kernel,
+            //                 params,
+            //                 createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x224x256",
+            //                                        mxfp4Kernel,
+            //                                        params.workgroupTile,
+            //                                        {64, 4, 1},
+            //                                        getCoPath() / "rr_custom_kernels.co"));
 
             // Static wave kernels (block size {256, 2, 1})
             // Filename shape is Wave M×N×K; StaticShape uses hipBLASLt convention (N,M,K).
@@ -516,114 +516,7 @@ void preloadCustomKernels(SolutionCache& cache)
                                                    StaticShape{128, 256, 256},
                                                    getCoPath() / "rr_custom_kernels.co"));
 
-            params.workgroupTile = {64, 64, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_static_gemm_64x64x256_256x128x1024",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   StaticShape{128, 256, 1024},
-                                                   getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {64, 64, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_static_gemm_64x64x256_256x640x768",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   StaticShape{640, 256, 768},
-                                                   getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {64, 64, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_static_gemm_64x64x256_1792x512x7424",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   StaticShape{512, 1792, 7424},
-                                                   getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {64, 64, 256};
-            cache.addKernel(mxfp4Kernel,
-                            params,
-                            createCustomGemmKernel("wave_mxfp4_static_gemm_64x64x256_896x7040x1280",
-                                                   mxfp4Kernel,
-                                                   params.workgroupTile,
-                                                   {256, 2, 1},
-                                                   StaticShape{7040, 896, 1280},
-                                                   getCoPath() / "rr_custom_kernels.co"));
-
-            // 256x160x256 macrotile
-            params.workgroupTile = {256, 160, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x160x256_2560x6656x3328",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{6656, 2560, 3328},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {256, 160, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x160x256_3200x1536x10496",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{1536, 3200, 10496},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {256, 160, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x160x256_3200x168448x6400",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{168448, 3200, 6400},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {256, 160, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x160x256_10880x1024x28416",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{1024, 10880, 28416},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
             // 256x192x256 macrotile
-            params.workgroupTile = {256, 192, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x192x256_5376x1792x4096",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{1792, 5376, 4096},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {256, 192, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x192x256_6144x2048x4608",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{2048, 6144, 4608},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
             params.workgroupTile = {256, 192, 256};
             cache.addKernel(
                 mxfp4Kernel,
@@ -633,17 +526,6 @@ void preloadCustomKernels(SolutionCache& cache)
                                        params.workgroupTile,
                                        {256, 2, 1},
                                        StaticShape{51712, 14976, 7680},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {256, 192, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x192x256_15360x9984x13824",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{9984, 15360, 13824},
                                        getCoPath() / "rr_custom_kernels.co"));
 
             params.workgroupTile = {256, 192, 256};
@@ -666,29 +548,6 @@ void preloadCustomKernels(SolutionCache& cache)
                                        params.workgroupTile,
                                        {256, 2, 1},
                                        StaticShape{13056, 43392, 1792},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            // 256x224x256 macrotile
-            params.workgroupTile = {256, 224, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x224x256_6272x7168x5888",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{7168, 6272, 5888},
-                                       getCoPath() / "rr_custom_kernels.co"));
-
-            params.workgroupTile = {256, 224, 256};
-            cache.addKernel(
-                mxfp4Kernel,
-                params,
-                createCustomGemmKernel("wave_mxfp4_static_gemm_256x224x256_7168x33280x10752",
-                                       mxfp4Kernel,
-                                       params.workgroupTile,
-                                       {256, 2, 1},
-                                       StaticShape{33280, 7168, 10752},
                                        getCoPath() / "rr_custom_kernels.co"));
         }
     }
