@@ -1643,6 +1643,81 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, SdpaFpropNode)
+{
+    Graph graph;
+    graph.set_name("sdpa_fprop_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::HALF);
+
+    auto q = createTensor("q", {2, 8, 16, 64}, DataType::HALF, 1);
+    auto k = createTensor("k", {2, 8, 32, 64}, DataType::HALF, 2);
+    auto v = createTensor("v", {2, 8, 32, 64}, DataType::HALF, 3);
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_causal_mask(true);
+    sdpaAttrs.set_attn_scale_value(0.125f);
+
+    auto outputs = graph.sdpa(q, k, v, sdpaAttrs);
+    outputs[0]->set_output(true).set_uid(4);
+
+    roundTripAndCompare(graph);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, SdpaBackwardNode)
+{
+    Graph graph;
+    graph.set_name("sdpa_backward_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::HALF);
+
+    auto q = createTensor("q", {2, 8, 16, 64}, DataType::HALF, 1);
+    auto k = createTensor("k", {2, 8, 32, 64}, DataType::HALF, 2);
+    auto v = createTensor("v", {2, 8, 32, 64}, DataType::HALF, 3);
+    auto o = createTensor("o", {2, 8, 16, 64}, DataType::HALF, 4);
+    auto dOut = createTensor("do", {2, 8, 16, 64}, DataType::HALF, 5);
+    auto stats = createTensor("stats", {2, 8, 16, 1}, DataType::FLOAT, 6);
+
+    SdpaBackwardAttributes bwdAttrs;
+    bwdAttrs.set_causal_mask(true);
+    bwdAttrs.set_attn_scale_value(0.125f);
+
+    auto [dq, dk, dv] = graph.sdpa_backward(q, k, v, o, dOut, stats, bwdAttrs); // NOLINT
+    dq->set_output(true).set_uid(7);
+    dk->set_output(true).set_uid(8);
+    dv->set_output(true).set_uid(9);
+
+    roundTripAndCompare(graph);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, SdpaBackwardNodeWithOptionals)
+{
+    Graph graph;
+    graph.set_name("sdpa_backward_optionals_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::HALF);
+
+    auto q = createTensor("q", {2, 8, 16, 64}, DataType::HALF, 1);
+    auto k = createTensor("k", {2, 8, 32, 64}, DataType::HALF, 2);
+    auto v = createTensor("v", {2, 8, 32, 64}, DataType::HALF, 3);
+    auto o = createTensor("o", {2, 8, 16, 64}, DataType::HALF, 4);
+    auto dOut = createTensor("do", {2, 8, 16, 64}, DataType::HALF, 5);
+    auto stats = createTensor("stats", {2, 8, 16, 1}, DataType::FLOAT, 6);
+
+    SdpaBackwardAttributes bwdAttrs;
+    bwdAttrs.set_alibi_mask(true);
+    bwdAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+    bwdAttrs.set_diagonal_band_left_bound(-3);
+    bwdAttrs.set_diagonal_band_right_bound(3);
+
+    auto [dq, dk, dv] = graph.sdpa_backward(q, k, v, o, dOut, stats, bwdAttrs); // NOLINT
+    dq->set_output(true).set_uid(7);
+    dk->set_output(true).set_uid(8);
+    dv->set_output(true).set_uid(9);
+
+    roundTripAndCompare(graph);
+}
+
 TEST_P(TestGraphSerializationRoundTrip, CustomOpNode)
 {
     Graph graph;
