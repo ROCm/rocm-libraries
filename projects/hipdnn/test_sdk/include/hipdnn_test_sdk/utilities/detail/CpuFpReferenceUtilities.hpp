@@ -5,9 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -55,6 +58,46 @@ inline TargetType safeConvert(const SourceType& value)
         // For all other types, direct cast is fine
         return static_cast<TargetType>(value);
     }
+}
+
+/**
+ * @brief Safely cast test values with range validation.
+ *
+ * This helper validates source values against the representable range of
+ * TargetType and throws if out-of-range (or non-finite for floating-like sources).
+ *
+ * @tparam TargetType The type to cast to
+ * @tparam SourceType The type to cast from
+ * @param value The value to cast
+ * @return The safely cast value
+ */
+template <typename TargetType, typename SourceType>
+inline TargetType safeTestTypeCast(SourceType value)
+{
+    static_assert(std::numeric_limits<std::remove_cv_t<SourceType>>::is_specialized,
+                  "safeTestTypeCast: SourceType must define numeric_limits");
+    static_assert(std::numeric_limits<std::remove_cv_t<TargetType>>::is_specialized,
+                  "safeTestTypeCast: TargetType must define numeric_limits");
+
+    const auto src = safeConvert<double>(value);
+
+    // If SourceType is not integral, treat it as floating-like and reject NaN/Inf.
+    if constexpr(!std::is_integral_v<std::remove_cv_t<SourceType>>)
+    {
+        if(!std::isfinite(src))
+        {
+            throw std::out_of_range("safeTestTypeCast: non-finite source value");
+        }
+    }
+
+    const auto lo = safeConvert<double>(std::numeric_limits<TargetType>::lowest());
+    const auto hi = safeConvert<double>(std::numeric_limits<TargetType>::max());
+    if(src < lo || src > hi)
+    {
+        throw std::out_of_range("safeTestTypeCast: value out of representable range");
+    }
+
+    return safeConvert<TargetType>(src);
 }
 
 struct JoinableThread : std::thread

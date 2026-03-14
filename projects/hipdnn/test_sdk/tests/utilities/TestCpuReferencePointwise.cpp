@@ -8,7 +8,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/detail/CpuTypeUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
