@@ -531,9 +531,13 @@ Program Handle::LoadProgram(const fs::path& program_name,
     std::string orig_params = params; // make a copy for target ID fallback
 
 #if WORKAROUND_ISSUE_3001
-    params = params + " -mcpu=" + this->GetTargetProperties().Name();
+    if(program_name.extension() != ".mlir")
+        params = params + " -mcpu=" + this->GetTargetProperties().Name();
 #else
-    if(program_name.extension() == ".s")
+    if(program_name.extension() == ".mlir")
+    { // no -mcpu
+    }
+    else if(program_name.extension() == ".s")
     {
         params += " -mcpu=" + LcOptionTargetStrings{this->GetTargetProperties()}.targetId;
     }

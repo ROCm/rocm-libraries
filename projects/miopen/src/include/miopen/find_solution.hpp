@@ -434,7 +434,7 @@ struct SolverContainer
                 }
                 // The following optimization is required to avoid checks
                 // for solvers that have slow IsApplicable() and do not
-                // require workspace. However we
+                // require workspace (like MLIR convolutions). However we
                 // do not want to use it for simple primitives, for example,
                 // the ones that ExecutePrimitive() which uses the first applicable
                 // solver:
