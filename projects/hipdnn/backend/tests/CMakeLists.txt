@@ -11,12 +11,6 @@ endif()
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-# TODO Do not enable HIP language globally, use HIP RTC instead. The library does not contain any
-# HIP code (or any other device code). It is required only for hipdnn_test_engine_plugin1.
-enable_language(HIP)
-# Verify that we're using AMD/ROCm HIP compiler.
-verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
-
 set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
 set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
 set(TEST_NO_API_VERSION_PLUGIN_NAME "hipdnn_test_no_api_version_plugin_name")
@@ -46,13 +40,18 @@ add_executable(
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
+    descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
-    descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
+    descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestLayernormOperationDescriptor.cpp
+    descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
+    descriptors/TestSdpaFpropOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
+    descriptors/TestDescriptorFromFlatBuffer.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp

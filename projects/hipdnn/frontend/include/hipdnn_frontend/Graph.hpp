@@ -5,16 +5,17 @@
  * @file Graph.hpp
  * @brief Main Graph class for building and executing deep learning operations
  *
- * This file contains the Graph class, which is the primary interface for users
- * to construct computational graphs of deep learning operations and execute them
- * on AMD GPUs via the hipDNN backend.
+ * This is the primary header most users will include. It contains the Graph
+ * class — hipDNN's top-level API for describing, compiling, and running DNN
+ * operations on AMD GPUs.
  *
  * @section graph_overview Overview
  *
  * The Graph class provides a fluent API for:
- * - Creating tensors with specified dimensions and data types
- * - Adding operations (convolution, batch normalization, pointwise, matmul)
- * - Building and executing plans on GPU
+ * - Creating tensor descriptors (shape + dtype, no data yet)
+ * - Adding operations (conv, batchnorm, layernorm, rmsnorm, pointwise, matmul)
+ * - Building (compiling) an execution plan for the GPU
+ * - Executing the plan with real device pointers
  *
  * @section graph_workflow Typical Workflow
  *
@@ -76,12 +77,14 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
@@ -99,11 +102,13 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -118,14 +123,25 @@ namespace hipdnn_frontend::graph
  * @class Graph
  * @brief The main class for building and executing hipDNN computational graphs
  *
- * Graph is the central class in hipDNN Frontend. It allows users to:
- * - Define tensors and their properties
- * - Add operation nodes (convolution, batchnorm, pointwise, matmul)
- * - Build execution plans
- * - Execute the graph on AMD GPUs
+ * You describe **what** operations to run (convolution, batchnorm,
+ * pointwise, matmul, layernorm, rmsnorm) and the library figures out
+ * **how** to execute them efficiently on AMD GPUs.
  *
- * The Graph class uses a fluent interface pattern, where setter methods return
- * a reference to the graph for method chaining.
+ * **Typical workflow:**
+ * | Step | What you do | hipDNN call |
+ * |------|-------------|-------------|
+ * | 1. Describe tensor shapes | Define dims, strides, dtype | `Graph::tensor(attrs)` |
+ * | 2. Add operations | Wire inputs to outputs | `graph.conv_fprop(x, w, ...)` |
+ * | 3. Compile for GPU | Select engine, build plan | `graph.build(handle)` |
+ * | 4. Execute | Pass device pointers | `graph.execute(handle, ptrs, ws)` |
+ *
+ * The Graph uses a **fluent API** — setter methods return `*this` so
+ * you can chain calls:
+ * @code{.cpp}
+ * graph.set_io_data_type(DataType::HALF)
+ *      .set_compute_data_type(DataType::FLOAT)
+ *      .set_name("my_graph");
+ * @endcode
  *
  * @see TensorAttributes, ConvFpropAttributes, BatchnormAttributes, PointwiseAttributes
  */
@@ -749,6 +765,31 @@ private:
                         std::move(attr), graph_attributes));
                     break;
                 }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
+                {
+                    auto attr = SdpaBackwardAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_SdpaBackwardAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<SdpaBpropNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+                {
+                    auto attr = CustomOpAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_CustomOpAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    attr.set_compute_data_type(fromSdkType(fbNode->compute_data_type()));
+                    _sub_nodes.emplace_back(
+                        std::make_shared<CustomOpNode>(std::move(attr), graph_attributes));
+                    break;
+                }
                 default:
                     return {ErrorCode::INVALID_VALUE, "Unsupported node type in deserialization"};
                 }
@@ -821,6 +862,10 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Verify that no two tensors in the graph share the same UID
+     * @return Error describing the duplicate UIDs, or OK
+     */
     Error checkNoDuplicateTensorIds()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -829,8 +874,10 @@ public:
         return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
-    /// Checks if all tensors in the graph have UIDs assigned.
-    /// Returns an error if any tensor is missing a UID.
+    /**
+     * @brief Check that all tensors in the graph have UIDs assigned
+     * @return Error listing tensors without UIDs, or OK
+     */
     Error checkTensorUidsSet() const
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -839,9 +886,13 @@ public:
         return checkTensorUidsSetImpl(allTensors);
     }
 
-    /// Returns a map of UID -> TensorAttributes for all tensors in the graph.
-    /// Tensors without UIDs are skipped (no error is generated).
-    /// @return Map from tensor UID to tensor attributes
+    /**
+     * @brief Get all tensors in the graph indexed by UID
+     *
+     * Tensors without UIDs are skipped.
+     *
+     * @return Map from tensor UID to tensor attributes
+     */
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> getTensorsByUid() const
     {
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> result;
@@ -860,9 +911,13 @@ public:
         return result;
     }
 
-    /// Returns a map of name -> TensorAttributes for all tensors in the graph.
-    /// Tensors without names are skipped (no error is generated).
-    /// @return Map from tensor name to tensor attributes
+    /**
+     * @brief Get all tensors in the graph indexed by name
+     *
+     * Tensors without names are skipped.
+     *
+     * @return Map from tensor name to tensor attributes
+     */
     std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> getTensorsByName() const
     {
         std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> result;
@@ -881,6 +936,15 @@ public:
         return result;
     }
 
+    /**
+     * @brief Topologically sort the graph nodes
+     *
+     * Reorders internal nodes so that every node appears after its
+     * dependencies. Returns an error if the graph has a cycle or is
+     * disconnected.
+     *
+     * @return Error indicating success or describing the structural issue
+     */
     Error topologicallySortGraph()
     {
         size_t nodeCount = _sub_nodes.size();
@@ -912,6 +976,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Serialize the graph to a FlatBuffer operation graph
+     *
+     * Assigns UIDs to any tensors that do not already have them, then
+     * serializes the full graph structure into a FlatBuffer.
+     *
+     * @return DetachedBuffer containing the serialized graph
+     */
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
         assignUnsetTensorUids();
@@ -1060,6 +1132,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Get knobs for a specific engine as a lookup map
+     * @param engineId The engine ID to query
+     * @param knobs Output map from knob type to Knob object
+     * @return Error indicating success or failure
+     *
+     * @see get_knobs_for_engine(), Knob
+     */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knob_lookup_for_engine(int64_t engineId,
                                      std::unordered_map<KnobType_t, Knob>& knobs) const
@@ -1207,6 +1287,10 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Verify that the execution plan is valid and supported
+     * @return Error indicating success or failure
+     */
     Error check_support() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Checking execution plan support for graph "
@@ -1569,24 +1653,29 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /// @brief Get the graph name
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_name();
     }
 
+    /// @brief Get the compute data type (precision used inside operations, e.g. accumulation)
     DataType get_compute_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_compute_data_type();
     }
+    /// @brief Get the intermediate data type (precision of virtual tensors between fused ops)
     DataType get_intermediate_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_intermediate_data_type();
     }
+    /// @brief Get the I/O data type (precision of graph input and output tensors)
     DataType get_io_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_io_data_type();
     }
 
+    /// @brief Get the preferred engine ID, if set
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<int64_t> get_preferred_engine_id_ext() const
     // NOLINTEND(readability-identifier-naming)
@@ -1594,29 +1683,84 @@ public:
         return _preferredEngineId;
     }
 
-    // Forwarding setters
+    /// @brief Set the graph name
     Graph& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_name(name);
         return *this;
     }
+    /**
+     * @brief Set the compute data type (precision for internal math)
+     *
+     * Controls the accumulation precision inside operations — the dtype
+     * used for arithmetic during execution. For mixed-precision training
+     * you might store tensors in fp16 (`io_data_type = HALF`) but
+     * accumulate in fp32 (`compute_data_type = FLOAT`) for numerical
+     * stability.
+     */
     Graph& set_compute_data_type(DataType computeType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_compute_data_type(computeType);
         return *this;
     }
+    /**
+     * @brief Set the intermediate data type for virtual tensors between fused ops
+     *
+     * When the backend fuses multiple operations, intermediate results
+     * are stored in this precision. Usually matches compute_data_type.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Graph& set_intermediate_data_type(DataType intermediateType)
     {
         graph_attributes.set_intermediate_data_type(intermediateType);
         return *this;
     }
+    /**
+     * @brief Set the I/O data type — the default precision for graph inputs/outputs
+     *
+     * This is the dtype of the tensors you feed in and read out.
+     * Individual tensors can override this by calling
+     * TensorAttributes::set_data_type().
+     */
     Graph& set_io_data_type(DataType ioType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_io_data_type(ioType);
         return *this;
     }
 
+    /** @brief Batch normalization forward pass for training
+     *
+     * Normalizes the input across the batch dimension and computes statistics.
+     *
+     * Formula:
+     * @code
+     * mean[c]    = (1/m) * sum(x[n,c,h,w])        where m = N*H*W
+     * var[c]     = (1/m) * sum((x[n,c,h,w] - mean[c])^2)
+     * invVar[c]  = 1 / sqrt(var[c] + epsilon)
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVar[c] + bias[c]
+     * @endcode
+     *
+     * When previous running statistics are provided:
+     * @code
+     * nextRunningMean = (1 - momentum) * prevRunningMean + momentum * mean
+     * nextRunningVar  = (1 - momentum) * prevRunningVar  + momentum * var
+     * @endcode
+     *
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
+     * @param attributes Configuration including epsilon; optionally
+     *        prev_running_mean, prev_running_variance, and momentum for
+     *        exponential moving average of running statistics
+     * @return Array of 5 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] mean: Per-channel batch mean
+     *         - [2] invVariance: Per-channel batch inverse variance
+     *         - [3] nextRunningMean: Updated running mean (nullptr if not tracking)
+     *         - [4] nextRunningVariance: Updated running variance (nullptr if not tracking)
+     *
+     * @see BatchnormAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 5>
         batchnorm(std::shared_ptr<TensorAttributes> x,
                   std::shared_ptr<TensorAttributes> scale,
@@ -1659,6 +1803,31 @@ public:
         return {y, meanOut, invVarianceOut, nextRunningMean, nextRunningVariance};
     }
 
+    /** @brief Batch normalization backward pass
+     *
+     * Computes gradients with respect to input, scale, and bias.
+     *
+     * Formula (using per-channel indexing for illustration):
+     * @code
+     * x_hat[c]  = (x[c] - mean[c]) * invVariance[c]
+     * dbias[c]  = sum(dy[c])                           // sum over batch and spatial dims
+     * dscale[c] = sum(dy[c] * x_hat[c])                // sum over batch and spatial dims
+     * dx[c]     = scale[c] * invVariance[c] * (dy[c] - (dbias[c] + x_hat[c] * dscale[c]) / m)
+     * @endcode
+     * where m = number of elements per channel (batch size * spatial dims).
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
+     * @param x Original input from forward pass
+     * @param scale Per-channel scale (gamma)
+     * @param attributes Configuration; optionally set saved mean and inverse
+     *        variance from the forward pass via set_saved_mean_and_inv_variance()
+     * @return Array of 3 output tensors:
+     *         - [0] dx: Gradient w.r.t. input (same shape as x)
+     *         - [1] dscale: Per-channel gradient w.r.t. scale
+     *         - [2] dbias: Per-channel gradient w.r.t. bias
+     *
+     * @see BatchnormBackwardAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         batchnorm_backward(std::shared_ptr<TensorAttributes> dy, // NOLINT
                            std::shared_ptr<TensorAttributes> x,
@@ -1687,6 +1856,25 @@ public:
         return {dx, dscale, dbias};
     }
 
+    /** @brief Batch normalization inference
+     *
+     * Applies pre-computed normalization statistics for inference.
+     *
+     * Formula:
+     * @code
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVariance[c] + bias[c]
+     * @endcode
+     *
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param mean Pre-computed per-channel mean
+     * @param invVariance Pre-computed per-channel inverse variance (1/sqrt(var+epsilon))
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
+     * @param attributes Additional configuration
+     * @return y: Normalized output tensor (same shape as x)
+     *
+     * @see BatchnormInferenceAttributes
+     */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference(std::shared_ptr<TensorAttributes> x, // NOLINT
                             std::shared_ptr<TensorAttributes> mean,
@@ -1715,6 +1903,27 @@ public:
         return y;
     }
 
+    /** @brief Batch normalization inference with variance and epsilon tensors
+     *
+     * Variant that accepts variance (instead of inverse variance) and epsilon
+     * as separate input tensors, computing inverse variance internally.
+     *
+     * Formula:
+     * @code
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) / sqrt(variance[c] + epsilon) + bias[c]
+     * @endcode
+     *
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param mean Pre-computed per-channel mean
+     * @param variance Pre-computed per-channel variance
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
+     * @param epsilon Epsilon tensor for numerical stability (pass-by-value scalar)
+     * @param attributes Additional configuration
+     * @return y: Normalized output tensor (same shape as x)
+     *
+     * @see BatchnormInferenceAttributesVarianceExt
+     */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
                                          std::shared_ptr<TensorAttributes> mean,
@@ -1746,13 +1955,37 @@ public:
         return y;
     }
 
-    // NOLINTBEGIN(readability-identifier-naming)
+    /** @brief Layer normalization forward pass
+     *
+     * Normalizes the input across the feature dimensions (all dimensions
+     * except the batch dimension).
+     *
+     * Formula:
+     * @code
+     * mean    = (1/m) * sum(x) over normalized dims, where m = product of normalized dims
+     * var     = (1/m) * sum((x - mean)^2) over normalized dims
+     * xhat    = (x - mean) / sqrt(var + epsilon)
+     * y       = scale * xhat + bias
+     * @endcode
+     *
+     * In training phase, mean and inverse variance are also returned as outputs.
+     *
+     * @param x Input tensor [N, D1, D2, ..., Dk]
+     * @param scale Per-feature scale (gamma) tensor [1, D1, D2, ..., Dk]
+     * @param bias Per-feature bias (beta) tensor [1, D1, D2, ..., Dk]
+     * @param attributes Configuration including epsilon and forward phase
+     * @return Array of 3 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] mean: Computed mean (nullptr in inference mode)
+     *         - [2] invVariance: Computed inverse variance (nullptr in inference mode)
+     *
+     * @see LayernormAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         layernorm(std::shared_ptr<TensorAttributes> x,
                   std::shared_ptr<TensorAttributes> scale,
                   std::shared_ptr<TensorAttributes> bias,
                   LayernormAttributes attributes)
-    // NOLINTEND(readability-identifier-naming)
     {
         if(attributes.get_name().empty())
         {
@@ -1802,6 +2035,29 @@ public:
         return {y, mean, invVariance};
     }
 
+    /** @brief RMS normalization forward pass
+     *
+     * Normalizes the input using the root mean square, without mean subtraction.
+     * Unlike layer normalization, RMSNorm does not center the activations.
+     *
+     * Formula:
+     * @code
+     * rms     = sqrt((1/m) * sum(x^2) over normalized dims + epsilon)
+     * y       = scale * (x / rms)
+     * @endcode
+     *
+     * In training phase, the inverse RMS is also returned as an output for use
+     * in the backward pass.
+     *
+     * @param x Input tensor with batch and feature dimensions
+     * @param scale Per-channel scale (gamma) tensor, broadcast over batch and spatial dims
+     * @param attributes Configuration including epsilon and forward phase
+     * @return Array of 2 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] invRms: Inverse RMS values (nullptr in inference mode)
+     *
+     * @see RMSNormAttributes, LayernormAttributes
+     */
     std::array<std::shared_ptr<TensorAttributes>, 2>
         rmsnorm(std::shared_ptr<TensorAttributes> x,
                 std::shared_ptr<TensorAttributes> scale,
@@ -1831,6 +2087,18 @@ public:
         return {y, invRmsOut};
     }
 
+    /** @brief Block-scale dequantization
+     *
+     * Dequantizes a blocked low-precision tensor using per-block scale factors.
+     * Supports MX blocked data-types (mxfp8, mxbfp8, mxfp6, mxfp4).
+     *
+     * @param x Input blocked tensor to dequantize
+     * @param scale Scale tensor for block dequantization
+     * @param attributes Configuration: block_size, is_negative_scale
+     * @return y: Dequantized output tensor
+     *
+     * @see BlockScaleDequantizeAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes>
         block_scale_dequantize(std::shared_ptr<TensorAttributes> x,
@@ -1855,6 +2123,18 @@ public:
         return y;
     }
 
+    /** @brief Block-scale quantization
+     *
+     * Quantizes an input tensor into a blocked low-precision representation
+     * with per-block scale factors. Supports MX blocked data-types
+     * (mxfp8, mxbfp8, mxfp6, mxfp4).
+     *
+     * @param x Input tensor to quantize
+     * @param attributes Configuration: block_size, axis, transpose
+     * @return [y, scale]: Quantized output tensor and computed scale tensor
+     *
+     * @see BlockScaleQuantizeAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2>
         block_scale_quantize(std::shared_ptr<TensorAttributes> x,
@@ -1879,6 +2159,18 @@ public:
         return {y, scale};
     }
 
+    /** @brief Unary element-wise operation
+     *
+     * Applies an element-wise function to a single input tensor. The operation
+     * is specified by PointwiseAttributes::set_mode().
+     *
+     * @param in0 Input tensor (arbitrary shape)
+     * @param attributes Configuration specifying the pointwise mode and any
+     *        mode-specific parameters (e.g., relu_lower_clip, elu_alpha)
+     * @return out0: Output tensor (same shape as in0)
+     *
+     * @see PointwiseAttributes, PointwiseMode
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -1902,6 +2194,18 @@ public:
         return out0;
     }
 
+    /** @brief Binary element-wise operation
+     *
+     * Applies an element-wise function to two input tensors. Inputs support
+     * broadcasting.
+     *
+     * @param in0 First input tensor
+     * @param in1 Second input tensor (broadcastable to in0 shape)
+     * @param attributes Configuration specifying the pointwise mode
+     * @return out0: Output tensor (broadcast shape of in0 and in1)
+     *
+     * @see PointwiseAttributes, PointwiseMode
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
                                                 PointwiseAttributes attributes)
@@ -1931,6 +2235,18 @@ public:
         return out0;
     }
 
+    /** @brief Ternary element-wise operation
+     *
+     * Applies an element-wise function to three input tensors.
+     *
+     * @param in0 First input tensor
+     * @param in1 Second input tensor
+     * @param in2 Third input tensor (e.g., condition for BINARY_SELECT)
+     * @param attributes Configuration specifying the pointwise mode
+     * @return out0: Output tensor
+     *
+     * @see PointwiseAttributes, PointwiseMode
+     */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
                                                 std::shared_ptr<TensorAttributes> in2,
@@ -1966,6 +2282,25 @@ public:
         return out0;
     }
 
+    /** @brief Matrix multiplication
+     *
+     * Computes the matrix product of two tensors with optional batch dimensions.
+     *
+     * Formula:
+     * @code
+     * C[..., i, j] = sum_k( A[..., i, k] * B[..., k, j] )
+     * @endcode
+     *
+     * Batch dimensions are broadcast when they differ (one must be divisible
+     * by the other).
+     *
+     * @param a Left input matrix [..., M, K]
+     * @param b Right input matrix [..., K, N]
+     * @param attributes Additional configuration
+     * @return c: Output matrix [..., M, N]
+     *
+     * @see MatmulAttributes
+     */
     std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
                                              std::shared_ptr<TensorAttributes> b,
                                              MatmulAttributes attributes)
@@ -1995,6 +2330,82 @@ public:
         return c;
     }
 
+    /** @brief Add a custom operation to the graph
+     *
+     * Custom ops let users coordinate directly with plugins without requiring
+     * hipDNN to understand the operation. hipDNN transports the tensor I/O
+     * topology and an opaque byte payload, and the target plugin interprets
+     * the payload.
+     *
+     * @param inputs Input tensors (variable length)
+     * @param numOutputs Number of output tensors to create
+     * @param attributes Custom op configuration including opaque payload
+     * @return Vector of output tensors
+     *
+     * @note This operation requires a matching custom plugin to find an engine.
+     *       It will fail engine selection unless a plugin is loaded that explicitly
+     *       handles the specified `custom_op_id`.
+     *
+     * @see CustomOpAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::vector<std::shared_ptr<TensorAttributes>>
+        custom_op(std::vector<std::shared_ptr<TensorAttributes>> inputs,
+                  size_t numOutputs,
+                  CustomOpAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("CustomOp_" + attributes.get_custom_op_id() + "_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        for(size_t i = 0; i < inputs.size(); ++i)
+        {
+            if(inputs[i] && inputs[i]->get_name().empty())
+            {
+                inputs[i]->set_name(attributes.get_name() + "::input_" + std::to_string(i));
+            }
+        }
+
+        std::vector<std::shared_ptr<TensorAttributes>> outputTensors;
+        outputTensors.reserve(numOutputs);
+        for(size_t i = 0; i < numOutputs; ++i)
+        {
+            outputTensors.push_back(
+                outputTensor(attributes.get_name() + "::output_" + std::to_string(i)));
+        }
+
+        attributes.set_inputs(std::move(inputs));
+        attributes.set_outputs(outputTensors);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<CustomOpNode>(std::move(attributes), graph_attributes));
+
+        return outputTensors;
+    }
+
+    /** @brief Scaled dot-product attention forward pass
+     *
+     * Computes scaled dot-product attention:
+     * @code
+     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * @endcode
+     *
+     * Supports optional causal masking, attention bias, dropout, paged
+     * attention, and FP8 quantization via descale/scale tensors.
+     *
+     * @param q Query tensor [B, H, S_q, D]
+     * @param k Key tensor [B, H, S_kv, D]
+     * @param v Value tensor [B, H, S_kv, D]
+     * @param attributes Configuration: masking, dropout, attention scale,
+     *        paged attention, and other SDPA options
+     * @return [o, stats]: Output tensor [B, H, S_q, D] and optional softmax
+     *         statistics (nullptr if generate_stats is not set)
+     *
+     * @see SdpaAttributes
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> sdpa(std::shared_ptr<TensorAttributes> q,
                                                           std::shared_ptr<TensorAttributes> k,
@@ -2041,6 +2452,103 @@ public:
         return ret;
     }
 
+    /** @brief Scaled dot-product attention backward pass
+     *
+     * Computes gradients dQ, dK, dV for the backward pass of SDPA:
+     * @code
+     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * @endcode
+     *
+     * Requires softmax statistics (logsumexp) from the forward pass, which
+     * are generated when the forward pass is configured with
+     * `set_generate_stats(true)`.
+     *
+     * @param q Query tensor from forward pass [B, H, S_q, D]
+     * @param k Key tensor from forward pass [B, H, S_kv, D]
+     * @param v Value tensor from forward pass [B, H, S_kv, D]
+     * @param o Output tensor from forward pass [B, H, S_q, D]
+     * @param dO Upstream gradient tensor [B, H, S_q, D]
+     * @param stats Softmax statistics (logsumexp) from forward pass [B, H, S_q, 1]
+     * @param attributes Configuration: masking, dropout, attention scale
+     * @return Array of 3 output tensors:
+     *         - [0] dQ: Gradient w.r.t. query [B, H, S_q, D]
+     *         - [1] dK: Gradient w.r.t. key [B, H, S_kv, D]
+     *         - [2] dV: Gradient w.r.t. value [B, H, S_kv, D]
+     *
+     * @see SdpaBackwardAttributes, SdpaAttributes
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        sdpa_backward(std::shared_ptr<TensorAttributes> q, // NOLINT
+                      std::shared_ptr<TensorAttributes> k,
+                      std::shared_ptr<TensorAttributes> v,
+                      std::shared_ptr<TensorAttributes> o,
+                      std::shared_ptr<TensorAttributes> dO,
+                      std::shared_ptr<TensorAttributes> stats,
+                      SdpaBackwardAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("SdpaBprop_" + std::to_string(_sub_nodes.size()));
+        }
+        if(q->get_name().empty())
+        {
+            q->set_name(attributes.get_name() + "::Q");
+        }
+        if(k->get_name().empty())
+        {
+            k->set_name(attributes.get_name() + "::K");
+        }
+        if(v->get_name().empty())
+        {
+            v->set_name(attributes.get_name() + "::V");
+        }
+        if(dO->get_name().empty())
+        {
+            dO->set_name(attributes.get_name() + "::dO");
+        }
+
+        auto dq = outputTensor(attributes.get_name() + "::dQ");
+        auto dk = outputTensor(attributes.get_name() + "::dK");
+        auto dv = outputTensor(attributes.get_name() + "::dV");
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_o(std::move(o));
+        attributes.set_do(std::move(dO));
+        attributes.set_stats(std::move(stats));
+        attributes.set_dq(dq);
+        attributes.set_dk(dk);
+        attributes.set_dv(dv);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<SdpaBpropNode>(std::move(attributes), graph_attributes));
+
+        return {dq, dk, dv};
+    }
+
+    /** @brief Convolution forward pass
+     *
+     * Computes a cross-correlation (or convolution) of the input with filters.
+     *
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * y[n,k,oh,ow] = sum_c,r,s  x[n, c, oh*stride_h + r*dilation_h - pad_h,
+     *                                     ow*stride_w + s*dilation_w - pad_w]
+     *                           * w[k, c, r, s]
+     *
+     * output_dim = floor((input + pad_before + pad_after
+     *              - dilation * (kernel - 1) - 1) / stride) + 1
+     * @endcode
+     *
+     * @param x Input activation tensor (batch, channels, spatial dimensions)
+     * @param w Filter/weight tensor (output channels, input channels, filter spatial dims)
+     * @param attributes Convolution parameters: padding, stride, dilation,
+     *        convolution mode
+     * @return y: Output activation tensor
+     *
+     * @see ConvFpropAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -2072,6 +2580,27 @@ public:
         return y;
     }
 
+    /** @brief Convolution data gradient (backward data)
+     *
+     * Computes the gradient of the loss with respect to the convolution input,
+     * given the output gradient and the filter weights. Used during
+     * backpropagation.
+     *
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * dx[n,c,h,w] = sum_k,r,s  dy[n, k, p, q] * w[k, c, r, s]
+     *   where p = (h + pad_h - r*dilation_h) / stride_h  (integer, in [0, H_out))
+     *         q = (w + pad_w - s*dilation_w) / stride_w  (integer, in [0, W_out))
+     * @endcode
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output)
+     * @param w Filter/weight tensor
+     * @param attributes Convolution parameters: padding, stride, dilation
+     *        (must match forward pass)
+     * @return dx: Gradient w.r.t. input (same shape as forward input)
+     *
+     * @see ConvDgradAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_dgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> w,
@@ -2103,6 +2632,27 @@ public:
         return dx;
     }
 
+    /** @brief Convolution weight gradient (backward weights)
+     *
+     * Computes the gradient of the loss with respect to the filter weights,
+     * given the output gradient and the original input. Used during
+     * backpropagation.
+     *
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * dw[k,c,r,s] = sum_n,p,q  dy[n, k, p, q] * x[n, c, h, w]
+     *   where h = p*stride_h - pad_h + r*dilation_h
+     *         w = q*stride_w - pad_w + s*dilation_w
+     * @endcode
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output)
+     * @param x Original input activation tensor
+     * @param attributes Convolution parameters: padding, stride, dilation
+     *        (must match forward pass)
+     * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
+     *
+     * @see ConvWgradAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> x,
@@ -2134,6 +2684,11 @@ public:
         return dw;
     }
 
+    /**
+     * @brief Set the preferred engine ID for execution plan selection
+     * @param engineId Engine ID to prefer, or std::nullopt to clear
+     * @return Reference to this Graph for method chaining
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Graph& set_preferred_engine_id_ext(std::optional<int64_t> engineId)
     // NOLINTEND(readability-identifier-naming)
@@ -2142,6 +2697,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set the preferred engine by name
+     * @param engineName Engine name to look up; empty string clears the preference
+     * @return Reference to this Graph for method chaining
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Graph& set_preferred_engine_id_ext(const std::string& engineName)
     // NOLINTEND(readability-identifier-naming)
