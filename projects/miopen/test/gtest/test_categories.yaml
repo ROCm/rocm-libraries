@@ -311,7 +311,7 @@ exclude_gpu:
       - *gfx11_common_patterns
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
-      - "Full/GPU_reduce_custom_fp32*
+      - "Full/GPU_reduce_custom_fp32*"
     labels:
       - "quick"
       - "standard"
