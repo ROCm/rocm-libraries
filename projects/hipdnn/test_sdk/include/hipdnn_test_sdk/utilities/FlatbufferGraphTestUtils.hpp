@@ -2014,6 +2014,47 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    std::vector<int64_t> dims = {4, 8};
+    std::vector<int64_t> strides = {8, 1};
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "input_0", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "output_0", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+
+    std::vector<int64_t> inputUids = {1};
+    std::vector<int64_t> outputUids = {2};
+    std::vector<uint8_t> data = {0x01, 0x02};
+
+    auto customOpAttr = hipdnn_data_sdk::data_objects::CreateCustomOpAttributesDirect(
+        builder, "my_plugin_op", &inputUids, &outputUids, &data);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "custom_op",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes,
+        customOpAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline flatbuffers::FlatBufferBuilder createValidEngineConfig(int64_t configId)
 {
     flatbuffers::FlatBufferBuilder builder;
