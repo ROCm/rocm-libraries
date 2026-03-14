@@ -1643,6 +1643,28 @@ TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, CustomOpNode)
+{
+    Graph graph;
+    graph.set_name("custom_op_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+
+    auto inputA = createTensor("input_a", {2, 3}, DataType::FLOAT, 1);
+    auto inputB = createTensor("input_b", {2, 3}, DataType::FLOAT, 2);
+
+    std::vector<uint8_t> opaquePayload = {0xDE, 0xAD, 0xBE, 0xEF};
+
+    CustomOpAttributes customAttrs;
+    customAttrs.set_name("my_custom_op").set_custom_op_id("example.my_add").set_data(opaquePayload);
+
+    auto outputs = graph.custom_op({inputA, inputB}, 1, customAttrs);
+    ASSERT_EQ(outputs.size(), 1u);
+    outputs[0]->set_output(true).set_dim({2, 3}).set_stride({3, 1}).set_data_type(DataType::FLOAT);
+
+    roundTripAndCompare(graph);
+}
+
 //==============================================================================
 // Test Suite Instantiation
 //==============================================================================
