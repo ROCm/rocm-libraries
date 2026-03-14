@@ -308,7 +308,7 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             // this pipeline has a pair of LDS buffers per logical tile
             constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
             constexpr index_t a_lds_block_space_size_aligned =
-                Policy::template GetALdsBlockSpaceSize<Problem, ADataType>();
+                Policy::template GetSmemSizeA<Problem, ADataType>();
 
             // Create LDS store tensor views for buffer 0
             auto a_lds_store_block0 =

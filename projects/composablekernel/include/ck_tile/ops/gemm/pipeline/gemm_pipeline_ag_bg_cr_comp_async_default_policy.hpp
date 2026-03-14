@@ -62,7 +62,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 
     template <typename Problem,
               typename OverrideADataType = remove_cvref_t<typename Problem::ADataType>>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeALdsLoadBlockDescriptor()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
 #if defined(__gfx125__)
         return Base::template MakeALdsBlockDescriptor<Problem>();
@@ -126,7 +126,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBLdsLoadBlockDescriptor()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
 #if defined(__gfx125__)
         return Base::template MakeBLdsBlockDescriptor<Problem>();
@@ -429,10 +429,18 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     }
 
     template <typename Problem, typename ADataType>
-    CK_TILE_DEVICE static constexpr index_t GetALdsBlockSpaceSize()
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
         constexpr auto a_lds_block_desc = MakeALdsStoreBlockDescriptor<Problem, ADataType>();
         return integer_least_multiple(sizeof(ADataType) * a_lds_block_desc.get_element_space_size(),
+                                      16);
+    }
+
+    template <typename Problem, typename BDataType>
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
+    {
+        constexpr auto b_lds_block_desc = MakeBLdsStoreBlockDescriptor<Problem>();
+        return integer_least_multiple(sizeof(BDataType) * b_lds_block_desc.get_element_space_size(),
                                       16);
     }
 
@@ -448,7 +456,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     CK_TILE_DEVICE static constexpr auto GetALdsLoadTensorView(void* smem)
     {
         ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
-        constexpr auto a_lds_block_desc = MakeALdsLoadBlockDescriptor<Problem, ADataType>();
+        constexpr auto a_lds_block_desc = MakeALdsBlockDescriptor<Problem, ADataType>();
         return make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
     }
 
@@ -456,7 +464,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     CK_TILE_DEVICE static constexpr auto GetBLdsLoadTensorView(void* smem)
     {
         BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(smem);
-        constexpr auto b_lds_block_desc = MakeBLdsLoadBlockDescriptor<Problem>();
+        constexpr auto b_lds_block_desc = MakeBLdsBlockDescriptor<Problem>();
         return make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
     }
 
