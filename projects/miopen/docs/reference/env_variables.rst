@@ -945,6 +945,28 @@ following table.
       - | 0: Disable
         | 1: Enable
 
+MLIR solution control
+=====================
+
+The MLIR solution control environment variables for MIOpen are collected in the following table.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``MIOPEN_DEBUG_CONV_MLIR_IGEMM_WRW_XDLOPS``
+        | Controls MLIR implicit GEMM weight-gradient XDLOPS solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_CONV_MLIR_IGEMM_BWD_XDLOPS``
+        | Controls MLIR implicit GEMM backward XDLOPS solution.
+      - | 0: Disable
+        | 1: Enable
+
 Attention and softmax control
 =============================
 
