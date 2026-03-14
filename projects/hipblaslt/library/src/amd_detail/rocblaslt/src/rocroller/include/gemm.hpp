@@ -72,6 +72,43 @@ private:
     hipModule_t module;
 };
 
+// Kernel compiled for exact problem dimensions. Has highest selection priority.
+struct StaticShape
+{
+    size_t m, n, k;
+
+    bool matches(size_t pm, size_t pn, size_t pk) const
+    {
+        return m == pm && n == pn && k == pk;
+    }
+};
+
+// Half-open range condition on problem dimensions ([min, max) per axis).
+// Checked after static-shape kernels but before unconditional fallbacks.
+struct ShapeCondition
+{
+    std::optional<size_t> minM, maxM;
+    std::optional<size_t> minN, maxN;
+    std::optional<size_t> minK, maxK;
+
+    bool matches(size_t m, size_t n, size_t k) const
+    {
+        if(minM && m < *minM)
+            return false;
+        if(maxM && m >= *maxM)
+            return false;
+        if(minN && n < *minN)
+            return false;
+        if(maxN && n >= *maxN)
+            return false;
+        if(minK && k < *minK)
+            return false;
+        if(maxK && k >= *maxK)
+            return false;
+        return true;
+    }
+};
+
 /**
  * @brief GemmKernel
  *
@@ -107,6 +144,15 @@ public:
     // Wave kernels need a non-default block size (e.g. {64,4,1}).
     // AITER kernels leave this empty and use the hardcoded default.
     std::optional<std::array<int, 3>> customBlockSize;
+
+    // When set, this kernel is only selected when problem dimensions exactly
+    // match. Has highest selection priority (above shapeCondition).
+    std::optional<StaticShape> staticShape;
+
+    // When set, this kernel is only selected for problems whose dimensions
+    // fall within the specified ranges. Kernels without any condition serve
+    // as unconditional fallbacks.
+    std::optional<ShapeCondition> shapeCondition;
 
     bool isCustomKernel() const
     {
