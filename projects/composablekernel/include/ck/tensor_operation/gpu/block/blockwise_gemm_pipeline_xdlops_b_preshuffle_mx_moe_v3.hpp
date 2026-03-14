@@ -622,83 +622,76 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v3<BlockGemmPipelineSched
                     static_for<0, MRepeat, 1>{}([&](auto m0) {
                         constexpr auto im_major = m0 / MXdlPack;
                         constexpr auto im_minor = m0 % MXdlPack;
-                        static_for<0, KRepeat, 1>{}([&](auto k0) {
+                        static_ford<Sequence<KRepeat, NRepeat>>{}([&](auto kn) {
+                            constexpr auto k0       = Number<kn[Number<0>{}]>{};
+                            constexpr auto n0       = Number<kn[Number<1>{}]>{};
                             constexpr auto ik_major = k0 / KXdlPack;
                             constexpr auto ik_minor = k0 % KXdlPack;
-                            static_for<0, NRepeat, 1>{}([&](auto n0) {
-                                constexpr auto in_major = n0 / NXdlPack;
-                                constexpr auto in_minor = n0 % NXdlPack;
+                            constexpr auto in_major = n0 / NXdlPack;
+                            constexpr auto in_minor = n0 % NXdlPack;
 
-                                constexpr index_t a_scale_offset =
-                                    a_scale_thread_desc.CalculateOffset(
-                                        make_tuple(im_major, ik_major, I0));
-                                constexpr index_t b_scale_offset =
-                                    b_scale_thread_desc.CalculateOffset(
-                                        make_tuple(in_major, ik_major, I0));
+                            constexpr index_t a_scale_offset = a_scale_thread_desc.CalculateOffset(
+                                make_tuple(im_major, ik_major, I0));
+                            constexpr index_t b_scale_offset = b_scale_thread_desc.CalculateOffset(
+                                make_tuple(in_major, ik_major, I0));
 
-                                static_assert(0 < ScalesPerXdlopsRunPerThread,
-                                              "Must have at least one scale per Xdlops "
-                                              "per Thread.");
+                            static_assert(0 < ScalesPerXdlopsRunPerThread,
+                                          "Must have at least one scale per Xdlops "
+                                          "per Thread.");
 
-                                vector_type<AScaleDataType, a_scale_thread_vec_size>
-                                    a_scale_thread_vec;
-                                vector_type<BScaleDataType, b_scale_thread_vec_size>
-                                    b_scale_thread_vec;
+                            vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
+                            vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
 
-                                // Pack scale_thread_buf into scale_thread_vec
-                                static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
-                                    a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
-                                        a_scale_thread_bufs(
-                                            scale_comp_buf)[Number<a_scale_offset + s>{}];
-                                });
-
-                                static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
-                                    b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
-                                        b_scale_thread_bufs(
-                                            scale_comp_buf)[Number<b_scale_offset + s>{}];
-                                });
-
-                                vector_type<ComputeTypeA, KPack> a_thread_vec;
-                                vector_type<ComputeTypeB, KPack> b_thread_vec;
-
-                                static_for<0, KPack, 1>{}([&](auto ik) {
-                                    a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                        a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                            make_tuple(I0, I0, im_minor, k0, ik))>{}];
-                                    b_thread_vec.template AsType<ComputeTypeB>()(ik) = b_thread_bufs
-                                        [scale_comp_buf][Number<b_thread_desc_.CalculateOffset(
-                                            make_tuple(in_major, I0, in_minor, k0, ik))>{}];
-                                });
-
-                                using mfma_input_type_a =
-                                    typename vector_type<ComputeTypeA,
-                                                         xdlops_gemm.K1PerXdlops /
-                                                             APackedSize>::type;
-
-                                using mfma_input_type_b =
-                                    typename vector_type<ComputeTypeB,
-                                                         xdlops_gemm.K1PerXdlops /
-                                                             BPackedSize>::type;
-
-                                using mfma_scale_input_type_a =
-                                    typename vector_type<AScaleDataType,
-                                                         a_scale_thread_vec_size>::type;
-                                using mfma_scale_input_type_b =
-                                    typename vector_type<BScaleDataType,
-                                                         b_scale_thread_vec_size>::type;
-
-                                constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
-                                    make_tuple(im_major, in_major, im_minor, in_minor, 0));
-
-                                // MFMA accumulation
-                                xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
-                                                         ik_minor * NXdlPack + in_minor>(
-                                    a_thread_vec.template AsType<mfma_input_type_a>(),
-                                    a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
-                                    b_thread_vec.template AsType<mfma_input_type_b>(),
-                                    b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
-                                    c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                            // Pack scale_thread_buf into scale_thread_vec
+                            static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
+                                a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
+                                    a_scale_thread_bufs(
+                                        scale_comp_buf)[Number<a_scale_offset + s>{}];
                             });
+
+                            static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
+                                b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
+                                    b_scale_thread_bufs(
+                                        scale_comp_buf)[Number<b_scale_offset + s>{}];
+                            });
+
+                            vector_type<ComputeTypeA, KPack> a_thread_vec;
+                            vector_type<ComputeTypeB, KPack> b_thread_vec;
+
+                            static_for<0, KPack, 1>{}([&](auto ik) {
+                                a_thread_vec.template AsType<ComputeTypeA>()(ik) =
+                                    a_thread_buf[Number<a_thread_desc_.CalculateOffset(
+                                        make_tuple(I0, I0, im_minor, k0, ik))>{}];
+                                b_thread_vec.template AsType<ComputeTypeB>()(ik) =
+                                    b_thread_bufs[scale_comp_buf]
+                                                 [Number<b_thread_desc_.CalculateOffset(make_tuple(
+                                                     in_major, I0, in_minor, k0, ik))>{}];
+                            });
+
+                            using mfma_input_type_a =
+                                typename vector_type<ComputeTypeA,
+                                                     xdlops_gemm.K1PerXdlops / APackedSize>::type;
+
+                            using mfma_input_type_b =
+                                typename vector_type<ComputeTypeB,
+                                                     xdlops_gemm.K1PerXdlops / BPackedSize>::type;
+
+                            using mfma_scale_input_type_a =
+                                typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
+                            using mfma_scale_input_type_b =
+                                typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
+
+                            constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                                make_tuple(im_major, in_major, im_minor, in_minor, 0));
+
+                            // MFMA accumulation
+                            xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
+                                                     ik_minor * NXdlPack + in_minor>(
+                                a_thread_vec.template AsType<mfma_input_type_a>(),
+                                a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
+                                b_thread_vec.template AsType<mfma_input_type_b>(),
+                                b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
+                                c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                         });
 
                         if constexpr(m0.value == SwitchM)
@@ -796,73 +789,73 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v3<BlockGemmPipelineSched
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 constexpr auto im_major = m0 / MXdlPack;
                 constexpr auto im_minor = m0 % MXdlPack;
-                static_for<0, KRepeat, 1>{}([&](auto k0) {
+                static_ford<Sequence<KRepeat, NRepeat>>{}([&](auto kn) {
+                    constexpr auto k0       = Number<kn[Number<0>{}]>{};
+                    constexpr auto n0       = Number<kn[Number<1>{}]>{};
                     constexpr auto ik_major = k0 / KXdlPack;
                     constexpr auto ik_minor = k0 % KXdlPack;
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        constexpr auto in_major = n0 / NXdlPack;
-                        constexpr auto in_minor = n0 % NXdlPack;
+                    constexpr auto in_major = n0 / NXdlPack;
+                    constexpr auto in_minor = n0 % NXdlPack;
 
-                        constexpr index_t a_scale_offset =
-                            a_scale_thread_desc.CalculateOffset(make_tuple(im_major, ik_major, I0));
-                        constexpr index_t b_scale_offset =
-                            b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
+                    constexpr index_t a_scale_offset =
+                        a_scale_thread_desc.CalculateOffset(make_tuple(im_major, ik_major, I0));
+                    constexpr index_t b_scale_offset =
+                        b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
 
-                        static_assert(0 < ScalesPerXdlopsRunPerThread,
-                                      "Must have at least one scale per Xdlops "
-                                      "per Thread.");
+                    static_assert(0 < ScalesPerXdlopsRunPerThread,
+                                  "Must have at least one scale per Xdlops "
+                                  "per Thread.");
 
-                        vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
+                    vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
 
-                        // Pack scale_thread_buf into scale_thread_vec
-                        static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
-                            a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
-                                a_scale_thread_bufs(I0)[Number<a_scale_offset + s>{}];
-                        });
-
-                        static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
-                            b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
-                                b_scale_thread_bufs(I0)[Number<b_scale_offset + s>{}];
-                        });
-
-                        vector_type<ComputeTypeA, KPack> a_thread_vec;
-                        vector_type<ComputeTypeB, KPack> b_thread_vec;
-
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(I0, I0, im_minor, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                b_thread_bufs[I0][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(in_major, I0, in_minor, k0, ik))>{}];
-                        });
-
-                        using mfma_input_type_a =
-                            typename vector_type<ComputeTypeA,
-                                                 xdlops_gemm.K1PerXdlops / APackedSize>::type;
-
-                        using mfma_input_type_b =
-                            typename vector_type<ComputeTypeB,
-                                                 xdlops_gemm.K1PerXdlops / BPackedSize>::type;
-
-                        using mfma_scale_input_type_a =
-                            typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
-                        using mfma_scale_input_type_b =
-                            typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
-
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
-                            make_tuple(im_major, in_major, im_minor, in_minor, 0));
-
-                        // MFMA accumulation
-                        xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
-                                                 ik_minor * NXdlPack + in_minor>(
-                            a_thread_vec.template AsType<mfma_input_type_a>(),
-                            a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
-                            b_thread_vec.template AsType<mfma_input_type_b>(),
-                            b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
-                            c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                    // Pack scale_thread_buf into scale_thread_vec
+                    static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
+                        a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
+                            a_scale_thread_bufs(I0)[Number<a_scale_offset + s>{}];
                     });
+
+                    static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
+                        b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
+                            b_scale_thread_bufs(I0)[Number<b_scale_offset + s>{}];
+                    });
+
+                    vector_type<ComputeTypeA, KPack> a_thread_vec;
+                    vector_type<ComputeTypeB, KPack> b_thread_vec;
+
+                    static_for<0, KPack, 1>{}([&](auto ik) {
+                        a_thread_vec.template AsType<ComputeTypeA>()(ik) =
+                            a_thread_buf[Number<a_thread_desc_.CalculateOffset(
+                                make_tuple(I0, I0, im_minor, k0, ik))>{}];
+                        b_thread_vec.template AsType<ComputeTypeB>()(ik) =
+                            b_thread_bufs[I0][Number<b_thread_desc_.CalculateOffset(
+                                make_tuple(in_major, I0, in_minor, k0, ik))>{}];
+                    });
+
+                    using mfma_input_type_a =
+                        typename vector_type<ComputeTypeA,
+                                             xdlops_gemm.K1PerXdlops / APackedSize>::type;
+
+                    using mfma_input_type_b =
+                        typename vector_type<ComputeTypeB,
+                                             xdlops_gemm.K1PerXdlops / BPackedSize>::type;
+
+                    using mfma_scale_input_type_a =
+                        typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
+                    using mfma_scale_input_type_b =
+                        typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
+
+                    constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                        make_tuple(im_major, in_major, im_minor, in_minor, 0));
+
+                    // MFMA accumulation
+                    xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
+                                             ik_minor * NXdlPack + in_minor>(
+                        a_thread_vec.template AsType<mfma_input_type_a>(),
+                        a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
+                        b_thread_vec.template AsType<mfma_input_type_b>(),
+                        b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
+                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                 });
                 if constexpr(m0.value == SwitchM)
                 {
@@ -900,73 +893,73 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v3<BlockGemmPipelineSched
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 constexpr auto im_major = m0 / MXdlPack;
                 constexpr auto im_minor = m0 % MXdlPack;
-                static_for<0, KRepeat, 1>{}([&](auto k0) {
+                static_ford<Sequence<KRepeat, NRepeat>>{}([&](auto kn) {
+                    constexpr auto k0       = Number<kn[Number<0>{}]>{};
+                    constexpr auto n0       = Number<kn[Number<1>{}]>{};
                     constexpr auto ik_major = k0 / KXdlPack;
                     constexpr auto ik_minor = k0 % KXdlPack;
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        constexpr auto in_major = n0 / NXdlPack;
-                        constexpr auto in_minor = n0 % NXdlPack;
+                    constexpr auto in_major = n0 / NXdlPack;
+                    constexpr auto in_minor = n0 % NXdlPack;
 
-                        constexpr index_t a_scale_offset =
-                            a_scale_thread_desc.CalculateOffset(make_tuple(im_major, ik_major, I0));
-                        constexpr index_t b_scale_offset =
-                            b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
+                    constexpr index_t a_scale_offset =
+                        a_scale_thread_desc.CalculateOffset(make_tuple(im_major, ik_major, I0));
+                    constexpr index_t b_scale_offset =
+                        b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
 
-                        static_assert(0 < ScalesPerXdlopsRunPerThread,
-                                      "Must have at least one scale per Xdlops "
-                                      "per Thread.");
+                    static_assert(0 < ScalesPerXdlopsRunPerThread,
+                                  "Must have at least one scale per Xdlops "
+                                  "per Thread.");
 
-                        vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
+                    vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
 
-                        // Pack scale_thread_buf into scale_thread_vec
-                        static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
-                            a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
-                                a_scale_thread_bufs(I1)[Number<a_scale_offset + s>{}];
-                        });
-
-                        static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
-                            b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
-                                b_scale_thread_bufs(I1)[Number<b_scale_offset + s>{}];
-                        });
-
-                        vector_type<ComputeTypeA, KPack> a_thread_vec;
-                        vector_type<ComputeTypeB, KPack> b_thread_vec;
-
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(I0, I0, im_minor, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                b_thread_bufs[I1][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(in_major, I0, in_minor, k0, ik))>{}];
-                        });
-
-                        using mfma_input_type_a =
-                            typename vector_type<ComputeTypeA,
-                                                 xdlops_gemm.K1PerXdlops / APackedSize>::type;
-
-                        using mfma_input_type_b =
-                            typename vector_type<ComputeTypeB,
-                                                 xdlops_gemm.K1PerXdlops / BPackedSize>::type;
-
-                        using mfma_scale_input_type_a =
-                            typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
-                        using mfma_scale_input_type_b =
-                            typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
-
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
-                            make_tuple(im_major, in_major, im_minor, in_minor, 0));
-
-                        // MFMA accumulation
-                        xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
-                                                 ik_minor * NXdlPack + in_minor>(
-                            a_thread_vec.template AsType<mfma_input_type_a>(),
-                            a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
-                            b_thread_vec.template AsType<mfma_input_type_b>(),
-                            b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
-                            c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                    // Pack scale_thread_buf into scale_thread_vec
+                    static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
+                        a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
+                            a_scale_thread_bufs(I1)[Number<a_scale_offset + s>{}];
                     });
+
+                    static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
+                        b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
+                            b_scale_thread_bufs(I1)[Number<b_scale_offset + s>{}];
+                    });
+
+                    vector_type<ComputeTypeA, KPack> a_thread_vec;
+                    vector_type<ComputeTypeB, KPack> b_thread_vec;
+
+                    static_for<0, KPack, 1>{}([&](auto ik) {
+                        a_thread_vec.template AsType<ComputeTypeA>()(ik) =
+                            a_thread_buf[Number<a_thread_desc_.CalculateOffset(
+                                make_tuple(I0, I0, im_minor, k0, ik))>{}];
+                        b_thread_vec.template AsType<ComputeTypeB>()(ik) =
+                            b_thread_bufs[I1][Number<b_thread_desc_.CalculateOffset(
+                                make_tuple(in_major, I0, in_minor, k0, ik))>{}];
+                    });
+
+                    using mfma_input_type_a =
+                        typename vector_type<ComputeTypeA,
+                                             xdlops_gemm.K1PerXdlops / APackedSize>::type;
+
+                    using mfma_input_type_b =
+                        typename vector_type<ComputeTypeB,
+                                             xdlops_gemm.K1PerXdlops / BPackedSize>::type;
+
+                    using mfma_scale_input_type_a =
+                        typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
+                    using mfma_scale_input_type_b =
+                        typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
+
+                    constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                        make_tuple(im_major, in_major, im_minor, in_minor, 0));
+
+                    // MFMA accumulation
+                    xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
+                                             ik_minor * NXdlPack + in_minor>(
+                        a_thread_vec.template AsType<mfma_input_type_a>(),
+                        a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
+                        b_thread_vec.template AsType<mfma_input_type_b>(),
+                        b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
+                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                 });
                 if constexpr(m0.value < (MRepeat - LocalPrefetchStages))
                 {
@@ -1004,73 +997,73 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v3<BlockGemmPipelineSched
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 constexpr auto im_major = m0 / MXdlPack;
                 constexpr auto im_minor = m0 % MXdlPack;
-                static_for<0, KRepeat, 1>{}([&](auto k0) {
+                static_ford<Sequence<KRepeat, NRepeat>>{}([&](auto kn) {
+                    constexpr auto k0       = Number<kn[Number<0>{}]>{};
+                    constexpr auto n0       = Number<kn[Number<1>{}]>{};
                     constexpr auto ik_major = k0 / KXdlPack;
                     constexpr auto ik_minor = k0 % KXdlPack;
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        constexpr auto in_major = n0 / NXdlPack;
-                        constexpr auto in_minor = n0 % NXdlPack;
+                    constexpr auto in_major = n0 / NXdlPack;
+                    constexpr auto in_minor = n0 % NXdlPack;
 
-                        constexpr index_t a_scale_offset =
-                            a_scale_thread_desc.CalculateOffset(make_tuple(im_major, ik_major, I0));
-                        constexpr index_t b_scale_offset =
-                            b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
+                    constexpr index_t a_scale_offset =
+                        a_scale_thread_desc.CalculateOffset(make_tuple(im_major, ik_major, I0));
+                    constexpr index_t b_scale_offset =
+                        b_scale_thread_desc.CalculateOffset(make_tuple(in_major, ik_major, I0));
 
-                        static_assert(0 < ScalesPerXdlopsRunPerThread,
-                                      "Must have at least one scale per Xdlops "
-                                      "per Thread.");
+                    static_assert(0 < ScalesPerXdlopsRunPerThread,
+                                  "Must have at least one scale per Xdlops "
+                                  "per Thread.");
 
-                        vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
-                        vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
+                    vector_type<AScaleDataType, a_scale_thread_vec_size> a_scale_thread_vec;
+                    vector_type<BScaleDataType, b_scale_thread_vec_size> b_scale_thread_vec;
 
-                        // Pack scale_thread_buf into scale_thread_vec
-                        static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
-                            a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
-                                a_scale_thread_bufs(I0)[Number<a_scale_offset + s>{}];
-                        });
-
-                        static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
-                            b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
-                                b_scale_thread_bufs(I0)[Number<b_scale_offset + s>{}];
-                        });
-
-                        vector_type<ComputeTypeA, KPack> a_thread_vec;
-                        vector_type<ComputeTypeB, KPack> b_thread_vec;
-
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(I0, I0, im_minor, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                b_thread_bufs[I0][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(in_major, I0, in_minor, k0, ik))>{}];
-                        });
-
-                        using mfma_input_type_a =
-                            typename vector_type<ComputeTypeA,
-                                                 xdlops_gemm.K1PerXdlops / APackedSize>::type;
-
-                        using mfma_input_type_b =
-                            typename vector_type<ComputeTypeB,
-                                                 xdlops_gemm.K1PerXdlops / BPackedSize>::type;
-
-                        using mfma_scale_input_type_a =
-                            typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
-                        using mfma_scale_input_type_b =
-                            typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
-
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
-                            make_tuple(im_major, in_major, im_minor, in_minor, 0));
-
-                        // MFMA accumulation
-                        xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
-                                                 ik_minor * NXdlPack + in_minor>(
-                            a_thread_vec.template AsType<mfma_input_type_a>(),
-                            a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
-                            b_thread_vec.template AsType<mfma_input_type_b>(),
-                            b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
-                            c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                    // Pack scale_thread_buf into scale_thread_vec
+                    static_for<0, a_scale_thread_vec_size, 1>{}([&](auto s) {
+                        a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
+                            a_scale_thread_bufs(I0)[Number<a_scale_offset + s>{}];
                     });
+
+                    static_for<0, b_scale_thread_vec_size, 1>{}([&](auto s) {
+                        b_scale_thread_vec.template AsType<BScaleDataType>()(s) =
+                            b_scale_thread_bufs(I0)[Number<b_scale_offset + s>{}];
+                    });
+
+                    vector_type<ComputeTypeA, KPack> a_thread_vec;
+                    vector_type<ComputeTypeB, KPack> b_thread_vec;
+
+                    static_for<0, KPack, 1>{}([&](auto ik) {
+                        a_thread_vec.template AsType<ComputeTypeA>()(ik) =
+                            a_thread_buf[Number<a_thread_desc_.CalculateOffset(
+                                make_tuple(I0, I0, im_minor, k0, ik))>{}];
+                        b_thread_vec.template AsType<ComputeTypeB>()(ik) =
+                            b_thread_bufs[I0][Number<b_thread_desc_.CalculateOffset(
+                                make_tuple(in_major, I0, in_minor, k0, ik))>{}];
+                    });
+
+                    using mfma_input_type_a =
+                        typename vector_type<ComputeTypeA,
+                                             xdlops_gemm.K1PerXdlops / APackedSize>::type;
+
+                    using mfma_input_type_b =
+                        typename vector_type<ComputeTypeB,
+                                             xdlops_gemm.K1PerXdlops / BPackedSize>::type;
+
+                    using mfma_scale_input_type_a =
+                        typename vector_type<AScaleDataType, a_scale_thread_vec_size>::type;
+                    using mfma_scale_input_type_b =
+                        typename vector_type<BScaleDataType, b_scale_thread_vec_size>::type;
+
+                    constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                        make_tuple(im_major, in_major, im_minor, in_minor, 0));
+
+                    // MFMA accumulation
+                    xdlops_gemm.template Run<ik_minor * MXdlPack + im_minor,
+                                             ik_minor * NXdlPack + in_minor>(
+                        a_thread_vec.template AsType<mfma_input_type_a>(),
+                        a_scale_thread_vec.template AsType<mfma_scale_input_type_a>(),
+                        b_thread_vec.template AsType<mfma_input_type_b>(),
+                        b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
+                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                 });
                 if constexpr(m0.value < (MRepeat - LocalPrefetchStages))
                 {
