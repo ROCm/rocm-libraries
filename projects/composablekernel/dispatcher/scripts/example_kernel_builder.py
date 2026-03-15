@@ -29,6 +29,39 @@ def find_hipcc() -> str:
     return "hipcc"
 
 
+def _get_arch_configs(arch: str):
+    """Get architecture-specific configs from arch_filter data.
+
+    Returns (valid_wave_configs, valid_warp_tile_configs, warp_size).
+    Falls back to gfx942 defaults if arch data is unavailable.
+    """
+    # Try to import arch_filter data
+    try:
+        script_dir = Path(__file__).parent
+        codegen_dir = script_dir.parent / "codegen"
+        if str(codegen_dir) not in sys.path:
+            sys.path.insert(0, str(codegen_dir))
+        if str(script_dir.parent / "python") not in sys.path:
+            sys.path.insert(0, str(script_dir.parent / "python"))
+
+        from arch_filter import ArchFilter
+        af = ArchFilter(arch)
+        wave_cfgs = af.get_supported_warp_configs()
+        warp_tiles = af.get_supported_warp_tiles("fp16_fp16_fp32")
+
+        if wave_cfgs and warp_tiles:
+            wave_tuples = [tuple(w) for w in wave_cfgs]
+            warp_tuples = [tuple(w) for w in warp_tiles]
+            # Determine warp size from arch family
+            warp_size = 32 if arch.startswith("gfx12") or arch.startswith("gfx11") else 64
+            return wave_tuples, warp_tuples, warp_size
+    except Exception:
+        pass
+
+    # Fallback: gfx942 defaults
+    return [(1, 4, 1), (2, 2, 1), (4, 1, 1)], [(32, 32, 16), (16, 16, 32)], 64
+
+
 def find_ar() -> str:
     for path in [
         "/opt/rocm/llvm/bin/llvm-ar",
@@ -524,7 +557,7 @@ def parse_int_or_wildcard(val: str) -> int:
     return int(val)
 
 
-def parse_gemm_declarations(content: str) -> List[Dict]:
+def parse_gemm_declarations(content: str, arch: str = "gfx942") -> List[Dict]:
     """Parse DECL_KERNEL_SET declarations for GEMM.
 
     Supports wildcards:
@@ -599,6 +632,11 @@ def parse_gemm_declarations(content: str) -> List[Dict]:
                 kernel["pad_n"] = m.group(2).lower() == "true"
                 kernel["pad_k"] = m.group(3).lower() == "true"
 
+            # Architecture target (third argument to .add())
+            # Matches: , "gfx1201") or similar at end of .add() body
+            if m := re.search(r',\s*"(gfx\w+)"\s*\)', add_body):
+                kernel["arch"] = m.group(1)
+
             # Shorthand format: .add("dtype", "layout", M, N, K)
             if not kernel.get("dtype"):
                 if m := re.match(
@@ -615,13 +653,23 @@ def parse_gemm_declarations(content: str) -> List[Dict]:
                 kernel["kernel_set"] = kernel_set_name
                 kernels.append(kernel)
 
+    # Extract arch from declarations (use first kernel's arch, or fallback)
+    decl_arch = "gfx942"
+    for kernel in kernels:
+        if kernel.get("arch"):
+            decl_arch = kernel["arch"]
+            break
+
+    # Use provided arch or fall back to declared arch
+    effective_arch = arch if arch != "gfx942" else decl_arch
+
     # Expand wildcards to multiple kernels
     expanded = []
     for kernel in kernels:
-        expanded.extend(expand_gemm_wildcards(kernel))
+        expanded.extend(expand_gemm_wildcards(kernel, arch=effective_arch))
 
     # Apply autocorrect to each expanded kernel
-    return [auto_fill_gemm_defaults(k) for k in expanded]
+    return [auto_fill_gemm_defaults(k, arch=effective_arch) for k in expanded]
 
 
 def expand_gemm_wildcards(kernel: Dict, arch: str = "gfx942") -> List[Dict]:
@@ -631,15 +679,9 @@ def expand_gemm_wildcards(kernel: Dict, arch: str = "gfx942") -> List[Dict]:
     valid configurations for the target architecture.
 
     Note: Block size constraint filters invalid combos:
-    - (tile_m/warp_tile_m) * (tile_n/warp_tile_n) * 64 <= 1024
-    - For 128x128 tile: only (32,32,k) works (16 warps * 64 = 1024)
-    - For 64x64 tile: both (16,16,k) and (32,32,k) work
+    - (tile_m/warp_tile_m) * (tile_n/warp_tile_n) * warp_size <= 1024
     """
-    # Valid wave configurations for gfx942
-    valid_wave_configs = [(1, 4, 1), (2, 2, 1), (4, 1, 1)]
-
-    # Valid warp tile configurations for gfx942 fp16
-    valid_warp_configs = [(16, 16, 32), (32, 32, 16)]
+    valid_wave_configs, valid_warp_configs, warp_size = _get_arch_configs(arch)
 
     # Valid pipelines and schedulers
     valid_pipelines = ["compv3"]  # compv4 requires special handling
@@ -683,11 +725,9 @@ def expand_gemm_wildcards(kernel: Dict, arch: str = "gfx942") -> List[Dict]:
     expanded = []
     for wm, wn, wk in wave_configs:
         for wtm, wtn, wtk in warp_configs:
-            # Check block size constraint: (tile_m/warp_tile_m) * (tile_n/warp_tile_n) * 64 <= 1024
-            tile_m = kernel.get("tile_m", 128)
-            tile_n = kernel.get("tile_n", 128)
-            num_warps = (tile_m // wtm) * (tile_n // wtn)
-            if num_warps * 64 > 1024:
+            # Check block size constraint: warp_m * warp_n * warp_k * warp_size <= 1024
+            num_warps = wm * wn * wk
+            if num_warps * warp_size > 1024:
                 continue  # Skip invalid config
 
             for pipe in pipelines:
@@ -709,23 +749,31 @@ def expand_gemm_wildcards(kernel: Dict, arch: str = "gfx942") -> List[Dict]:
     return expanded if expanded else [kernel]
 
 
-def auto_fill_gemm_defaults(kernel: Dict) -> Dict:
+def auto_fill_gemm_defaults(kernel: Dict, arch: str = "gfx942") -> Dict:
     """Auto-fill missing GEMM parameters with sensible defaults (autofill + autocorrect).
 
     This implements:
     1. AUTOFILL: Missing parameters are filled with valid defaults
-    2. AUTOCORRECT: Invalid values are corrected to valid ones (e.g., wave(1,1,1) -> wave(2,2,1))
+    2. AUTOCORRECT: Invalid values are corrected to valid ones
+
+    Architecture-aware: uses arch_filter data for valid wave/warp configs.
     """
+    valid_wave_configs, valid_warp_configs, warp_size = _get_arch_configs(arch)
+
+    # Pick arch-appropriate defaults from valid configs
+    default_wave = valid_wave_configs[0] if valid_wave_configs else (2, 2, 1)
+    default_warp = valid_warp_configs[0] if valid_warp_configs else (32, 32, 16)
+
     defaults = {
         "tile_m": 128,
         "tile_n": 128,
         "tile_k": 64,
-        "warp_m": 2,
-        "warp_n": 2,
-        "warp_k": 1,
-        "warp_tile_m": 32,
-        "warp_tile_n": 32,
-        "warp_tile_k": 16,
+        "warp_m": default_wave[0],
+        "warp_n": default_wave[1],
+        "warp_k": default_wave[2],
+        "warp_tile_m": default_warp[0],
+        "warp_tile_n": default_warp[1],
+        "warp_tile_k": default_warp[2],
         "pipeline": "compv3",
         "scheduler": "intrawave",
         "epilogue": "cshuffle",
@@ -745,22 +793,19 @@ def auto_fill_gemm_defaults(kernel: Dict) -> Dict:
     if autofilled:
         print(f"    [AUTOFILL] {', '.join(autofilled)}")
 
-    # AUTOCORRECT: Fix invalid wave configurations for gfx942
-    # Valid wave configs: (1,4,1), (2,2,1), (4,1,1)
-    valid_wave_configs = [(1, 4, 1), (2, 2, 1), (4, 1, 1)]
+    # AUTOCORRECT: Fix invalid wave configurations
     current_wave = (
-        kernel.get("warp_m", 2),
-        kernel.get("warp_n", 2),
-        kernel.get("warp_k", 1),
+        kernel.get("warp_m", default_wave[0]),
+        kernel.get("warp_n", default_wave[1]),
+        kernel.get("warp_k", default_wave[2]),
     )
 
     if current_wave not in valid_wave_configs:
-        # Correct to (2,2,1) which is a balanced default
         old = current_wave
-        kernel["warp_m"] = 2
-        kernel["warp_n"] = 2
-        kernel["warp_k"] = 1
-        print(f"    [AUTOCORRECT] wave{old} -> wave(2,2,1) (invalid for gfx942)")
+        kernel["warp_m"] = default_wave[0]
+        kernel["warp_n"] = default_wave[1]
+        kernel["warp_k"] = default_wave[2]
+        print(f"    [AUTOCORRECT] wave{old} -> wave{default_wave} (invalid for {arch})")
 
     # AUTOCORRECT: Fix invalid pipeline/scheduler combinations
     invalid_combos = [
@@ -779,52 +824,41 @@ def auto_fill_gemm_defaults(kernel: Dict) -> Dict:
         )
 
     # AUTOCORRECT: Fix warp tile to avoid exceeding max block size (1024 threads)
-    # Block size = (tile_m / warp_tile_m) * (tile_n / warp_tile_n) * 64
-    tile_m = kernel.get("tile_m", 128)
-    tile_n = kernel.get("tile_n", 128)
-    warp_tile_m = kernel.get("warp_tile_m", 32)
-    warp_tile_n = kernel.get("warp_tile_n", 32)
-
-    num_warps = (tile_m // warp_tile_m) * (tile_n // warp_tile_n)
-    block_size = num_warps * 64  # 64 threads per warp
+    # Block size = warp_m * warp_n * warp_k * warp_size (wave config determines warps-per-block)
+    wm = kernel.get("warp_m", default_wave[0])
+    wn = kernel.get("warp_n", default_wave[1])
+    wk = kernel.get("warp_k", default_wave[2])
+    num_warps = wm * wn * wk
+    block_size = num_warps * warp_size
 
     if block_size > 1024:
-        # Find valid warp tile that fits
-        old_warp = (warp_tile_m, warp_tile_n, kernel.get("warp_tile_k", 16))
+        # Reduce wave config to fit
+        old_wave = (wm, wn, wk)
+        # Pick the first valid wave config that fits
+        for vw in valid_wave_configs:
+            if vw[0] * vw[1] * vw[2] * warp_size <= 1024:
+                kernel["warp_m"] = vw[0]
+                kernel["warp_n"] = vw[1]
+                kernel["warp_k"] = vw[2]
+                print(
+                    f"    [AUTOCORRECT] wave{old_wave} -> wave{vw} (block_size={vw[0]*vw[1]*vw[2]*warp_size})"
+                )
+                break
 
-        # For large tiles, use larger warp tiles
-        if tile_m >= 256:
-            kernel["warp_tile_m"] = 64
-        if tile_n >= 256:
-            kernel["warp_tile_n"] = 64
-
-        # Recalculate
-        num_warps = (tile_m // kernel["warp_tile_m"]) * (
-            tile_n // kernel["warp_tile_n"]
+    # Also validate warp tiles are in the supported set
+    warp_tile = (
+        kernel.get("warp_tile_m", default_warp[0]),
+        kernel.get("warp_tile_n", default_warp[1]),
+        kernel.get("warp_tile_k", default_warp[2]),
+    )
+    if warp_tile not in valid_warp_configs:
+        old_warp = warp_tile
+        kernel["warp_tile_m"] = default_warp[0]
+        kernel["warp_tile_n"] = default_warp[1]
+        kernel["warp_tile_k"] = default_warp[2]
+        print(
+            f"    [AUTOCORRECT] warp{old_warp} -> warp{default_warp} (invalid for {arch})"
         )
-        block_size = num_warps * 64
-
-        if block_size <= 1024:
-            new_warp = (
-                kernel["warp_tile_m"],
-                kernel["warp_tile_n"],
-                kernel["warp_tile_k"],
-            )
-            print(
-                f"    [AUTOCORRECT] warp{old_warp} -> warp{new_warp} (block_size={block_size})"
-            )
-        else:
-            # Still too large, try even larger warp tiles
-            kernel["warp_tile_m"] = tile_m // 4
-            kernel["warp_tile_n"] = tile_n // 4
-            new_warp = (
-                kernel["warp_tile_m"],
-                kernel["warp_tile_n"],
-                kernel["warp_tile_k"],
-            )
-            print(
-                f"    [AUTOCORRECT] warp{old_warp} -> warp{new_warp} (block_size adjusted)"
-            )
 
     return kernel
 
@@ -918,7 +952,7 @@ def strip_cpp_strings_and_comments(content: str) -> str:
     return "".join(result)
 
 
-def detect_and_parse(source_path: Path) -> Tuple[str, List[Dict]]:
+def detect_and_parse(source_path: Path, gpu_target: str = "gfx942") -> Tuple[str, List[Dict]]:
     """Detect example type and parse kernel declarations.
 
     Properly strips string literals and comments before parsing to avoid
@@ -932,7 +966,7 @@ def detect_and_parse(source_path: Path) -> Tuple[str, List[Dict]]:
     elif "DECL_GROUPED_CONV_KERNEL_SET" in content:
         return "conv", parse_conv_declarations(content)
     elif "DECL_KERNEL_SET" in content:
-        return "gemm", parse_gemm_declarations(content)
+        return "gemm", parse_gemm_declarations(content, arch=gpu_target)
     return "unknown", []
 
 
@@ -1530,7 +1564,7 @@ def _run_gemm_codegen(args: Tuple) -> Tuple[int, bool, str]:
 
 
 def generate_gemm_kernels(
-    kernels: List[Dict], output_dir: Path, codegen_dir: Path
+    kernels: List[Dict], output_dir: Path, codegen_dir: Path, gpu_target: str = "gfx942"
 ) -> bool:
     """Generate GEMM kernels for ALL declarations using unified codegen.
 
@@ -1582,8 +1616,10 @@ def generate_gemm_kernels(
             k.get("layout", "rcr"),
             "--variants",
             variant,
-            "--output",
+            "--output-dir",
             str(output_dir),
+            "--gpu-target",
+            gpu_target,
             "--tile-config-json",
             config_json,
         ]
@@ -1663,7 +1699,7 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Detect and parse
-    example_type, kernels = detect_and_parse(args.source)
+    example_type, kernels = detect_and_parse(args.source, gpu_target=args.gpu_target)
 
     if example_type == "conv":
         k = kernels[0] if kernels else {}
@@ -1701,7 +1737,7 @@ def main():
             kernels, args.output_dir, codegen_dir, args.gpu_target
         )
     else:
-        success = generate_gemm_kernels(kernels, args.output_dir, codegen_dir)
+        success = generate_gemm_kernels(kernels, args.output_dir, codegen_dir, args.gpu_target)
 
     if not success:
         print(f"[{target_name}] Kernel generation failed!")
