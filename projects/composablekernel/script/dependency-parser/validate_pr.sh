@@ -209,10 +209,16 @@ if [ ! -f "compile_commands.json" ]; then
     exit 1
 fi
 
+if [ ! -f "build.ninja" ]; then
+    log_error "build.ninja not found - CMake should have generated it"
+    exit 1
+fi
+
 log_info "Generating fresh dependency map for PR validation..."
 START_TIME=$(date +%s)
 python3 ../script/dependency-parser/main.py cmake-parse \
     compile_commands.json \
+    build.ninja \
     --workspace-root .. \
     --output enhanced_dependency_mapping.json
 
