@@ -345,6 +345,7 @@ add_declarative_gpu_example(gemm_04_heuristics           gemm/cpp/04_heuristics.
 add_declarative_gpu_example(gemm_05_json_export          gemm/cpp/05_json_export.cpp)
 add_declarative_gpu_example(gemm_06_multi_registry       gemm/cpp/06_multi_registry.cpp)
 add_declarative_gpu_example(gemm_07_gfx950_minimal       gemm/cpp/07_gfx950_minimal.cpp)
+add_declarative_gpu_example(gemm_08_gfx1201_rdna4        gemm/cpp/08_gfx1201_rdna4.cpp)
 
 # =============================================================================
 # GEMM Python Library - Single Fallback Kernel
