@@ -36,13 +36,13 @@ extern "C" {
 *  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
-*  \p hipsparseSpGEMMreuse_workEstimation is called twice. We call it to compute the size of the first required user allocated
-*  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMMreuse_workEstimation
+*  \p hipsparseSpGEMMreuse_workEstimation is called twice. First, call it to compute the size of the first required user-allocated
+*  buffer. After the buffer size is determined, allocate it and call \p hipsparseSpGEMMreuse_workEstimation
 *  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to
-*  determine the number of intermediate products that will result from multipltying \f$A\f$ and \f$B\f$ together.
+*  determine the number of intermediate products that will result from multiplying \f$A\f$ and \f$B\f$ together.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
@@ -63,7 +63,7 @@ extern "C" {
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC or \p bufferSize1 pointer is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, or \p bufferSize1 pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -124,7 +124,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
@@ -153,7 +153,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *  externalBuffer4  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, \p bufferSize2, \p bufferSize3
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, \p bufferSize2, \p bufferSize3,
 *                                         or \p bufferSize4 pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -228,7 +228,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
@@ -320,7 +320,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA              sparse matrix \f$A\f$ operation type.
 *  @param[in]
