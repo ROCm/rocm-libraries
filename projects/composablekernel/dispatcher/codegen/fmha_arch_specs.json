@@ -1803,7 +1803,7 @@
     },
     "gfx1100": {
       "family": "rdna3",
-      "arch_tag": "ck_tile::gfx1100_t",
+      "arch_tag": "ck_tile::gfx11_t",
       "supported_dtypes": [
         "fp16",
         "bf16"
@@ -1927,7 +1927,7 @@
     },
     "gfx1201": {
       "family": "rdna4",
-      "arch_tag": "ck_tile::gfx1201_t",
+      "arch_tag": "ck_tile::gfx12_t",
       "supported_dtypes": [
         "fp16",
         "bf16",
