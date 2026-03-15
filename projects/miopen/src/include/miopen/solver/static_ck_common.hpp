@@ -59,7 +59,8 @@ static inline bool IsComposableKernelSupportedHardware(const ExecutionContext& c
            c.GetStream().GetDeviceName() == "gfx908" || c.GetStream().GetDeviceName() == "gfx90a" ||
            c.GetStream().GetDeviceName() == "gfx942" ||
            StartsWith(c.GetStream().GetDeviceName(), "gfx95") ||
-           StartsWith(c.GetStream().GetDeviceName(), "gfx103");
+           StartsWith(c.GetStream().GetDeviceName(), "gfx103") ||
+           StartsWith(c.GetStream().GetDeviceName(), "gfx12");
 }
 
 static inline bool GfxHasMissingBf16Intrinsics(const std::string& device_name)
