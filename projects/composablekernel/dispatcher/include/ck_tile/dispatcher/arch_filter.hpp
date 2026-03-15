@@ -82,24 +82,30 @@ inline std::vector<WarpTileConfig> get_supported_warp_tiles(GpuArch arch,
     // INT8 configurations
     std::vector<WarpTileConfig> int8_configs = {{16, 16, 32}, {32, 32, 16}};
 
-    // GFX1201 only supports limited FP16
-    std::vector<WarpTileConfig> rdna4_fp16 = {{16, 16, 16}};
+    // RDNA4 (gfx1200/gfx1201) supports only 16x16x16 tiles for all data types
+    std::vector<WarpTileConfig> rdna4_tiles = {{16, 16, 16}};
+
+    auto is_rdna4 = [](GpuArch a) {
+        return a == GpuArch::GFX_1200 || a == GpuArch::GFX_1201;
+    };
 
     // Match based on architecture and data types
     if(dtype_a == DataType::FP16 && dtype_b == DataType::FP16)
     {
-        if(arch == GpuArch::GFX_1201)
-            return rdna4_fp16;
+        if(is_rdna4(arch))
+            return rdna4_tiles;
         return fp16_configs;
     }
     if(dtype_a == DataType::BF16 && dtype_b == DataType::BF16)
     {
-        if(arch == GpuArch::GFX_1201)
-            return {};       // Not supported on RDNA4
+        if(is_rdna4(arch))
+            return rdna4_tiles;
         return fp16_configs; // Same as FP16
     }
     if(dtype_a == DataType::FP8 || dtype_a == DataType::BF8)
     {
+        if(is_rdna4(arch))
+            return rdna4_tiles;
         if(arch == GpuArch::GFX_950)
             return fp8_gfx950;
         if(arch == GpuArch::GFX_942)
@@ -109,6 +115,8 @@ inline std::vector<WarpTileConfig> get_supported_warp_tiles(GpuArch arch,
     }
     if(dtype_a == DataType::INT8 && dtype_b == DataType::INT8)
     {
+        if(is_rdna4(arch))
+            return rdna4_tiles;
         if(arch == GpuArch::GFX_942)
             return int8_configs;
     }

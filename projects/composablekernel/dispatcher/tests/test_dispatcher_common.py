@@ -141,6 +141,100 @@ class TestValidateWarpTileConfig(unittest.TestCase):
         self.assertIn("warp", msg.lower())
 
 
+class TestRDNA4WarpTileSupport(unittest.TestCase):
+    """Tests for RDNA4 (gfx1200/gfx1201) warp tile support.
+
+    Validates that the arch_filter returns correct 16x16x16 warp tiles
+    for all data types on gfx12. This was a bug where BF16/FP8/INT8
+    returned empty tiles, blocking those data types on RDNA4.
+    """
+
+    RDNA4_ARCHS = ["gfx1200", "gfx1201"]
+    # All data types that RDNA4 supports via WMMA
+    RDNA4_DTYPES = ["fp16", "bf16", "fp8", "bf8", "int8"]
+    EXPECTED_TILE = [16, 16, 16]
+
+    def test_rdna4_fp16_warp_tile(self):
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                is_valid, msg = validate_warp_tile_config(
+                    self.EXPECTED_TILE, arch, "fp16"
+                )
+                self.assertTrue(is_valid, f"{arch} fp16: {msg}")
+
+    def test_rdna4_bf16_warp_tile(self):
+        """BF16 was previously blocked on gfx1201 (returned empty tiles)."""
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                is_valid, msg = validate_warp_tile_config(
+                    self.EXPECTED_TILE, arch, "bf16"
+                )
+                self.assertTrue(is_valid, f"{arch} bf16: {msg}")
+
+    def test_rdna4_fp8_warp_tile(self):
+        """FP8 was previously blocked on gfx1201 (no gfx12 case)."""
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                is_valid, msg = validate_warp_tile_config(
+                    self.EXPECTED_TILE, arch, "fp8"
+                )
+                self.assertTrue(is_valid, f"{arch} fp8: {msg}")
+
+    def test_rdna4_bf8_warp_tile(self):
+        """BF8 was previously blocked on gfx1201."""
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                is_valid, msg = validate_warp_tile_config(
+                    self.EXPECTED_TILE, arch, "bf8"
+                )
+                self.assertTrue(is_valid, f"{arch} bf8: {msg}")
+
+    def test_rdna4_int8_warp_tile(self):
+        """INT8 was previously blocked on gfx1201."""
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                is_valid, msg = validate_warp_tile_config(
+                    self.EXPECTED_TILE, arch, "int8"
+                )
+                self.assertTrue(is_valid, f"{arch} int8: {msg}")
+
+    def test_rdna4_only_16x16x16(self):
+        """RDNA4 WMMA only supports 16x16x16 tiles (not 32x32x16)."""
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                is_valid, _ = validate_warp_tile_config(
+                    [32, 32, 16], arch, "fp16"
+                )
+                self.assertFalse(
+                    is_valid, f"{arch} should NOT accept 32x32x16 tiles"
+                )
+
+    def test_rdna4_arch_filter_data_present(self):
+        """Verify gfx1200/gfx1201 appear in arch filter data."""
+        data = get_arch_filter_data()
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                self.assertIn(arch, data.get("warp_tile_combos", {}),
+                              f"{arch} missing from warp_tile_combos")
+
+    def test_rdna4_all_dtype_combos_present(self):
+        """Verify all 7 dtype combos are defined for RDNA4."""
+        data = get_arch_filter_data()
+        expected_keys = {
+            "fp16_fp16_fp32", "bf16_bf16_fp32",
+            "fp8_fp8_fp32", "bf8_bf8_fp32",
+            "fp8_bf8_fp32", "bf8_fp8_fp32",
+            "int8_int8_int32",
+        }
+        for arch in self.RDNA4_ARCHS:
+            with self.subTest(arch=arch):
+                combos = data["warp_tile_combos"].get(arch, {})
+                self.assertEqual(
+                    set(combos.keys()), expected_keys,
+                    f"{arch} dtype combos mismatch"
+                )
+
+
 class TestValidateTraitCombo(unittest.TestCase):
     """Tests for validate_trait_combo."""
 
