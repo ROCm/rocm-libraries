@@ -1141,7 +1141,14 @@ def spec_to_config(
     )
 
     if is_gfx12:
+        # wave config = warp distribution across block; warp/warp_tile = WMMA tile dims
+        # gfx12 valid wave configs: [2,4,1], [4,2,1], [1,8,1], [8,1,1]
+        # Default (4,1,1) from FmhaKernelConfig is invalid for gfx12
+        wave_m_cfg, wave_n_cfg, wave_k_cfg = 2, 4, 1
         config_kwargs.update(
+            wave_m0=wave_m_cfg, wave_n0=wave_n_cfg, wave_k0=wave_k_cfg,
+            wave_m1=wave_m_cfg, wave_n1=wave_n_cfg, wave_k1=wave_k_cfg,
+            wave_m2=wave_m_cfg, wave_n2=wave_n_cfg, wave_k2=wave_k_cfg,
             warp_m0=warp_m, warp_n0=warp_n, warp_k0=warp_k,
             warp_m1=warp_m, warp_n1=warp_n, warp_k1=warp_k,
             warp_m2=warp_m, warp_n2=warp_n, warp_k2=warp_k,
