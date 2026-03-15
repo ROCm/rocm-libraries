@@ -171,8 +171,7 @@ public:
     void RunTestImpl(const miopen::solver::conv::ConvSolverInterface& solver,
                      const UnitTestConvSolverParams& params,
                      miopen::conv::Direction direction,
-                     const ConvTestCase& conv_config,
-                     miopenConvAlgorithm_t algo);
+                     const ConvTestCase& conv_config);
 
 protected:
     void SetUpImpl(const UnitTestConvSolverParams& params);
@@ -191,7 +190,7 @@ public:
         miopenConvAlgorithm_t algo;
         ConvTestCase conv_config;
         std::tie(params, algo, conv_config) = GetParam();
-        this->RunTestImpl(solver, params, direction, conv_config, algo);
+        this->RunTestImpl(solver, params, direction, conv_config /*, algo*/);
     }
 
 protected:
