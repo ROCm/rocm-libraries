@@ -42,16 +42,16 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
-    set (TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
+    set(TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
 
-    if (NOT TMP_FILTER )
-        set (TMP_FILTER "-")
+    if(NOT TMP_FILTER )
+        set(TMP_FILTER "-")
     else()
-        set (TMP_FILTER "${TMP_FILTER}:")
+        set(TMP_FILTER "${TMP_FILTER}:")
     endif()
-    set (TMP_FILTER ${TMP_FILTER}${NEGATIVE_FILTER_TO_ADD})
+    set(TMP_FILTER ${TMP_FILTER}${NEGATIVE_FILTER_TO_ADD})
 
-    set (MIOPEN_GTEST_FILTER_NEGATIVE ${TMP_FILTER} PARENT_SCOPE)
+    set(MIOPEN_GTEST_FILTER_NEGATIVE ${TMP_FILTER} PARENT_SCOPE)
 endfunction()
 
 function(add_gtest TEST_NAME TEST_CPP)
@@ -247,7 +247,7 @@ else()
   add_gtest(miopen_gtest "${TESTS_CPP}")
 
   if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
+    if(MIOPEN_BUILD_CK)
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
         target_include_directories(miopen_gtest SYSTEM PRIVATE

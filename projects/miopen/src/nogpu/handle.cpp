@@ -69,6 +69,8 @@ Handle::WriteTo(const void* /* data */, Allocator::ManageDataPtr& ddata, std::si
     return ddata;
 }
 
+void Handle::WriteTo(const void*, Data_t, std::size_t) const {}
+
 void Handle::ReadTo(void* /* data */,
                     const Allocator::ManageDataPtr& /* ddata */,
                     std::size_t /* sz */) const
@@ -138,6 +140,7 @@ void Handle::ClearKernels(const std::string& algorithm, const std::string& netwo
 {
     this->impl->cache.ClearKernels(algorithm, network_config);
 }
+
 void Handle::ClearProgram(const fs::path& program_name, const std::string& params) const
 {
     this->impl->cache.ClearProgram(program_name, params);
@@ -157,11 +160,6 @@ Program Handle::LoadProgram(const fs::path& program_name,
                             bool force_attach_binary) const
 {
     std::ignore = force_attach_binary;
-
-    if(program_name.extension() == ".mlir")
-    {
-        params += " -mcpu=" + this->GetTargetProperties().Name();
-    }
 
     auto hsaco =
         miopen::LoadBinary(GetTargetProperties(), GetMaxComputeUnits(), program_name, params);
@@ -294,4 +292,8 @@ hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
     return hipblasLt_handle_ptr{handle};
 }
 #endif
+
+MIOPEN_INTERNALS_EXPORT void set_device(int /*id*/) {}
+MIOPEN_INTERNALS_EXPORT int get_device_id() { return -1; }
+
 } // namespace miopen

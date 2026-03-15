@@ -93,7 +93,7 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
 // ConvTestCase
 //************************************************************************************
 
-ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}){};
+ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}) {};
 
 ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
                            std::vector<size_t>&& w_,
@@ -339,10 +339,7 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 }
 
 template <typename T>
-double GetThreshold(miopenConvAlgorithm_t algo,
-                    miopen::conv::Direction direction,
-                    const Tolerances& tolerances,
-                    const bool use_tf32_compute)
+double GetThreshold(const Tolerances& tolerances, const bool use_tf32_compute)
 {
     double tolerance = tolerances.Get(GetDevGpuType(), miopen_type<T>{});
     double threshold = std::numeric_limits<T>::epsilon() * tolerance;
@@ -359,8 +356,6 @@ double GetThreshold(miopenConvAlgorithm_t algo,
 template <typename T, typename Tref>
 void VerifyData(const std::vector<T>& data,
                 const std::vector<Tref>& ref_data,
-                miopenConvAlgorithm_t algo,
-                miopen::conv::Direction direction,
                 const Tolerances& tolerances,
                 bool use_tf32_compute = false)
 {
@@ -389,7 +384,7 @@ void VerifyData(const std::vector<T>& data,
     else
     {
         const auto error       = miopen::rms_range(ref_data, data);
-        const double threshold = GetThreshold<T>(algo, direction, tolerances, use_tf32_compute);
+        const double threshold = GetThreshold<T>(tolerances, use_tf32_compute);
         ASSERT_LT(error, threshold) << "Error beyond tolerance";
         // std::cout << "error: " << error << " threshold: " << threshold << std::endl;
     }
@@ -514,8 +509,6 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     VerifyData(output.data,
                ref_out.data,
-               algo,
-               miopen::conv::Direction::Forward,
                params.tolerances,
                problem.UseTF32());
 }
@@ -640,8 +633,6 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     VerifyData(input.data,
                ref_in.data,
-               algo,
-               miopen::conv::Direction::BackwardData,
                params.tolerances,
                problem.UseTF32());
 }
@@ -766,8 +757,6 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 
     VerifyData(weights.data,
                ref_weights.data,
-               algo,
-               miopen::conv::Direction::BackwardWeights,
                params.tolerances,
                problem.UseTF32());
 }
