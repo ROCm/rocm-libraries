@@ -203,24 +203,12 @@ except ImportError:
         },
         # RDNA4 (gfx1200/gfx1201): wave32, only 16x16x16 tiles for all data types
         # Matches arch_specs.json warp_tile_combos
-        "gfx1200": {
-            "fp16_fp16_fp32": [[16, 16, 16]],
-            "bf16_bf16_fp32": [[16, 16, 16]],
-            "fp8_fp8_fp32": [[16, 16, 16]],
-            "bf8_bf8_fp32": [[16, 16, 16]],
-            "fp8_bf8_fp32": [[16, 16, 16]],
-            "bf8_fp8_fp32": [[16, 16, 16]],
-            "int8_int8_int32": [[16, 16, 16]],
-        },
-        "gfx1201": {
-            "fp16_fp16_fp32": [[16, 16, 16]],
-            "bf16_bf16_fp32": [[16, 16, 16]],
-            "fp8_fp8_fp32": [[16, 16, 16]],
-            "bf8_bf8_fp32": [[16, 16, 16]],
-            "fp8_bf8_fp32": [[16, 16, 16]],
-            "bf8_fp8_fp32": [[16, 16, 16]],
-            "int8_int8_int32": [[16, 16, 16]],
-        },
+        "gfx1200": {dt: [[16, 16, 16]] for dt in [
+            "fp16_fp16_fp32", "bf16_bf16_fp32", "fp8_fp8_fp32",
+            "bf8_bf8_fp32", "fp8_bf8_fp32", "bf8_fp8_fp32", "int8_int8_int32"]},
+        "gfx1201": {dt: [[16, 16, 16]] for dt in [
+            "fp16_fp16_fp32", "bf16_bf16_fp32", "fp8_fp8_fp32",
+            "bf8_bf8_fp32", "fp8_bf8_fp32", "bf8_fp8_fp32", "int8_int8_int32"]},
     }
 
     # Preshuffle-specific warp tile combinations (no [4, 64, 16])
