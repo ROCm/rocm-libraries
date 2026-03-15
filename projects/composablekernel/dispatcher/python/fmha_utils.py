@@ -1673,7 +1673,15 @@ def spec_to_config(
 ) -> FmhaKernelConfig:
     """Convert a high-level FmhaKernelSpec to a full FmhaKernelConfig."""
     hdim = spec.hdim
-    return FmhaKernelConfig(
+
+    # gfx12 (RDNA4) uses 16x16x16 WMMA tiles with wave32
+    # gfx9 (CDNA) uses 32x32x16 warp tiles with wave64; gfx11 (RDNA3) uses wave32
+    is_gfx12 = arch.startswith("gfx12")
+    warp_m = 16 if is_gfx12 else 32
+    warp_n = 16 if is_gfx12 else 32
+    warp_k = 16
+
+    config_kwargs = dict(
         data_type=dtype,
         hdim_q=hdim,
         hdim_v=hdim,
@@ -1686,6 +1694,15 @@ def spec_to_config(
         tile_k0max=hdim,
         gfx_arch=arch,
     )
+
+    if is_gfx12:
+        config_kwargs.update(
+            warp_m0=warp_m, warp_n0=warp_n, warp_k0=warp_k,
+            warp_m1=warp_m, warp_n1=warp_n, warp_k1=warp_k,
+            warp_m2=warp_m, warp_n2=warp_n, warp_k2=warp_k,
+        )
+
+    return FmhaKernelConfig(**config_kwargs)
 
 
 # =============================================================================
