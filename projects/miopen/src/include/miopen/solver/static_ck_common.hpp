@@ -70,7 +70,8 @@ static inline bool GfxHasMissingBf16Intrinsics(const std::string& device_name)
 
 static inline bool GfxHasMissingFp32Intrinsics(const std::string& device_name)
 {
-    return device_name == "gfx942" || StartsWith(device_name, "gfx95");
+    return device_name == "gfx942" || StartsWith(device_name, "gfx95") ||
+           StartsWith(device_name, "gfx12");
 }
 
 static inline bool support_amd_buffer_atomic_fadd(const std::string& device_name)
@@ -81,7 +82,7 @@ static inline bool support_amd_buffer_atomic_fadd(const std::string& device_name
 static inline bool is_use_v_fmac_f32(const ExecutionContext& ctx)
 {
     const auto device_name = ctx.GetStream().GetDeviceName();
-    return StartsWith(device_name, "gfx103");
+    return StartsWith(device_name, "gfx103") || StartsWith(device_name, "gfx12");
 }
 
 static inline bool is_use_amd_buffer_load_store(const ExecutionContext& ctx)
