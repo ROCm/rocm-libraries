@@ -507,10 +507,7 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     output.data = handle.Read<Tout>(out_dev, output.data.size());
 
-    VerifyData(output.data,
-               ref_out.data,
-               params.tolerances,
-               problem.UseTF32());
+    VerifyData(output.data, ref_out.data, params.tolerances, problem.UseTF32());
 }
 
 template <typename T, typename Tref>
@@ -631,10 +628,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     input.data = handle.Read<Tin>(in_dev, input.data.size());
 
-    VerifyData(input.data,
-               ref_in.data,
-               params.tolerances,
-               problem.UseTF32());
+    VerifyData(input.data, ref_in.data, params.tolerances, problem.UseTF32());
 }
 
 template <typename T, typename Tref>
@@ -755,10 +749,7 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 
     weights.data = handle.Read<Twei>(wei_dev, weights.data.size());
 
-    VerifyData(weights.data,
-               ref_weights.data,
-               params.tolerances,
-               problem.UseTF32());
+    VerifyData(weights.data, ref_weights.data, params.tolerances, problem.UseTF32());
 }
 
 template <typename T, typename Tref>
