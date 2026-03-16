@@ -95,7 +95,9 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
     // Handle special values first using std library functions
     if(std::isnan(f))
     {
-        return std::signbit(f) ? FP4_E2M1_NEG_ZERO : FP4_E2M1_POS_ZERO;
+        // Per OCP MX Specification v1.0, conversion from NaN is implementation-defined.
+        // This implementation returns zero.
+        return FP4_E2M1_POS_ZERO;
     }
 
     if(std::isinf(f))
@@ -508,14 +510,18 @@ public:
 
     static constexpr hipdnn_data_sdk::types::fp4_e2m1 quiet_NaN() noexcept
     {
-        // Quiet NaN: returns max (no NaN in E2M1)
-        return max();
+        // E2M1 has no NaN representation. Returns zero for consistency
+        // with float-to-E2M1 conversion behavior.
+        return hipdnn_data_sdk::types::fp4_e2m1::from_bits(
+            hipdnn_data_sdk::types::detail::FP4_E2M1_POS_ZERO);
     }
 
     static constexpr hipdnn_data_sdk::types::fp4_e2m1 signaling_NaN() noexcept
     {
-        // Signaling NaN: returns max (no NaN in E2M1)
-        return max();
+        // E2M1 has no NaN representation. Returns zero for consistency
+        // with float-to-E2M1 conversion behavior.
+        return hipdnn_data_sdk::types::fp4_e2m1::from_bits(
+            hipdnn_data_sdk::types::detail::FP4_E2M1_POS_ZERO);
     }
 
     static constexpr hipdnn_data_sdk::types::fp4_e2m1 denorm_min() noexcept
