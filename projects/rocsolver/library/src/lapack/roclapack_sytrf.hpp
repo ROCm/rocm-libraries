@@ -76,7 +76,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
     __shared__ rocblas_int sidx[SYTRF_MAX_THDS];
 
     if(tid == 0)
+    {
+        iinfo = 0;
+        kb = 0;
         info[bid] = 0;
+    }
+
+    __syncthreads();
 
     while(k >= 0)
     {
@@ -91,6 +97,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
             sytf2_device_upper<SYTRF_MAX_THDS>(tid, k + 1, A, lda, ipiv, &iinfo, sidx, sval);
             k = -1;
         }
+
+        __syncthreads();
 
         if(tid == 0 && iinfo != 0 && info[bid] == 0)
             info[bid] = iinfo;
@@ -131,7 +139,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
     __shared__ rocblas_int sidx[SYTRF_MAX_THDS];
 
     if(tid == 0)
+    {
+        iinfo = 0;
+        kb = 0;
         info[bid] = 0;
+    }
+    __syncthreads();
 
     while(k < n)
     {
@@ -146,8 +159,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
             sytf2_device_lower<SYTRF_MAX_THDS>(tid, n - k, A + k + k * lda, lda, ipiv + k, &iinfo,
                                                sidx, sval);
             ktemp = n;
-            __syncthreads();
         }
+        __syncthreads();
 
         if(tid == 0 && iinfo != 0 && info[bid] == 0)
             info[bid] = iinfo + k;
