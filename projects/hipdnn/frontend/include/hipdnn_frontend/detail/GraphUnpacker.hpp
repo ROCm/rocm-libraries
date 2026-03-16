@@ -272,11 +272,6 @@ void unpackNodeFromFlatBuffer(
         }
     }
 
-    if(outNodes.empty())
-    {
-        return {ErrorCode::INVALID_VALUE, "FlatBuffer graph has no nodes"};
-    }
-
     return {};
 }
 

@@ -1240,12 +1240,19 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
     {
-        _sub_nodes.clear();
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
+
+        HIPDNN_CHECK_ERROR(
+            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
+
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
         _graphDesc.reset();
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
-        HIPDNN_CHECK_ERROR(detail::unpackGraphDescriptor(
-            graphDesc, _sub_nodes, graph_attributes, _preferredEngineId));
         return {};
     }
 
