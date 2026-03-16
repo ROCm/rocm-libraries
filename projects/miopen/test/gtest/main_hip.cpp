@@ -35,7 +35,7 @@ int main(int argc, char** argv)
     // Clear sharding env vars so each child runs all filtered tests.
     for(int i = 1; i < argc; ++i)
     {
-        if(std::string_view(argv[i]) == "--mp-test-child")
+        if(std::string_view(argv[i]) == "--reset-sharding")
         {
 #ifdef _WIN32
             _putenv_s("GTEST_TOTAL_SHARDS", "");

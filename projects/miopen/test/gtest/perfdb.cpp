@@ -995,7 +995,8 @@ public:
             {
                 // Use --gtest_filter to run only the child worker test in spawned process
                 auto args =
-                    std::string{"--gtest_filter="} + ArgsHelper::child_worker_filter +
+                    std::string{"--reset-sharding"
+                    " --gtest_filter="} + ArgsHelper::child_worker_filter +
                     " --" + ArgsHelper::write_arg +
                     " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
                     " --" + ArgsHelper::path_arg + " " + temp_file.Path() +
@@ -1085,7 +1086,8 @@ public:
                 // Use --gtest_filter to run only the child worker test in spawned process
                 // Note: no --write flag for read test
                 auto args =
-                    std::string{"--gtest_filter="} + ArgsHelper::child_worker_filter +
+                    std::string{"--reset-sharding"
+                    " --gtest_filter="} + ArgsHelper::child_worker_filter +
                     " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
                     " --" + ArgsHelper::path_arg + " " + temp_file +
                     " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
