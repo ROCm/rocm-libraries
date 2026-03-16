@@ -62,7 +62,14 @@ def cmake_build(Map conf=[:]){
     def build_type_debug = (conf.get("build_type",'release') == 'debug')
     def miopen_install_path = conf.get("miopen_install_path", "${env.WORKSPACE}/${env.MIOPEN_DIR}/install")
 
-    def setup_args = " -DMIOPEN_GPU_SYNC=Off " + conf.get("setup_flags","")
+    def mlir_args = " -DMIOPEN_USE_MLIR=" + conf.get("mlir_build", "ON")
+    // WORKAROUND_ISSUE_3192 Disabling MLIR for debug builds since MLIR generates sanitizer errors.
+    if (build_type_debug)
+    {
+        mlir_args = " -DMIOPEN_USE_MLIR=OFF"
+    }
+
+    def setup_args = mlir_args + " -DMIOPEN_GPU_SYNC=Off " + conf.get("setup_flags","")
     def build_fin = conf.get("build_fin", "OFF")
 
     setup_args = setup_args + " -DCMAKE_PREFIX_PATH=${prefixpath} "

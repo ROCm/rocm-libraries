@@ -163,6 +163,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/rmsnorm_attributes.fbs
             schemas/block_scale_quantize_attributes.fbs
             schemas/sdpa_attributes.fbs
+            schemas/sdpa_backward_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}

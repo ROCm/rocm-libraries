@@ -316,7 +316,12 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
         SetObject<miopen::solver::conv::ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm>();
         break;
     case 83: SetObject<miopen::solver::conv::ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm>(); break;
-    // IDs 98-100, 103-105: removed MLIR solvers
+    case 98: SetObject<miopen::solver::conv::ConvMlirIgemmFwd>(); break;
+    case 99: SetObject<miopen::solver::conv::ConvMlirIgemmBwd>(); break;
+    case 100: SetObject<miopen::solver::conv::ConvMlirIgemmWrW>(); break;
+    case 103: SetObject<miopen::solver::conv::ConvMlirIgemmFwdXdlops>(); break;
+    case 104: SetObject<miopen::solver::conv::ConvMlirIgemmBwdXdlops>(); break;
+    case 105: SetObject<miopen::solver::conv::ConvMlirIgemmWrWXdlops>(); break;
     case 107: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC>(); break;
     case 108: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC>(); break;
     case 110: SetObject<miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC>(); break;

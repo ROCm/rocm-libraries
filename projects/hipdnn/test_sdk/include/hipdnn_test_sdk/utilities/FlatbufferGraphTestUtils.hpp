@@ -2014,6 +2014,88 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+inline flatbuffers::FlatBufferBuilder
+    createValidSdpaBpropGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
+                              const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
+                              const std::vector<int64_t>& kDims = {2, 8, 16, 64},
+                              const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
+                              const std::vector<int64_t>& vDims = {2, 8, 16, 64},
+                              const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
+                              const std::vector<int64_t>& oDims = {2, 8, 16, 64},
+                              const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
+                              hipdnn_data_sdk::data_objects::DataType dataType
+                              = hipdnn_data_sdk::data_objects::DataType::HALF)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    int64_t uid = 1;
+
+    const auto qUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, qUid, "q", dataType, &qStrides, &qDims));
+
+    const auto kUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, kUid, "k", dataType, &kStrides, &kDims));
+
+    const auto vUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, vUid, "v", dataType, &vStrides, &vDims));
+
+    const auto oUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, oUid, "o", dataType, &oStrides, &oDims));
+
+    // dO has same shape as O
+    const auto doUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, doUid, "do", dataType, &oStrides, &oDims));
+
+    // Stats: [batch, num_heads, seq_q, 1]
+    std::vector<int64_t> statsDims = {qDims[0], qDims[1], qDims[2], 1};
+    std::vector<int64_t> statsStrides = {qDims[1] * qDims[2], qDims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, statsUid, "stats", dataType, &statsStrides, &statsDims));
+
+    // Output gradient tensors (same shapes as Q, K, V)
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, dqUid, "dq", dataType, &qStrides, &qDims));
+
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, dkUid, "dk", dataType, &kStrides, &kDims));
+
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, dvUid, "dv", dataType, &vStrides, &vDims));
+
+    auto sdpaBwdAttributes = hipdnn_data_sdk::data_objects::CreateSdpaBackwardAttributes(
+        builder, qUid, kUid, vUid, oUid, doUid, statsUid, dqUid, dkUid, dvUid);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "sdpa_bprop",
+        dataType,
+        hipdnn_data_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes,
+        sdpaBwdAttributes.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
 {
     flatbuffers::FlatBufferBuilder builder;
