@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -394,7 +394,7 @@ if(BUILD_CODE_COVERAGE)
   set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
   find_package(Python3 COMPONENTS Interpreter)
   find_program(GENHTML genhtml)
-  
+
   if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
     message(STATUS "Found Python3 and filter script - coverage exclusion markers will be processed")
     set(COVERAGE_FILTER_COMMAND
