@@ -774,7 +774,7 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
 ##################################################
 # Apply wave partition offset to rowId for a single matrix (A or B)
 #
-def _grApplyWavePartition(module, writer, tileInfo, waveId, numRowsPerWave, rowId):
+def _grApplyRowOffset(module, writer, tileInfo, waveId, numRowsPerWave, rowId):
   tc = tileInfo.tc
   tmpVgpr1 = writer.vgprPool.checkOut(2)
   tmpSgpr = writer.sgprPool.checkOut(1)
@@ -831,34 +831,23 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
 
-  tmpVgpr = writer.vgprPool.checkOut(9)
+  tmpVgpr = writer.vgprPool.checkOut(7)
   colId     = tmpVgpr
-  rowId     = tmpVgpr + 1
-  lds_row_id = tmpVgpr + 2
-  split_id   = tmpVgpr + 3
-  newSerial = tmpVgpr + 4
-  waveId    = tmpVgpr + 5
-  tmp = tmpVgpr + 6
-  tmp1 = tmpVgpr + 7
-  laneId = tmpVgpr + 8
+  rowIdA     = tmpVgpr + 1
+  rowIdB     = tmpVgpr + 2
+  lds_row_id = tmpVgpr + 3
+  waveId    = tmpVgpr + 4
+  tmp = tmpVgpr + 5
+  laneId = tmpVgpr + 6
 
-  # Compute newSerial
+  # Compute waveId and laneId
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
-
-  
-  # module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(5), src=vgpr(wave_id), comment=""))
-  # module.add(VAddU32(dst=vgpr(new_serial), src0=vgpr(wave_id), src1=vgpr(new_serial), comment="New Serial"))
-  module.add(VMovB32(dst=vgpr(newSerial), src=vgpr("Serial"), comment="New Serial"))
-  
-
   # Common code for both A & B
   # Calculate col and row id within a wave for 128b loads
-  module.add(VAndB32(dst=vgpr(colId), src0=vgpr(newSerial), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
-  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
-
-
-
+  module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  module.add(VLShiftRightB32(dst=vgpr(rowIdA), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
+  module.add(VMovB32(dst=vgpr(rowIdB), src=vgpr(rowIdA), comment=""))
 
   useSwizzling = False
   if useSwizzling:
@@ -878,32 +867,16 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
   module.add(VLShiftLeftB32(dst=vgpr(colId), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
 
-
-  # Wave partitionning
-  # Offset based on waveId
-  _grApplyWavePartition(module, writer, tileInfoA, waveId, numRowsPerWave, rowId)
-  # module.add(VMovB32(dst=vgpr(tileInfoA.sharedVgprGROffset[0]), src=vgpr(rowId), comment="New Serial"))
-  # return module
-  #TODO
-  # _grApplyWavePartition(module, writer, tileInfoB, waveId, numRowsPerWave, rowId)
- 
-
-
-
-
-  # Get split Wave Id
-  # module.add(VLShiftRightB32(dst=vgpr(split_id), shiftHex=hex((wavesize//2).bit_length()-1), src=vgpr("Serial"), comment=""))
-  # module.add(VAndB32(dst=vgpr(split_id), src0=vgpr(split_id), src1=1, comment="wave split id [0-1]"))
+  # Apply row offset based on wave partitioning (e.g. 2x2, 4x1/1x4)
+  _grApplyRowOffset(module, writer, tileInfoA, waveId, numRowsPerWave, rowIdA)
+  _grApplyRowOffset(module, writer, tileInfoB, waveId, numRowsPerWave, rowIdB)
 
   # Compute GR offset for A
-  _grComputeOffset(module, writer, tileInfoA, colId, rowId)
-
+  _grComputeOffset(module, writer, tileInfoA, colId, rowIdA)
   # Compute GR offset for B
-  _grComputeOffset(module, writer, tileInfoB, colId, rowId)
+  _grComputeOffset(module, writer, tileInfoB, colId, rowIdB)
 
   writer.vgprPool.checkIn(tmpVgpr)
-
-
 
   # Compute subtile offsets for A and B
   _grComputeSubtileOffsets(writer, module, tileInfoA)
