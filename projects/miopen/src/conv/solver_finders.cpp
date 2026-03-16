@@ -227,15 +227,16 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        FindCoreResult& core_result,
                                        bool force_attach_binary)
 {
+    std::vector<Solution> ret;
+
     const auto arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
-        return {};
+        return ret;
 
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
     auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
     auto best                = std::numeric_limits<float>::max();
     auto best_invoker        = Invoker{};
-    auto ret                 = std::vector<Solution>{};
     std::vector<float> samples;
 
     for(const auto& sol : solutions)
@@ -355,7 +356,10 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     }
 
     if(!selected.Succeeded())
-        return {};
+    {
+        ret.clear();
+        return ret;
+    }
 
     handle.RegisterInvoker(best_invoker, network_config, selected.solver_id, algorithm_name);
     MIOPEN_LOG_I("Selected: " << selected << ": " << best
