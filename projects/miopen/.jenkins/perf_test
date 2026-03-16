@@ -24,6 +24,7 @@ pipeline {
       Full_test       = " -DMIOPEN_TEST_ALL=Off"
       Smoke_targets   = " check MIOpenDriver"
       NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
+      NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
       perftest_image  = docker.image('ubuntu:22.04')
   }
   parameters {

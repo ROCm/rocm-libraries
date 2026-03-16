@@ -109,7 +109,7 @@ public:
                                   + ", num_kv_heads=" + std::to_string(numKvHeadsK));
 
         // Rule 5: Optional attention mask validation
-        const auto attnMask = attributes.get_attn_mask();
+        const auto attnMask = attributes.get_bias();
         if(attnMask)
         {
             const auto& maskDims = attnMask->get_dim();
@@ -141,7 +141,7 @@ public:
         }
 
         // Rule 6: Optional scale must be a scalar tensor (volume == 1)
-        const auto scale = attributes.get_scale();
+        const auto scale = attributes.get_attn_scale();
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));

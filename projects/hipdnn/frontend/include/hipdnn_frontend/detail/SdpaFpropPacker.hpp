@@ -52,12 +52,12 @@ inline Error createSdpaFpropOperation(
     // Optional input tensors
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
                                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
-                                                     attributes.get_attn_mask(),
+                                                     attributes.get_bias(),
                                                      tensorDescs,
                                                      "SDPA fprop ATTN_MASK"));
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
                                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT,
-                                                     attributes.get_scale(),
+                                                     attributes.get_attn_scale(),
                                                      tensorDescs,
                                                      "SDPA fprop SCALE"));
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
