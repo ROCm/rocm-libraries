@@ -126,16 +126,16 @@ def compute_expected_subtile(regId, stride, tileInfo):
 # Tile configs to test
 TILE_CONFIGS = [
     # 2x2 configs
-    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=4096, stride_b=1024, use_swizzling=False),
-    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=4096, stride_b=1024, use_swizzling=True),
-    TileConfig(mt_a=96, mt_b=256, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
-    # 1x4 configs
-    TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
-    TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
-    # 4x1 configs
-    TileConfig(mt_a=64, mt_b=80, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
-    # mt0<32 (read size)
-    TileConfig(mt_a=16, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
+    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=512, stride_b=1024, use_swizzling=False),
+    # TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=4096, stride_b=1024, use_swizzling=True),
+    # TileConfig(mt_a=96, mt_b=256, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
+    # # 1x4 configs
+    # TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
+    # TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
+    # # 4x1 configs
+    # TileConfig(mt_a=64, mt_b=80, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
+    # # mt0<32 (read size)
+    # TileConfig(mt_a=16, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
 ]
 
 

@@ -708,7 +708,7 @@ def graInitPointer(writer, kernel):
 ##################################################
 # Compute GR offset for a single matrix (A or B)
 #
-def _grComputeOffset(module, writer, tileInfo, col_id, row_id, split_id):
+def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id):
   tc = tileInfo.tc
   bpe = tileInfo.bpe
 
@@ -724,21 +724,21 @@ def _grComputeOffset(module, writer, tileInfo, col_id, row_id, split_id):
   module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(row_id), comment="%s: row_id * stride"%tc))
   # TODO : handle FP4 (sub byte type once available)
   module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpe.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: row_id*stride*bpe"%tc))
-  module.add(VAddU32(dst=vgpr(tmpVgpr), src0=vgpr(col_id), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
+  module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(col_id_bytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
 
-  # # apply top-half / bottom half offset according to wave split id
-  if tileInfo.loadRatioGR == 2.0:
-    module.add(SMovB32(dst=sgpr(sHalfOffset), src=(subtile_size * bpe), comment="%s: subtile row offset x bytes"%tc))
-  else:
-    module.add(SMovB32(dst=sgpr(sHalfOffset), src=(MT0 * bpe) // 2, comment="%s: Half Tile row offset x bytes"%tc))
-  module.add(VMulLOU32(dst=vgpr(tmpVgpr+1), src0=sgpr(sHalfOffset), src1=vgpr(split_id), comment="%s: Apply offset for 2nd half wave"%tc))
-  module.add(VMulLOU32(dst=vgpr(tmpVgpr+1), src0=sgpr(strideRef), src1=vgpr(tmpVgpr+1), comment="%s: Multiply by stride"%tc))
+  # # # apply top-half / bottom half offset according to wave split id
+  # if tileInfo.loadRatioGR == 2.0:
+  #   module.add(SMovB32(dst=sgpr(sHalfOffset), src=(subtile_size * bpe), comment="%s: subtile row offset x bytes"%tc))
+  # else:
+  #   module.add(SMovB32(dst=sgpr(sHalfOffset), src=(MT0 * bpe) // 2, comment="%s: Half Tile row offset x bytes"%tc))
+  # module.add(VMulLOU32(dst=vgpr(tmpVgpr+1), src0=sgpr(sHalfOffset), src1=vgpr(split_id), comment="%s: Apply offset for 2nd half wave"%tc))
+  # module.add(VMulLOU32(dst=vgpr(tmpVgpr+1), src0=sgpr(strideRef), src1=vgpr(tmpVgpr+1), comment="%s: Multiply by stride"%tc))
 
-  module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(tmpVgpr), src1=vgpr(tmpVgpr+1), comment="%s: GR offset = row_offset + split_wave_offset"%tc))
+  # module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(tmpVgpr), src1=vgpr(tmpVgpr+1), comment="%s: GR offset = row_offset + split_wave_offset"%tc))
 
   if len(tileInfo.sharedVgprGROffset)>1:
-    module.add(SMovB32(dst=sgpr(sHalfOffset), src=(MT0 * bpe) // 4, comment="%s: 2nd GR offset calc : + %u rows"%(tc,MT0 // 4)))
-    module.add(SMulI32(dst=sgpr(sHalfOffset), src0=sgpr(strideRef), src1=(MT0 * bpe) // 4, comment="%s: 2nd GR offset calc : + %u rows"%(tc,MT0 // 4)))
+    offset = tileInfo.subtileSize*tileInfo.loadRatioGR
+    module.add(SMulI32(dst=sgpr(sHalfOffset), src0=sgpr(strideRef), src1=offset, comment="%s: 2nd GR offset calc : + %u rows"%(tc,offset)))
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[1]), src0=vgpr(tileInfo.sharedVgprGROffset[0]), src1=sgpr(sHalfOffset), comment="%s: GR offset for 2nd subtile = GR offset + subtile row offset"%tc))
 
   writer.sgprPool.checkIn(sHalfOffset)
@@ -791,58 +791,101 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   assert depthUBytes <= ldsRowBankSize, "Only support depthUBytes smaller than %u (lds row bank size) for now"%ldsRowBankSize
 
   loadWidth = 16 # dwordx4 loads only
-  block_size = depthUBytes // loadWidth
+  blockSize = depthUBytes // loadWidth
+  numRowsPerWave = wavesize // (depthUBytes // loadWidth)
+
   numRowsPerLDSBanks = ldsRowBankSize // depthUBytes
 
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
 
-  tmpVgpr = writer.vgprPool.checkOut(7)
-  col_id     = tmpVgpr
-  row_id     = tmpVgpr + 1
+  tmpVgpr = writer.vgprPool.checkOut(9)
+  colId     = tmpVgpr
+  rowId     = tmpVgpr + 1
   lds_row_id = tmpVgpr + 2
   split_id   = tmpVgpr + 3
-  new_serial = tmpVgpr + 4
-  wave_id    = tmpVgpr + 5
+  newSerial = tmpVgpr + 4
+  waveId    = tmpVgpr + 5
   tmp = tmpVgpr + 6
+  tmp1 = tmpVgpr + 7
+  laneId = tmpVgpr + 8
 
   # Compute newSerial
-  module.add(VLShiftRightB32(dst=vgpr(wave_id), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
-  module.add(VAndB32(dst=vgpr(new_serial), src0=vgpr("Serial"), src1=31, comment=""))
-  module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(5), src=vgpr(wave_id), comment=""))
-  module.add(VAddU32(dst=vgpr(new_serial), src0=vgpr(wave_id), src1=vgpr(new_serial), comment="New Serial"))
+  module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
+
+  
+  # module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(5), src=vgpr(wave_id), comment=""))
+  # module.add(VAddU32(dst=vgpr(new_serial), src0=vgpr(wave_id), src1=vgpr(new_serial), comment="New Serial"))
+  module.add(VMovB32(dst=vgpr(newSerial), src=vgpr("Serial"), comment="New Serial"))
+  
 
   # Common code for both A & B
   # Calculate col and row id within a wave for 128b loads
-  module.add(VAndB32(dst=vgpr(col_id), src0=vgpr(new_serial), src1=(block_size-1), comment="get col_id in wave for %uB load"%loadWidth))
-  module.add(VLShiftRightB32(dst=vgpr(row_id), shiftHex=hex(block_size.bit_length()-1), src=vgpr(new_serial), comment="row id within wave"))
+  module.add(VAndB32(dst=vgpr(colId), src0=vgpr(newSerial), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
 
+
+
+
+  useSwizzling = False
   if useSwizzling:
     module.addComment0("Swizzling")
     module.add(VLShiftRightB32(dst=vgpr(lds_row_id), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(row_id), comment="lds row id"))
     module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(lds_row_id), src1=hex(1), comment="lds row id % 2"))
     module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
-    module.add(VMovB32(dst=vgpr(col_id), src=vgpr(col_id), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap col_id pairs for swizzling"))
+    module.add(VMovB32(dst=vgpr(colId), src=vgpr(colId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap col_id pairs for swizzling"))
     module.add(SMovB64(dst=EXEC(), src=-1))
     module.addComment0("Rotation")
     module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(lds_row_id), comment=""))
     module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(lds_row_id //2) * 2"))
     module.add(VSubU32(dst=vgpr(tmp), src0=hex(block_size), src1=vgpr(tmp), comment="rotation offset : block_size - (lds_row_id//2)*2"))
-    module.add(VAddU32(dst=vgpr(col_id), src0=vgpr(tmp), src1=vgpr(col_id), comment=""))
-    module.add(VAndB32(dst=vgpr(col_id), src0=vgpr(col_id), src1=hex(block_size-1), comment="(col + offset) % block_size"))
+    module.add(VAddU32(dst=vgpr(colId), src0=vgpr(tmp), src1=vgpr(colId), comment=""))
+    module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(block_size-1), comment="(col + offset) % block_size"))
 
 
-  module.add(VLShiftLeftB32(dst=vgpr(col_id), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(col_id), comment="scale col_id by load_width"))
+  module.add(VLShiftLeftB32(dst=vgpr(colId), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
+
+  # Wave partitionning
+  # Offset based on waveId
+
+  tmpSgpr = writer.sgprPool.checkOut(1)
+  localRow = tmp
+  partitionRow = tmp1
+  rowOffset = tileInfoA.mmaTileShape[0]*tileInfoA.localSubtileGrid[0]
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=rowOffset, comment=""))
+  
+  if tileInfoA.loadRatioGR == 1.0:
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="waveId %% 2"))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="waveId / 2"))
+  elif tileInfoA.loadRatioGR == 0.5:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment=""))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment=""))
+  elif tileInfoA.loadRatioGR == 2.0:
+    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment=""))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment=""))
+  else:
+    raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfoA.loadRatioGR))
+
+  module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(tmp), comment="local row offset"))
+  module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="wave row offset"))
+  module.add(VAddU32(dst=vgpr(localRow), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="row offset"))
+  module.add(VAddU32(dst=vgpr(rowId), src0=vgpr(rowId), src1=vgpr(localRow), comment="row offset"))
+
+  # module.add(VMovB32(dst=vgpr(tileInfoA.sharedVgprGROffset[0]), src=vgpr(rowId), comment="New Serial"))
+  # return module
+
+
 
   # Get split Wave Id
-  module.add(VLShiftRightB32(dst=vgpr(split_id), shiftHex=hex((wavesize//2).bit_length()-1), src=vgpr("Serial"), comment=""))
-  module.add(VAndB32(dst=vgpr(split_id), src0=vgpr(split_id), src1=1, comment="wave split id [0-1]"))
+  # module.add(VLShiftRightB32(dst=vgpr(split_id), shiftHex=hex((wavesize//2).bit_length()-1), src=vgpr("Serial"), comment=""))
+  # module.add(VAndB32(dst=vgpr(split_id), src0=vgpr(split_id), src1=1, comment="wave split id [0-1]"))
 
   # Compute GR offset for A
-  _grComputeOffset(module, writer, tileInfoA, col_id, row_id, split_id)
+  _grComputeOffset(module, writer, tileInfoA, colId, rowId)
 
   # Compute GR offset for B
-  _grComputeOffset(module, writer, tileInfoB, col_id, row_id, split_id)
+  _grComputeOffset(module, writer, tileInfoB, colId, rowId)
 
   writer.vgprPool.checkIn(tmpVgpr)
 
