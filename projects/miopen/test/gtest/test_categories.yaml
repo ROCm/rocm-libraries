@@ -64,6 +64,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_MhaForward_*"
   - "*GPU_TestMhaFind20*"
   - "*/GPU_MIOpenDriver*"
+  - "*/GPU_HipGraphExist*"
 
 
 test_categories:
@@ -295,6 +296,10 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Full/GPU_Softmax_FP16*" # 11.5 min
   - "Smoke/GPU_Reduce_FP32*"  # 6.5 min
   - "Smoke/GPU_Reduce_FP16*"  # 4.5 min
+  # HIP Graph tests - exclude slow ones, keep only bnorm (test/2)
+  - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/0"  # conv_hip_graph - 94.83 sec
+  - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 4.35 sec
+  - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 10.42 sec
 
 exclude_gpu:
   exclude_gpu_gfx120X:
@@ -347,4 +352,4 @@ execution_settings:
     quick: 300          # 5 minutes 
     standard: 1800      # 30 minutes 
     comprehensive: 7200 # 2 hours 
-    full: 14400         # 4 hours         
+    full: 14400         # 4 hours
