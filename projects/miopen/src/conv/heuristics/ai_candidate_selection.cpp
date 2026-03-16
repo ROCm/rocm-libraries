@@ -488,18 +488,19 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
         {
             // Skip this entire candidate rather than partial processing
             // also give a clear log message about the candidate being skipped
-            std::ostringstream candidate_str;
-            candidate_str << "[";
+            std::ostringstream invalid_candidate_str;
+            invalid_candidate_str << "[";
             for(size_t i = 0; i < candidate.size(); ++i)
             {
                 if(i > 0)
-                    candidate_str << ", ";
-                candidate_str << "\"" << candidate[i] << "\"";
+                    invalid_candidate_str << ", ";
+                invalid_candidate_str << "\"" << candidate[i] << "\"";
             }
-            candidate_str << "]";
+            invalid_candidate_str << "]";
 
             MIOPEN_LOG_W("Skipping candidate due to invalid kernel string mapping. "
-                         << "Kernel: " << kernel_name << ", Candidate: " << candidate_str.str()
+                         << "Kernel: " << kernel_name
+                         << ", Candidate: " << invalid_candidate_str.str()
                          << ", Total mappings: " << kernel_str_mapping.size());
             continue; // Continue to the next candidate
         }

@@ -131,6 +131,30 @@ using DeviceOpGFwdDefaultPtrs =
 
 namespace {
 
+// ============================================================================
+// Solver Configuration for Forward 3D Grouped Convolution
+// ============================================================================
+
+/**
+ * @brief Configuration for the 3D Forward grouped convolution solver
+ *
+ * This solver does not use split_k parameter.
+ * Only supports Candidate Selection heuristics (gfx942/gfx950).
+ * Note: 3D solvers do not have KTN models, so solver_name is used for all architectures.
+ */
+// clang-format off
+constexpr SolverHeuristicConfig k3DFwdSolverConfig = {
+    /* solver_name                 */ "ConvHipImplicitGemm3DGroupFwdXdlops",
+    /* solver_name_ktn             */ "ConvHipImplicitGemm3DGroupFwdXdlops", // No KTN for 3D
+    /* spatial_dims                */ 3,
+    /* uses_split_k                */ false,
+    /* split_k_min                 */ 0,
+    /* split_k_max                 */ 0,
+    /* supports_split_k_autodeduce */ false,
+    /* supports_ktn                */ false,
+};
+// clang-format on
+
 template <typename DataType, typename ComputeType = DataType>
 struct CKArgs
 {
@@ -468,295 +492,153 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
 {
-    index     = 0;
-    kernel_id = "None";
-    split_k   = 0; // split_k is not used in this solver, but it is required by the interface
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(k3DFwdSolverConfig.uses_split_k);
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    // 1. IDX_OVERRIDE is preferred
+    // STEP 1: Index override (solver-specific optimization)
     auto idx_override = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
     if(idx_override != 0)
     {
         MIOPEN_LOG_I2("Step 1: Attempting index override with value: " << idx_override);
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf: Init<ck::half_t>(problem); break;
-        case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-        default: break;
-        }
+        InitValidKernels(problem);
 
         if(idx_override < valid_kernels.size())
         {
-            index     = idx_override;
-            kernel_id = valid_kernels[index];
-            MIOPEN_LOG_I("Step 1: Index override selected kernel: " << kernel_id
-                                                                    << " at index: " << index);
+            state.SetResult(idx_override, 0, k3DFwdSolverConfig.uses_split_k);
+            MIOPEN_LOG_I("Step 1: Index override selected: " << kernel_id);
             return;
         }
-        else
-        {
-            MIOPEN_LOG_W("Step 1: Index override failed, index "
-                         << idx_override << " out of range, proceeding to next step");
-            // Continue to hard-coded heuristics
-        }
-    }
-    else
-    {
-        MIOPEN_LOG_I2("Step 1: Index override not set, proceeding to next step");
+
+        MIOPEN_LOG_W("Step 1: Index override out of range, continuing...");
     }
 
-    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
+    // STEP 2: Hard-coded heuristics (solver-specific optimization for BF16/FP16)
+    const std::string& arch = ctx.GetStream().GetDeviceName();
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-       (ctx.GetStream().GetDeviceName() == "gfx942" || ctx.GetStream().GetDeviceName() == "gfx950"))
+       (arch == "gfx942" || arch == "gfx950"))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
                       << (problem.GetInDataType() == miopenBFloat16 ? "BF16" : "FP16"));
 
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf: Init<ck::half_t>(problem); break;
-        case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-        default: break;
-        }
+        InitValidKernels(problem);
 
-        auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
-                               const std::size_t& expected_index,
-                               const std::string& kernel_id) -> std::optional<std::size_t> {
-            if(expected_index < valid_kernels.size() && valid_kernels[expected_index] == kernel_id)
+        auto find_kernel = [&](const std::size_t& expected_index,
+                               const std::string& target_kernel) -> std::optional<std::size_t> {
+            if(expected_index < valid_kernels.size() &&
+               valid_kernels[expected_index] == target_kernel)
                 return expected_index;
-            auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
+            auto it = std::find(valid_kernels.begin(), valid_kernels.end(), target_kernel);
             if(it != valid_kernels.end())
                 return static_cast<std::size_t>(it - valid_kernels.begin());
-            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id);
             return std::nullopt;
         };
 
         std::optional<std::size_t> found_index;
-        if(ctx.GetStream().GetDeviceName() == "gfx942")
+
+        if(arch == "gfx942" && index == 0 && problem.GetGroupCount() == 1 &&
+           problem.GetAlphaBetaCase() == DEFAULT)
         {
-            if(index == 0 && problem.GetGroupCount() == 1 && problem.GetAlphaBetaCase() == DEFAULT)
+            int K = problem.GetOutChannels();
+            int C = problem.GetInChannels();
+
+            if(C <= 32)
             {
-                int K = problem.GetOutChannels();
-
-                MIOPEN_LOG_I("3D Conv Implicit GEMM Fwd Xdlops: selecting kernel for K="
-                             << K << " C=" << problem.GetInChannels() << " G="
-                             << problem.GetGroupCount() << " Type=" << problem.GetInDataType());
-
-                if((problem.GetInDataType() == miopenHalf) ||
-                   (problem.GetInDataType() == miopenBFloat16))
-                {
-                    if((problem.GetInChannels()) <= 32)
-                    {
-                        if(K < 128)
-                        {
-                            found_index = find_kernel(
-                                1,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 32, 32, "
-                                "Filter1x1Pad0, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>");
-                        }
-                        else
-                        {
-                            found_index = find_kernel(
-                                2,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, 128, "
-                                "32, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, 1>");
-                        }
-                    }
-                    else
-                    {
-                        if(K < 16)
-                        {
-                            found_index = find_kernel(
-                                1,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, "
-                                "Default, 32, 32, 2, 1, 8, 8, 1, 1, 1, 1>");
-                        }
-                        else if(K <= 32)
-                        {
-                            found_index = find_kernel(
-                                2,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, "
-                                "Default, "
-                                "16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, "
-                                "BlkGemmPipelineVersion: v1>");
-                        }
-                        else if(K < 64)
-                        {
-                            found_index = find_kernel(
-                                57,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
-                                "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
-                        }
-                        else if(K < 256)
-                        {
-                            found_index = find_kernel(
-                                10,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, "
-                                "64, 32, Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>");
-                        }
-                        else
-                        {
-                            found_index = find_kernel(
-                                31,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
-                                "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-                        }
-                    }
-                }
-                else if(problem.GetInDataType() == miopenFloat)
-                {
-                    if((problem.GetInChannels()) >= 256)
-                    {
-                        found_index = find_kernel(
-                            2,
-                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, "
-                            "Default, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: "
-                            "Interwave, BlkGemmPipelineVersion: v2>");
-                    }
-                }
+                if(K < 128)
+                    found_index =
+                        find_kernel(1,
+                                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 32, "
+                                    "32, Filter1x1Pad0, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>");
+                else
+                    found_index =
+                        find_kernel(2,
+                                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, 128, "
+                                    "32, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, 1>");
             }
-        }
-        else if(ctx.GetStream().GetDeviceName() == "gfx950")
-        {
-            if(index == 0 && ((problem.GetInDataType() == miopenHalf) ||
-                              (problem.GetInDataType() == miopenBFloat16)))
+            else
             {
-                if(problem.GetInDepth() >= 3 && problem.GetInWidth() >= 256)
-                {
+                if(K < 16)
+                    found_index =
+                        find_kernel(1,
+                                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, "
+                                    "Default, 32, 32, 2, 1, 8, 8, 1, 1, 1, 1>");
+                else if(K <= 32)
                     found_index = find_kernel(
-                        11,
-                        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 256, 256, "
-                        "32, Default, 32, 32, 4, 4, 8, 8, 8, 1, 1, "
-                        "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-                }
+                        2,
+                        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, Default, "
+                        "16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, "
+                        "BlkGemmPipelineVersion: v1>");
+                else if(K < 64)
+                    found_index = find_kernel(
+                        57,
+                        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, Default, "
+                        "16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, "
+                        "BlkGemmPipelineVersion: v1>");
+                else if(K < 256)
+                    found_index =
+                        find_kernel(10,
+                                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, 64, "
+                                    "32, Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>");
+                else
+                    found_index = find_kernel(
+                        31,
+                        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 128, 128, 64, "
+                        "Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: "
+                        "Intrawave, BlkGemmPipelineVersion: v3>");
             }
+
+            // Special case for FP32 with large channel count
+            if(problem.GetInDataType() == miopenFloat && C >= 256)
+                found_index =
+                    find_kernel(2,
+                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, "
+                                "Default, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: "
+                                "Interwave, BlkGemmPipelineVersion: v2>");
+        }
+        else if(arch == "gfx950" && index == 0)
+        {
+            if(problem.GetInDepth() >= 3 && problem.GetInWidth() >= 256)
+                found_index =
+                    find_kernel(11,
+                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 256, 256, "
+                                "32, Default, 32, 32, 4, 4, 8, 8, 8, 1, 1, "
+                                "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
         }
 
         if(found_index.has_value())
         {
-            index     = found_index.value();
-            kernel_id = valid_kernels[index];
-            MIOPEN_LOG_I("Step 2: Hard-coded heuristics selected kernel: "
-                         << kernel_id << " at index: " << index);
+            state.SetResult(found_index.value(), 0, k3DFwdSolverConfig.uses_split_k);
+            MIOPEN_LOG_I("Step 2: Hard-coded heuristics selected: " << kernel_id);
             return;
         }
 
-        MIOPEN_LOG_I2(
-            "Step 2: Hard-coded heuristics did not select a kernel, proceeding to next step");
-        // Continue to AI heuristics
-    }
-    else
-    {
-        MIOPEN_LOG_I2("Step 2: Hard-coded heuristics skipped (data type: "
-                      << problem.GetInDataType() << ", device: " << ctx.GetStream().GetDeviceName()
-                      << ")");
+        MIOPEN_LOG_I2("Step 2: Hard-coded heuristics did not select kernel");
     }
 
-    // 3. AI heuristics (if enabled)
+    // STEP 3: AI heuristics using centralized infrastructure
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
     {
-        MIOPEN_LOG_I2(
-            "Step 3: Attempting AI heuristics for data type: " << problem.GetInDataType());
-
-        std::string solver_name = "ConvHipImplicitGemm3DGroupFwdXdlops";
-
-        bool ai_success = false;
-        miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
-
-        auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
-            using T        = decltype(CKDataType);
-            using TCompute = decltype(CKComputeType);
-            auto fill_valid_kernels =
-                [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return FillValidKernelsByAlphaBeta<T, TCompute>(problem);
-            };
-            // Validation lambda for AI-predicted kernel + split_k combinations
-            // Note: This solver currently doesn't use split_k (always 0), but validation
-            // infrastructure is in place for future split_k support
-            auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
-                if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
-                    return false;
-
-                // TODO: Add split_k validation if split_k support is implemented
-                // for now, only allow split_k_value == 0
-                if(split_k_value != 0)
-                    return false;
-
-                return true;
-            };
-
-            return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
-                                                                        problem,
-                                                                        valid_kernels,
-                                                                        index,
-                                                                        split_k,
-                                                                        kernel_id,
-                                                                        fill_valid_kernels,
-                                                                        solver_name,
-                                                                        is_kernel_split_k_valid);
+        auto fill_valid_kernels = [&](const ::miopen::conv::ProblemDescription& p) {
+            return FillValidKernelsWithAlphaBetaGeneric<DeviceOpGFwdBilinearPtrs,
+                                                        DeviceOpGFwdScalePtrs,
+                                                        DeviceOpGFwdDefaultPtrs,
+                                                        CKArgs>(p);
         };
-        switch(problem.GetInDataType())
+
+        // Note: No KTN runner needed for 3D (supports_ktn = false)
+        if(RunAIHeuristics(k3DFwdSolverConfig, state, ctx, problem, false, fill_valid_kernels))
         {
-        case miopenHalf:
-            std::tie(ai_success, result) = run_ai_heuristics(ck::half_t{}, ck::half_t{});
-            break;
-        case miopenFloat:
-            if(problem.UseTF32())
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, ck::tf32_t{});
-                if(!ai_success || result.IsEmpty())
-                {
-                    MIOPEN_LOG_I2("Step 3: AI heuristics with TF32 failed, retrying with FP32");
-                    std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-                }
-            }
-            else
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-            }
-            break;
-        case miopenBFloat16:
-            std::tie(ai_success, result) = run_ai_heuristics(ck::bhalf_t{}, ck::bhalf_t{});
-            break;
-        default: break;
-        }
-        if(ai_success && !result.IsEmpty())
-        {
-            MIOPEN_LOG_I("Step 3: AI heuristics selected kernel: " << kernel_id);
             return;
         }
-        else
-        {
-            MIOPEN_LOG_I2("Step 3: AI heuristics failed, proceeding to default initialization");
-            // Continue to default initialization
-        }
     }
-    else
-    {
-        MIOPEN_LOG_I2("Step 3: AI heuristics skipped (disabled or dummy context)");
-    }
-#else
-    MIOPEN_LOG_I2("Step 3: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
 #endif
 
-    // 4. Default: index remains 0, first valid_kernel will be used
-    MIOPEN_LOG_I2("Step 4: Using default initialization (index=0)");
+    // STEP 4: Default initialization
+    MIOPEN_LOG_I2("Using default initialization");
     InitValidKernels(problem);
-    if(!valid_kernels.empty())
-    {
-        index     = 0;
-        kernel_id = valid_kernels[index];
-        MIOPEN_LOG_I("Step 4: Default initialization selected kernel: " << kernel_id
-                                                                        << " at index: 0");
-    }
-    else
-    {
-        MIOPEN_LOG_W("Step 4: Default initialization failed - no valid kernels found");
-    }
+    state.SetResult(0, 0, k3DFwdSolverConfig.uses_split_k);
 #endif
 }
 

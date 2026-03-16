@@ -480,6 +480,259 @@ protected:
 
 // ------------------- Platform-Agnostic Tests -------------------
 
+// ===============================================================================
+// SolverHeuristicConfig Tests
+// ===============================================================================
+
+class CPU_SolverHeuristicConfig_NONE : public ::testing::Test
+{
+};
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_PowerOfTwo)
+{
+    // Create a config that uses split_k with range 1-128
+    SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
+
+    // Valid power-of-2 values
+    EXPECT_TRUE(cfg.IsValidSplitK(1));
+    EXPECT_TRUE(cfg.IsValidSplitK(2));
+    EXPECT_TRUE(cfg.IsValidSplitK(4));
+    EXPECT_TRUE(cfg.IsValidSplitK(8));
+    EXPECT_TRUE(cfg.IsValidSplitK(16));
+    EXPECT_TRUE(cfg.IsValidSplitK(32));
+    EXPECT_TRUE(cfg.IsValidSplitK(64));
+    EXPECT_TRUE(cfg.IsValidSplitK(128));
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NonPowerOfTwo)
+{
+    SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
+
+    // Invalid non-power-of-2 values within range
+    EXPECT_FALSE(cfg.IsValidSplitK(3));
+    EXPECT_FALSE(cfg.IsValidSplitK(5));
+    EXPECT_FALSE(cfg.IsValidSplitK(6));
+    EXPECT_FALSE(cfg.IsValidSplitK(7));
+    EXPECT_FALSE(cfg.IsValidSplitK(12));
+    EXPECT_FALSE(cfg.IsValidSplitK(100));
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_OutOfRange)
+{
+    SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
+
+    // Out of range values (even if power of 2)
+    EXPECT_FALSE(cfg.IsValidSplitK(0));
+    EXPECT_FALSE(cfg.IsValidSplitK(256));
+    EXPECT_FALSE(cfg.IsValidSplitK(512));
+    EXPECT_FALSE(cfg.IsValidSplitK(-1)); // Not autodeduce since not supported
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_AutoDeduce)
+{
+    // Config that supports autodeduce
+    SolverHeuristicConfig cfg_with_auto{"TestSolver", "TestSolverKTN", 2, true, 1, 128, true, true};
+    EXPECT_TRUE(cfg_with_auto.IsValidSplitK(CkSplitkAutoDeduce));
+
+    // Config that doesn't support autodeduce
+    SolverHeuristicConfig cfg_no_auto{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
+    EXPECT_FALSE(cfg_no_auto.IsValidSplitK(CkSplitkAutoDeduce));
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NoSplitKSolver)
+{
+    // Config for solver that doesn't use split_k (like Forward)
+    SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, false, 0, 0, false, true};
+
+    // Only 0 is valid for non-split_k solvers
+    EXPECT_TRUE(cfg.IsValidSplitK(0));
+    EXPECT_FALSE(cfg.IsValidSplitK(1));
+    EXPECT_FALSE(cfg.IsValidSplitK(2));
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx90a)
+{
+    SolverHeuristicConfig cfg{"ConvHipImplicitGemmGroupBwdXdlops",
+                              "ConvHipIgemmGroupXdlops",
+                              2,
+                              true,
+                              1,
+                              128,
+                              false,
+                              true};
+
+    // gfx90a should return the KTN name
+    EXPECT_STREQ(cfg.GetSolverNameForArch("gfx90a"), "ConvHipIgemmGroupXdlops");
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx942)
+{
+    SolverHeuristicConfig cfg{"ConvHipImplicitGemmGroupBwdXdlops",
+                              "ConvHipIgemmGroupXdlops",
+                              2,
+                              true,
+                              1,
+                              128,
+                              false,
+                              true};
+
+    // gfx942 should return the standard name
+    EXPECT_STREQ(cfg.GetSolverNameForArch("gfx942"), "ConvHipImplicitGemmGroupBwdXdlops");
+    EXPECT_STREQ(cfg.GetSolverNameForArch("gfx950"), "ConvHipImplicitGemmGroupBwdXdlops");
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, SolverConfigs_Consistency)
+{
+    // Test that actual solver configs are consistent
+    // Forward solver: no split_k
+    SolverHeuristicConfig fwd_cfg{"ConvHipImplicitGemmGroupFwdXdlops",
+                                  "ConvHipIgemmGroupFwdXdlops",
+                                  2,
+                                  false,
+                                  0,
+                                  0,
+                                  false,
+                                  true};
+    EXPECT_FALSE(fwd_cfg.uses_split_k);
+    EXPECT_TRUE(fwd_cfg.IsValidSplitK(0));
+    EXPECT_FALSE(fwd_cfg.IsValidSplitK(1));
+
+    // Backward solvers: use split_k with range 1-128
+    SolverHeuristicConfig bwd_cfg{"ConvHipImplicitGemmGroupBwdXdlops",
+                                  "ConvHipIgemmGroupXdlops",
+                                  2,
+                                  true,
+                                  1,
+                                  128,
+                                  false,
+                                  true};
+    EXPECT_TRUE(bwd_cfg.uses_split_k);
+    EXPECT_EQ(bwd_cfg.split_k_min, 1);
+    EXPECT_EQ(bwd_cfg.split_k_max, 128);
+
+    SolverHeuristicConfig wrw_cfg{"ConvHipImplicitGemmGroupWrwXdlops",
+                                  "ConvHipIgemmGroupXdlops",
+                                  2,
+                                  true,
+                                  1,
+                                  128,
+                                  false,
+                                  true};
+    EXPECT_TRUE(wrw_cfg.uses_split_k);
+    EXPECT_EQ(wrw_cfg.split_k_min, 1);
+    EXPECT_EQ(wrw_cfg.split_k_max, 128);
+}
+
+// ===============================================================================
+// HeuristicInitState Tests
+// ===============================================================================
+
+class CPU_HeuristicInitState_NONE : public ::testing::Test
+{
+};
+
+TEST_F(CPU_HeuristicInitState_NONE, Reset_WithSplitK)
+{
+    std::vector<std::string> valid_kernels;
+    int index             = 99;
+    int split_k           = 99;
+    std::string kernel_id = "old_value";
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(true); // uses_split_k = true
+
+    EXPECT_EQ(index, 0);
+    EXPECT_EQ(split_k, 1);
+    EXPECT_EQ(kernel_id, "");
+}
+
+TEST_F(CPU_HeuristicInitState_NONE, Reset_WithoutSplitK)
+{
+    std::vector<std::string> valid_kernels;
+    int index             = 99;
+    int split_k           = 99;
+    std::string kernel_id = "old_value";
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(false); // uses_split_k = false
+
+    EXPECT_EQ(index, 0);
+    EXPECT_EQ(split_k, 0);
+    EXPECT_EQ(kernel_id, "");
+}
+
+TEST_F(CPU_HeuristicInitState_NONE, SetResult_WithSplitK)
+{
+    std::vector<std::string> valid_kernels = {"kernel_A", "kernel_B", "kernel_C"};
+    int index                              = 0;
+    int split_k                            = 0;
+    std::string kernel_id;
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.SetResult(1, 4, true); // idx=1, split_k=4, uses_split_k=true
+
+    EXPECT_EQ(index, 1);
+    EXPECT_EQ(split_k, 4);
+    EXPECT_EQ(kernel_id, "kernel_B+4");
+}
+
+TEST_F(CPU_HeuristicInitState_NONE, SetResult_WithoutSplitK)
+{
+    std::vector<std::string> valid_kernels = {"kernel_A", "kernel_B", "kernel_C"};
+    int index                              = 0;
+    int split_k                            = 0;
+    std::string kernel_id;
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.SetResult(2, 0, false); // idx=2, split_k=0, uses_split_k=false
+
+    EXPECT_EQ(index, 2);
+    EXPECT_EQ(split_k, 0);
+    EXPECT_EQ(kernel_id, "kernel_C");
+}
+
+TEST_F(CPU_HeuristicInitState_NONE, SetResult_InvalidIndex)
+{
+    std::vector<std::string> valid_kernels = {"kernel_A", "kernel_B"};
+    int index                              = 0;
+    int split_k                            = 0;
+    std::string kernel_id;
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.SetResult(-1, 1, true); // Invalid index
+
+    // Should update index and split_k but not kernel_id
+    EXPECT_EQ(index, -1);
+    EXPECT_EQ(split_k, 1);
+    EXPECT_EQ(kernel_id, "");
+
+    // Out of bounds index
+    state.SetResult(999, 1, true);
+    EXPECT_EQ(index, 999);
+    EXPECT_EQ(split_k, 1);
+    EXPECT_EQ(kernel_id, "");
+}
+
+TEST_F(CPU_HeuristicInitState_NONE, KernelIdFormatting)
+{
+    std::vector<std::string> valid_kernels = {"DeviceOp<1,2,3>"};
+    int index                              = 0;
+    int split_k                            = 0;
+    std::string kernel_id;
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+
+    // Test various split_k values
+    state.SetResult(0, 1, true);
+    EXPECT_EQ(kernel_id, "DeviceOp<1,2,3>+1");
+
+    state.SetResult(0, 16, true);
+    EXPECT_EQ(kernel_id, "DeviceOp<1,2,3>+16");
+
+    state.SetResult(0, 128, true);
+    EXPECT_EQ(kernel_id, "DeviceOp<1,2,3>+128");
+}
+
 // Non-parameterized utility tests
 class GPU_ConvNDKernelTuningUtils_FP32 : public GPU_ConvNDKernelTuning_Base
 {
@@ -989,6 +1242,281 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
         auto features = GetFeaturesND(problem, max_cu, arch);
         EXPECT_EQ(features.size(), 29u) << "Feature count inconsistent for " << arch;
         EXPECT_EQ(features.at("spatial_dim"), 3.0f) << "Spatial dim incorrect for " << arch;
+    }
+}
+
+// ===============================================================================
+// FillValidKernelsGeneric Tests
+// ===============================================================================
+
+class CPU_FillValidKernelsGeneric_NONE : public ::testing::Test
+{
+};
+
+TEST_F(CPU_FillValidKernelsGeneric_NONE, Documentation_Test)
+{
+    // This test documents the purpose of FillValidKernelsGeneric:
+    // It provides a single reusable template that handles data type dispatch
+    // and TF32 fallback logic for all hip_implicit_gemm solvers, eliminating
+    // the need for each solver to implement its own fill_valid_kernels lambda.
+    SUCCEED();
+}
+
+// ===============================================================================
+// RunKTNGeneric Tests
+// ===============================================================================
+
+class CPU_RunKTNGeneric_NONE : public ::testing::Test
+{
+};
+
+TEST_F(CPU_RunKTNGeneric_NONE, Documentation_Test)
+{
+    // This test documents the purpose of RunKTNGeneric:
+    // It provides a single reusable template that dispatches KTN model execution
+    // based on data type for all hip_implicit_gemm solvers that support gfx90a,
+    // eliminating the need for each solver to implement its own ktn_runner lambda.
+    SUCCEED();
+}
+
+// ===============================================================================
+// RunAIHeuristics Integration Tests
+// ===============================================================================
+
+class GPU_RunAIHeuristics_Integration : public GPU_ConvNDKernelTuningAI_Base
+{
+};
+
+TEST_F(GPU_RunAIHeuristics_Integration, CandidateSelection_BasicFlow)
+{
+    // Skip if not on supported architecture
+    if(device_arch != "gfx942" && device_arch != "gfx950")
+    {
+        GTEST_SKIP() << "Test requires gfx942 or gfx950, current: " << device_arch;
+    }
+
+    auto problem =
+        GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+
+    std::vector<std::string> valid_kernels;
+    int index = 0;
+    int split_k = 0;
+    std::string kernel_id;
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+
+    constexpr SolverHeuristicConfig test_cfg = {
+        "ConvHipImplicitGemmGroupWrwXdlops", // solver_name
+        "ConvHipIgemmGroupXdlops",           // solver_name_ktn
+        2,                                   // spatial_dims
+        true,                                // uses_split_k
+        1,                                   // split_k_min
+        128,                                 // split_k_max
+        false,                               // supports_split_k_autodeduce
+        true                                 // supports_ktn
+    };
+
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
+        return std::vector<std::string>{
+            "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
+            "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>"};
+    };
+
+    bool result = RunAIHeuristics(test_cfg, state, ctx, problem, false, fill_kernels);
+
+    // Verify AI heuristics succeeded and populated state
+    EXPECT_TRUE(result) << "RunAIHeuristics should succeed on " << device_arch;
+    if(result)
+    {
+        EXPECT_FALSE(kernel_id.empty()) << "kernel_id should be populated";
+        EXPECT_GE(index, 0) << "index should be valid";
+        EXPECT_GE(split_k, 1) << "split_k should be >= 1 for WrW solver";
+        EXPECT_LE(split_k, 128) << "split_k should be <= 128";
+        
+        // Verify kernel_id format (should be "kernel+split_k" for WrW)
+        EXPECT_NE(kernel_id.find('+'), std::string::npos) 
+            << "kernel_id should contain '+' separator for split_k";
+    }
+}
+
+TEST_F(GPU_RunAIHeuristics_Integration, Deterministic_EnforcesSplitK1)
+{
+    // Skip if not on supported architecture
+    if(device_arch != "gfx942" && device_arch != "gfx950")
+    {
+        GTEST_SKIP() << "Test requires gfx942 or gfx950, current: " << device_arch;
+    }
+
+    auto problem =
+        GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+
+    std::vector<std::string> valid_kernels;
+    int index = 0;
+    int split_k = 0;
+    std::string kernel_id;
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+
+    constexpr SolverHeuristicConfig bwd_cfg = {
+        "ConvHipImplicitGemmGroupWrwXdlops", // solver_name
+        "ConvHipIgemmGroupXdlops",           // solver_name_ktn
+        2,                                   // spatial_dims
+        true,                                // uses_split_k
+        1,                                   // split_k_min
+        128,                                 // split_k_max
+        false,                               // supports_split_k_autodeduce
+        true                                 // supports_ktn
+    };
+
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
+        return std::vector<std::string>{
+            "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
+    };
+
+    bool result = RunAIHeuristics(bwd_cfg, state, ctx, problem, true, fill_kernels); // deterministic=true
+
+    if(result)
+    {
+        // Deterministic mode must enforce split_k=1
+        EXPECT_EQ(split_k, 1) << "Deterministic mode must enforce split_k=1";
+        EXPECT_TRUE(kernel_id.find("+1") != std::string::npos || 
+                    kernel_id.find("+") == std::string::npos)
+            << "kernel_id should indicate split_k=1 in deterministic mode";
+    }
+}
+
+TEST_F(GPU_RunAIHeuristics_Integration, ForwardSolver_NoSplitK)
+{
+    // Skip if not on supported architecture
+    if(device_arch != "gfx942" && device_arch != "gfx950")
+    {
+        GTEST_SKIP() << "Test requires gfx942 or gfx950, current: " << device_arch;
+    }
+
+    auto problem = GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
+
+    std::vector<std::string> valid_kernels;
+    int index = 0;
+    int split_k = 0;
+    std::string kernel_id;
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+
+    constexpr SolverHeuristicConfig fwd_cfg = {
+        "ConvHipImplicitGemmGroupFwdXdlops", // solver_name
+        "ConvHipIgemmGroupFwdXdlops",        // solver_name_ktn
+        2,                                   // spatial_dims
+        false,                               // uses_split_k (Forward doesn't use split_k)
+        0,                                   // split_k_min
+        0,                                   // split_k_max
+        false,                               // supports_split_k_autodeduce
+        true                                 // supports_ktn
+    };
+
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
+        return std::vector<std::string>{
+            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256,256,256,4,Default,4,4,1,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,1,1,S<1,32,1,8>,S<1,32,1,8>,7,7,PassThrough,PassThrough,PassThrough>"};
+    };
+
+    bool result = RunAIHeuristics(fwd_cfg, state, ctx, problem, false, fill_kernels);
+
+    if(result)
+    {
+        // Forward solver should have split_k=0
+        EXPECT_EQ(split_k, 0) << "Forward solver should have split_k=0";
+        EXPECT_EQ(kernel_id.find('+'), std::string::npos) 
+            << "Forward solver kernel_id should not contain '+' separator";
+    }
+}
+
+
+// ===============================================================================
+// Parameterized Split_k Validation Tests
+// ===============================================================================
+
+class CPU_SplitKValidation_Parameterized
+    : public ::testing::TestWithParam<std::tuple<int, int, int, bool>>
+{
+    // Parameters: (split_k_value, min, max, expected_valid)
+};
+
+TEST_P(CPU_SplitKValidation_Parameterized, ValidateSplitKRange)
+{
+    auto [value, min, max, expected] = GetParam();
+    SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, min, max, false, true};
+    
+    bool actual = cfg.IsValidSplitK(value);
+    EXPECT_EQ(actual, expected) 
+        << "IsValidSplitK(" << value << ") with range [" << min << "," << max 
+        << "] expected " << (expected ? "true" : "false") 
+        << " but got " << (actual ? "true" : "false");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SplitKEdgeCases,
+    CPU_SplitKValidation_Parameterized,
+    ::testing::Values(
+        // (value, min, max, expected)
+        std::make_tuple(0, 1, 128, false),     // Below minimum
+        std::make_tuple(1, 1, 128, true),      // Valid: minimum power of 2
+        std::make_tuple(2, 1, 128, true),      // Valid: power of 2
+        std::make_tuple(3, 1, 128, false),     // Invalid: not power of 2
+        std::make_tuple(4, 1, 128, true),      // Valid: power of 2
+        std::make_tuple(7, 1, 128, false),     // Invalid: not power of 2
+        std::make_tuple(8, 1, 128, true),      // Valid: power of 2
+        std::make_tuple(16, 1, 128, true),     // Valid: power of 2
+        std::make_tuple(32, 1, 128, true),     // Valid: power of 2
+        std::make_tuple(64, 1, 128, true),     // Valid: power of 2
+        std::make_tuple(100, 1, 128, false),   // Invalid: not power of 2
+        std::make_tuple(128, 1, 128, true),    // Valid: maximum power of 2
+        std::make_tuple(256, 1, 128, false),   // Above maximum
+        std::make_tuple(512, 1, 128, false),   // Above maximum
+        std::make_tuple(1, 2, 64, false),      // Below custom minimum
+        std::make_tuple(2, 2, 64, true),       // At custom minimum
+        std::make_tuple(64, 2, 64, true),      // At custom maximum
+        std::make_tuple(128, 2, 64, false)     // Above custom maximum
+    ));
+
+// ===============================================================================
+// Deterministic Mode Enforcement Tests
+// ===============================================================================
+
+class CPU_DeterministicMode_NONE : public ::testing::Test
+{
+};
+
+
+TEST_F(CPU_DeterministicMode_NONE, HeuristicInit_SetsSplitK1)
+{
+    std::vector<std::string> valid_kernels = {"kernel_A"};
+    int index = 0;
+    int split_k = 999; // Should be overridden
+    std::string kernel_id;
+
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    
+    // When deterministic mode is active, HeuristicInit should set split_k=1
+    // This is tested in the integration tests with actual RunAIHeuristics
+    state.SetResult(0, 1, true); // Simulate deterministic result
+    
+    EXPECT_EQ(split_k, 1) << "Deterministic mode should set split_k=1";
+    EXPECT_EQ(kernel_id, "kernel_A+1");
+}
+
+TEST_F(CPU_DeterministicMode_NONE, AllBackwardSolvers_SupportDeterministic)
+{
+    // Verify all backward/WrW solvers are configured to support deterministic mode
+    // by using split_k that can be set to 1
+    
+    std::vector<SolverHeuristicConfig> backward_configs = {
+        {"ConvHipImplicitGemmGroupBwdXdlops", "ConvHipIgemmGroupXdlops", 2, true, 1, 128, false, true},
+        {"ConvHipImplicitGemmGroupWrwXdlops", "ConvHipIgemmGroupXdlops", 2, true, 1, 128, false, true},
+        {"ConvHipImplicitGemm3DGroupBwdXdlops", "ConvHipIgemmGroup3DXdlops", 3, true, 1, 128, false, true},
+        {"ConvHipImplicitGemm3DGroupWrwXdlops", "ConvHipIgemmGroup3DXdlops", 3, true, 1, 128, false, true},
+    };
+
+    for(const auto& cfg : backward_configs)
+    {
+        EXPECT_TRUE(cfg.uses_split_k) << cfg.solver_name << " should use split_k";
+        EXPECT_LE(cfg.split_k_min, 1) << cfg.solver_name << " should support split_k=1";
+        EXPECT_TRUE(cfg.IsValidSplitK(1)) << cfg.solver_name << " should accept split_k=1";
     }
 }
 

@@ -37,6 +37,128 @@
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
+// ============================================================================
+// Centralized Heuristic Configuration for CK Implicit GEMM Solvers
+// ============================================================================
+/**
+ * @file ai_conv_nd_kernel_tuning_utils.hpp
+ * @brief Centralized AI heuristics infrastructure for CK implicit GEMM solvers
+ *
+ * This file provides a unified framework for AI-based kernel selection across
+ * all hip_implicit_gemm solvers (2D/3D, Forward/Backward/WrW). The centralized
+ * approach eliminates code duplication and ensures consistent behavior.
+ *
+ * Key components:
+ * - SolverHeuristicConfig: Declarative solver configuration (split_k rules, naming, etc.)
+ * - HeuristicInitState: State management for heuristic results
+ * - RunAIHeuristics: Main template function that orchestrates AI model execution
+ *
+ * Architecture support:
+ * - gfx942/gfx950: Candidate Selection models (newer architecture)
+ * - gfx90a: KTN models (legacy compatibility)
+ *
+ * @see RunAIHeuristics for usage examples
+ */
+
+namespace miopen {
+namespace solver {
+namespace conv {
+
+/// @brief Check if a value is a positive power of two
+/// @param x The value to check
+/// @return true if x is a positive power of two (1, 2, 4, 8, ...), false otherwise
+inline constexpr bool IsPowerOfTwo(int x) { return x > 0 && (x & (x - 1)) == 0; }
+
+/// @brief The special value used by CK to indicate automatic split_k deduction
+static constexpr int CkSplitkAutoDeduce = -1;
+
+/**
+ * @brief Configuration struct for solver-specific heuristic behavior
+ *
+ * This struct provides runtime configuration for the centralized heuristic
+ * initialization machinery. Each solver creates a static constexpr instance
+ * with its specific settings.
+ *
+ * ## Usage Example
+ * ```cpp
+ * static constexpr SolverHeuristicConfig kFwdSolverConfig = {
+ *     .solver_name = "ConvHipImplicitGemmGroupFwdXdlops",
+ *     .solver_name_ktn = "ConvHipIgemmGroupFwdXdlops",  // Abbreviated for gfx90a
+ *     .spatial_dims = 2,
+ *     .uses_split_k = false,
+ *     .split_k_min = 0,
+ *     .split_k_max = 0,
+ *     .supports_ktn = true,
+ * };
+ * ```
+ */
+struct SolverHeuristicConfig
+{
+    // Solver name for Candidate Selection models (gfx942/gfx950)
+    const char* solver_name = "Unknown";
+
+    // Solver name for KTN models (gfx90a) - often abbreviated
+    const char* solver_name_ktn = "Unknown";
+
+    // Spatial dimensions: 2 for 2D convolutions, 3 for 3D
+    int spatial_dims = 2;
+
+    // Whether this solver uses split_k parameter
+    // Forward: false, Backward/WrW: true
+    bool uses_split_k = false;
+
+    // Valid split_k range (only used if uses_split_k is true)
+    // For most solvers: min=1, max=128 (powers of 2)
+    int split_k_min = 1;
+    int split_k_max = 128;
+
+    // Whether this solver supports split_k autodeduce (CkSplitkAutoDeduce = -1)
+    // Some solvers only support explicit split_k values (1, 2, 4, ..., 128),
+    // while others allow CK to automatically determine the optimal split_k value
+    bool supports_split_k_autodeduce = false;
+
+    // Whether this solver supports KTN models (gfx90a)
+    bool supports_ktn = false;
+
+    // Helper: Get solver name for a specific architecture.
+    // Note: gfx90a can uses the legacy KTN heuristics which use a different solver naming
+    // convention
+    const char* GetSolverNameForArch(const std::string& arch) const
+    {
+        return (arch == "gfx90a") ? solver_name_ktn : solver_name;
+    }
+
+    /// @brief Validate a split_k value against this solver's configuration
+    /// @param split_k_value The split_k value to validate
+    /// @return true if the split_k value is valid for this solver
+    bool IsValidSplitK(int split_k_value) const
+    {
+        // If solver doesn't use split_k, only 0 is valid
+        if(!uses_split_k)
+            return split_k_value == 0;
+
+        // Check for autodeduce special value
+        if(split_k_value == CkSplitkAutoDeduce)
+            return supports_split_k_autodeduce;
+
+        // Check range constraint
+        if(split_k_value < split_k_min || split_k_value > split_k_max)
+            return false;
+
+        // Power-of-2 constraint: This is a design choice (not a CK requirement).
+        // CK itself does not require split_k to be a power of 2.
+        // We enforce this to:
+        //   1. Limit the search space during tuning
+        //   2. Match historical behavior of these solvers
+        // Future versions may relax this constraint.
+        return IsPowerOfTwo(split_k_value);
+    }
+};
+
+} // namespace conv
+} // namespace solver
+} // namespace miopen
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
 namespace solver {
@@ -132,6 +254,244 @@ RunParameterPredictionModel(
         return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
     }
 }
+// ============================================================================
+// Centralized AI Heuristics Runner
+// ============================================================================
+
+/**
+ * @brief Configuration state for heuristic initialization results
+ *
+ * This struct holds the output state from AI heuristics. It's designed to be
+ * passed by reference to the centralized heuristics function, which will
+ * populate it with results.
+ */
+struct HeuristicInitState
+{
+    std::vector<std::string>& valid_kernels;
+    int& index;
+    int& split_k;
+    std::string& kernel_id;
+
+    HeuristicInitState(std::vector<std::string>& vk, int& idx, int& sk, std::string& kid)
+        : valid_kernels(vk), index(idx), split_k(sk), kernel_id(kid)
+    {
+    }
+
+    void Reset(bool uses_split_k)
+    {
+        index     = 0;
+        kernel_id = "";
+        split_k   = uses_split_k ? 1 : 0;
+    }
+
+    void SetResult(int idx, int sk, bool uses_split_k)
+    {
+        index   = idx;
+        split_k = sk;
+        if(uses_split_k && idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
+        {
+            kernel_id = valid_kernels[idx] + "+" + std::to_string(sk);
+        }
+        else if(idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
+        {
+            kernel_id = valid_kernels[idx];
+        }
+    }
+};
+
+// ============================================================================
+// Generic Helper Template for KTN Lambda Functions
+// ============================================================================
+
+/**
+ * @brief Generic implementation for running KTN heuristics across all data types
+ *
+ * This template function dispatches KTN model execution based on data type,
+ * providing a reusable implementation for the ktn_runner lambda that appears
+ * in all hip_implicit_gemm solvers supporting gfx90a.
+ *
+ * @tparam ConfigType Performance configuration type for the solver
+ *
+ * @param config Reference to the solver's performance configuration object
+ * @param ctx Execution context
+ * @param problem Convolution problem description
+ * @return true if KTN heuristics successfully selected a kernel, false otherwise
+ *
+ * @note This function calls the RunParameterPredictionModelKTN method on the
+ *       config object with the appropriate data type template parameter.
+ *
+ * ## Usage Example (in solver HeuristicInit)
+ * ```cpp
+ * auto ktn_runner = [&](const ExecutionContext& c, const ProblemDescription& p) {
+ *     return RunKTNGeneric(*this, c, p);
+ * };
+ * ```
+ */
+template <typename ConfigType>
+bool RunKTNGeneric(ConfigType& config,
+                   const miopen::ExecutionContext& ctx,
+                   const miopen::conv::ProblemDescription& problem)
+{
+    switch(problem.GetInDataType())
+    {
+    case miopenFloat: return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
+    case miopenBFloat16:
+        return config.template RunParameterPredictionModelKTN<ck::bhalf_t>(ctx, problem);
+    case miopenHalf:
+        return config.template RunParameterPredictionModelKTN<ck::half_t>(ctx, problem);
+    default: return false;
+    }
+}
+
+/**
+ * @brief Run AI-based heuristics to select optimal kernel configuration
+ *
+ * This centralized function handles both Candidate Selection (gfx942/gfx950)
+ * and KTN (gfx90a) heuristics, reducing code duplication across solvers.
+ *
+ * @tparam FillKernelsFunc Callable that returns valid kernel IDs for a given problem
+ * @tparam KTNRunnerFunc Callable that runs KTN heuristics for gfx90a (optional)
+ *
+ * @param solver_cfg The solver's static configuration (includes split_k validation rules)
+ * @param state The heuristic state to be populated with results
+ * @param ctx The execution context
+ * @param problem The convolution problem description
+ * @param is_deterministic Whether deterministic mode is enabled
+ * @param fill_valid_kernels Callable to fill valid kernel IDs
+ * @param ktn_runner Optional callable to run KTN heuristics for gfx90a
+ *
+ * @return true if AI heuristics successfully selected a kernel, false otherwise
+ *
+ * ## Usage Example
+ * ```cpp
+ * HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+ *
+ * auto fill_kernels = [&](const ProblemDescription& p) {
+ *     return FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(p);
+ * };
+ *
+ * if(RunAIHeuristics(kFwdSolverConfig, state, ctx, problem,
+ *                    is_deterministic, fill_kernels, ktn_runner))
+ * {
+ *     return; // AI heuristics succeeded
+ * }
+ * // Fallback to default initialization
+ * ```
+ */
+template <typename FillKernelsFunc, typename KTNRunnerFunc = std::nullptr_t>
+bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
+                     HeuristicInitState& state,
+                     const miopen::ExecutionContext& ctx,
+                     const miopen::conv::ProblemDescription& problem,
+                     bool is_deterministic,
+                     FillKernelsFunc&& fill_valid_kernels,
+                     KTNRunnerFunc&& ktn_runner = nullptr)
+{
+    const std::string& arch = ctx.GetStream().GetDeviceName();
+
+    // Only applicable for supported architectures
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950")
+    {
+        return false;
+    }
+
+    // Candidate Selection heuristics for gfx942/gfx950
+    if(arch == "gfx942" || arch == "gfx950")
+    {
+        MIOPEN_LOG_I2("Candidate Selection heuristics for " << arch);
+        std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
+
+        // Fill valid kernels
+        state.valid_kernels = fill_valid_kernels(problem);
+        if(state.valid_kernels.empty())
+        {
+            MIOPEN_LOG_I("No valid kernels found");
+            return false;
+        }
+
+        // Filter kernels by type
+        std::vector<int> heuristic_indexes;
+        std::vector<std::vector<std::string>> heuristic_kernels;
+        FillHeuristicKernels(state.valid_kernels, heuristic_indexes, heuristic_kernels);
+
+        // Prepare features
+        std::map<std::string, float> features =
+            GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+
+        bool use_split_k = solver_cfg.uses_split_k;
+
+        try
+        {
+            // Validation function: Filters candidate (kernel_index, split_k) combinations
+            // - Checks kernel index bounds
+            // - Enforces deterministic mode restrictions (split_k must be 1)
+            // - Validates split_k using solver configuration rules
+            auto is_valid = [&](int ki, int sk) {
+                if(ki < 0 || ki >= static_cast<int>(state.valid_kernels.size()))
+                    return false;
+                if(is_deterministic && solver_cfg.uses_split_k && sk != 1)
+                    return false;
+                return solver_cfg.IsValidSplitK(sk);
+            };
+
+            auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
+                arch, solver_name, features, heuristic_kernels, use_split_k, is_valid);
+
+            if(!result.IsEmpty())
+            {
+                int best_index   = result.GetBestKernelIndex();
+                int best_split_k = result.GetBestSplitK();
+
+                if(best_index >= 0 && best_index < static_cast<int>(state.valid_kernels.size()))
+                {
+                    state.SetResult(best_index, best_split_k, use_split_k);
+                    MIOPEN_LOG_I("Candidate Selection selected: " << state.kernel_id);
+                    return true;
+                }
+            }
+
+            MIOPEN_LOG_I("AI prediction returned no valid candidates, falling back");
+        }
+        catch(const miopen::Exception& ex)
+        {
+            MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
+        }
+
+        return false;
+    }
+
+    // KTN heuristics for gfx90a
+    if(arch == "gfx90a" && solver_cfg.supports_ktn)
+    {
+        MIOPEN_LOG_I2("KTN heuristics for gfx90a");
+
+        // Use the provided KTN runner if available
+        if constexpr(!std::is_same_v<KTNRunnerFunc, std::nullptr_t>)
+        {
+            bool ktn_succeeded = ktn_runner(ctx, problem);
+
+            if(ktn_succeeded)
+            {
+                // Enforce split_k == 1 for deterministic mode
+                if(is_deterministic && solver_cfg.uses_split_k && state.split_k != 1)
+                {
+                    MIOPEN_LOG_I("Deterministic mode: Overriding KTN-predicted split_k="
+                                 << state.split_k << " to split_k=1");
+                    state.split_k = 1;
+                    if(!state.valid_kernels.empty())
+                    {
+                        state.kernel_id = state.valid_kernels[state.index] + "+1";
+                    }
+                }
+                MIOPEN_LOG_I("KTN selected: " << state.kernel_id);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen

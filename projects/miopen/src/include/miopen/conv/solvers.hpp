@@ -4325,15 +4325,18 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
 
-    // OLD KTN functions (for gfx90a)
-    template <typename DataType>
-    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
-                                        const miopen::conv::ProblemDescription& problem);
     void InitHeuristicKernelIDsKTN(const std::string& type);
     bool ModelApplyTokenKTN(int idx, std::string value, const std::string& arch);
 #endif
@@ -4664,15 +4667,18 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
 
-    // OLD KTN functions (for gfx90a)
-    template <typename DataType>
-    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
-                                        const miopen::conv::ProblemDescription& problem);
     void InitHeuristicKernelIDsKTN();
     bool ModelApplyTokenKTN(int idx,
                             std::string value,
@@ -4766,15 +4772,18 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
 
-    // OLD KTN functions (for gfx90a)
-    template <typename DataType>
-    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
-                                        const miopen::conv::ProblemDescription& problem);
     void InitHeuristicKernelIDsKTN(const std::string& type);
     bool ModelApplyTokenKTN(int idx,
                             std::string value,

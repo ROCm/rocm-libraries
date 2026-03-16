@@ -245,6 +245,138 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     return valid_kernels;
 }
 
+/**
+ * @brief Generic implementation for filling valid kernel IDs across all data types
+ *
+ * This template function provides a reusable implementation that handles data type
+ * dispatch and TF32 fallback logic. It's used by all hip_implicit_gemm solvers to
+ * avoid code duplication when constructing the fill_valid_kernels lambda.
+ *
+ * @tparam DeviceOpPtrs CK DeviceOp factory template (e.g., DeviceOpGFwdPtrs)
+ * @tparam CKArgs CK argument structure for the solver
+ * @tparam ProblemDescriptionType Problem description type (default:
+ * miopen::conv::ProblemDescription)
+ *
+ * @param problem Convolution problem description
+ * @return Vector of valid kernel ID strings for the problem
+ *
+ * @note Automatically handles TF32 mode for float data type, falling back to
+ *       regular float kernels if TF32 kernels are unavailable.
+ *
+ * ## Usage Example (in solver HeuristicInit)
+ * ```cpp
+ * auto fill_valid_kernels = [&](const ProblemDescription& p) {
+ *     return FillValidKernelsGeneric<DeviceOpGFwdPtrs, CKArgs>(p);
+ * };
+ * ```
+ */
+template <template <typename, typename> class DeviceOpPtrs,
+          typename CKArgs,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+std::vector<std::string> FillValidKernelsGeneric(const ProblemDescriptionType& problem)
+{
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf:
+        return FillValidKernelsIDs<DeviceOpPtrs<ck::half_t, ck::half_t>, CKArgs>(problem);
+
+    case miopenFloat:
+        if(problem.UseTF32())
+        {
+            auto tf32_kernels =
+                FillValidKernelsIDs<DeviceOpPtrs<float, ck::tf32_t>, CKArgs>(problem);
+            if(!tf32_kernels.empty())
+                return tf32_kernels;
+        }
+        return FillValidKernelsIDs<DeviceOpPtrs<float, float>, CKArgs>(problem);
+
+    case miopenBFloat16:
+        return FillValidKernelsIDs<DeviceOpPtrs<ck::bhalf_t, ck::bhalf_t>, CKArgs>(problem);
+
+    case miopenInt8: return FillValidKernelsIDs<DeviceOpPtrs<int8_t, int8_t>, CKArgs>(problem);
+
+    default: return {};
+    }
+}
+
+/**
+ * @brief Generic implementation for filling valid kernel IDs with alpha/beta case dispatch
+ *
+ * This template function extends FillValidKernelsGeneric to handle 3D solvers that support
+ * multiple alpha/beta operation types (BILINEAR, SCALE, DEFAULT). It dispatches to the
+ * appropriate DeviceOp type based on the problem's alpha/beta case.
+ *
+ * @tparam BilinearPtrs CK DeviceOp factory for BILINEAR operations
+ * @tparam ScalePtrs CK DeviceOp factory for SCALE operations
+ * @tparam DefaultPtrs CK DeviceOp factory for DEFAULT (PassThrough) operations
+ * @tparam CKArgs CK argument structure (must be templated on DataType, ComputeType)
+ * @tparam ProblemDescriptionType Problem description type
+ *
+ * @param problem Convolution problem description
+ * @return Vector of valid kernel ID strings for the problem
+ *
+ * @note This is used by 3D solvers (Fwd/Bwd/Wrw) that support alpha/beta fusion.
+ *       2D solvers don't need this as they use simpler operation types.
+ *
+ * ## Usage Example (in 3D solver HeuristicInit)
+ * ```cpp
+ * auto fill_valid_kernels = [&](const ProblemDescription& p) {
+ *     return FillValidKernelsWithAlphaBetaGeneric<
+ *         DeviceOpGFwdBilinearPtrs,
+ *         DeviceOpGFwdScalePtrs,
+ *         DeviceOpGFwdDefaultPtrs,
+ *         CKArgs>(p);
+ * };
+ * ```
+ */
+template <template <typename, typename> class BilinearPtrs,
+          template <typename, typename>
+          class ScalePtrs,
+          template <typename, typename>
+          class DefaultPtrs,
+          template <typename, typename>
+          class CKArgs,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+std::vector<std::string> FillValidKernelsWithAlphaBetaGeneric(const ProblemDescriptionType& problem)
+{
+    // Helper lambda to dispatch by alpha_beta case for a specific data type
+    auto fill_by_alpha_beta = [&problem]<typename DataType, typename ComputeType>() {
+        switch(problem.GetAlphaBetaCase())
+        {
+        case BILINEAR:
+            return FillValidKernelsIDs<BilinearPtrs<DataType, ComputeType>,
+                                       CKArgs<DataType, ComputeType>>(problem);
+        case SCALE:
+            return FillValidKernelsIDs<ScalePtrs<DataType, ComputeType>,
+                                       CKArgs<DataType, ComputeType>>(problem);
+        default: // DEFAULT case (PassThrough)
+            return FillValidKernelsIDs<DefaultPtrs<DataType, ComputeType>,
+                                       CKArgs<DataType, ComputeType>>(problem);
+        }
+    };
+
+    // Data type dispatch with TF32 support
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: return fill_by_alpha_beta.template operator()<ck::half_t, ck::half_t>();
+
+    case miopenFloat:
+        if(problem.UseTF32())
+        {
+            auto tf32_kernels = fill_by_alpha_beta.template operator()<float, ck::tf32_t>();
+            if(!tf32_kernels.empty())
+                return tf32_kernels;
+        }
+        return fill_by_alpha_beta.template operator()<float, float>();
+
+    case miopenBFloat16: return fill_by_alpha_beta.template operator()<ck::bhalf_t, ck::bhalf_t>();
+
+    case miopenInt8: return fill_by_alpha_beta.template operator()<int8_t, int8_t>();
+
+    default: return {};
+    }
+}
+
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 template <typename DeviceOpType>
 inline constexpr bool IsSplitKNeeded()
