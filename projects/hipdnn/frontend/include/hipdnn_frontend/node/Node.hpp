@@ -64,6 +64,19 @@ public:
         return {};
     }
 
+    /// Unpacks operation attributes from a backend descriptor into this node.
+    /// Subclasses that support unpacking from the C-API must override this.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    virtual Error unpack_from_descriptor(
+        [[maybe_unused]] hipdnnBackendDescriptor_t opDesc,
+        [[maybe_unused]] std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        auto nodeName = getNodeName();
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "unpack_from_descriptor not implemented for node"
+                    + (nodeName.empty() ? std::string{} : ": " + nodeName)};
+    }
+
     // Creates backend operation descriptor(s) for this node using the C-API.
     // Tensor descriptors are deduplicated by UID in tensorDescs.
     // TODO: Make pure virtual once pack_node / flatbuffers serialization path is removed.

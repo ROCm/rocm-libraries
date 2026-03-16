@@ -40,6 +40,7 @@
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
 namespace solver {
@@ -173,7 +174,61 @@ bool ConvHipImplicitGemmFwdXdlops::CheckCKApplicability(const ProblemDescription
 }
 #endif
 
+// clang-format off
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+static const std::vector<std::string> ranked_gemm_fwd = {
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 64, 128, 4, Filter1x1Pad0, 4, 32, 32, 1, 2, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 64, 128, 4, Default, 4, 32, 32, 1, 2, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<64, 32, 64, 4, Filter1x1Stride1Pad0, 4, 32, 32, 1, 2, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 128, 64, 4, Filter1x1Pad0, 4, 32, 32, 2, 1, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<64, 64, 32, 4, Filter1x1Stride1Pad0, 4, 32, 32, 2, 1, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 128, 64, 4, Default, 4, 32, 32, 2, 1, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<64, 64, 32, 4, Default, 4, 32, 32, 2, 1, 4, 4, 4, 4>",
+"DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 128, 256, 4, Default, 8, 2, 4, 8, 8, 8, 8, 1, 1, 8>",
+"DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 64, 128, 4, Filter1x1Stride1Pad0, 8, 1, 2, 8, 8, 8, 8, 1, 1, 8>",
+"DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<128, 64, 128, 4, Filter1x1Pad0, 8, 2, 2, 8, 8, 8, 8, 1, 1, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 64, 128, 4, Filter1x1Stride1Pad0, 8, 32, 32, 1, 2, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 64, 128, 4, Filter1x1Pad0, 8, 32, 32, 1, 2, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<128, 64, 128, 4, Default, 8, 32, 32, 2, 2, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 64, 128, 4, OddC, 8, 1, 2, 1, 1, 1, 1, 1, 1, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 128, 64, 4, Filter1x1Pad0, 8, 32, 32, 2, 1, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<128, 128, 32, 4, Filter1x1Stride1Pad0, 8, 32, 32, 2, 1, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 128, 64, 4, Default, 8, 32, 32, 2, 1, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<128, 128, 32, 4, Default, 8, 32, 32, 2, 1, 8, 8, 8, 8>",
+"DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<256, 128, 64, 4, OddC, 8, 2, 1, 1, 1, 1, 1, 1, 1, 8>",
+"DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K<64, 64, 32, 4, OddC, 8, 2, 1, 1, 1, 1, 1, 1, 1, 8>"
+};
+
+//no results for navi
+static const std::vector<std::string> ranked_gemm_fwd_navi = {};
+// clang-format on
+
+void PerformanceConfigHipImplicitGemmFwdXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
+{
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_fwd;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_fwd_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
+    for(const auto& kernel_str : ranked_1st_applicable)
+    {
+        auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
+        if(it != valid_kernels.end())
+        {
+            index     = it - valid_kernels.begin();
+            kernel_id = valid_kernels[index];
+            return;
+        }
+    }
+}
+
 void PerformanceConfigHipImplicitGemmFwdXdlops::HeuristicInit(
+    [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
     index     = 0;
@@ -192,14 +247,30 @@ void PerformanceConfigHipImplicitGemmFwdXdlops::HeuristicInit(
     case miopenInt32:
     case miopenDouble: break;
     }
+
+    if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
+        DefaultKernelFromList(ctx);
 #endif
 }
 
 bool PerformanceConfigHipImplicitGemmFwdXdlops::SetNextValue(const ProblemDescription& problem)
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        HeuristicInit(problem);
+        switch(problem.GetInDataType())
+        {
+        case miopenInt8: Init<int8_t>(problem); break;
+        case miopenHalf: Init<ck::half_t>(problem); break;
+        case miopenFloat: Init<float>(problem); break;
+        case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64:
+        case miopenInt32:
+        case miopenDouble: break;
+        }
+
         assert(!valid_kernels.empty());
         return true;
     }
@@ -211,6 +282,7 @@ bool PerformanceConfigHipImplicitGemmFwdXdlops::SetNextValue(const ProblemDescri
         return true;
     }
     else
+#endif
         return false;
 }
 
@@ -246,11 +318,11 @@ bool PerformanceConfigHipImplicitGemmFwdXdlops::operator==(
 }
 
 PerformanceConfigHipImplicitGemmFwdXdlops
-ConvHipImplicitGemmFwdXdlops::GetDefaultPerformanceConfig(const ExecutionContext&,
+ConvHipImplicitGemmFwdXdlops::GetDefaultPerformanceConfig(const ExecutionContext& ctx,
                                                           const ProblemDescription& problem) const
 {
     PerformanceConfigHipImplicitGemmFwdXdlops pp;
-    pp.HeuristicInit(problem);
+    pp.HeuristicInit(ctx, problem);
     return pp;
 }
 

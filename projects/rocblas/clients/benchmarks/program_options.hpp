@@ -23,7 +23,15 @@
 
 #pragma once
 
+#if __GLIBC__ < 3 && __GLIBC__MINOR__ < 39
+#define SCNd32 "d"
+#define SCNu32 "u"
+#define SCNd64 "l"
+#define SCNu64 "lu"
+#undef _GLIBCXX_USE_C99_INTTYPES_TR1
+#endif
 #include <cinttypes>
+
 #include <cstdio>
 #include <iomanip>
 #include <map>
