@@ -401,7 +401,7 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
 
                 auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-                if(!dummy_run_executed)
+                if(time_kernel && !dummy_run_executed)
                 {
                     // Run first instance as dummy to get proper time from the first instance
                     invoker_ptr->Run(argument_ptr.get(),
