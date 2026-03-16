@@ -148,8 +148,8 @@ struct Bf16PairsResult
 template <int VecSize>
 __global__ void kernel_convert_float_to_bf16_pairs(const float* in, Bf16PairsResult<VecSize>* out)
 {
-    using float_vec_t = typename ck_tile::impl::bf16_ext_vec<float, VecSize>::type;
-    using bf16_vec_t  = typename ck_tile::impl::bf16_ext_vec<bfloat16_t, VecSize>::type;
+    using float_vec_t = ck_tile::ext_vector_t<float, VecSize>;
+    using bf16_vec_t  = ck_tile::ext_vector_t<bfloat16_t, VecSize>;
 
     float_vec_t reg_f32;
     for(int i = 0; i < VecSize; i++)

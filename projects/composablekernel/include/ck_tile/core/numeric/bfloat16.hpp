@@ -463,48 +463,4 @@ CK_TILE_HOST_DEVICE constexpr fp32x2_t bf16x2_to_fp32x2(bf16x2_t x)
 #endif
 }
 
-#ifndef CK_TILE_TF32_USE_PACKED_CVT
-#define CK_TILE_TF32_USE_PACKED_CVT 1
-#endif
-
-namespace impl {
-template <typename T, int N>
-struct bf16_ext_vec
-{
-    using type = T __attribute__((ext_vector_type(N)));
-};
-} // namespace impl
-
-template <int VecSize>
-CK_TILE_DEVICE void
-convert_float_to_bf16_pairs(const typename impl::bf16_ext_vec<float, VecSize>::type& reg_f32,
-                            typename impl::bf16_ext_vec<bfloat16_t, VecSize>::type& reg_bf16_big,
-                            typename impl::bf16_ext_vec<bfloat16_t, VecSize>::type& reg_bf16_small)
-{
-#if defined(__gfx94__) && CK_TILE_TF32_USE_PACKED_CVT && CK_TILE_USE_LLVM_BUILTIN_BF16
-    static_assert(VecSize % 2 == 0, "VecSize must be even for packed operations");
-
-#pragma unroll
-    for(int i = 0; i < VecSize; i += 2)
-    {
-        fp32x2_t orig = {reg_f32[i], reg_f32[i + 1]};
-
-        bf16x2_t big_pair   = cvt_pk_bf16_f32(orig[0], orig[1]);
-        fp32x2_t big_f32    = bf16x2_to_fp32x2(big_pair);
-        fp32x2_t diff       = orig - big_f32;
-        bf16x2_t small_pair = cvt_pk_bf16_f32(diff[0], diff[1]);
-
-        reinterpret_cast<bf16x2_t*>(&reg_bf16_big)[i / 2]   = big_pair;
-        reinterpret_cast<bf16x2_t*>(&reg_bf16_small)[i / 2] = small_pair;
-    }
-#else
-#pragma unroll
-    for(int i = 0; i < VecSize; i++)
-    {
-        reg_bf16_big[i]   = float_to_bf16(reg_f32[i]);
-        reg_bf16_small[i] = float_to_bf16(reg_f32[i] - bf16_to_float(reg_bf16_big[i]));
-    }
-#endif
-}
-
 } // namespace ck_tile
