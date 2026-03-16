@@ -3890,20 +3890,23 @@ private:
     /// Prints a (dry) header.
     void print_header(std::string_view algorithm)
     {
-        if(m_settings.dry)
+        if(!m_settings.skip_header)
         {
-            detail::progress::print_dry_header(algorithm,
+            if(m_settings.dry)
+            {
+                detail::progress::print_dry_header(algorithm,
+                                                   m_specialization_column_width,
+                                                   m_index_column_width,
+                                                   specializations.size());
+            }
+            else if(!m_settings.skip_header)
+            {
+                detail::progress::print_header(algorithm,
                                                m_specialization_column_width,
                                                m_index_column_width,
-                                               specializations.size());
-        }
-        else if(!m_settings.skip_header)
-        {
-            detail::progress::print_header(algorithm,
-                                           m_specialization_column_width,
-                                           m_index_column_width,
-                                           specializations.size(),
-                                           m_settings.noise_timeout_secs);
+                                               specializations.size(),
+                                               m_settings.noise_timeout_secs);
+            }
         }
     }
 
