@@ -444,12 +444,16 @@ inline bool IsPointOutput3dStrideEqFilter(const ProblemDescription& problem,
     if(conv.GetSpatialDimension() != 3 || conv.group_count != 1)
         return false;
 
-    const auto& in_desc = problem.GetIn();
-    const auto& w_desc  = problem.GetWeights();
+    const auto& in_desc    = problem.GetIn();
+    const auto& out_desc   = problem.GetOut();
+    const auto& point_desc = direction == Direction::Forward ? out_desc : in_desc;
+    const auto& w_desc     = problem.GetWeights();
+
+    const auto& point_lens = point_desc.GetLengths();
+    if(point_lens.size() != 5 || point_lens[2] != 1 || point_lens[3] != 1 || point_lens[4] != 1)
+        return false;
 
     const auto& in_lens = in_desc.GetLengths();
-    if(in_lens.size() != 5 || in_lens[2] != 1 || in_lens[3] != 1 || in_lens[4] != 1)
-        return false;
 
     const auto& pads      = conv.GetConvPads();
     const auto& strides   = conv.GetConvStrides();
