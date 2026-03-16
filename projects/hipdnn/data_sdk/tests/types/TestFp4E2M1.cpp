@@ -40,73 +40,56 @@ TEST(TestFp4E2M1, RoundTripAllValues)
 // Rounding Tests
 // ============================================================================
 
-TEST(TestFp4E2M1, RoundToNearestEvenMidpoints)
+struct RoundingTestCase
 {
-    struct TestCase
-    {
-        float input;
-        float expected;
-    };
-    std::vector<TestCase> cases = {
-        {0.25f, 0.0f}, // Midpoint rounds to even (0)
-        {0.75f, 1.0f}, // Midpoint rounds to even (1)
-        {1.25f, 1.0f}, // Midpoint rounds to even (1)
-        {2.5f, 2.0f}, // Midpoint rounds to even (2)
-        {5.0f, 4.0f}, // Midpoint rounds to even (4)
-    };
+    float input;
+    float expected;
 
-    for(const auto& tc : cases)
+    friend std::ostream& operator<<(std::ostream& os, const RoundingTestCase& tc)
     {
-        fp4_e2m1 val(tc.input);
-        EXPECT_EQ(static_cast<float>(val), tc.expected) << "Failed for input: " << tc.input;
+        return os << tc.input << " -> " << tc.expected;
     }
+};
+
+class TestFp4E2M1Rounding : public ::testing::TestWithParam<RoundingTestCase>
+{
+};
+
+TEST_P(TestFp4E2M1Rounding, Rounding)
+{
+    auto [input, expected] = GetParam();
+    fp4_e2m1 val(input);
+    EXPECT_EQ(static_cast<float>(val), expected);
 }
 
-TEST(TestFp4E2M1, SubnormalRoundingEdgeCases)
-{
-    struct TestCase
-    {
-        float input;
-        float expected;
-    };
-    std::vector<TestCase> cases = {
-        {0.3f, 0.5f}, // Rounds up to subnormal
-        {0.4f, 0.5f}, // Rounds up to subnormal
-        {0.24f, 0.0f}, // Underflows to zero
-        {0.6f, 0.5f}, // Rounds down to subnormal
-        {-0.3f, -0.5f}, // Negative rounds to subnormal
-        {-0.4f, -0.5f}, // Negative rounds to subnormal
-    };
+INSTANTIATE_TEST_SUITE_P(
+    MidpointRounding,
+    TestFp4E2M1Rounding,
+    ::testing::Values(RoundingTestCase{0.25f, 0.0f}, // Midpoint rounds to even (0)
+                      RoundingTestCase{0.75f, 1.0f}, // Midpoint rounds to even (1)
+                      RoundingTestCase{1.25f, 1.0f}, // Midpoint rounds to even (1)
+                      RoundingTestCase{2.5f, 2.0f}, // Midpoint rounds to even (2)
+                      RoundingTestCase{5.0f, 4.0f})); // Midpoint rounds to even (4)
 
-    for(const auto& tc : cases)
-    {
-        fp4_e2m1 val(tc.input);
-        EXPECT_EQ(static_cast<float>(val), tc.expected) << "Failed for input: " << tc.input;
-    }
-}
+INSTANTIATE_TEST_SUITE_P(
+    SubnormalRounding,
+    TestFp4E2M1Rounding,
+    ::testing::Values(RoundingTestCase{0.3f, 0.5f}, // Rounds up to subnormal
+                      RoundingTestCase{0.4f, 0.5f}, // Rounds up to subnormal
+                      RoundingTestCase{0.24f, 0.0f}, // Underflows to zero
+                      RoundingTestCase{0.6f, 0.5f}, // Rounds down to subnormal
+                      RoundingTestCase{-0.3f, -0.5f}, // Negative rounds to subnormal
+                      RoundingTestCase{-0.4f, -0.5f})); // Negative rounds to subnormal
 
-TEST(TestFp4E2M1, BoundaryRoundingEdgeCases)
-{
-    struct TestCase
-    {
-        float input;
-        float expected;
-    };
-    std::vector<TestCase> cases = {
-        {5.5f, 6.0f}, // Rounds up to max
-        {5.1f, 6.0f}, // Rounds up (closer to 6.0 than 4.0)
-        {3.5f, 4.0f}, // Midpoint between values
-        {2.25f, 2.0f}, // Quarter-step rounds down
-        {2.75f, 3.0f}, // Three-quarter-step rounds up
-        {-5.5f, -6.0f}, // Negative rounds to lowest
-    };
-
-    for(const auto& tc : cases)
-    {
-        fp4_e2m1 val(tc.input);
-        EXPECT_EQ(static_cast<float>(val), tc.expected) << "Failed for input: " << tc.input;
-    }
-}
+INSTANTIATE_TEST_SUITE_P(
+    BoundaryRounding,
+    TestFp4E2M1Rounding,
+    ::testing::Values(RoundingTestCase{5.5f, 6.0f}, // Rounds up to max
+                      RoundingTestCase{5.1f, 6.0f}, // Rounds up (closer to 6.0 than 4.0)
+                      RoundingTestCase{3.5f, 4.0f}, // Midpoint between values
+                      RoundingTestCase{2.25f, 2.0f}, // Quarter-step rounds down
+                      RoundingTestCase{2.75f, 3.0f}, // Three-quarter-step rounds up
+                      RoundingTestCase{-5.5f, -6.0f})); // Negative rounds to lowest
 
 // ============================================================================
 // Saturation Tests
