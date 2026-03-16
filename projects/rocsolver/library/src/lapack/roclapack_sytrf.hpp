@@ -63,7 +63,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
 
     // get array pointers
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = WA + (bid * n * SYTRF_MAX_THDS);
+    T* W = WA + (bid * n * SYTRF_BLOCKSIZE);
     rocblas_int* ipiv = ipivA + (bid * strideP);
 
     // local and shared variables
@@ -117,7 +117,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
 
     // get array pointers
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = WA + (bid * n * SYTRF_MAX_THDS);
+    T* W = WA + (bid * n * SYTRF_BLOCKSIZE);
     rocblas_int* ipiv = ipivA + (bid * strideP);
 
     // local and shared variables
