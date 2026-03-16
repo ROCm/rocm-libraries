@@ -119,17 +119,17 @@ TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { RunTest(); }
 
 TEST_P(GPU_Pooling2d_BFP16, BFloat16Test_pooling2d) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling2d_FP32,
                          testing::ValuesIn(GetPooling2dTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling2d_FP16,
                          testing::ValuesIn(GetPooling2dTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling2d_BFP16,
                          testing::ValuesIn(GetPooling2dTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);

@@ -94,12 +94,12 @@ TEST_P(GPU_WidePooling2d_FP32, FloatTest_pooling2d_wide) { this->RunTest(); }
 
 TEST_P(GPU_WidePooling2d_FP16, HalfTest_pooling2d_wide) { this->RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_WidePooling2d_FP32,
                          testing::ValuesIn(GetPooling2dWideTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_WidePooling2d_FP16,
                          testing::ValuesIn(GetPooling2dWideTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);

@@ -96,12 +96,12 @@ TEST_P(GPU_AsymPooling2d_FP32, FloatTest_pooling2d_asymmetric) { this->RunTest()
 
 TEST_P(GPU_AsymPooling2d_FP16, HalfTest_pooling2d_asymmetric) { this->RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_FP32,
                          testing::ValuesIn(GetPooling2dAsymmetricTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_FP16,
                          testing::ValuesIn(GetPooling2dAsymmetricTestCases()),
                          pooling2d_gtest::GetPoolingTestCaseName);

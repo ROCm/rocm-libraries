@@ -247,14 +247,6 @@ if(WIN32)
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
-  # Ensure canonical pooling target names come from gtest sources when present.
-  foreach(POOLING_TEST pooling2d pooling3d)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${POOLING_TEST}.cpp")
-      list(REMOVE_ITEM TESTS "${CMAKE_CURRENT_SOURCE_DIR}/${POOLING_TEST}.cpp")
-      add_gtest(test_${POOLING_TEST} ${POOLING_TEST}.cpp)
-    endif()
-  endforeach()
-
   foreach(TEST ${TESTS})
     get_filename_component(BASE_NAME ${TEST} NAME_WE)
     add_gtest(test_${BASE_NAME} ${BASE_NAME}.cpp)
