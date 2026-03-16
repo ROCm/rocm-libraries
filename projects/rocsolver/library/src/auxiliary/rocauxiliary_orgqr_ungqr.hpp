@@ -140,9 +140,9 @@ rocblas_status rocsolver_orgqr_ungqr_template(rocblas_handle handle,
     // corresponding top submatrix
     if(kk < n)
     {
-        blocksx = (kk - 1) / 32 + 1;
-        blocksy = (n - kk - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0,
+        blocksx = (kk - 1) / BS2 + 1;
+        blocksy = (n - kk - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
                                 stream, kk, n - kk, A, shiftA + idx2D(0, kk, lda), lda, strideA);
 
         rocsolver_org2r_ung2r_template<T>(handle, m - kk, n - kk, k - kk, A,
@@ -173,9 +173,9 @@ rocblas_status rocsolver_orgqr_ungqr_template(rocblas_handle handle,
         // the corresponding top submatrix
         if(j > 0)
         {
-            blocksx = (j - 1) / 32 + 1;
-            blocksy = (jb - 1) / 32 + 1;
-            ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(32, 32),
+            blocksx = (j - 1) / BS2 + 1;
+            blocksy = (jb - 1) / BS2 + 1;
+            ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2),
                                     0, stream, j, jb, A, shiftA + idx2D(0, j, lda), lda, strideA);
         }
         rocsolver_org2r_ung2r_template<T>(handle, m - j, jb, jb, A, shiftA + idx2D(j, j, lda), lda,
