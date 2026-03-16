@@ -9,6 +9,7 @@
 #include "descriptors/EngineDescriptor.hpp"
 #include "descriptors/ExecutionPlanDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/KnobSettingDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/HandleFactory.hpp"
 
@@ -177,6 +178,19 @@ TEST(TestDescriptorFactory, CreateVariantPackWithUnsupportedType)
         HIPDNN_STATUS_NOT_SUPPORTED);
 
     EXPECT_EQ(descriptor, nullptr);
+}
+
+TEST(TestDescriptorFactory, CreateKnobSettingDescriptor)
+{
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_NO_THROW(DescriptorFactory::create(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR, &descriptor));
+    EXPECT_NE(descriptor, nullptr);
+
+    auto knobDesc = descriptor->asDescriptor<KnobSettingDescriptor>();
+    EXPECT_FALSE(knobDesc->isFinalized());
+    EXPECT_EQ(knobDesc->getType(), HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
+
+    ASSERT_NO_THROW(DescriptorFactory::destroy(descriptor));
 }
 
 TEST(TestDescriptorFactory, DestroyNull)

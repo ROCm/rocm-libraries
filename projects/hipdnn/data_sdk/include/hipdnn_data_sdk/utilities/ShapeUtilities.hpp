@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -46,9 +47,24 @@ inline bool areDimensionsBroadcastCompatible(const std::vector<int64_t>& inputDi
     return true;
 }
 
-// Sets a default stride ordering based off the provided stride order.
-// Ex. dim = {1,2,3,4} stride_order = {3, 0, 2, 1} for NHWC
-// returns {24, 1, 8, 2}
+/**
+ * @brief Computes strides from dimensions and a stride ordering
+ *
+ * Generates strides for a tensor based on the provided dimensions and stride order.
+ * The stride order specifies the memory layout priority (lower values = tighter packing).
+ *
+ * @param dim Dimension sizes. The expected ordering depends on the operation type:
+ *            convolution/batchnorm use (N, C, H, W) or (N, C, D, H, W),
+ *            matmul uses (...batch, M, K) or (...batch, K, N).
+ * @param strideOrder Priority of each dimension in memory (lower = tighter packing).
+ *                    Use TensorLayout constants for common layouts.
+ * @return Strides corresponding to the requested memory layout
+ *
+ * @code{.cpp}
+ * // Example for convolution input: {N=1, C=2, H=3, W=4}
+ * auto nhwcStrides = generateStrides({1,2,3,4}, {3, 0, 2, 1}); // {24, 1, 8, 2}
+ * @endcode
+ */
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
                                             const std::vector<int64_t>& strideOrder)
 {
@@ -208,6 +224,70 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     return strideOrder;
 }
 
+/**
+ * @brief Generates strides that make a specified axis the most tightly packed dimension
+ *
+ * Derives a stride ordering from a reference tensor's strides, optionally rotating
+ * the specified axis to be the most tightly packed (stride=1). Other dimensions
+ * preserve their relative ordering from the reference layout.
+ *
+ * @param referenceStrides Strides of the reference tensor (used to determine dimension ordering)
+ * @param referenceDims Dimensions of the reference tensor (used for singleton tiebreaking)
+ * @param targetDims Dimensions of the tensor to generate strides for
+ * @param axis If set, this dimension index becomes the most tightly packed (stride=1).
+ *             If not set, the reference stride ordering is preserved as-is.
+ * @return Strides for targetDims with the specified axis most tightly packed
+ *
+ * @code{.cpp}
+ * // NCHW input, make axis 1 (C) most packed:
+ * auto strides = generateStridesWithPackedAxis(
+ *     {65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 1);
+ * // Returns {64, 1, 4096, 128}
+ * @endcode
+ */
+inline std::vector<int64_t>
+    generateStridesWithPackedAxis(const std::vector<int64_t>& referenceStrides,
+                                  const std::vector<int64_t>& referenceDims,
+                                  const std::vector<int64_t>& targetDims,
+                                  std::optional<int64_t> axis = std::nullopt)
+{
+    size_t numDims = referenceStrides.size();
+
+    // Sort dimension indices by reference strides ascending,
+    // with singleton-dimension tiebreaker (singletons sort first)
+    std::vector<size_t> sortedIndices(numDims);
+    std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
+    std::sort(sortedIndices.begin(),
+              sortedIndices.end(),
+              [&referenceStrides, &referenceDims](size_t a, size_t b) {
+                  if(referenceStrides[a] != referenceStrides[b])
+                  {
+                      return referenceStrides[a] < referenceStrides[b];
+                  }
+                  return (referenceDims[a] == 1) > (referenceDims[b] == 1);
+              });
+
+    // If axis is set, rotate so the axis dimension becomes most packed
+    if(axis.has_value())
+    {
+        auto axisVal = static_cast<size_t>(axis.value());
+        auto it = std::find(sortedIndices.begin(), sortedIndices.end(), axisVal);
+        if(it != sortedIndices.end())
+        {
+            std::rotate(sortedIndices.begin(), it, sortedIndices.end());
+        }
+    }
+
+    // Build stride order from inverse permutation
+    std::vector<int64_t> strideOrder(numDims);
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        strideOrder[sortedIndices[i]] = static_cast<int64_t>(i);
+    }
+
+    return generateStrides(targetDims, strideOrder);
+}
+
 // Checks if the tensor defined by dims and strides is packed (contiguous in memory).
 // Note: Assumes dims are positive (validated at graph level).
 // Strides can be negative (for reversed dimensions).
@@ -309,8 +389,18 @@ static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
     }
 }
 
-// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
-// skipping initial elements in the spatialIndices vector for convenience.
+/**
+ * @brief Constructs a full tensor indices vector from batch, channel, and spatial components
+ *
+ * Builds an index vector following NCHW ordering: batch at position 0, channel at position 1,
+ * followed by spatial dimensions (H, W for 4D tensors; D, H, W for 5D tensors).
+ *
+ * @param batchIdx Batch index (position 0 in result)
+ * @param channelIdx Channel index (position 1 in result)
+ * @param spatialIndices Spatial dimension indices (positions 2+ in result)
+ * @param spatialOffset Number of elements to skip at the start of spatialIndices
+ * @return Combined index vector in NCHW/NCDHW order
+ */
 static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
                                                       int64_t channelIdx,
                                                       const std::vector<int64_t>& spatialIndices,

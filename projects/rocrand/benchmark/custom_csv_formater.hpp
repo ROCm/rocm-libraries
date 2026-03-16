@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,10 @@
 
 #pragma once
 
+#include <array>
 #include <benchmark/benchmark.h>
 #include <vector>
+
 namespace benchmark
 {
 
@@ -135,9 +137,8 @@ inline void customCSVReporter::ReportRuns(const std::vector<Run>& reports)
                     continue;
 
                 // benchmark::internal::GetNullLogInstance()
-                *nullLog << "All counters must be present in each run. "
-                         << "Counter named \"" << cnt.first
-                         << "\" was not in a run after being added to the header";
+                *nullLog << "All counters must be present in each run. " << "Counter named \""
+                         << cnt.first << "\" was not in a run after being added to the header";
             }
         }
     }
@@ -155,7 +156,7 @@ inline void customCSVReporter::PrintRunData(const Run& run)
     std::ostream& Err = GetErrorStream();
 
     //get the name of the engine and distribution:
-    std::string temp = run.benchmark_name();
+    std::string temp       = run.benchmark_name();
     std::string deviceName = std::string(temp.begin(), temp.begin() + temp.find("<"));
     temp.erase(0, temp.find("<") + 1);
     std::string engineName = std::string(temp.begin(), temp.begin() + temp.find(","));
@@ -168,7 +169,7 @@ inline void customCSVReporter::PrintRunData(const Run& run)
         temp.erase(0, temp.find(",") + 1);
     }
     std::string disName = std::string(temp.begin(), temp.begin() + temp.find(">"));
-    std::string lambda = "";
+    std::string lambda  = "";
 
     size_t ePos = disName.find("=");
     if(ePos <= disName.size())

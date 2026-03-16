@@ -26,12 +26,10 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
-import logging
 import os
 import subprocess
 import sys
 import argparse
-import time
 
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +43,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -53,14 +52,6 @@ from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
 from Tensile import LibraryLogic
-
-_timing_logger = logging.getLogger("tensile.timing")
-if not _timing_logger.handlers:
-    _h = logging.StreamHandler(sys.stderr)
-    _h.setFormatter(logging.Formatter("%(message)s"))
-    _timing_logger.addHandler(_h)
-    _timing_logger.setLevel(logging.INFO)
-    _timing_logger.propagate = False
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
@@ -84,7 +75,8 @@ def executeStepsInConfig(
         cCompiler: str,
         debugConfig: DebugConfig,
         deviceId: int,
-        probSolDict: dict
+        probSolDict: dict,
+        buildOnly: bool = False,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -102,36 +94,37 @@ def executeStepsInConfig(
         asmToolchain (AssemblyToolchain): The toolchain for making assembly kernels.
         srcToolchain (SourceToolchain): The toolchain for making source kernels.
         cCompiler (str): The C compiler to use.
+        buildOnly (bool): If True, generate and build kernels but skip benchmarking.
     """
 
     buildTmpPath = outputPath / "build_tmp"
-    timingEnabled = globalParameters.get("TimingInstrumentation", False)
 
     ##############################################################################
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
     if "BenchmarkProblems" in config:
-        # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
-        startTime = time.time_ns()
-        BenchmarkProblems.main(
-            config["BenchmarkProblems"],
-            config["UseCache"],
-            asmToolchain,
-            srcToolchain,
-            cCompiler,
-            outputPath,
-            buildTmpPath,
-            debugConfig,
-            deviceId,
-            gfxName,
-            isaInfoMap,
-            probSolDict,
-        )
-        if timingEnabled:
-            elapsed = (time.time_ns() - startTime) / 1_000_000
-            _timing_logger.info(f"TIMING:python_benchmark_problems:{elapsed:.3f}")
+        with timing_context("python_benchmark_problems"):
+            BenchmarkProblems.main(
+                config["BenchmarkProblems"],
+                config["UseCache"],
+                asmToolchain,
+                srcToolchain,
+                cCompiler,
+                outputPath,
+                buildTmpPath,
+                debugConfig,
+                deviceId,
+                gfxName,
+                isaInfoMap,
+                probSolDict,
+                buildOnly,
+            )
         print1("")
+
+    if buildOnly:
+        print1("# Build-only mode: skipping LibraryLogic and LibraryClient.")
+        return
 
     ##############################################################################
     # Library Logic
@@ -147,19 +140,16 @@ def executeStepsInConfig(
                 libraryLogicConfig = config["LibraryLogic"]
             else:
                 libraryLogicConfig = {}
-            startTime = time.time_ns()
-            LibraryLogic.main(
-                libraryLogicConfig,
-                srcToolchain.compiler,
-                outputPath,
-                debugConfig.splitGSU,
-                debugConfig.printSolutionRejectionReason,
-                debugConfig.printIndexAssignmentInfo,
-                isaInfoMap,
-            )
-            if timingEnabled:
-                elapsed = (time.time_ns() - startTime) / 1_000_000
-                _timing_logger.info(f"TIMING:python_library_logic:{elapsed:.3f}")
+            with timing_context("python_library_logic"):
+                LibraryLogic.main(
+                    libraryLogicConfig,
+                    srcToolchain.compiler,
+                    outputPath,
+                    debugConfig.splitGSU,
+                    debugConfig.printSolutionRejectionReason,
+                    debugConfig.printIndexAssignmentInfo,
+                    isaInfoMap,
+                )
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -173,19 +163,16 @@ def executeStepsInConfig(
             libraryClientConfig = config["LibraryClient"]
         else:
             libraryClientConfig = {}
-        startTime = time.time_ns()
-        ClientWriter.main(
-            libraryClientConfig,
-            asmToolchain.assembler,
-            cCompiler,
-            isaInfoMap,
-            outputPath,
-            deviceId,
-            gfxName,
-        )
-        if timingEnabled:
-            elapsed = (time.time_ns() - startTime) / 1_000_000
-            _timing_logger.info(f"TIMING:python_client_writer:{elapsed:.3f}")
+        with timing_context("python_client_writer"):
+            ClientWriter.main(
+                libraryClientConfig,
+                asmToolchain.assembler,
+                cCompiler,
+                isaInfoMap,
+                outputPath,
+                deviceId,
+                gfxName,
+            )
         print1("")
 
 
@@ -493,7 +480,11 @@ def Tensile(userArgs):
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")
     argParser.add_argument("--use-cache", dest="useCache", action="store_true",
-            help="Ignore cache; redo parameter forking and solution generation")
+            help="Bypass redo parameter forking and solution generation and used existing solutions.")
+    argParser.add_argument("--build-only", dest="buildOnly", action="store_true",
+            help="Generate and compile kernels but skip benchmarking. "
+                 "Useful for splitting compilation and benchmarking across runs/nodes. "
+                 "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
 
@@ -502,6 +493,7 @@ def Tensile(userArgs):
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
+    buildOnly = args.buildOnly
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
 
@@ -632,7 +624,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

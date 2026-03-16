@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -179,18 +156,33 @@ namespace rocRoller
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto numTilesX = tileCeilDivide(numPTTilesX * literal(sizePTTileX), tile.sizes[0]);
-            auto numTilesY = tileCeilDivide(numPTTilesY * literal(sizePTTileY), tile.sizes[1]);
+            // TODO: Audit scale-pretile and pretile-b paths to make
+            // this intuitive.  Consider renaming the numPTTilesX/Y
+            // variables.
+            auto numTilesX = tileCeilDivide(numPTTilesX, tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(numPTTilesY, tile.sizes[1]);
 
             auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
             auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
             auto iX = graph.coordinates.addElement(tile.tileIndex(0));
             auto iY = graph.coordinates.addElement(tile.tileIndex(1));
 
-            AssertFatal(tile.sizes[0] % sizePTTileX == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[1] % sizePTTileY == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[0] / sizePTTileX > 0, "Bad pre-tile size.");
-            AssertFatal(tile.sizes[1] / sizePTTileY > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0,
+                        "Pre-tile size mismatch: tile.sizes[0] must be divisible by sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0,
+                        "Pre-tile size mismatch: tile.sizes[1] must be divisible by sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0,
+                        "Bad pre-tile size: tile.sizes[0] must be greater than sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0,
+                        "Bad pre-tile size: tile.sizes[1] must be greater than sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
 
             auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
             auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;

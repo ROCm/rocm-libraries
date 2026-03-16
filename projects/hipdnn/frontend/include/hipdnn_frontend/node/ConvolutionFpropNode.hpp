@@ -8,6 +8,9 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/ConvolutionFpropPacker.hpp>
+#include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -20,6 +23,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvFpropAttributes convAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackConvFpropOperation(opDesc, tensorMap, convAttr));
+        attributes = std::move(convAttr);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -171,7 +184,7 @@ public:
             HIPDNN_RETURN_IF_LT(dilationVal,
                                 1,
                                 ErrorCode::INVALID_VALUE,
-                                "ConvolutionFpropNode: Dilation must > 0");
+                                "ConvolutionFpropNode: Dilation must be > 0");
 
             HIPDNN_RETURN_IF_LT(prePad,
                                 0,
@@ -364,6 +377,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createConvFpropOperation(attributes, tensorDescs, operations);
     }
 };
 
