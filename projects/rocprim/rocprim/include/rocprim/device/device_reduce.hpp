@@ -211,6 +211,10 @@ inline hipError_t reduce_impl(void*               temporary_storage,
         const unsigned int too_large = size > 0 ? items_per_block / size : 0;
         const unsigned int too_small = number_of_blocks;
 
+        const unsigned int needed_ipt
+            = detail::next_power_of_two(too_large == 0 ? items_per_thread * too_small
+                                                       : ceiling_div(items_per_thread, too_large));
+
         if(debug_synchronous)
         {
             start = std::chrono::steady_clock::now();
@@ -228,9 +232,6 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                 [&](auto i)
                 {
                     constexpr unsigned ipt = 1 << i;
-                    const unsigned int needed_ipt = detail::next_power_of_two(
-                        too_large == 0 ? config_items_per_thread * too_small
-                                      : ceiling_div(config_items_per_thread, too_large));
 
                     if(needed_ipt == ipt)
                     {
