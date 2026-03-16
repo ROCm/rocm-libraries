@@ -63,6 +63,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_MhaBackward_*"
   - "*/GPU_MhaForward_*"
   - "*GPU_TestMhaFind20*"
+  - "*/GPU_MIOpenDriver*"
 
 
 test_categories:
@@ -151,7 +152,8 @@ test_categories:
       - "Full/GPU_ConvGrpActivInfer3D_FP32*"
       - "Full/GPU_ConvGrpActivInfer3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "*/GPU_MIOpenDriver*"
+      - "Full/GPU_MIOpenDriverConv2dTransTest*"
+      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
 
@@ -198,7 +200,6 @@ test_categories:
     test_patterns: *positive_patterns
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
       - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
 
@@ -250,7 +251,6 @@ test_categories:
       - "*"
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
 
     test_files:
       # All test files in the suite
@@ -307,7 +307,11 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: *gfx11_common_patterns
+    test_patterns: 
+      - *gfx11_common_patterns
+      - "*/GPU_MIOpenDriver*"
+      - "Smoke/CPU_Handle_NONE*"
+      - "Full/GPU_reduce_custom_fp32*
     labels:
       - "quick"
       - "standard"

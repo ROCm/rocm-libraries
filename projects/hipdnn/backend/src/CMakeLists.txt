@@ -33,6 +33,7 @@ add_library(
     descriptors/ExecutionPlanDescriptor.cpp
     descriptors/GraphDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
+    descriptors/LayernormOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
