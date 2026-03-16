@@ -49,19 +49,6 @@ constexpr int64_t K_SHARED_TENSOR_Y_UID = 15;
 class TestGraphDescriptorOps : public ::testing::Test
 {
 public:
-    // Find a tensor in a GraphT by UID, returns nullptr if not found
-    static const TensorAttributesT* findTensorByUid(const GraphT& graphT, int64_t uid)
-    {
-        for(const auto& tensor : graphT.tensors)
-        {
-            if(tensor->uid == uid)
-            {
-                return tensor.get();
-            }
-        }
-        return nullptr;
-    }
-
     // Validate a tensor's fields against expected values
     static void verifyTensor(const TensorAttributesT* tensor,
                              int64_t expectedUid,
@@ -900,74 +887,6 @@ TEST_F(TestGraphDescriptorOps, GetSerializedGraphMultipleCalls)
     // Verify both unpacked graphs contain identical node data
     EXPECT_EQ(graphT1->nodes[0]->compute_data_type, graphT2->nodes[0]->compute_data_type);
     EXPECT_EQ(graphT1->nodes[0]->attributes.type, graphT2->nodes[0]->attributes.type);
-}
-
-// =============================================================================
-// Graph Structure Verification Tests
-// =============================================================================
-
-TEST_F(TestGraphDescriptorOps, GraphHasCorrectNodeCount)
-{
-    auto conv = createDefaultConvOp();
-
-    auto desc = getDescriptor();
-    setHandle();
-
-    std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
-    desc->finalize();
-
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-
-    ASSERT_EQ(graphT->nodes.size(), 1);
-
-    // Verify node has ConvolutionFwdAttributes and correct tensor UID references
-    verifyConvFwdNode(*graphT->nodes[0],
-                      DataType::FLOAT,
-                      K_TENSOR_X_UID,
-                      K_TENSOR_W_UID,
-                      K_TENSOR_Y_UID,
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_PADDING),
-                      toVec(K_CONV_STRIDE),
-                      toVec(K_CONV_DILATION));
-}
-
-TEST_F(TestGraphDescriptorOps, GraphHasCorrectTensorCount)
-{
-    auto conv = createDefaultConvOp();
-
-    auto desc = getDescriptor();
-    setHandle();
-
-    std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
-    desc->finalize();
-
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
-
-    ASSERT_EQ(graphT->tensors.size(), 3);
-
-    // Verify each tensor's full field values (not just UIDs)
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_X_UID),
-                 K_TENSOR_X_UID,
-                 toVec(K_TENSOR_X_DIMS),
-                 toVec(K_TENSOR_X_STRIDES),
-                 DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_W_UID),
-                 K_TENSOR_W_UID,
-                 toVec(K_TENSOR_W_DIMS),
-                 toVec(K_TENSOR_W_STRIDES),
-                 DataType::FLOAT);
-    verifyTensor(findTensorByUid(*graphT, K_TENSOR_Y_UID),
-                 K_TENSOR_Y_UID,
-                 toVec(K_TENSOR_Y_DIMS),
-                 toVec(K_TENSOR_Y_STRIDES),
-                 DataType::FLOAT);
 }
 
 // =============================================================================

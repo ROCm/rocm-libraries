@@ -125,11 +125,11 @@ void GraphDescriptor::setPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            const void* arrayOfElements)
 {
     flatbuffers::Optional<int64_t> fbOptional = flatbuffers::nullopt;
-    setOptionalInt64(fbOptional,
-                     attributeType,
-                     elementCount,
-                     arrayOfElements,
-                     "GraphDescriptor::setPreferredEngineId");
+    setOptionalScalar<HIPDNN_TYPE_INT64>(fbOptional,
+                                         attributeType,
+                                         elementCount,
+                                         arrayOfElements,
+                                         "GraphDescriptor::setPreferredEngineId");
     _preferredEngineId
         = fbOptional.has_value() ? std::optional<int64_t>(fbOptional.value()) : std::nullopt;
 }
@@ -287,12 +287,12 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
         = _preferredEngineId.has_value()
               ? flatbuffers::Optional<int64_t>(_preferredEngineId.value())
               : flatbuffers::nullopt;
-    getOptionalInt64(fbOptional,
-                     attributeType,
-                     requestedElementCount,
-                     elementCount,
-                     arrayOfElements,
-                     "GraphDescriptor::getAttribute()");
+    getOptionalScalar<HIPDNN_TYPE_INT64>(fbOptional,
+                                         attributeType,
+                                         requestedElementCount,
+                                         elementCount,
+                                         arrayOfElements,
+                                         "GraphDescriptor::getAttribute()");
 }
 
 void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,

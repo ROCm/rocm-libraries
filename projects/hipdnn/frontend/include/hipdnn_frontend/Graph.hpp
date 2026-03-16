@@ -1235,12 +1235,15 @@ public:
      * descriptor and rebuilds the frontend Graph representation. Tensors are
      * shared across operations via UID-based lookup.
      *
-     * Currently supports: ConvolutionFprop operations (POC).
+     * Currently supports: ConvolutionFprop operations (phased rollout — additional operation types will be added incrementally).
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
     {
         _sub_nodes.clear();
+        _graphDesc.reset();
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
         HIPDNN_CHECK_ERROR(detail::unpackGraphDescriptor(
             graphDesc, _sub_nodes, graph_attributes, _preferredEngineId));
         return {};
@@ -1251,22 +1254,29 @@ public:
     /// frontend graph via unpackGraphDescriptor(). If a handle is provided,
     /// the descriptor is finalized for full backend support.
     ///
-    /// NOTE: Currently only supports ConvolutionFprop operations. Graphs
-    /// containing other operation types will fail during unpackOperation().
+    /// NOTE: Currently supports ConvolutionFprop operations (phased rollout — additional
+    /// operation types will be added incrementally). Graphs containing unsupported
+    /// operation types will fail during unpackOperation().
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
-        _sub_nodes.clear();
-        auto [graphDesc, err] = detail::deserializeAndUnpackGraph(
-            handle, data, _sub_nodes, graph_attributes, _preferredEngineId);
+        std::vector<std::shared_ptr<graph::INode>> tempNodes;
+        graph::GraphAttributes tempAttrs;
+        std::optional<int64_t> tempEngineId;
 
+        auto [graphDesc, err]
+            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
         if(err.is_bad())
         {
             return err;
         }
 
+        _sub_nodes = std::move(tempNodes);
+        graph_attributes = std::move(tempAttrs);
+        _preferredEngineId = tempEngineId;
         _graphDesc = std::move(graphDesc);
-
+        _engineConfigDesc.reset();
+        _executionPlanDesc.reset();
         return {};
     }
 

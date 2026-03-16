@@ -6,6 +6,7 @@
 #include "DescriptorTestUtils.hpp"
 #include "TensorDescriptorTestUtils.hpp"
 #include "hipdnn_backend.h"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -41,6 +42,20 @@ inline ConvOpBundle createDefaultConvOp(hipdnnDataType_t computeType = HIPDNN_DA
     bundle.convOp = createFinalizedConvOp(
         bundle.xDesc.get(), bundle.wDesc.get(), bundle.yDesc.get(), computeType);
     return bundle;
+}
+
+/// Finds a tensor in a GraphT by UID, returns nullptr if not found.
+inline const hipdnn_data_sdk::data_objects::TensorAttributesT*
+    findTensorByUid(const hipdnn_data_sdk::data_objects::GraphT& graphT, int64_t uid)
+{
+    for(const auto& tensor : graphT.tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            return tensor.get();
+        }
+    }
+    return nullptr;
 }
 
 } // namespace hipdnn_backend::test_utilities

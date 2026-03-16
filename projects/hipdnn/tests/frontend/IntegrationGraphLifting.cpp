@@ -408,4 +408,44 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
     EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
 }
 
+// Verifies that fromBackendDescriptor returns an error (not a crash) when given
+// a graph descriptor with no operations set.
+TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
+{
+    // Create a backend graph descriptor with no operations
+    hipdnnBackendDescriptor_t desc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc),
+              HIPDNN_STATUS_SUCCESS);
+
+    // Attempt to lift — should return an error since no operations are set
+    auto graph = std::make_shared<TestableGraph>();
+    auto result = graph->fromBackendDescriptor(desc);
+    EXPECT_NE(result.code, ErrorCode::OK)
+        << "fromBackendDescriptor should fail on a descriptor with no operations";
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Verifies that deserialize_via_backend returns an error (not a crash) when
+// given corrupt (garbage) bytes.
+TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
+{
+    std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
+
+    auto graph = std::make_shared<TestableGraph>();
+    auto result = graph->deserialize_via_backend(_handle, garbage);
+    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on corrupt data";
+}
+
+// Verifies that deserialize_via_backend returns an error (not a crash) when
+// given an empty data vector.
+TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
+{
+    std::vector<uint8_t> empty;
+
+    auto graph = std::make_shared<TestableGraph>();
+    auto result = graph->deserialize_via_backend(_handle, empty);
+    EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on empty data";
+}
+
 } // namespace

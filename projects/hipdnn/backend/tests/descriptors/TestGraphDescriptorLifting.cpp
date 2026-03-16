@@ -184,45 +184,21 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Find the X tensor by UID and verify its attributes
-    const hipdnn_data_sdk::data_objects::TensorAttributesT* xTensor = nullptr;
-    for(const auto& tensor : graphT->tensors)
-    {
-        if(tensor->uid == K_TENSOR_X_UID)
-        {
-            xTensor = tensor.get();
-            break;
-        }
-    }
+    auto* xTensor = findTensorByUid(*graphT, K_TENSOR_X_UID);
     ASSERT_NE(xTensor, nullptr);
     EXPECT_EQ(xTensor->data_type, DataType::FLOAT);
     EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
     EXPECT_EQ(xTensor->strides, toVec(K_TENSOR_X_STRIDES));
 
     // Find the W tensor by UID and verify its attributes
-    const hipdnn_data_sdk::data_objects::TensorAttributesT* wTensor = nullptr;
-    for(const auto& tensor : graphT->tensors)
-    {
-        if(tensor->uid == K_TENSOR_W_UID)
-        {
-            wTensor = tensor.get();
-            break;
-        }
-    }
+    auto* wTensor = findTensorByUid(*graphT, K_TENSOR_W_UID);
     ASSERT_NE(wTensor, nullptr);
     EXPECT_EQ(wTensor->data_type, DataType::FLOAT);
     EXPECT_EQ(wTensor->dims, toVec(K_TENSOR_W_DIMS));
     EXPECT_EQ(wTensor->strides, toVec(K_TENSOR_W_STRIDES));
 
     // Find the Y tensor by UID and verify its attributes
-    const hipdnn_data_sdk::data_objects::TensorAttributesT* yTensor = nullptr;
-    for(const auto& tensor : graphT->tensors)
-    {
-        if(tensor->uid == K_TENSOR_Y_UID)
-        {
-            yTensor = tensor.get();
-            break;
-        }
-    }
+    auto* yTensor = findTensorByUid(*graphT, K_TENSOR_Y_UID);
     ASSERT_NE(yTensor, nullptr);
     EXPECT_EQ(yTensor->data_type, DataType::FLOAT);
     EXPECT_EQ(yTensor->dims, toVec(K_TENSOR_Y_DIMS));
@@ -614,15 +590,7 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
 
     // Spot-check tensor dims
-    const TensorAttributesT* xTensor = nullptr;
-    for(const auto& tensor : graphT->tensors)
-    {
-        if(tensor->uid == K_TENSOR_X_UID)
-        {
-            xTensor = tensor.get();
-            break;
-        }
-    }
+    auto* xTensor = findTensorByUid(*graphT, K_TENSOR_X_UID);
     ASSERT_NE(xTensor, nullptr);
     EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
 }
