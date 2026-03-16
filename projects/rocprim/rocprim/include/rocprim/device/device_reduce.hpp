@@ -57,7 +57,6 @@ namespace detail
         std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
     }
 
-
 template<bool WithInitialValue, // true when inital_value should be used in reduction
          class Config,
          class InputIterator,
@@ -147,9 +146,9 @@ inline hipError_t reduce_impl(void*               temporary_storage,
     const unsigned int max_items_per_thread = get_max_items_per_thread(items_per_thread);
     const unsigned int max_number_of_blocks = max_items_per_thread / items_per_thread;
 
-    // We increase the items per thread with a maximum of 16.
-    // This means if the number_of_blocks is larger than 16 it
-    // will not fit in one kernel.
+    // We increase the items per thread with a maximum of 16x the input value.
+    // This ensures each thread processes enough work while keeping the total
+    // number of blocks manageable for a single kernel launch.
     if(number_of_blocks > max_number_of_blocks)
     {
         const auto aligned_size_limit = number_of_blocks_limit * items_per_block;
@@ -225,7 +224,8 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             constexpr unsigned int config_items_per_thread
                 = decltype(target_config)::params.kernel_config.items_per_thread;
 
-            constexpr unsigned int max_items_per_thread = get_max_items_per_thread(config_items_per_thread);
+            constexpr unsigned int max_items_per_thread
+                = get_max_items_per_thread(config_items_per_thread);
 
             // for(int i = 1; i <= max_items_per_thread; i*2)
             ::rocprim::detail::constexpr_for_lte<0, Log2<max_items_per_thread>::VALUE, 1>(
