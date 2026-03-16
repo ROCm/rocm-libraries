@@ -11,7 +11,7 @@
 #include "NodeFactory.hpp"
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 
-using hipdnn_data_sdk::utilities::toFbOptional;
+using hipdnn_data_sdk::utilities::toFlatbufferOptional;
 using hipdnn_data_sdk::utilities::toStdOptional;
 
 namespace hipdnn_backend
@@ -59,7 +59,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGra
     graph->compute_data_type = _computeDataType;
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
-    graph->preferred_engine_id = toFbOptional(_preferredEngineId);
+    graph->preferred_engine_id = toFlatbufferOptional(_preferredEngineId);
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
@@ -126,13 +126,13 @@ void GraphDescriptor::setPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            int64_t elementCount,
                                            const void* arrayOfElements)
 {
-    flatbuffers::Optional<int64_t> fbOptional = flatbuffers::nullopt;
-    setOptionalScalar<HIPDNN_TYPE_INT64>(fbOptional,
+    flatbuffers::Optional<int64_t> flatbufferOptional = flatbuffers::nullopt;
+    setOptionalScalar<HIPDNN_TYPE_INT64>(flatbufferOptional,
                                          attributeType,
                                          elementCount,
                                          arrayOfElements,
                                          "GraphDescriptor::setPreferredEngineId");
-    _preferredEngineId = toStdOptional(fbOptional);
+    _preferredEngineId = toStdOptional(flatbufferOptional);
 }
 
 void GraphDescriptor::setHandle(hipdnnBackendAttributeType_t attributeType,
@@ -284,8 +284,8 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            int64_t* elementCount,
                                            void* arrayOfElements) const
 {
-    auto fbOptional = toFbOptional(_preferredEngineId);
-    getOptionalScalar<HIPDNN_TYPE_INT64>(fbOptional,
+    auto flatbufferOptional = toFlatbufferOptional(_preferredEngineId);
+    getOptionalScalar<HIPDNN_TYPE_INT64>(flatbufferOptional,
                                          attributeType,
                                          requestedElementCount,
                                          elementCount,
