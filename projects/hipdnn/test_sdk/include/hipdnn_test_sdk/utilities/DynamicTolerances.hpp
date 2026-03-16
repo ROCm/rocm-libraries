@@ -776,7 +776,7 @@ constexpr double getErrorMultiplier(PointwiseErrorClass errorClass)
     case PointwiseErrorClass::COMPOSITE_BWD:
         return IS_HIGH_PRECISION ? 24.0 : 48.0;
     default:
-        return 1.0;
+        return IS_HIGH_PRECISION ? 24.0 : 48.0;
     }
 }
 

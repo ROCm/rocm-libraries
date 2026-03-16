@@ -8,8 +8,6 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
 
@@ -56,17 +54,6 @@ template <typename Input1Type,
 class CpuReferencePointwiseFixture : public ::testing::Test
 {
 protected:
-    float getMixedTypeTolerance() const
-    {
-        auto input1Tolerance = pointwise::getTolerance<Input1Type>();
-        auto input2Tolerance = pointwise::getTolerance<Input2Type>();
-        auto outputTolerance = pointwise::getTolerance<OutputType>();
-
-        return std::max({static_cast<float>(input1Tolerance),
-                         static_cast<float>(input2Tolerance),
-                         static_cast<float>(outputTolerance)});
-    }
-
     /// Calculates dynamic tolerance based on the operation and input data range.
     /// Takes the max of ComputeType-based and float-based tolerance because test
     /// expected values are computed from float constants (PI, E, TEST_VALUE_*),

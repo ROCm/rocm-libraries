@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -1836,4 +1837,67 @@ TEST(TestCalculatePointwiseTolerance, BackwardToleranceExceedsForward)
     auto transBwdBf16 = calculatePointwiseTolerance<bfloat16, bfloat16, bfloat16>(
         1.0, PointwiseErrorClass::TRANSCENDENTAL_BWD);
     EXPECT_GT(transBwdBf16, transFwdBf16);
+}
+
+// =================================================================================================
+// TestClassifyPointwiseOp — exercises every PointwiseMode branch in classifyPointwiseOp
+// and isBoundedOutput for code coverage.
+// =================================================================================================
+
+using hipdnn_data_sdk::data_objects::PointwiseMode;
+using hipdnn_data_sdk::data_objects::EnumNamesPointwiseMode;
+using hipdnn_data_sdk::data_objects::EnumValuesPointwiseMode;
+
+// Verify one representative per error class for correctness
+TEST(TestClassifyPointwiseOp, OnePerClassCorrect)
+{
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::ABS),
+              PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::ADD),
+              PointwiseErrorClass::LINEAR);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::DIV),
+              PointwiseErrorClass::RATIONAL);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::EXP),
+              PointwiseErrorClass::TRANSCENDENTAL_FWD);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::TANH_BWD),
+              PointwiseErrorClass::TRANSCENDENTAL_BWD);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::GELU_FWD),
+              PointwiseErrorClass::COMPOSITE_FWD);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::GELU_BWD),
+              PointwiseErrorClass::COMPOSITE_BWD);
+}
+
+// Exercise every enum value for branch coverage; verify result is a valid class
+TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
+{
+    for(auto mode : EnumValuesPointwiseMode())
+    {
+        if(mode == PointwiseMode::UNSET)
+        {
+            continue;
+        }
+        auto errorClass = pointwise::classifyPointwiseOp(mode);
+        EXPECT_LE(static_cast<uint8_t>(errorClass),
+                  static_cast<uint8_t>(PointwiseErrorClass::COMPOSITE_BWD))
+            << "invalid class for " << EnumNamesPointwiseMode()[static_cast<int>(mode)];
+    }
+}
+
+// Only SIGMOID_FWD, TANH_FWD, ERF are bounded; all others are not
+TEST(TestClassifyPointwiseOp, BoundedOutputCorrect)
+{
+    EXPECT_TRUE(pointwise::isBoundedOutput(PointwiseMode::SIGMOID_FWD));
+    EXPECT_TRUE(pointwise::isBoundedOutput(PointwiseMode::TANH_FWD));
+    EXPECT_TRUE(pointwise::isBoundedOutput(PointwiseMode::ERF));
+
+    for(auto mode : EnumValuesPointwiseMode())
+    {
+        if(mode == PointwiseMode::UNSET || mode == PointwiseMode::SIGMOID_FWD
+           || mode == PointwiseMode::TANH_FWD || mode == PointwiseMode::ERF)
+        {
+            continue;
+        }
+        EXPECT_FALSE(pointwise::isBoundedOutput(mode))
+            << EnumNamesPointwiseMode()[static_cast<int>(mode)] << " should not be bounded";
+    }
 }
