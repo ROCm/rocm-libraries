@@ -43,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
+          ref: faeb8f95793a8e671bf857582c992e232f3804da # 2026-03-03
 
       - name: Install python deps
         run: |
@@ -95,11 +95,8 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build TheRock/build --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-archives and therock-dist
+        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -151,7 +148,8 @@ jobs:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu'}}
+    # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx94X-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}

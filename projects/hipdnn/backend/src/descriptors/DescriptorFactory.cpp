@@ -16,9 +16,11 @@
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
+#include "SdpaFpropOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -88,6 +90,12 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<SdpaFpropOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<LayernormOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
