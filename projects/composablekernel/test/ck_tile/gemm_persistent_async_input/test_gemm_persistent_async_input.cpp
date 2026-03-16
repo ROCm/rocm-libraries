@@ -14,6 +14,7 @@
 
 using Row       = ck_tile::tensor_layout::gemm::RowMajor;
 using Col       = ck_tile::tensor_layout::gemm::ColumnMajor;
+using F8        = ck_tile::fp8_t;
 using F16       = ck_tile::fp16_t;
 using F32       = ck_tile::fp32_t;
 using Intrawave = ck_tile::integral_constant<ck_tile::GemmPipelineScheduler,
@@ -75,8 +76,9 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
             M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
 
         // Fill input tensors with random values
-        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5, 11939}(a_m_k);
-        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5, 11940}(b_k_n);
+
+        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-2, 2, 11939}(a_m_k);
+        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-2, 2, 11940}(b_k_n);
 
         // Allocate device memory
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
@@ -142,7 +144,7 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
         using DsLayout   = ck_tile::tuple<>;
         using DsDataType = ck_tile::tuple<>;
 
-#if 1 // CShuffleEpilogue leads to LDS bank conflicts. Use DefaultGemm2DEpilogue if want to reduce
+#if 0 // CShuffleEpilogue leads to LDS bank conflicts. Use DefaultGemm2DEpilogue if want to reduce
       // the bank conflict to 0. This is just for this test suite.
         using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<
             ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
@@ -308,6 +310,7 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
 // Define test types for different layout combinations
 using RowRowRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Row, Row, Row, F16, F16, F32, F16>;
 using RowColRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Row, Col, Row, F16, F16, F32, F16>;
+using RowColRow_F8F8F32F8    = TestGemmPersistentAsyncInput<Row, Col, Row, F8, F8, F32, F8>;
 using ColRowRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Row, Row, F16, F16, F32, F16>;
 using ColColRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Col, Row, F16, F16, F32, F16>;
 
@@ -316,6 +319,7 @@ using ColColRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Col, Row, F16, 
 
 // Test case for Row-Col-Row layout
 TEST_F(RowColRow_F16F16F32F16, BasicTest) { this->Run(); }
+TEST_F(RowColRow_F8F8F32F8, BasicTest) { this->Run(); }
 
 // Test case for Col-Row-Row layout
 // TEST_F(ColRowRow_F16F16F32F16, BasicTest) { this->Run(); }

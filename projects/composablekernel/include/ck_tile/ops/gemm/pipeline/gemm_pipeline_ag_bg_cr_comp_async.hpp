@@ -15,9 +15,10 @@ namespace ck_tile {
 template <typename Problem>
 struct BaseGemmPipelineAgBgCrCompAsync
 {
-    static constexpr index_t PrefetchStages  = 2;
-    static constexpr index_t PrefillStages   = 1;
-    static constexpr index_t GlobalBufferNum = 1;
+    static constexpr index_t PrefetchStages   = 2;
+    static constexpr index_t PrefillStages    = 1;
+    static constexpr index_t GlobalBufferNum  = 1;
+    static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
 
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {

@@ -26,8 +26,13 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     using Base::is_b_load_tr;
 
     static constexpr index_t kLdsBankBytes = 4;
-    static constexpr index_t kLdsRowBytes  = get_warp_size() * kLdsBankBytes;
-    static constexpr index_t MaxVecSize    = get_max_mem_vec_inst_width();
+#if defined(__gfx950__)
+    static constexpr index_t kLdsBankCount = 64;
+#else
+    static constexpr index_t kLdsBankCount = 32;
+#endif
+    static constexpr index_t kLdsRowBytes = kLdsBankCount * kLdsBankBytes;
+    static constexpr index_t MaxVecSize   = get_max_mem_vec_inst_width();
 
     template <typename Problem,
               typename OverrideADataType = remove_cvref_t<typename Problem::ADataType>>
@@ -83,8 +88,10 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
-            constexpr index_t KPack          = GetSmemPackA<Problem>();
-            constexpr index_t PacksPerLdsRow = (kLdsRowBytes / sizeof(OverrideADataType)) / KPack;
+            constexpr index_t APackedSize = numeric_traits<OverrideADataType>::PackedSize;
+            constexpr index_t KPack       = MaxVecSize / (sizeof(OverrideADataType) * APackedSize);
+            constexpr index_t PacksPerLdsRow =
+                (kLdsRowBytes / (sizeof(OverrideADataType) * APackedSize)) / KPack;
 
             constexpr index_t L2              = KPack;
             constexpr index_t L1              = PacksPerLdsRow;
@@ -147,9 +154,11 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
-            constexpr index_t KPack = GetSmemPackB<Problem>();
+            using BDataType               = remove_cvref_t<typename Problem::BDataType>;
+            constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
+            constexpr index_t KPack       = MaxVecSize / (sizeof(BDataType) * BPackedSize);
             constexpr index_t PacksPerLdsRow =
-                (kLdsRowBytes / sizeof(typename Problem::BDataType)) / KPack;
+                (kLdsRowBytes / (sizeof(typename Problem::BDataType) * BPackedSize)) / KPack;
 
             constexpr index_t L2              = KPack;
             constexpr index_t L1              = PacksPerLdsRow;
