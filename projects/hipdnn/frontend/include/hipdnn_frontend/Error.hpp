@@ -12,8 +12,9 @@
 
 #pragma once
 
-#include "Types.hpp"
+#include <ostream>
 #include <string>
+#include <vector>
 
 /**
  * @brief Check an Error return value and propagate if an error occurred

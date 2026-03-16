@@ -18,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -43,7 +44,8 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               LayernormFpropSignatureKey,
                                               MatmulSignatureKey,
                                               PointwiseSignatureKey,
-                                              RMSNormFwdSignatureKey>;
+                                              RMSNormFwdSignatureKey,
+                                              SdpaFwdSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
 {

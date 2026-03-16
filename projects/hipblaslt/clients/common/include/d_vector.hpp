@@ -73,7 +73,7 @@ public:
         return capacity() < s;
     }
 
-    size_t get_available_host_memory()
+    size_t get_available_host_memory(size_t allocated_capacity)
     {
 #ifdef __linux__
         struct sysinfo info;
@@ -93,10 +93,7 @@ public:
         if(GlobalMemoryStatusEx(&memStatus))
         {
             // In the windows system, the host memory(pinned memory)'s capacity is the half of the physical memory
-            // Use available physical memory with a safety margin to avoid OOM
-            // Dividing by 2 provides a conservative estimate for hipHostMalloc
-            // during heavy testing scenarios
-            return memStatus.ullAvailPhys / 2;
+            return (memStatus.ullTotalPhys / 2) - allocated_capacity;
         }
         else
         {
@@ -110,10 +107,11 @@ public:
     }
 
 protected:
-    hip_memory(size_t size, size_t capacity, bool use_HMM = false)
+    hip_memory(size_t size, size_t capacity, bool use_HMM = false, size_t allocated_capacity = 0)
         : m_size(size)
         , m_capacity(capacity)
         , m_managed(use_HMM)
+        , m_allocated_capacity(allocated_capacity)
     {
     }
     virtual ~hip_memory() = default;
@@ -121,6 +119,7 @@ protected:
     size_t m_size     = 0;
     size_t m_capacity = 0;
     bool   m_managed  = false;
+    size_t m_allocated_capacity = 0;
 };
 
 /* ============================================================================================ */
@@ -133,15 +132,15 @@ public:
     {
     }
 
-    d_memory(size_t size, size_t capacity, bool use_HMM = false)
-        : hip_memory(size, capacity, use_HMM)
+    d_memory(size_t size, size_t capacity, bool use_HMM = false, size_t allocated_capacity = 0)
+        : hip_memory(size, capacity, use_HMM, allocated_capacity)
     {
         char* d = nullptr;
 
         if(use_HMM)
         {
             // Keep 20% of the available system memory for room of emergency
-            size_t available_host_memory = get_available_host_memory() * 0.8;
+            size_t available_host_memory = get_available_host_memory(allocated_capacity) * 0.8;
             // Need to ensure sufficient host memory, otherwise hipMallocManaged may OOM and hip api won't return error code,
             // and will cause the gtest get aborted
             if(available_host_memory < capacity || hipMallocManaged(&d, capacity) != hipSuccess)
@@ -187,13 +186,13 @@ public:
     {
     }
 
-    h_memory(size_t size, size_t capacity, bool use_HMM = false)
-        : hip_memory(size, capacity, false)
+    h_memory(size_t size, size_t capacity, bool use_HMM = false, size_t allocated_capacity = 0)
+        : hip_memory(size, capacity, false, allocated_capacity)
     {
         char* d = nullptr;
 
         // Keep 20% of the available system memory for room of emergency
-        size_t available_host_memory = get_available_host_memory() * 0.8;
+        size_t available_host_memory = get_available_host_memory(allocated_capacity) * 0.8;
         // Need to ensure sufficient host memory, otherwise hipHostMalloc may OOM and hip api won't return error code,
         // and will cause the gtest get aborted
         if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
@@ -272,7 +271,14 @@ private:
             // Allocate 20% extra if it is not huge_request for later reuse
             size_t alloc_capacity = huge_request ? bytes : static_cast<size_t>(bytes * 1.2); 
 
-            auto e = M(bytes, alloc_capacity, use_HMM);
+            // Calculate the total allocated capacity of the memory pool
+            size_t allocated_capacity = 0;
+            for(const auto& mem : pool)
+            {
+                allocated_capacity += mem.capacity();
+            }
+
+            auto e = M(bytes, alloc_capacity, use_HMM, allocated_capacity);
             if(e.get())
                 return e;
             hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
@@ -284,7 +290,8 @@ private:
             if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation )
                 (void)hipGetLastError();
 
-            return M(bytes, bytes, use_HMM);
+            // Pool has been cleared, so allocated_capacity is 0
+            return M(bytes, bytes, use_HMM, 0);
         }
     }
 

@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -6695,4 +6696,126 @@ TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraphWithStats)
     EXPECT_EQ(deserializedSdpaAttributes->stats_tensor_uid.value(), stats->get_uid());
     ASSERT_TRUE(deserializedSdpaAttributes->generate_stats.has_value());
     EXPECT_TRUE(deserializedSdpaAttributes->generate_stats.value());
+}
+
+TEST_F(TestGraph, CustomOpNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto inputA = std::make_shared<TensorAttributes>();
+    inputA->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto inputB = std::make_shared<TensorAttributes>();
+    inputB->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    CustomOpAttributes attributes;
+    attributes.set_name("MyCustomOp").set_custom_op_id("example.my_add");
+
+    auto outputs = graph.custom_op({inputA, inputB}, 2, attributes);
+
+    EXPECT_EQ(outputs.size(), 2u);
+    EXPECT_EQ(outputs[0]->get_name(), "MyCustomOp::output_0");
+    EXPECT_EQ(outputs[1]->get_name(), "MyCustomOp::output_1");
+    EXPECT_TRUE(outputs[0]->get_is_virtual());
+    EXPECT_TRUE(outputs[1]->get_is_virtual());
+
+    // Custom ops are opaque — output dims must be set explicitly by the caller
+    outputs[0]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+    outputs[1]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeCustomOpGraph)
+{
+    Graph graph;
+
+    graph.set_name("SerializedCustomOpGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto inputA = std::make_shared<TensorAttributes>();
+    inputA->set_uid(1).set_name("A").set_dim({4, 8}).set_stride({8, 1}).set_data_type(
+        DataType::FLOAT);
+
+    auto inputB = std::make_shared<TensorAttributes>();
+    inputB->set_uid(2).set_name("B").set_dim({4, 8}).set_stride({8, 1}).set_data_type(
+        DataType::FLOAT);
+
+    std::vector<uint8_t> payload = {0xDE, 0xAD};
+
+    CustomOpAttributes attributes;
+    attributes.set_name("CustomOpNode").set_custom_op_id("example.my_add").set_data(payload);
+
+    auto outputs = graph.custom_op({inputA, inputB}, 1, attributes);
+    outputs[0]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedCustomOpGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type,
+              hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    // 3 tensors: inputA, inputB, output
+    EXPECT_EQ(deserializedGraph->tensors.size(), 3);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*inputA, tensorLookup[inputA->get_uid()]);
+    validateTensor(*inputB, tensorLookup[inputB->get_uid()]);
+    validateTensor(*outputs[0], tensorLookup[outputs[0]->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "CustomOpNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes);
+    auto deserializedCustomOpAttributes
+        = deserializedGraph->nodes[0]->attributes.AsCustomOpAttributes();
+    ASSERT_NE(deserializedCustomOpAttributes, nullptr);
+    EXPECT_EQ(deserializedCustomOpAttributes->custom_op_id, "example.my_add");
+    EXPECT_EQ(deserializedCustomOpAttributes->input_tensor_uids.size(), 2u);
+    EXPECT_EQ(deserializedCustomOpAttributes->input_tensor_uids[0], inputA->get_uid());
+    EXPECT_EQ(deserializedCustomOpAttributes->input_tensor_uids[1], inputB->get_uid());
+    EXPECT_EQ(deserializedCustomOpAttributes->output_tensor_uids.size(), 1u);
+    EXPECT_EQ(deserializedCustomOpAttributes->output_tensor_uids[0], outputs[0]->get_uid());
+    EXPECT_EQ(deserializedCustomOpAttributes->data, payload);
+}
+
+TEST_F(TestGraph, CustomOpValidateFailsWithNullInput)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto validInput = std::make_shared<TensorAttributes>();
+    validInput->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    CustomOpAttributes attributes;
+    attributes.set_name("NullInputOp").set_custom_op_id("example.my_add");
+
+    // Pass a nullptr alongside a valid input
+    auto outputs = graph.custom_op({validInput, nullptr}, 1, attributes);
+    outputs[0]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    // This must return an error, not crash
+    auto err = graph.validate();
+    EXPECT_FALSE(err.is_good());
 }

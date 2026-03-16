@@ -69,6 +69,10 @@ MemLayout_t GetGroupConvLayout(MemLayout_t layout, bool IsDataBuffer)
         case MemLayout_t::CNHW: return MemLayout_t::CGNHW;
         case MemLayout_t::NCHW: return MemLayout_t::NGCHW;
         case MemLayout_t::NHWC:
+            // For transposing solvers, NHWC data will be transposed to NCHW before
+            // group operations, so we return the layout unchanged and let the
+            // transpose mechanism handle the conversion
+            return MemLayout_t::NHWC;
         case MemLayout_t::CHWN:
         case MemLayout_t::HWCN:
         case MemLayout_t::HWNC:
@@ -86,6 +90,10 @@ MemLayout_t GetGroupConvLayout(MemLayout_t layout, bool IsDataBuffer)
         case MemLayout_t::CNHW: return MemLayout_t::GCNHW;
         case MemLayout_t::NCHW: return MemLayout_t::GNCHW;
         case MemLayout_t::NHWC:
+            // For transposing solvers, NHWC weights will be transposed to NCHW before
+            // group operations, so we return the layout unchanged and let the
+            // transpose mechanism handle the conversion
+            return MemLayout_t::NHWC;
         case MemLayout_t::CHWN:
         case MemLayout_t::HWCN:
         case MemLayout_t::HWNC:

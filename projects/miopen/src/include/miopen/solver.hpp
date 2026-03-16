@@ -195,6 +195,8 @@ struct TunableSolverTrait
 template <class Context, class Problem, class PerformanceConfig>
 struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolverTrait
 {
+    using PerformanceConfigType = PerformanceConfig;
+
     bool IsTunable() const final { return true; };
 
     /// Initializes performance config to the default values.

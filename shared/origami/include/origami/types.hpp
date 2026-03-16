@@ -453,6 +453,9 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
+  /// Index of config, not used by Origami but can be used by the user
+  std::size_t index = 0;
+
   /// Global read vector width for matrix A (elements per load)
   std::size_t grvw_a = 1;
 

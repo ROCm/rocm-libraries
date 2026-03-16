@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -103,6 +103,9 @@ set(ROCSPARSE_TEST_SOURCES
   test_bsric0.cpp
   test_bsrilu0.cpp
   test_csric0.cpp
+  test_spic0.cpp
+  test_spilu0.cpp
+  test_sptrsv.cpp
   test_csrilu0.cpp
   test_csritilu0.cpp
   test_csritilu0_ex.cpp
@@ -250,6 +253,9 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsric0.cpp
 ../testings/testing_bsrilu0.cpp
 ../testings/testing_csric0.cpp
+../testings/testing_spic0.cpp
+../testings/testing_spilu0.cpp
+../testings/testing_sptrsv.cpp
 ../testings/testing_csrilu0.cpp
 ../testings/testing_csritilu0.cpp
 ../testings/testing_csritilu0_ex.cpp
@@ -399,7 +405,9 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_importer_format_t.cpp
   ../common/rocsparse_clients_envariables.cpp
   ../common/rocsparse_clients_matrices_dir.cpp
-  ../common/rocsparseio.cpp
+  ../common/rocsparse_clients_spmat_descr.cpp
+  ../common/rocsparse_clients_dnvec_descr.cpp
+ ../common/rocsparseio.cpp
   )
 
 if (BUILD_CLIENTS_ONLY)

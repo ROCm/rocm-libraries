@@ -525,7 +525,7 @@ protected:
             std::inner_product(dims.begin(),
                                dims.end(),
                                strides.begin(),
-                               1,
+                               size_t{1},
                                std::plus<>(),
                                [](size_t len, size_t stride) { return (len - 1) * stride; }));
     }
@@ -538,7 +538,7 @@ protected:
         }
 
         return static_cast<size_t>(
-            std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
+            std::accumulate(dims.begin(), dims.end(), int64_t{1}, std::multiplies<>()));
     }
 };
 
