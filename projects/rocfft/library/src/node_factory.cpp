@@ -1069,7 +1069,6 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
 static std::size_t cutOffBatch_1 = 5;
 static std::size_t cutOffBatch_2 = 25;
 static std::size_t cutOffBatch_3 = 20;
-static std::size_t cutOffBatch_4 = 150;
 
 // Partial pass is currently restricted to large enough batch sizes,
 // unite stride, interleaved FFTs.
@@ -1167,20 +1166,10 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
     // and it also varies more across architectures, so we have more fine-grained cut-offs here.
     size_t cutOffBatch
         = nodeData.precision == rocfft_precision_double ? cutOffBatch_1 : cutOffBatch_2;
-    if(get_curr_gcn_arch_name() == "gfx950")
-    {
-        std::vector<std::vector<size_t>> gfx950LenException = {{72, 84, 84}};
-        auto lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
-        cutOffBatch            = lenExceptionFound ? cutOffBatch_4 : cutOffBatch_3;
-    }
-    else if(get_curr_gcn_arch_name() == "gfx942")
-    {
-        cutOffBatch = cutOffBatch_1;
-    }
-    else if(get_curr_gcn_arch_name() == "gfx90a")
-    {
+    if(get_curr_gcn_arch_name() == "gfx950" || get_curr_gcn_arch_name() == "gfx90a")
         cutOffBatch = cutOffBatch_3;
-    }
+    else if(get_curr_gcn_arch_name() == "gfx942")
+        cutOffBatch = cutOffBatch_1;
 
     return check_pp_restrictions(nodeData, cutOffBatch);
 }
