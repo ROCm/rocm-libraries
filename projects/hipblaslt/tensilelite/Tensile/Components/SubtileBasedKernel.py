@@ -752,11 +752,7 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
   tc = tileInfo.tc
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
   subtile_size = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
-  if tileInfo.loadRatioGR == 2.0:
-    rowOffset = 2*subtile_size
-  else:
-    rowOffset = subtile_size
-
+  rowOffset = math.ceil(tileInfo.loadRatioGR*subtile_size)
   s_stride = rowOffset * tileInfo.bpe
 
   for regId in range(len(tileInfo.localSubtilesRegister)):
@@ -777,7 +773,7 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
 def _grApplyRowOffset(module, writer, tileInfo, waveId, numRowsPerWave, rowId):
   tc = tileInfo.tc
   tmpVgpr1 = writer.vgprPool.checkOut(2)
-  tmpSgpr = writer.sgprPool.checkOut(1)
+  tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
   localRow = tmpVgpr1
   partitionRow = tmpVgpr1+1
   rowOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
