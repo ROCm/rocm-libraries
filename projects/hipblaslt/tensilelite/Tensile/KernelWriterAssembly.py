@@ -600,8 +600,10 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.use64bShadowLimitMX:
       if kernel["ProblemType"]["MXBlockA"]:
         module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
+        self.addSgprVarToPool("ShadowLimitMXSA")
       if kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
+        self.addSgprVarToPool("ShadowLimitMXSB")
 
     if self.states.staggerUCode:
       module.add(self.defineSgpr("StaggerUIter", 1))  # stagger loop iterations, used for various iter counts in the code
