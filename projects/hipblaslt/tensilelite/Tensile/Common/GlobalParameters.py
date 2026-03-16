@@ -414,6 +414,7 @@ defaultBenchmarkCommonParameters = [
     {"GlobalSplitUCoalesced": [False]},
     {"GlobalSplitUWorkGroupMappingRoundRobin": [False]},
     {"Use64bShadowLimit": [True]},
+    {"Use64bShadowLimitMX": [False]}, # Disable Use64bShadowLimit for MXSA/B by default
     {"NumLoadsCoalescedA": [1]},
     {"NumLoadsCoalescedB": [1]},
     {"WorkGroup": [[16, 16, 1]]},

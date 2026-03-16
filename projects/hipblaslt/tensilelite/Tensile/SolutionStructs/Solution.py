@@ -3469,6 +3469,10 @@ class Solution(collections.abc.Mapping):
       if not (state["DirectToVgprMXSB"] or state["DirectToLdsMXSB"]):
         state["NoLdsWriteCode"] = False
 
+    # Use64bShadowLimitMX for MX case only
+    if not (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+      state["Use64bShadowLimitMX"] = False
+
     # enable scheduling GR (in LWcode for PGR2) over barrier sync
     if not state["EnableMatrixInstruction"]:
       # not valid for non MFMA case

@@ -32,7 +32,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # FP8HS with ScaleABCD
+  # F4SS TN
   ########################################
   -
     - # ProblemType
@@ -163,6 +163,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - 1LDSBuffer: [0]
         - DirectToLds: [1,2,3]
+        - Use64bShadowLimitMX: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

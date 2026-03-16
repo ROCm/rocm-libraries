@@ -551,6 +551,9 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.use64bShadowLimit:
       self.removeSgprVarFromPool("ShadowLimitA")
       self.removeSgprVarFromPool("ShadowLimitB")
+    if self.states.use64bShadowLimitMX:
+      self.removeSgprVarFromPool("ShadowLimitMXSA")
+      self.removeSgprVarFromPool("ShadowLimitMXSB")
 
     self.removeSgprVarFromPool("WrapUA")
     self.removeSgprVarFromPool("WrapUB")
@@ -589,15 +592,16 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.states.use64bShadowLimit:
       module.add(self.defineSgpr("ShadowLimitA", 2, 2))
-      if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
       module.add(self.defineSgpr("ShadowLimitB", 2, 2))
-      if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
       self.addSgprVarToPool("ShadowLimitA")
       self.addSgprVarToPool("ShadowLimitB")
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
+    if self.states.use64bShadowLimitMX:
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
 
     if self.states.staggerUCode:
       module.add(self.defineSgpr("StaggerUIter", 1))  # stagger loop iterations, used for various iter counts in the code
@@ -3904,10 +3908,11 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def computeLoadSrd(self, kernel, tP, tc, indices, bpe):
     module = Module("computeLoadSrd")
-    with self.allocTmpSgpr(2 + 2 + (0 if self.states.use64bShadowLimit else 2)) as tmpSgprInfo:
+    use64bShadowLimit = self.states.use64bShadowLimitMX if tc in ["MXSA", "MXSB"] else self.states.use64bShadowLimit
+    with self.allocTmpSgpr(2 + 2 + (0 if use64bShadowLimit else 2)) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
       tileStart = stmp+2
-      if self.states.use64bShadowLimit:
+      if use64bShadowLimit:
         tensor2dSize0 = "ShadowLimit%s+0"%tc
         tensor2dSize1 = "ShadowLimit%s+1"%tc
       else:
@@ -3995,7 +4000,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB64(dst=sgpr(tileStart, 2), src=0, comment="set default tileStart"))
 
       #Calculate tensor 2d size
-      if self.states.use64bShadowLimit or ((not self.states.use64bShadowLimit) and tensor2dSize0 % 2 == 0):
+      if use64bShadowLimit or ((not use64bShadowLimit) and tensor2dSize0 % 2 == 0):
         module.add(SMovB64(dst=sgpr(tensor2dSize0, 2), src=0x1, comment="Init tensor size"))
       else:
         module.add(SMovB32(dst=sgpr(tensor2dSize0), src=0x1, comment="Init tensor size"))
@@ -4049,7 +4054,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddU32(dst=sgpr(tensor2dSize0), src0=sgpr(tensor2dSize0), src1=sgpr(stmp+0), comment="sum tensor size"))
           module.add(SAddCU32(dst=sgpr(tensor2dSize1), src0=sgpr(tensor2dSize1), src1=sgpr(stmp+1), comment="sum tensor size"))
 
-      if self.states.use64bShadowLimit:
+      if use64bShadowLimit:
         limitTmp0 = "ShadowLimit%s+0"%tc
         limitTmp1 = "ShadowLimit%s+1"%tc
       else:
@@ -4059,7 +4064,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SSubU32(dst=sgpr(limitTmp0), src0=sgpr(tensor2dSize0), src1=sgpr(tileStart+0), comment="sub tileStart"))
       module.add(SSubBU32(dst=sgpr(limitTmp1), src0=sgpr(tensor2dSize1), src1=sgpr(tileStart+1), comment="sub tileStart"))
 
-      if self.states.use64bShadowLimit:
+      if use64bShadowLimit:
         # Set initial buffer limit
         # if the limit is >64bit, incrementSrd decrements the shadow as the SRD increments,
         # and when we get within 32-bit we start to step down the SRD
@@ -8287,6 +8292,7 @@ class KernelWriterAssembly(KernelWriter):
   def incrementSrd(self, tP, incLower, incUpper):
     imod = Module("incrementSrd")
     tc = tP["tensorChar"]
+    use64bShadowLimit = self.states.use64bShadowLimitMX if tc in ["MXSA", "MXSB"] else self.states.use64bShadowLimit
 
     imod.add(SAddU32(dst=sgpr("Srd%s+0"%(tc)), \
                      src0=sgpr("Srd%s+0"%(tc)), \
@@ -8299,7 +8305,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # also have to move the boundary since we change the base
     # so less buffers to the edge:
-    if self.states.use64bShadowLimit:
+    if use64bShadowLimit:
       imod.add(SSubU32(dst=sgpr("ShadowLimit%s+0"%tc), \
                        src0=sgpr("ShadowLimit%s+0"%tc), \
                        src1=incLower, \
@@ -8381,7 +8387,8 @@ class KernelWriterAssembly(KernelWriter):
           comment="gra SRD -= inc(upper)" ))
 
     # using Shadow limit here which only works with 64-bit PBC:
-    assert(self.states.use64bShadowLimit)
+    use64bShadowLimit = self.states.use64bShadowLimitMX if tc in ["MXSA", "MXSB"] else self.states.use64bShadowLimit
+    assert(use64bShadowLimit)
 
     module.add(SAddU32(dst=sgpr("ShadowLimit%s+0"%tc), \
           src0=sgpr("ShadowLimit%s+0"%tc), src1=incLower, \
