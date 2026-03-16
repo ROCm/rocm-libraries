@@ -100,7 +100,7 @@ def sendFailureNotifications() {
 
     // Patterns where the node name is useful for triage — captured by extracting
     // NODE_NAME = <name> from the context block.
-    def gpuPatterns = ['cat: .* No such file or directory', 'GPU not found']
+    def nodePatterns = ['cat: .* No such file or directory', 'GPU not found', 'No space left on device']
 
     // Build a single combined grep -E pattern and stream the log through it.
     // grep does the scanning natively so the full log is never loaded into Groovy.
@@ -135,7 +135,7 @@ def sendFailureNotifications() {
         for (patternMap in failurePatterns) {
             if ((block =~ patternMap.pattern) && !foundPatterns.any { it.description == patternMap.description }) {
                 def nodeName = ""
-                if (gpuPatterns.contains(patternMap.pattern)) {
+                if (nodePatterns.contains(patternMap.pattern)) {
                     nodeName = sh(
                         script: """
                             set +x
