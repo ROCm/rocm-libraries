@@ -362,13 +362,14 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedIn0 = nullptr;
+    HipdnnBackendDescriptor* rawIn0 = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedIn0));
+                                       &rawIn0));
+    std::unique_ptr<HipdnnBackendDescriptor> retrievedIn0(rawIn0);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedIn0, nullptr);

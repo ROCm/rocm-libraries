@@ -274,13 +274,14 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedA = nullptr;
+    HipdnnBackendDescriptor* rawA = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedA));
+                                       &rawA));
+    std::unique_ptr<HipdnnBackendDescriptor> retrievedA(rawA);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedA, nullptr);

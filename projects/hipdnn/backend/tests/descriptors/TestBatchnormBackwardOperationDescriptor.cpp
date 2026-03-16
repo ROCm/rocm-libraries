@@ -509,13 +509,14 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedDy = nullptr;
+    HipdnnBackendDescriptor* rawDy = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedDy));
+                                       &rawDy));
+    std::unique_ptr<HipdnnBackendDescriptor> retrievedDy(rawDy);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedDy, nullptr);
@@ -948,8 +949,10 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetPeerStatsTensorArray)
                                        2,
                                        &elementCount,
                                        retrieved.data()));
+    std::unique_ptr<HipdnnBackendDescriptor> retrieved0(retrieved[0]);
+    std::unique_ptr<HipdnnBackendDescriptor> retrieved1(retrieved[1]);
 
     ASSERT_EQ(elementCount, 2);
-    ASSERT_NE(retrieved[0], nullptr);
-    ASSERT_NE(retrieved[1], nullptr);
+    ASSERT_NE(retrieved0, nullptr);
+    ASSERT_NE(retrieved1, nullptr);
 }

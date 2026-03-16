@@ -52,6 +52,7 @@ add_executable(
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
+    descriptors/TestNodeFactory.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
