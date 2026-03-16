@@ -342,7 +342,7 @@ void RNNBackwardDataModularAlgo::PropDy(const Handle& handle,
 
         ws_ht_layer_size[0] = 1;
 
-        return ws_ht_layer_size;
+        return std::move(ws_ht_layer_size);
     }(workspaceInfo.hStateSizes);
 
     auto ws_dy_dst_desc = miopen::TensorDescriptor(rnn_data_type, ws_dst_size, ws_dst_strides);

@@ -18,6 +18,7 @@ add_executable(
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
+    utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
@@ -61,6 +62,8 @@ add_executable(
     utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
+    utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp
     TestVersion.cpp
 )
 
