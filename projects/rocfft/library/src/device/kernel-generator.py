@@ -355,7 +355,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             # get first pp kernel
             f_pp_1 = pp_functions[counter_f_pp_1]
 
-            # PPFMKey entry needs two kernels with same length, precision, and arch, but different pp_current_dim
+            # PPFMKey entry needs two kernels with same length, precision, arch, and transform_type but different pp_current_dim
             counter_f_pp_2 = counter_f_pp_1 + 1
             if counter_f_pp_2 >= len(pp_functions):
                 break
@@ -365,14 +365,18 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                 if (f_pp_1.meta.length == f_pp_2.meta.length
                         and f_pp_1.meta.precision == f_pp_2.meta.precision and
                         f_pp_1.meta.gcn_arch_name == f_pp_2.meta.gcn_arch_name
+                        and f_pp_1.meta.transform_type
+                        == f_pp_2.meta.transform_type
                         and f_pp_1.meta.pp_current_dim !=
                         f_pp_2.meta.pp_current_dim):
                     break
-                if (f_pp_1.meta.length != f_pp_2.meta.length or (
-                        f_pp_1.meta.length == f_pp_2.meta.length and
-                    (f_pp_1.meta.precision != f_pp_2.meta.precision or
-                     f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name))):
-                    # we hit a new kernel with different length/precision/arch
+                if (f_pp_1.meta.length != f_pp_2.meta.length or
+                    (f_pp_1.meta.length == f_pp_2.meta.length and
+                     (f_pp_1.meta.precision != f_pp_2.meta.precision
+                      or f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name
+                      or f_pp_1.meta.transform_type !=
+                      f_pp_2.meta.transform_type))):
+                    # we hit a new kernel with different length/precision/arch/transform_type
                     # start next iteration looking for the next pair
                     counter_f_pp_1 = counter_f_pp_2
                     skip_to_next_iter = True
@@ -548,7 +552,7 @@ def list_3d_partial_pass_kernels():
                 k_cpy.scheme = "CS_REAL_3D_PP"
                 k_cpy.transform_type = t
                 del k_cpy.type
-                pp_3d_kernels.append(copy.copy(k_cpy))
+                pp_3d_kernels.append(k_cpy)
             elif t == 'c2c':
                 for transform_type in complex_transform_types:
                     k_cpy = copy.copy(k)
