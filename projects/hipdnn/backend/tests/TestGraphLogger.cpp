@@ -207,6 +207,31 @@ TEST_F(TestGraphLogger, OutputDirectoryCreatedIfMissing)
     EXPECT_EQ(jsonFiles.size(), 1u);
 }
 
+TEST_F(TestGraphLogger, RelativePathResolvedFromCurrentDirectory)
+{
+    // Use a relative path under the temp dir to avoid polluting the working directory
+    auto relativeSubdir
+        = std::string("hipdnn_rel_test_")
+          + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+    // Change the working directory to _tempDir so the relative path resolves inside it
+    auto originalCwd = std::filesystem::current_path();
+    std::filesystem::current_path(_tempDir);
+
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", relativeSubdir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto descriptor = createAndFinalizeGraph();
+
+    // Restore the original working directory before assertions
+    std::filesystem::current_path(originalCwd);
+
+    auto expectedDir = _tempDir / relativeSubdir;
+    EXPECT_TRUE(std::filesystem::exists(expectedDir));
+    auto jsonFiles = getJsonFilesInDir(expectedDir);
+    EXPECT_EQ(jsonFiles.size(), 1u);
+}
+
 TEST_F(TestGraphLogger, CacheResetOnShutdown)
 {
     // Enable graph logging
