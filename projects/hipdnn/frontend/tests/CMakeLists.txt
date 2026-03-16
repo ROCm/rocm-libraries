@@ -29,6 +29,8 @@ add_executable(
     TestBatchnormInferenceNode.cpp
     TestBatchnormInferenceNodeVarianceExt.cpp
     TestBatchnormNode.cpp
+    TestCustomOpAttributes.cpp
+    TestCustomOpNode.cpp
     TestConvolutionDgradAttributes.cpp
     TestConvolutionFwdAttributes.cpp
     TestConvolutionDgradNode.cpp
@@ -55,6 +57,8 @@ add_executable(
     TestNode.cpp
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
+    TestSdpaBackwardAttributes.cpp
+    TestSdpaBpropNode.cpp
     TestSdpaFpropNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp

@@ -696,14 +696,14 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         std::unique_ptr<conv3d::Model3D> model = conv3d::Get3DModel(device);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
-            return {}; // Fallback: empty vector
+            return cached_result; // Fallback: empty vector
         }
 
         MIOPEN_LOG_I2("Evaluating 3D TunaNet");
         std::vector<float> predictions = model->Forward(problem);
 
-        return ProcessAndCachePredictions(
-            problem, device, true, predictions, model->GetSolverMap());
+        cached_result =
+            ProcessAndCachePredictions(problem, device, true, predictions, model->GetSolverMap());
     }
     else
     {
@@ -711,15 +711,17 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         std::unique_ptr<Model> model = GetModel(device);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
-            return {}; // Fallback: empty vector
+            return cached_result; // Fallback: empty vector
         }
 
         MIOPEN_LOG_I2("Evaluating TunaNet");
         std::vector<float> predictions = model->Forward(problem);
 
-        return ProcessAndCachePredictions(
+        cached_result = ProcessAndCachePredictions(
             problem, device, false, predictions, model->metadata.solver_map);
     }
+
+    return cached_result;
 }
 
 } // namespace immed_mode
