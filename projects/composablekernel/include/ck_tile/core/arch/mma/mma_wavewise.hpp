@@ -5,11 +5,13 @@
 #include "ck_tile/core/numeric/vector_type.hpp"
 
 #include "amdgcn_mma.hpp"
+#include "mma_pipeline.hpp"
 #include "mma_selector.hpp"
 #include "mma_transforms.hpp"
 
 #include "mfma/mfma.hpp"
 #include "wmma/wmma.hpp"
+#include <tuple>
 
 namespace ck_tile::core::arch::mma {
 
@@ -71,8 +73,13 @@ template <typename ADataType,
                                           OpFamily>::SelectedOp,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp, CompilerTarget>::SelectedTransforms>
-struct WaveWiseMma
+// clang-format off
+struct WaveWiseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE),
+                                            WaveWiseMma<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CompilerTarget, MmaOp, MmaTransforms>>
 {
+    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE),
+                                 WaveWiseMma<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CompilerTarget, MmaOp, MmaTransforms>>;
+    // clang-format on
     using FragWiseMmaOp = MmaOp;
 
     // Fragment dimensions
@@ -110,119 +117,75 @@ struct WaveWiseMma
     static_assert(WaveTileN % FragN == 0u, "WaveTileN must be a multiple of FragN");
     static_assert(WaveTileK % FragK == 0u, "WaveTileK must be a multiple of FragK");
 
-    private:
-    template <typename DstT, typename SrcT>
-    CK_TILE_DEVICE static auto formatBuffer(SrcT const& inputBuffer)
+    template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
+    CK_TILE_DEVICE static decltype(auto) preApply(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        // TODO: Implement formatting logic as needed.
-        // This is intended to convert input WaveTiles to the native vector types
-        // required by the FragWiseMma operation for iteration
-        static_assert(sizeof(DstT) == sizeof(SrcT), "Size mismatch in formatBuffer");
-        return reinterpret_cast<DstT const&>(inputBuffer);
-    }
+        static_assert(Flags == MmaPipelineOptionFlags(), "No special flags implemented yet.");
 
-    template <typename DstT, typename SrcT>
-    CK_TILE_DEVICE static auto formatBuffer(SrcT& inputBuffer)
-    {
-        // TODO: Implement formatting logic as needed.
-        // This is intended to convert input WaveTiles to the native vector types
-        // required by the FragWiseMma operation for iteration
-        static_assert(sizeof(DstT) == sizeof(SrcT), "Size mismatch in formatBuffer");
-        return reinterpret_cast<DstT&>(inputBuffer);
-    }
-
-    /*! @brief Execute Mma in row-major accumulation order.
-     * @tparam VecTA The input WaveTile A vector type
-     * @tparam VecTB The input WaveTile B vector type
-     * @tparam VecTC The input/output WaveTile C vector type
-     */
-    template <typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static decltype(auto) exec_col_major(VecTA&& a, VecTB&& b, VecTC&& accum)
-    {
         // We implement an example wave-tile pipeline here.
         // First, we apply the necessary transforms to the input fragments,
         // then we convert the result into buffers of native vector formats
         // that we can easily index. Native vector formats are necessary inputs
         // to the given MmaOp exec function.
-        auto a_frag = formatBuffer<ABufferType>(ATransform::exec(a));
-        auto b_frag = formatBuffer<BBufferType>(BTransform::exec(b));
-        auto c_frag = formatBuffer<CBufferType>(CTransform::exec(accum));
+        auto a_frag =
+            Base::template preApplyTransform<ABufferType, ATransform>(std::forward<VecTA>(a));
+        auto b_frag =
+            Base::template preApplyTransform<BBufferType, BTransform>(std::forward<VecTB>(b));
+        auto c_frag =
+            Base::template preApplyTransform<CBufferType, CTransform>(std::forward<VecTC>(accum));
 
-        // "Col-major" accumulation over the M-dimension fragments first.
-        // Pseudo code here, but we would basically iterate over the fragments in col-major order
-        for(uint32_t bn = 0u; bn < FragsN; ++bn)
-        {
-            for(uint32_t bm = 0u; bm < FragsM; ++bm)
-            {
-                for(uint32_t bk = 0u; bk < FragsK; ++bk)
-                {
-                    c_frag[bm][bn] =
-                        FragWiseMmaOp::exec(a_frag[bm][bk], b_frag[bn][bk], c_frag[bm][bn]);
-                }
-            }
-        }
-
-        // Convert native vector results back to the output WaveTile format
-        // and then return after we apply the final output transform.
-        return DTransform::exec(formatBuffer<std::decay_t<VecTC>>(c_frag));
+        return std::make_tuple(std::move(a_frag), std::move(b_frag), std::move(c_frag));
     }
 
-    /*! @brief Execute Mma in row-major accumulation order.
-     * @tparam VecTA The input WaveTile A vector type
-     * @tparam VecTB The input WaveTile B vector type
-     * @tparam VecTC The input/output WaveTile C vector type
-     */
-    template <typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static decltype(auto) exec_row_major(VecTA&& a, VecTB&& b, VecTC&& accum)
+    template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
+    CK_TILE_DEVICE static decltype(auto) postApply(std::tuple<VecTA, VecTB, VecTC>&& vecs)
     {
-        // We implement an example wave-tile pipeline here.
-        // First, we apply the necessary transforms to the input WaveTiles,
-        // then we convert the result into buffers of native vector formats
-        // that we can easily index. Native vector formats are necessary inputs
-        // to the given MmaOp exec function.
-        auto a_frag = formatBuffer<ABufferType>(ATransform::exec(a));
-        auto b_frag = formatBuffer<BBufferType>(BTransform::exec(b));
-        auto c_frag = formatBuffer<CBufferType>(CTransform::exec(accum));
+        static_assert(Flags == MmaPipelineOptionFlags(), "No special flags implemented yet.");
 
-        // "Row-major" accumulation over the N-dimension fragments first.
-        // Pseudo code here, but we would basically iterate over the fragments in row-major order.
-        // We also have to ensure that the incoming vector WaveTiles are converted to native vector
-        // types before passing to the FragWiseMma exec function.
-        for(uint32_t bm = 0u; bm < FragsM; ++bm)
-        {
-            for(uint32_t bn = 0u; bn < FragsN; ++bn)
-            {
-                for(uint32_t bk = 0u; bk < FragsK; ++bk)
-                {
-                    c_frag[bm][bn] =
-                        FragWiseMmaOp::exec(a_frag[bm][bk], b_frag[bn][bk], c_frag[bm][bn]);
-                }
-            }
-        }
-
+        auto& [a_frag, b_frag, c_frag] = vecs;
         // Convert native vector results back to the output WaveTile format
         // and then return after we apply the final output transform.
-        return DTransform::exec(formatBuffer<std::decay_t<VecTC>>(c_frag));
+        return Base::template postApplyTransform<std::decay_t<VecTC>, DTransform>(c_frag);
     }
 
-    public:
-    /*! @brief Forward to Mma operation with specified accumulation order.
-     * @tparam VecTA The input WaveTile A vector type
-     * @tparam VecTB The input WaveTile B vector type
-     * @tparam VecTC The input/output WaveTile C vector type
-     */
     template <typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC&& accum)
+    CK_TILE_DEVICE static void execImpl(std::tuple<VecTA, VecTB, VecTC>& vecs)
     {
+        auto& [a_frag, b_frag, c_frag] = vecs;
+
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
-            return exec_row_major(
-                std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
+            // "Row-major" accumulation over the N-dimension fragments first.
+            // Pseudo code here, but we would basically iterate over the fragments in row-major
+            // order. We also have to ensure that the incoming vector WaveTiles are converted to
+            // native vector types before passing to the FragWiseMma exec function.
+            for(uint32_t bm = 0u; bm < FragsM; ++bm)
+            {
+                for(uint32_t bn = 0u; bn < FragsN; ++bn)
+                {
+                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
+                    {
+                        c_frag[bm][bn] =
+                            FragWiseMmaOp::exec(a_frag[bm][bk], b_frag[bn][bk], c_frag[bm][bn]);
+                    }
+                }
+            }
         }
-        else // if constexpr(AccumPolicy == MmaAccumPolicy::COL_MAJOR)
+        else
         {
-            return exec_col_major(
-                std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
+            // "Col-major" accumulation over the M-dimension fragments first.
+            // Pseudo code here, but we would basically iterate over the blocks in col-major order
+            for(uint32_t bn = 0u; bn < FragsN; ++bn)
+            {
+                for(uint32_t bm = 0u; bm < FragsM; ++bm)
+                {
+                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
+                    {
+                        c_frag[bm][bn] =
+                            FragWiseMmaOp::exec(a_frag[bm][bk], b_frag[bn][bk], c_frag[bm][bn]);
+                    }
+                }
+            }
         }
     }
 };
