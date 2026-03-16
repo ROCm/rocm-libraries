@@ -767,10 +767,11 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
     auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
-    HipdnnBackendDescriptor* output = nullptr;
+    HipdnnBackendDescriptor* rawOutput = nullptr;
 
     ASSERT_NO_THROW(
-        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &output, "test"));
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &rawOutput, "test"));
+    std::unique_ptr<HipdnnBackendDescriptor> output(rawOutput);
     ASSERT_EQ(count, 1);
     ASSERT_NE(output, nullptr);
 }
