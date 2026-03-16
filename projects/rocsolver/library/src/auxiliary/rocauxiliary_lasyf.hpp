@@ -184,6 +184,8 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
                 if(tid == 0)
                     rowmax = sval[0];
 
+                __syncthreads();
+
                 if(imax > 0)
                 {
                     iamax<MAX_THDS>(tid, imax, W + (kw - 1) * ldw, 1, sval, sidx);
@@ -411,6 +413,8 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
                 iamax<MAX_THDS>(tid, imax - k, W + k + (k + 1) * ldw, 1, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
+
+                __syncthreads();
 
                 if(imax < n - 1)
                 {
