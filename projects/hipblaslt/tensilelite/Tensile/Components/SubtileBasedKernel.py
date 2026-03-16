@@ -708,10 +708,12 @@ def graInitPointer(writer, kernel):
 ##################################################
 # Compute GR offset for a single matrix (A or B)
 #
-def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id):
+def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id, rowOffset):
   tc = tileInfo.tc
   bpe = tileInfo.bpe
 
+  module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(row_id), src1=vgpr(rowOffset), comment="%s: row offset"%tc))
+  rowId = rowOffset # re-use rowOffset
   assert len(tileInfo.sharedVgprGROffset)<=2, "Only support 2 GR offset vgpr for now, found %u"%(len(tileInfo.sharedVgprGROffset))
 
   MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
@@ -721,9 +723,9 @@ def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id):
   tmpVgpr = writer.vgprPool.checkOut(2)
   sHalfOffset = writer.sgprPool.checkOut(1, preventOverflow=False)
 
-  module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(row_id), comment="%s: row_id * stride"%tc))
+  module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
   # TODO : handle FP4 (sub byte type once available)
-  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpe.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: row_id*stride*bpe"%tc))
+  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpe.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
   module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(col_id_bytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
 
   # # # apply top-half / bottom half offset according to wave split id
@@ -770,14 +772,21 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
 ##################################################
 # Apply wave partition offset to rowId for a single matrix (A or B)
 #
-def _grApplyRowOffset(module, writer, tileInfo, waveId, numRowsPerWave, rowId):
+def _grComputeRowOffset(module, kernel, writer, tileInfo, waveId, rowOffset):
+  depthU = kernel["DepthU"]
+  bpeA = kernel["ProblemType"]["DataTypeA"].numBytes()
+  bpeB = kernel["ProblemType"]["DataTypeB"].numBytes()
+  depthUBytes = depthU * bpeA
+  wavesize = kernel["WavefrontSize"]
+  loadWidth = 16
+  numRowsPerWave = wavesize // (depthUBytes // loadWidth)
   tc = tileInfo.tc
   tmpVgpr1 = writer.vgprPool.checkOut(2)
   tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
   localRow = tmpVgpr1
   partitionRow = tmpVgpr1+1
-  rowOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
-  module.add(SMovB32(dst=sgpr(tmpSgpr), src=rowOffset, comment="%s: row offset"%tc))
+  partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
 
   if tileInfo.loadRatioGR == 1.0:
     module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
@@ -793,8 +802,8 @@ def _grApplyRowOffset(module, writer, tileInfo, waveId, numRowsPerWave, rowId):
 
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
-  module.add(VAddU32(dst=vgpr(localRow), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
-  module.add(VAddU32(dst=vgpr(rowId), src0=vgpr(rowId), src1=vgpr(localRow), comment="%s: row offset"%tc))
+  module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
+  
 
   writer.vgprPool.checkIn(tmpVgpr1)
   writer.sgprPool.checkIn(tmpSgpr)
@@ -820,21 +829,22 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
   loadWidth = 16 # dwordx4 loads only
   blockSize = depthUBytes // loadWidth
-  numRowsPerWave = wavesize // (depthUBytes // loadWidth)
+  
 
   numRowsPerLDSBanks = ldsRowBankSize // depthUBytes
 
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
 
-  tmpVgpr = writer.vgprPool.checkOut(7)
-  colId     = tmpVgpr
-  rowIdA     = tmpVgpr + 1
-  rowIdB     = tmpVgpr + 2
-  ldsRowId = tmpVgpr + 3
-  waveId    = tmpVgpr + 4
-  tmp = tmpVgpr + 5
-  laneId = tmpVgpr + 6
+  tmpVgpr = writer.vgprPool.checkOut(8)
+  colId = tmpVgpr
+  rowId = tmpVgpr + 1
+  rowOffsetA = tmpVgpr + 2
+  rowOffsetB = tmpVgpr + 3
+  ldsRowId = tmpVgpr + 4
+  waveId = tmpVgpr + 5
+  tmp = tmpVgpr + 6
+  laneId = tmpVgpr + 7
 
   # Compute waveId and laneId
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
@@ -842,13 +852,12 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   # Common code for both A & B
   # Calculate col and row id within a wave for 128b loads
   module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
-  module.add(VLShiftRightB32(dst=vgpr(rowIdA), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
-  module.add(VMovB32(dst=vgpr(rowIdB), src=vgpr(rowIdA), comment=""))
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
 
   useSwizzling = True
   if useSwizzling:
     module.addComment0("Swizzling")
-    module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(rowIdA), comment="lds row id"))
+    module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(rowId), comment="lds row id"))
     module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="lds row id % 2"))
     module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
     module.add(VMovB32(dst=vgpr(colId), src=vgpr(colId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
@@ -863,13 +872,13 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   module.add(VLShiftLeftB32(dst=vgpr(colId), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
 
   # Apply row offset based on wave partitioning (e.g. 2x2, 4x1/1x4)
-  _grApplyRowOffset(module, writer, tileInfoA, waveId, numRowsPerWave, rowIdA)
-  _grApplyRowOffset(module, writer, tileInfoB, waveId, numRowsPerWave, rowIdB)
+  _grComputeRowOffset(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
+  _grComputeRowOffset(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
 
   # Compute GR offset for A
-  _grComputeOffset(module, writer, tileInfoA, colId, rowIdA)
+  _grComputeOffset(module, writer, tileInfoA, colId, rowId, rowOffsetA)
   # Compute GR offset for B
-  _grComputeOffset(module, writer, tileInfoB, colId, rowIdB)
+  _grComputeOffset(module, writer, tileInfoB, colId, rowId, rowOffsetB)
 
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -907,23 +916,24 @@ def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
 
   loadWidth = 16
   numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-  numBytesPerLoad = loadWidth * kernel["WavefrontSize"]
-  numBytesPerLoadWG = numBytesPerLoad * numWaves
-
+  
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   subtileInfo = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, sId1)]
   regList = tileInfo.localSubtilesRegister[subtileInfo.regListId]
 
-  offset = sId1 * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe
+  offsetK = sId1 * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe
   ldsStartOffset = writer.ldsStartOffsetA if tc == 'A' else writer.ldsStartOffsetB
   m0Offset = ldsStartOffset
 
   grBaseId = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, sId1)].globalReadMap[0]
+  print("Ids = " , tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, sId1)].globalReadMap)
 
+  subtileOffset = math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize)
+  WriteBaseAddr = "LocalWriteBaseAddrA" if tc == 'A' else "LocalWriteBaseAddrB"
   # Emit number of buffer loads equal to number of loads needed to load a subtile
   for i in range(tileInfo.numGRPerSubtile):
-    module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr"), src1=(m0Offset + (grBaseId + i) * numBytesPerLoadWG - offset)))
-    mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=False, slc=False, nt=False, lds=True)
+    module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(0*m0Offset + (grBaseId + i) * subtileOffset - offsetK)))
+    mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=False, slc=False, nt=False, lds=True)
 
     # Check if the subtile specific registers is SGPR or VGPR
     # For SGPR we can keep the same shared vgpr offset and use the soffset field for the subtile specific SGPR
@@ -932,7 +942,7 @@ def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
     useSgpr = subtileInfo.useSgpr
     soffset = sgpr(regList.regValues[0]) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.regValues[i]
-    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment=""))
+    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
 
   return module
 
@@ -1023,11 +1033,36 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
   vgprWaveId = writer.vgprPool.checkOut(1)
   module.addComment0("Compute shared offsets used by m0 in DTL loads")
   module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
-  module.add(VLShiftLeftB32(dst=vgpr(vgprWaveId), shiftHex=hex((loadWidth * wavesize).bit_length()-1), src=vgpr(vgprWaveId), comment="Apply wave-specific offset of %u"%(loadWidth * wavesize)))
+
+  atile = writer.states.a.tileInfo
+  btile = writer.states.b.tileInfo
+
+  print("atile : ", atile)
+
+  tmpVgpr = writer.vgprPool.checkOut(2)
+  rowOffsetA = tmpVgpr 
+  rowOffsetB = tmpVgpr + 1
+
+  _grComputeRowOffset(module, kernel, writer, atile, vgprWaveId, rowOffsetA)
+  _grComputeRowOffset(module, kernel, writer, btile, vgprWaveId, rowOffsetB)
+
+  depthUBytes = kernel["DepthU"] * atile.bpe
+
+  module.add(VLShiftLeftB32(dst=vgpr(rowOffsetA), shiftHex=hex((depthUBytes).bit_length()-1), src=vgpr(rowOffsetA), comment="Apply wave-specific offset for A"))
+  module.add(VLShiftLeftB32(dst=vgpr(rowOffsetB), shiftHex=hex((depthUBytes).bit_length()-1), src=vgpr(rowOffsetB), comment="Apply wave-specific offset for B"))
+
   module.add(SNop(waitState=0, comment="Wait for VGPR to be ready"))
-  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddr"), src=vgpr(vgprWaveId), comment="Store base LDS offset, will be modified"))
-  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteDTLOffset"), src=vgpr(vgprWaveId), comment="Store DTL wave-specific offset, this will not be modified"))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrA"), src=vgpr(rowOffsetA), comment="Store base LDS offset, will be modified"))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrB"), src=vgpr(rowOffsetB), comment="Store base LDS offset, will be modified"))
+  module.add(SAddU32(dst=sgpr("LocalWriteBaseAddrB"), src0=sgpr("LocalWriteBaseAddrB"), src1=hex(writer.ldsStartOffsetB), comment=""))
+
+  module.add(SMovB32(dst=sgpr("LocalWriteDTLOffsetA"), src=sgpr("LocalWriteBaseAddrA"), comment=""))
+  module.add(SMovB32(dst=sgpr("LocalWriteDTLOffsetB"), src=sgpr("LocalWriteBaseAddrB"), comment=""))
+
   writer.vgprPool.checkIn(vgprWaveId)
+  writer.vgprPool.checkIn(tmpVgpr)
+
+
   return module
 
 
@@ -1139,6 +1174,8 @@ def mainLoopImpl(writer, kernel, isNLL = False):
     module.add(globalReadDoSubtile('B', writer, kernel))
     module.add(SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all subtile GRs to complete"))
     module.add(SBarrier(comment=""))
+
+  
 
   module.add(localReadDoSubtile('A', writer, kernel))
   module.add(localReadDoSubtile('B', writer, kernel))
