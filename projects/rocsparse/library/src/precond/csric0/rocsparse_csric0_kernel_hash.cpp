@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -258,10 +258,18 @@ namespace rocsparse
                             J* __restrict__ zero_pivot,
                             int64_t zero_pivot_stride,
                             J* __restrict__ singular_pivot,
-                            int64_t              singular_pivot_stride,
-                            double               tol,
+                            int64_t            singular_pivot_stride,
+                            rocsparse_datatype tolerance_datatype,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
+                            bool                 is_singular_tol_host_mode,
                             rocsparse_index_base idx_base)
     {
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_64);
+        const double tolerance
+            = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
+
         const auto batch_index = hipBlockIdx_y;
         rocsparse::csric0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
             m,
@@ -273,7 +281,7 @@ namespace rocsparse
             map,
             zero_pivot + batch_index * zero_pivot_stride,
             singular_pivot + batch_index * singular_pivot_stride,
-            tol,
+            tolerance,
             idx_base);
     }
 
@@ -298,26 +306,40 @@ namespace rocsparse
                                  A->batch_count);
         const dim3    csric0_threads(BLOCKSIZE);
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csric0_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),
-                                           csric0_blocks,
-                                           csric0_threads,
-                                           0,
-                                           handle->stream,
-                                           static_cast<J>(A->rows),
-                                           reinterpret_cast<const I*>(A->const_row_data),
-                                           reinterpret_cast<const J*>(A->const_col_data),
-                                           reinterpret_cast<T*>(A->val_data),
-                                           A->batch_stride,
-                                           reinterpret_cast<const I*>(trm_info->get_diag_ind()),
-                                           done_array,
-                                           done_array_stride,
-                                           reinterpret_cast<const J*>(trm_info->get_row_map()),
-                                           reinterpret_cast<J*>(csric0_info->get_zero_pivot()),
-                                           csric0_info->get_zero_pivot_stride(),
-                                           reinterpret_cast<J*>(csric0_info->get_singular_pivot()),
-                                           csric0_info->get_singular_pivot_stride(),
-                                           csric0_info->get_singular_tol(),
-                                           A->descr->base);
+        auto                         numeric_exact = csric0_info->get_singularity_numeric_exact();
+        auto                         numeric_near  = csric0_info->get_singularity_numeric_near();
+        const rocsparse_pointer_mode tolerance_pointer_mode
+            = numeric_near->get_tolerance_pointer_mode();
+        const rocsparse_datatype tolerance_datatype = numeric_near->get_tolerance_datatype();
+        const float*             tolerance_pointer_32
+            = reinterpret_cast<const float*>(numeric_near->get_tolerance_pointer());
+        const double* tolerance_pointer_64
+            = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csric0_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),
+            csric0_blocks,
+            csric0_threads,
+            0,
+            handle->stream,
+            static_cast<J>(A->rows),
+            reinterpret_cast<const I*>(A->const_row_data),
+            reinterpret_cast<const J*>(A->const_col_data),
+            reinterpret_cast<T*>(A->val_data),
+            A->batch_stride,
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            done_array,
+            done_array_stride,
+            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
+            reinterpret_cast<J*>(numeric_near->get_position()),
+            numeric_near->get_stride(),
+            tolerance_datatype,
+            ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_32),
+            ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_64),
+            (tolerance_pointer_mode == rocsparse_pointer_mode_host),
+            A->descr->base);
 
         return rocsparse_status_success;
     }

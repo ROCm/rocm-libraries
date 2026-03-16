@@ -7,6 +7,7 @@
 #include "BatchnormInferenceOperationDescriptor.hpp"
 #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
 #include "BatchnormOperationDescriptor.hpp"
+#include "BlockScaleQuantizeOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
@@ -85,6 +86,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormInferenceVarianceExtOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BlockScaleQuantizeOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<MatmulOperationDescriptor>();
