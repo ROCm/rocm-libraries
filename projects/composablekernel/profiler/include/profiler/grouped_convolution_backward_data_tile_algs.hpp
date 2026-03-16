@@ -8,10 +8,9 @@
 
 #include "../../experimental/builder/test/utils/conv_algorithm_type_utils.hpp"
 #include "grouped_convolution_signatures.hpp"
-#include "ck_tile/ref/naive_grouped_conv_bwd_weight_gpu.hpp"
+#include "ck_tile/ref/naive_grouped_conv_bwd_data_gpu.hpp"
 
 #include "ck_tile/builder/testing/filter_extent.hpp"
-#include "ck_tile/builder/testing/conv/fwd.hpp"
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 #include "ck_tile/builder/testing/conv/reference.hpp"
 #include "ck_tile/builder/conv_builder.hpp"
@@ -22,12 +21,12 @@ namespace ck_tile::builder::profiling {
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
 
-#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32.inc"
-#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32.inc"
-#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_bf16.inc"
-#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp16.inc"
-#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16.inc"
-#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp32.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp32.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_bf16.inc"
+#include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp16.inc"
 
 template <auto SIGNATURE>
 void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
@@ -42,24 +41,24 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::bfloat16_t>>;
     const auto conv_param = args.to_ck_tile_conv_param();
 
-    const std::size_t weight_bytes_num = conv_param.template GetWeightByte<DataType>();
-    std::vector<DataType> wei(weight_bytes_num / sizeof(DataType));
-    std::vector<DataType> ref(weight_bytes_num / sizeof(DataType));
+    const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
+    std::vector<DataType> in(input_bytes_num / sizeof(DataType));
+    std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
     HIP_CHECK_ERROR(
-        hipMemcpy(&ref.data()[0], reference.weight, weight_bytes_num, hipMemcpyDeviceToHost));
+        hipMemcpy(&ref.data()[0], reference.input, input_bytes_num, hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(
-        hipMemcpy(&wei.data()[0], outputs.weight, weight_bytes_num, hipMemcpyDeviceToHost));
-    ck_tile::check_err(wei, ref, "\tError: Incorrect results!");
+        hipMemcpy(&in.data()[0], outputs.input, input_bytes_num, hipMemcpyDeviceToHost));
+    ck_tile::check_err(in, ref, "\tError: Incorrect results!");
 }
 
-/// @brief `run_grouped_conv_backward_weight_tile_algs()` run all grouped conv fwd instances.
+/// @brief `run_grouped_conv_backward_data_tile_algs()` run all grouped conv fwd instances.
 ///
 /// @tparam SIGNATURE Forward convolution signature.
 ///
-/// @see run_grouped_conv_backward_weight_tile_algs()
+/// @see run_grouped_conv_backward_data_tile_algs()
 template <auto SIGNATURE>
 std::tuple<bool, float, std::string, int>
-run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
+run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                            const std::string& split_k,
                                            const ckt::Inputs<SIGNATURE>& inputs,
                                            const ckt::Outputs<SIGNATURE>& outputs,
@@ -88,11 +87,13 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
     const auto conv_param = args.to_ck_tile_conv_param();
 
     // Get max possible value in the output
-    const std::size_t weight_bytes_num = conv_param.template GetWeightByte<DataType>();
-    std::vector<DataType> ref(weight_bytes_num / sizeof(DataType));
+    const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
+    std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
     HIP_CHECK_ERROR(
-        hipMemcpy(&ref.data()[0], reference.get().weight, weight_bytes_num, hipMemcpyDeviceToHost));
+        hipMemcpy(&ref.data()[0], reference.get().input, input_bytes_num, hipMemcpyDeviceToHost));
     const float max_accumulated_value = *std::max_element(ref.begin(), ref.end());
+
+    // TODO: Is this correct?
     const index_t num_accums = std::accumulate(std::begin(conv_param.output_spatial_lengths_),
                                                std::end(conv_param.output_spatial_lengths_),
                                                static_cast<std::size_t>(1),
@@ -150,29 +151,29 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
         }
     };
 
-    if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP16_BWD_WEIGHT)
+    if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP16_BWD_DATA)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp16_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
     }
-    else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_BWD_WEIGHT)
+    else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_BWD_DATA)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_bf16_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16_calls.inc"
     }
-    else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_WEIGHT)
+    else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_DATA)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp32_calls.inc"
     }
-    else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP16_BWD_WEIGHT)
+    else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP16_BWD_DATA)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp16_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp16_calls.inc"
     }
-    else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_BF16_BWD_WEIGHT)
+    else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_BF16_BWD_DATA)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_bf16_calls.inc"
     }
-    else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP32_BWD_WEIGHT)
+    else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP32_BWD_DATA)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp32_calls.inc"
     }
     else
     {
