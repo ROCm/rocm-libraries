@@ -28,7 +28,7 @@ class TestLayernormFpropPlan : public ::testing::Test
 
 TEST_F(TestLayernormFpropPlan, ExecutePlan)
 {
-    auto tolerance = batchnorm::getToleranceInference<float>();
+    auto tolerance = layernorm::getTolerance<float>();
     std::vector<int64_t> const dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 3;
     unsigned int const seed = getGlobalTestSeed();
@@ -86,7 +86,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
 
 TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 {
-    auto tolerance = batchnorm::getToleranceInference<float>();
+    auto tolerance = layernorm::getTolerance<float>();
     std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 2;
     unsigned int seed = getGlobalTestSeed();
@@ -146,7 +146,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 
 TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
 {
-    auto tolerance = batchnorm::getToleranceInference<float>();
+    auto tolerance = layernorm::getTolerance<float>();
     std::vector<int64_t> const dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 3;
     unsigned int const seed = getGlobalTestSeed();

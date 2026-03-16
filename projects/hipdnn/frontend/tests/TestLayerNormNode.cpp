@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "hipdnn_data_sdk/utilities/Constants.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -33,7 +34,7 @@ LayernormAttributes makeMinimalAttrs(const std::shared_ptr<TensorAttributes>& x)
     attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
 
@@ -106,7 +107,7 @@ TEST(TestLayerNormNode, PreValidateFailsForwardPhaseNotSet)
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
@@ -125,7 +126,7 @@ TEST(TestLayerNormNode, PreValidateFailsMissingX)
     attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
@@ -144,7 +145,7 @@ TEST(TestLayerNormNode, PreValidateFailsMissingY)
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_x(x);
     attrs.set_epsilon(epsilon);
     attrs.set_scale(makeTensor({512}));
@@ -179,7 +180,7 @@ TEST(TestLayerNormNode, PreValidateFailsMissingScale)
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_x(x);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
@@ -198,7 +199,7 @@ TEST(TestLayerNormNode, PreValidateFailsMissingBias)
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_x(x);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
@@ -271,7 +272,7 @@ TEST(TestLayerNormNode, InferPropertiesInfersScaleDimsFromX)
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
 
@@ -303,7 +304,7 @@ TEST(TestLayerNormNode, InferPropertiesInfersScaleDimsFromX4D)
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
 
@@ -334,7 +335,7 @@ TEST(TestLayerNormNode, InferPropertiesPreservesNhwcStrideOrder)
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
 
@@ -379,7 +380,7 @@ TEST(TestLayerNormNode, InferPropertiesNhwcScaleStridesMatchX)
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
 
@@ -528,7 +529,7 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitOutputShape)
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
@@ -582,7 +583,7 @@ TEST(TestLayerNormNode, PreValidateFailsXWithNoDimensions)
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
@@ -607,7 +608,7 @@ TEST(TestLayerNormNode, PreValidateFailsEpsilonNotScalar)
     // Epsilon with more than one element.
     // set_value must be called before set_dim because set_value resets dim to {1}.
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     epsilon->set_dim({2});
     attrs.set_epsilon(epsilon);
 
@@ -668,7 +669,7 @@ TEST(TestLayerNormNode, PreValidateFailsXYShapeMismatch)
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
 
     // Y has different shape than X
@@ -716,7 +717,7 @@ TEST(TestLayerNormNode, InferPropertiesFailsMissingX)
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
@@ -735,7 +736,7 @@ TEST(TestLayerNormNode, InferPropertiesFailsMissingY)
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
-    epsilon->set_value(1e-5f);
+    epsilon->set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
     attrs.set_epsilon(epsilon);
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
@@ -889,7 +890,8 @@ TEST(TestLayerNormNode, GatherHipdnnTensors)
     bias->set_uid(4).set_name("Bias");
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(5).set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_uid(5).set_name("Epsilon").set_value(
+        hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(6).set_name("Mean");
@@ -937,7 +939,7 @@ TEST(TestLayerNormNode, GatherHipdnnTensorsRequired)
     bias->set_uid(4);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(5).set_value(1e-5f);
+    epsilon->set_uid(5).set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
 
     LayernormAttributes attrs;
     attrs.set_x(x);
