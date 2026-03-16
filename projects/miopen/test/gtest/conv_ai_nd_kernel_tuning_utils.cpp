@@ -1299,7 +1299,7 @@ TEST_F(GPU_RunAIHeuristics_Integration, CandidateSelection_BasicFlow)
         GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
 
     std::vector<std::string> valid_kernels;
-    int index = 0;
+    int index   = 0;
     int split_k = 0;
     std::string kernel_id;
     HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
@@ -1331,9 +1331,9 @@ TEST_F(GPU_RunAIHeuristics_Integration, CandidateSelection_BasicFlow)
         EXPECT_GE(index, 0) << "index should be valid";
         EXPECT_GE(split_k, 1) << "split_k should be >= 1 for WrW solver";
         EXPECT_LE(split_k, 128) << "split_k should be <= 128";
-        
+
         // Verify kernel_id format (should be "kernel+split_k" for WrW)
-        EXPECT_NE(kernel_id.find('+'), std::string::npos) 
+        EXPECT_NE(kernel_id.find('+'), std::string::npos)
             << "kernel_id should contain '+' separator for split_k";
     }
 }
@@ -1350,7 +1350,7 @@ TEST_F(GPU_RunAIHeuristics_Integration, Deterministic_EnforcesSplitK1)
         GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
 
     std::vector<std::string> valid_kernels;
-    int index = 0;
+    int index   = 0;
     int split_k = 0;
     std::string kernel_id;
     HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
@@ -1371,13 +1371,14 @@ TEST_F(GPU_RunAIHeuristics_Integration, Deterministic_EnforcesSplitK1)
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
     };
 
-    bool result = RunAIHeuristics(bwd_cfg, state, ctx, problem, true, fill_kernels); // deterministic=true
+    bool result =
+        RunAIHeuristics(bwd_cfg, state, ctx, problem, true, fill_kernels); // deterministic=true
 
     if(result)
     {
         // Deterministic mode must enforce split_k=1
         EXPECT_EQ(split_k, 1) << "Deterministic mode must enforce split_k=1";
-        EXPECT_TRUE(kernel_id.find("+1") != std::string::npos || 
+        EXPECT_TRUE(kernel_id.find("+1") != std::string::npos ||
                     kernel_id.find("+") == std::string::npos)
             << "kernel_id should indicate split_k=1 in deterministic mode";
     }
@@ -1394,7 +1395,7 @@ TEST_F(GPU_RunAIHeuristics_Integration, ForwardSolver_NoSplitK)
     auto problem = GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
 
     std::vector<std::string> valid_kernels;
-    int index = 0;
+    int index   = 0;
     int split_k = 0;
     std::string kernel_id;
     HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
@@ -1412,7 +1413,9 @@ TEST_F(GPU_RunAIHeuristics_Integration, ForwardSolver_NoSplitK)
 
     auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
         return std::vector<std::string>{
-            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256,256,256,4,Default,4,4,1,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,1,1,S<1,32,1,8>,S<1,32,1,8>,7,7,PassThrough,PassThrough,PassThrough>"};
+            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256,256,256,4,Default,4,4,1,1,S<4,64,1>,"
+            "S<1,0,2>,S<1,0,2>,2,8,8,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,1,1,S<1,32,1,8>,S<1,32,"
+            "1,8>,7,7,PassThrough,PassThrough,PassThrough>"};
     };
 
     bool result = RunAIHeuristics(fwd_cfg, state, ctx, problem, false, fill_kernels);
@@ -1421,11 +1424,10 @@ TEST_F(GPU_RunAIHeuristics_Integration, ForwardSolver_NoSplitK)
     {
         // Forward solver should have split_k=0
         EXPECT_EQ(split_k, 0) << "Forward solver should have split_k=0";
-        EXPECT_EQ(kernel_id.find('+'), std::string::npos) 
+        EXPECT_EQ(kernel_id.find('+'), std::string::npos)
             << "Forward solver kernel_id should not contain '+' separator";
     }
 }
-
 
 // ===============================================================================
 // Parameterized Split_k Validation Tests
@@ -1441,38 +1443,36 @@ TEST_P(CPU_SplitKValidation_Parameterized, ValidateSplitKRange)
 {
     auto [value, min, max, expected] = GetParam();
     SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, min, max, false, true};
-    
+
     bool actual = cfg.IsValidSplitK(value);
-    EXPECT_EQ(actual, expected) 
-        << "IsValidSplitK(" << value << ") with range [" << min << "," << max 
-        << "] expected " << (expected ? "true" : "false") 
-        << " but got " << (actual ? "true" : "false");
+    EXPECT_EQ(actual, expected) << "IsValidSplitK(" << value << ") with range [" << min << ","
+                                << max << "] expected " << (expected ? "true" : "false")
+                                << " but got " << (actual ? "true" : "false");
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    SplitKEdgeCases,
-    CPU_SplitKValidation_Parameterized,
-    ::testing::Values(
-        // (value, min, max, expected)
-        std::make_tuple(0, 1, 128, false),     // Below minimum
-        std::make_tuple(1, 1, 128, true),      // Valid: minimum power of 2
-        std::make_tuple(2, 1, 128, true),      // Valid: power of 2
-        std::make_tuple(3, 1, 128, false),     // Invalid: not power of 2
-        std::make_tuple(4, 1, 128, true),      // Valid: power of 2
-        std::make_tuple(7, 1, 128, false),     // Invalid: not power of 2
-        std::make_tuple(8, 1, 128, true),      // Valid: power of 2
-        std::make_tuple(16, 1, 128, true),     // Valid: power of 2
-        std::make_tuple(32, 1, 128, true),     // Valid: power of 2
-        std::make_tuple(64, 1, 128, true),     // Valid: power of 2
-        std::make_tuple(100, 1, 128, false),   // Invalid: not power of 2
-        std::make_tuple(128, 1, 128, true),    // Valid: maximum power of 2
-        std::make_tuple(256, 1, 128, false),   // Above maximum
-        std::make_tuple(512, 1, 128, false),   // Above maximum
-        std::make_tuple(1, 2, 64, false),      // Below custom minimum
-        std::make_tuple(2, 2, 64, true),       // At custom minimum
-        std::make_tuple(64, 2, 64, true),      // At custom maximum
-        std::make_tuple(128, 2, 64, false)     // Above custom maximum
-    ));
+INSTANTIATE_TEST_SUITE_P(SplitKEdgeCases,
+                         CPU_SplitKValidation_Parameterized,
+                         ::testing::Values(
+                             // (value, min, max, expected)
+                             std::make_tuple(0, 1, 128, false),   // Below minimum
+                             std::make_tuple(1, 1, 128, true),    // Valid: minimum power of 2
+                             std::make_tuple(2, 1, 128, true),    // Valid: power of 2
+                             std::make_tuple(3, 1, 128, false),   // Invalid: not power of 2
+                             std::make_tuple(4, 1, 128, true),    // Valid: power of 2
+                             std::make_tuple(7, 1, 128, false),   // Invalid: not power of 2
+                             std::make_tuple(8, 1, 128, true),    // Valid: power of 2
+                             std::make_tuple(16, 1, 128, true),   // Valid: power of 2
+                             std::make_tuple(32, 1, 128, true),   // Valid: power of 2
+                             std::make_tuple(64, 1, 128, true),   // Valid: power of 2
+                             std::make_tuple(100, 1, 128, false), // Invalid: not power of 2
+                             std::make_tuple(128, 1, 128, true),  // Valid: maximum power of 2
+                             std::make_tuple(256, 1, 128, false), // Above maximum
+                             std::make_tuple(512, 1, 128, false), // Above maximum
+                             std::make_tuple(1, 2, 64, false),    // Below custom minimum
+                             std::make_tuple(2, 2, 64, true),     // At custom minimum
+                             std::make_tuple(64, 2, 64, true),    // At custom maximum
+                             std::make_tuple(128, 2, 64, false)   // Above custom maximum
+                             ));
 
 // ===============================================================================
 // Deterministic Mode Enforcement Tests
@@ -1482,20 +1482,19 @@ class CPU_DeterministicMode_NONE : public ::testing::Test
 {
 };
 
-
 TEST_F(CPU_DeterministicMode_NONE, HeuristicInit_SetsSplitK1)
 {
     std::vector<std::string> valid_kernels = {"kernel_A"};
-    int index = 0;
-    int split_k = 999; // Should be overridden
+    int index                              = 0;
+    int split_k                            = 999; // Should be overridden
     std::string kernel_id;
 
     HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
-    
+
     // When deterministic mode is active, HeuristicInit should set split_k=1
     // This is tested in the integration tests with actual RunAIHeuristics
     state.SetResult(0, 1, true); // Simulate deterministic result
-    
+
     EXPECT_EQ(split_k, 1) << "Deterministic mode should set split_k=1";
     EXPECT_EQ(kernel_id, "kernel_A+1");
 }
@@ -1504,12 +1503,40 @@ TEST_F(CPU_DeterministicMode_NONE, AllBackwardSolvers_SupportDeterministic)
 {
     // Verify all backward/WrW solvers are configured to support deterministic mode
     // by using split_k that can be set to 1
-    
+
     std::vector<SolverHeuristicConfig> backward_configs = {
-        {"ConvHipImplicitGemmGroupBwdXdlops", "ConvHipIgemmGroupXdlops", 2, true, 1, 128, false, true},
-        {"ConvHipImplicitGemmGroupWrwXdlops", "ConvHipIgemmGroupXdlops", 2, true, 1, 128, false, true},
-        {"ConvHipImplicitGemm3DGroupBwdXdlops", "ConvHipIgemmGroup3DXdlops", 3, true, 1, 128, false, true},
-        {"ConvHipImplicitGemm3DGroupWrwXdlops", "ConvHipIgemmGroup3DXdlops", 3, true, 1, 128, false, true},
+        {"ConvHipImplicitGemmGroupBwdXdlops",
+         "ConvHipIgemmGroupXdlops",
+         2,
+         true,
+         1,
+         128,
+         false,
+         true},
+        {"ConvHipImplicitGemmGroupWrwXdlops",
+         "ConvHipIgemmGroupXdlops",
+         2,
+         true,
+         1,
+         128,
+         false,
+         true},
+        {"ConvHipImplicitGemm3DGroupBwdXdlops",
+         "ConvHipIgemmGroup3DXdlops",
+         3,
+         true,
+         1,
+         128,
+         false,
+         true},
+        {"ConvHipImplicitGemm3DGroupWrwXdlops",
+         "ConvHipIgemmGroup3DXdlops",
+         3,
+         true,
+         1,
+         128,
+         false,
+         true},
     };
 
     for(const auto& cfg : backward_configs)
