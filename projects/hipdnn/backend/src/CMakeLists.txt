@@ -39,6 +39,7 @@ add_library(
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaFpropOperationDescriptor.cpp
     descriptors/TensorDescriptor.cpp
+    descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp

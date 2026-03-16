@@ -891,11 +891,14 @@ std::string TensorDescriptor::ToString() const
     std::string result;
     if(this->lens.empty())
         return result;
+
     for(auto i : this->lens)
     {
         result += std::to_string(i) + ", ";
     }
-    return result.substr(0, result.length() - 2);
+    result = result.substr(0, result.length() - 2);
+
+    return result;
 }
 
 std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t)

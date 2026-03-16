@@ -253,7 +253,7 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsWithAttnMask)
     // Valid mask: [2, 8, 16, 32] — exact match
     auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim({2, 8, 16, 32});
-    attrs.set_attn_mask(mask);
+    attrs.set_bias(mask);
 
     GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
@@ -271,7 +271,7 @@ TEST(TestSdpaFpropNode, PreValidateSucceedsWithBroadcastAttnMask)
     // Broadcast mask: last two dims are 1
     auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim({1, 1});
-    attrs.set_attn_mask(mask);
+    attrs.set_bias(mask);
 
     GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
@@ -289,7 +289,7 @@ TEST(TestSdpaFpropNode, PreValidateFailsAttnMaskRankTooLarge)
     // Rank-5 mask is invalid
     auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim({1, 2, 8, 16, 32});
-    attrs.set_attn_mask(mask);
+    attrs.set_bias(mask);
 
     GraphAttributes graphAttrs;
     SdpaFpropNode node(std::move(attrs), graphAttrs);
