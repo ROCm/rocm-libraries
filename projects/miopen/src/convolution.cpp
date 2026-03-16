@@ -380,7 +380,8 @@ bool ConvolutionDescriptor::IsWinograd3x3SupportedAndFast(
     if(!(problem.GetOutChannels() >= 16 && problem.GetOutChannels() % 2 == 0))
         return false;
 
-    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
+    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem) ||
+           solver::conv::TransposedConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
 }
 
 std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,

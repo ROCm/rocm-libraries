@@ -479,13 +479,14 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedDy = nullptr;
+    HipdnnBackendDescriptor* rawDy = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedDy));
+                                       &rawDy));
+    std::unique_ptr<HipdnnBackendDescriptor> retrievedDy(rawDy);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedDy, nullptr);

@@ -51,7 +51,7 @@ if(REGRESSION_TEST_SOURCES)
 
     # Link against rocWMMA and GTest
     target_link_libraries(${TEST_TARGET} rocwmma GTest::gtest GTest::gtest_main hiprtc::hiprtc)
-    target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
+    target_link_libraries(${TEST_TARGET} ${ROCWMMA_OPENMP_LIBRARY})
     if(UNIX)
         set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")
         target_link_libraries(${TEST_TARGET} "-fno-rtlib-add-rpath")
