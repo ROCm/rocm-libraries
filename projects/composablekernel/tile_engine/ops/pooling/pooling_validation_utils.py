@@ -21,9 +21,20 @@ logger = logging.getLogger(__name__)
 # Hardware constants
 # ---------------------------------------------------------------------------
 
-WARP_SIZE = 64  # AMD wavefront size (wave64)
+# Default warp size (wave64 for CDNA architectures)
+WARP_SIZE = 64
 MAX_BLOCK_SIZE = 1024  # Maximum threads per workgroup on AMD GPUs
 MAX_LDS_BYTES = 65536  # 64 KB LDS per workgroup
+
+def get_warp_size_for_gpu(gpu_target: str) -> int:
+    """Get the warp size for a given GPU target.
+
+    CDNA architectures (gfx9xx) use WAVE64 (64 threads per wavefront).
+    RDNA architectures (gfx10xx, gfx11xx, gfx12xx) use WAVE32 (32 threads per wavefront).
+    """
+    if gpu_target.startswith("gfx9"):
+        return 64  # CDNA - WAVE64
+    return 32  # RDNA and others - WAVE32
 
 # ---------------------------------------------------------------------------
 # Datatype helpers
@@ -182,6 +193,7 @@ def validate_warp_thread_distribution(
     warp_tile_n: int,
     thread_tile_m: int,
     thread_tile_n: int,
+    warp_size: int = WARP_SIZE,
 ) -> Tuple[bool, str]:
     """
     Mirrors pool_shape.hpp:
@@ -189,11 +201,11 @@ def validate_warp_thread_distribution(
                     % get_warp_size() == 0);
     """
     threads_per_warp = (warp_tile_m * warp_tile_n) // (thread_tile_m * thread_tile_n)
-    if threads_per_warp % WARP_SIZE != 0:
+    if threads_per_warp % warp_size != 0:
         return (
             False,
             f"(warp_tile_m * warp_tile_n) / (thread_tile_m * thread_tile_n) = "
-            f"{threads_per_warp} is not a multiple of WARP_SIZE ({WARP_SIZE})",
+            f"{threads_per_warp} is not a multiple of warp_size ({warp_size})",
         )
     return True, ""
 
@@ -203,12 +215,13 @@ def _compute_warp_size_scale_factors(
     warp_tile_n: int,
     thread_tile_m: int,
     thread_tile_n: int,
+    warp_size: int = WARP_SIZE,
 ) -> Tuple[int, int]:
     """
     Reproduce the WarpSizeScaleFactor_M / _N logic from pool_shape.hpp.
     """
     threads_per_warp = (warp_tile_m * warp_tile_n) // (thread_tile_m * thread_tile_n)
-    scale = threads_per_warp // WARP_SIZE
+    scale = threads_per_warp // warp_size
 
     if warp_tile_m // thread_tile_m > warp_tile_n // thread_tile_n:
         return scale, 1
@@ -224,6 +237,7 @@ def validate_block_tile_coverage(
     warp_tile_n: int,
     thread_tile_m: int,
     thread_tile_n: int,
+    warp_size: int = WARP_SIZE,
 ) -> Tuple[bool, str]:
     """
     Mirrors pool_shape.hpp:
@@ -233,7 +247,7 @@ def validate_block_tile_coverage(
                     (WarpPerBlock_N * Warp_N) == 0);
     """
     sf_m, sf_n = _compute_warp_size_scale_factors(
-        warp_tile_m, warp_tile_n, thread_tile_m, thread_tile_n
+        warp_tile_m, warp_tile_n, thread_tile_m, thread_tile_n, warp_size
     )
 
     if (block_m * sf_m) % (warp_m * warp_tile_m) != 0:
@@ -256,13 +270,14 @@ def validate_block_tile_coverage(
 def validate_block_size(
     warp_m: int,
     warp_n: int,
+    warp_size: int = WARP_SIZE,
 ) -> Tuple[bool, str]:
-    """BlockSize = WARP_SIZE * warp_m * warp_n must be <= MAX_BLOCK_SIZE."""
-    block_size = WARP_SIZE * warp_m * warp_n
+    """BlockSize = warp_size * warp_m * warp_n must be <= MAX_BLOCK_SIZE."""
+    block_size = warp_size * warp_m * warp_n
     if block_size > MAX_BLOCK_SIZE:
         return (
             False,
-            f"BlockSize ({block_size} = {WARP_SIZE}*{warp_m}*{warp_n}) "
+            f"BlockSize ({block_size} = {warp_size}*{warp_m}*{warp_n}) "
             f"exceeds maximum ({MAX_BLOCK_SIZE})",
         )
     return True, ""
@@ -337,6 +352,7 @@ def is_tile_config_valid(
     in_datatype: str,
     out_datatype: str,
     fast_mode: bool = False,
+    gpu_target: str = "gfx90a",
 ) -> bool:
     """
     Comprehensive pooling tile configuration validation.
@@ -377,6 +393,9 @@ def is_tile_config_valid(
     if fast_mode:
         return True
 
+    # Get the warp size for this GPU target
+    warp_size = get_warp_size_for_gpu(gpu_target)
+
     # --- Power-of-two ---
     ok, err = validate_power_of_two(*all_params)
     if not ok:
@@ -385,20 +404,20 @@ def is_tile_config_valid(
 
     # --- Warp-thread distribution ---
     ok, err = validate_warp_thread_distribution(
-        warp_tile_m, warp_tile_n, thread_tile_m, thread_tile_n
+        warp_tile_m, warp_tile_n, thread_tile_m, thread_tile_n, warp_size
     )
     if not ok:
         logger.debug(f"Warp thread distribution failed: {err}")
         return False
 
     # --- Block-tile coverage ---
-    ok, err = validate_block_tile_coverage(*all_params)
+    ok, err = validate_block_tile_coverage(*all_params, warp_size=warp_size)
     if not ok:
         logger.debug(f"Block tile coverage failed: {err}")
         return False
 
     # --- Block size ---
-    ok, err = validate_block_size(warp_m, warp_n)
+    ok, err = validate_block_size(warp_m, warp_n, warp_size)
     if not ok:
         logger.debug(f"Block size check failed: {err}")
         return False
