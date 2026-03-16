@@ -6,10 +6,12 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
@@ -65,6 +67,22 @@ protected:
                          static_cast<float>(outputTolerance)});
     }
 
+    /// Calculates dynamic tolerance based on the operation and input data range.
+    /// Takes the max of ComputeType-based and float-based tolerance because test
+    /// expected values are computed from float constants (PI, E, TEST_VALUE_*),
+    /// so precision is bounded by float even when ComputeType is double.
+    float getDynamicTolerance(PointwiseMode mode, float scale) const
+    {
+        auto errorClass = pointwise::classifyPointwiseOp(mode);
+        auto effectiveScale = static_cast<double>(pointwise::isBoundedOutput(mode) ? 1.0f : scale);
+        auto tolerance
+            = pointwise::calculatePointwiseTolerance<OutputType, Input1Type, ComputeType>(
+                effectiveScale, errorClass);
+        auto floatFloor = pointwise::calculatePointwiseTolerance<OutputType, Input1Type, float>(
+            effectiveScale, errorClass);
+        return std::max(tolerance, floatFloor);
+    }
+
     // ======================= BINARY OPERATIONS =======================
 
     void testBinaryAddOperation()
@@ -82,7 +100,7 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, TEST_VALUE_2);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -102,7 +120,7 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -177,7 +195,7 @@ protected:
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PI);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -243,7 +261,7 @@ protected:
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -263,7 +281,7 @@ protected:
         Tensor<OutputType> expected({2, 3, 10});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_4));
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, TEST_VALUE_2_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -296,7 +314,7 @@ protected:
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -317,7 +335,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PRECISION_TEST_B);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -345,7 +363,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(10)), 3);
         expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(13)), 4);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 8.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -387,7 +405,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 40.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -423,7 +441,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -460,7 +478,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -511,7 +529,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -565,7 +583,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 103.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -630,7 +648,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -680,7 +698,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -757,7 +775,7 @@ protected:
                               1,
                               1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -816,7 +834,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -901,7 +919,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -975,7 +993,7 @@ protected:
                               1,
                               1); // sigmoid(1.5)
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_FWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1035,7 +1053,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_BWD, TEST_VALUE_4);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1077,7 +1095,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, TEST_VALUE_3);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1137,7 +1155,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::TANH_BWD, TEST_VALUE_4);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1207,7 +1225,7 @@ protected:
             1,
             1); // |-4| = 4
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ABS, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1242,7 +1260,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_2_5), 0, 1, 1, 0); // -2.5
         expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1314,7 +1332,7 @@ protected:
                               1,
                               1); // gelu_erf(1.5)
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_FWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1356,7 +1374,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(-TEST_VALUE_5)), 0, 1, 1, 0);
         expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_FWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1394,7 +1412,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(swish(-TEST_VALUE_5)), 0, 1, 1, 0);
         expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_FWD, TEST_VALUE_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1422,7 +1440,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(1.0f), 3); // max(0, 1) = 1
         expected.setHostValue(safeTestTypeCast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, 2.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1457,7 +1475,7 @@ protected:
             }
         }
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::ABS, 3.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1476,7 +1494,7 @@ protected:
         Tensor<OutputType> expected({2, 3, 4});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5));
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_2_5);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1495,7 +1513,7 @@ protected:
         Tensor<OutputType> expected({1, 1, 1, 1});
         expected.setHostValue(safeTestTypeCast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, E);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1529,7 +1547,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
         expected.setHostValue(safeTestTypeCast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
 
-        auto tolerance = getMixedTypeTolerance();
+        auto tolerance = getDynamicTolerance(PointwiseMode::IDENTITY, PI);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
