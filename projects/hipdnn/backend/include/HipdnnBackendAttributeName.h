@@ -49,6 +49,7 @@
  * - 2500-2599: Matmul operation attributes
  * - 2600-2699: SDPA forward propagation operation attributes
  * - 2700-2799: Layernorm operation attributes
+ * - 2800-2899: Block scale quantize operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -797,6 +798,35 @@ typedef enum
 
     /** @brief Math precision (compute data type) for layernorm */
     HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
+
+    /** @} */
+
+    /**
+     * @name Block Scale Quantize Operation Attributes (2800-2899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT = 2800,
+
+    /** @brief Output tensor (Y) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT = 2801,
+
+    /** @brief Scale tensor for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT = 2802,
+
+    /** @brief Block size parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT = 2803,
+
+    /** @brief Axis parameter for block scale quantize (optional) */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT = 2804,
+
+    /** @brief Transpose parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2805,
+
+    /** @brief Math precision for block scale quantize */
+    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT = 2806,
 
     /** @} */
 
