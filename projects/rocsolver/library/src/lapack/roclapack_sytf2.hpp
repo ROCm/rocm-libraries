@@ -102,6 +102,8 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
                 if(tid == 0)
                     rowmax = sval[0];
 
+                __syncthreads();
+
                 if(imax > 0)
                 {
                     iamax<MAX_THDS>(tid, imax, A + imax * lda, 1, sval, sidx);
@@ -272,6 +274,8 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
                 iamax<MAX_THDS>(tid, imax - k, A + imax + k * lda, lda, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
+
+                __syncthreads();
 
                 if(imax < n - 1)
                 {
