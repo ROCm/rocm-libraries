@@ -37,11 +37,14 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 
+#include <hipdnn_frontend/Error.hpp>
+
 #include <bitset>
 #include <optional>
 #include <ostream>
 #include <set>
 #include <string>
+#include <utility>
 #include <variant>
 
 namespace hipdnn_frontend
@@ -309,6 +312,30 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
         return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnConvolutionMode_t to frontend ConvolutionMode
+ *
+ * Maps the backend C API convolution mode enum to the frontend ConvolutionMode enum.
+ *
+ * @param mode The backend hipdnnConvolutionMode_t value
+ * @return A pair of the corresponding ConvolutionMode and an Error (set if the mode is unknown)
+ */
+inline std::pair<ConvolutionMode, Error> fromHipdnnConvMode(hipdnnConvolutionMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+        return {ConvolutionMode::CROSS_CORRELATION, {}};
+    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+        return {ConvolutionMode::CONVOLUTION, {}};
+    default:
+        return {
+            ConvolutionMode::NOT_SET,
+            {ErrorCode::HIPDNN_BACKEND_ERROR,
+             "Unknown hipdnnConvolutionMode_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 
@@ -649,6 +676,43 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
     case DataType::NOT_SET:
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnDataType_t to frontend DataType
+ *
+ * Maps the backend C API data type enum to the frontend DataType enum.
+ *
+ * @param type The backend hipdnnDataType_t value
+ * @return A pair of the corresponding DataType and an Error (set if the type is unknown)
+ */
+inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
+{
+    switch(type)
+    {
+    case HIPDNN_DATA_FLOAT:
+        return {DataType::FLOAT, {}};
+    case HIPDNN_DATA_DOUBLE:
+        return {DataType::DOUBLE, {}};
+    case HIPDNN_DATA_HALF:
+        return {DataType::HALF, {}};
+    case HIPDNN_DATA_INT8:
+        return {DataType::INT8, {}};
+    case HIPDNN_DATA_INT32:
+        return {DataType::INT32, {}};
+    case HIPDNN_DATA_UINT8:
+        return {DataType::UINT8, {}};
+    case HIPDNN_DATA_BFLOAT16:
+        return {DataType::BFLOAT16, {}};
+    case HIPDNN_DATA_FP8_E4M3:
+        return {DataType::FP8_E4M3, {}};
+    case HIPDNN_DATA_FP8_E5M2:
+        return {DataType::FP8_E5M2, {}};
+    default:
+        return {DataType::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnDataType_t value: " + std::to_string(static_cast<int>(type))}};
     }
 }
 
