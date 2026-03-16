@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,19 @@ namespace rocsparse
     rocsparse_status csrsv_solve_buffer_size(rocsparse_handle            handle,
                                              rocsparse_operation         trans,
                                              rocsparse_const_spmat_descr A,
+                                             rocsparse_const_dnvec_descr x,
+                                             rocsparse_const_dnvec_descr y,
                                              size_t*                     buffer_size);
+
+    inline rocsparse_status csrsv_solve_buffer_size(rocsparse_handle            handle,
+                                                    rocsparse_operation         trans,
+                                                    rocsparse_const_spmat_descr A,
+                                                    size_t*                     buffer_size)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            csrsv_solve_buffer_size(handle, trans, A, nullptr, nullptr, buffer_size));
+        return rocsparse_status_success;
+    }
 
     rocsparse_status csrsv_analysis(rocsparse_handle            handle,
                                     rocsparse_operation         trans,
