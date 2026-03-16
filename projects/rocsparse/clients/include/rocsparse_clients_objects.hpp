@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,20 @@
 *
 * ************************************************************************ */
 
-#include "testing.hpp"
+#pragma once
+#include "auto_testing_bad_arg.hpp"
+#include "display.hpp"
+#include "flops.hpp"
+#include "gbyte.hpp"
+#include "rocsparse.hpp"
+#include "rocsparse_check.hpp"
+#include "rocsparse_graph.hpp"
+#include "rocsparse_matrix_factory.hpp"
+#include "rocsparse_reproducibility.hpp"
+#include "rocsparse_reproducibility_test_save.hpp"
+#include "rocsparse_traits.hpp"
+#include "rocsparse_vector_utils.hpp"
+#include "utility.hpp"
 
 namespace rocsparse_clients
 {
@@ -49,13 +62,18 @@ namespace rocsparse_clients
             host_dense_vector<T>* that = new host_dense_vector<T>(size);
             T*                    d    = that->data();
             for(int64_t i = 0; i < size; ++i)
+            {
                 d[i] = 1;
+            }
             return that;
         }
+
         ~dense_vector_t()
         {
             if(m_h != nullptr)
+            {
                 delete m_h;
+            }
         }
         dense_vector_t(int64_t size)
             : m_h(init(size))

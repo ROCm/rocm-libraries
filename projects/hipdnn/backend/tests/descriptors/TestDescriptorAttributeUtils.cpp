@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "HipdnnOperationType.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/BackendDescriptor.hpp"
@@ -61,6 +62,18 @@ TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnWrongAttributeType)
 
     ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_BOOLEAN, 3, data.data(), "test"),
                                HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetInt64VectorSuccess)
+{
+    std::vector<int64_t> target;
+    std::array<int64_t, 3> data = {10, 20, 30};
+
+    ASSERT_NO_THROW(setInt64Vector(target, HIPDNN_TYPE_INT64, 3, data.data(), "test"));
+    ASSERT_EQ(target.size(), 3u);
+    EXPECT_EQ(target[0], 10);
+    EXPECT_EQ(target[1], 20);
+    EXPECT_EQ(target[2], 30);
 }
 
 // --- getInt64Vector ---
@@ -126,6 +139,19 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnWrongAttributeType)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST(TestDescriptorAttributeUtils, GetInt64VectorSuccess)
+{
+    std::vector<int64_t> source = {10, 20, 30};
+    std::array<int64_t, 3> output = {};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, output.data(), "test"));
+    ASSERT_EQ(count, 3);
+    EXPECT_EQ(output[0], 10);
+    EXPECT_EQ(output[1], 20);
+    EXPECT_EQ(output[2], 30);
+}
+
 // --- setScalar ---
 
 TEST(TestDescriptorAttributeUtils, SetScalarThrowsOnNullArrayOfElements)
@@ -165,6 +191,15 @@ TEST(TestDescriptorAttributeUtils, SetScalarThrowsOnWrongElementCount)
     ASSERT_THROW_HIPDNN_STATUS(
         setScalar(target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 2, &value, "test"),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetScalarSuccess)
+{
+    int64_t target = 0;
+    int64_t value = 42;
+
+    ASSERT_NO_THROW(setScalar(target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, &value, "test"));
+    ASSERT_EQ(target, 42);
 }
 
 // --- getScalar ---
@@ -221,6 +256,18 @@ TEST(TestDescriptorAttributeUtils, GetScalarThrowsOnWrongAttributeType)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST(TestDescriptorAttributeUtils, GetScalarSuccess)
+{
+    int64_t source = 42;
+    int64_t count = 0;
+    int64_t output = 0;
+
+    ASSERT_NO_THROW(
+        getScalar(source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(output, 42);
+}
+
 // --- setDataType ---
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnNullArrayOfElements)
@@ -260,6 +307,16 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnWrongElementCount)
 
     ASSERT_THROW_HIPDNN_STATUS(setDataType(target, HIPDNN_TYPE_DATA_TYPE, 2, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetDataTypeSuccess)
+{
+    using hipdnn_data_sdk::data_objects::DataType;
+    auto target = DataType::UNSET;
+    auto value = HIPDNN_DATA_FLOAT;
+
+    ASSERT_NO_THROW(setDataType(target, HIPDNN_TYPE_DATA_TYPE, 1, &value, "test"));
+    ASSERT_EQ(target, DataType::FLOAT);
 }
 
 // --- getDataType ---
@@ -314,6 +371,18 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnWrongAttributeType)
     ASSERT_THROW_HIPDNN_STATUS(
         getDataType(DataType::FLOAT, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, GetDataTypeSuccess)
+{
+    using hipdnn_data_sdk::data_objects::DataType;
+    int64_t count = 0;
+    hipdnnDataType_t output = {};
+
+    ASSERT_NO_THROW(
+        getDataType(DataType::FLOAT, HIPDNN_TYPE_DATA_TYPE, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
 }
 
 // --- setConvMode ---
@@ -455,6 +524,102 @@ TEST(TestDescriptorAttributeUtils, GetConvModeSuccessConvolution)
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CONVOLUTION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
     ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+}
+
+// --- getOperationType ---
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
+{
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                     HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                     1,
+                                     &count,
+                                     nullptr,
+                                     "test"));
+    ASSERT_EQ(count, 1);
+}
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequestedCount)
+{
+    int64_t count = 0;
+    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                     HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                     0,
+                                     &count,
+                                     &output,
+                                     "test"));
+    ASSERT_EQ(count, 1);
+}
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNull)
+{
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                                HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                                1,
+                                                nullptr,
+                                                nullptr,
+                                                "test"),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
+{
+    int64_t count = 0;
+    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                                HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                                1,
+                                                &count,
+                                                &output,
+                                                nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
+{
+    int64_t count = 0;
+    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                                HIPDNN_TYPE_INT64,
+                                                1,
+                                                &count,
+                                                &output,
+                                                "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessConvForward)
+{
+    int64_t count = 0;
+    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                                     HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                     1,
+                                     &count,
+                                     &output,
+                                     "test"));
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+}
+
+TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessBatchnormInference)
+{
+    int64_t count = 0;
+    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE,
+                                     HIPDNN_TYPE_OPERATION_TYPE_EXT,
+                                     1,
+                                     &count,
+                                     &output,
+                                     "test"));
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE);
 }
 
 // --- setTensorDescriptor ---
@@ -602,12 +767,94 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
     auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
     int64_t count = 0;
-    HipdnnBackendDescriptor* output = nullptr;
+    HipdnnBackendDescriptor* rawOutput = nullptr;
 
     ASSERT_NO_THROW(
-        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &output, "test"));
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &rawOutput, "test"));
+    std::unique_ptr<HipdnnBackendDescriptor> output(rawOutput);
     ASSERT_EQ(count, 1);
     ASSERT_NE(output, nullptr);
+}
+
+// --- setString ---
+
+TEST(TestDescriptorAttributeUtils, SetStringThrowsOnWrongAttributeType)
+{
+    std::string target;
+    const char* data = "hello";
+
+    ASSERT_THROW_HIPDNN_STATUS(setString(target, HIPDNN_TYPE_INT64, 5, data, "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetStringThrowsOnNullArrayOfElements)
+{
+    std::string target;
+
+    ASSERT_THROW_HIPDNN_STATUS(setString(target, HIPDNN_TYPE_CHAR, 5, nullptr, "test"),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, SetStringThrowsOnNegativeElementCount)
+{
+    std::string target;
+    const char* data = "hello";
+
+    ASSERT_THROW_HIPDNN_STATUS(setString(target, HIPDNN_TYPE_CHAR, -1, data, "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetStringSuccess)
+{
+    std::string target;
+    const char* data = "hello";
+
+    ASSERT_NO_THROW(setString(target, HIPDNN_TYPE_CHAR, 5, data, "test"));
+    ASSERT_EQ(target, "hello");
+}
+
+// --- getString ---
+
+TEST(TestDescriptorAttributeUtils, GetStringReturnsSizeWhenBufferNull)
+{
+    std::string source = "hello";
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 0, &count, nullptr, "test"));
+    ASSERT_EQ(count, 6); // "hello" + null terminator
+}
+
+TEST(TestDescriptorAttributeUtils, GetStringCopiesData)
+{
+    std::string source = "hello";
+    std::array<char, 16> buffer = {};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 16, &count, buffer.data(), "test"));
+    ASSERT_EQ(count, 6);
+    ASSERT_STREQ(buffer.data(), "hello");
+}
+
+TEST(TestDescriptorAttributeUtils, GetStringTruncatesWhenBufferSmall)
+{
+    std::string source = "hello";
+    std::array<char, 4> buffer = {};
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 4, &count, buffer.data(), "test"));
+    ASSERT_EQ(count, 4);
+    ASSERT_STREQ(buffer.data(), "hel"); // 3 chars + null
+}
+
+TEST(TestDescriptorAttributeUtils, GetStringThrowsOnWrongAttributeType)
+{
+    std::string source = "hello";
+    std::array<char, 16> buffer = {};
+    int64_t count = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getString(source, HIPDNN_TYPE_INT64, 16, &count, buffer.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace testing

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,61 +38,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
     ROCSPARSE_CHECKARG_POINTER(2, position);
 
-    auto    csrilu0_info = info->get_csrilu0_info();
-    int64_t zero_pivot_value;
-    auto    status = csrilu0_info->copy_zero_pivot_async(rocsparse_pointer_mode_host,
-                                                      rocsparse::get_indextype<int64_t>(),
-                                                      &zero_pivot_value,
-                                                      handle->stream);
-    if(status != rocsparse_status_zero_pivot)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(status);
-    }
-
-    int64_t singular_pivot_value;
-    status = csrilu0_info->copy_singular_pivot_async(rocsparse_pointer_mode_host,
-                                                     rocsparse::get_indextype<int64_t>(),
-                                                     &singular_pivot_value,
-                                                     handle->stream);
-
-    if(status != rocsparse_status_zero_pivot)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(status);
-    }
+    auto csrilu0_info = info->get_csrilu0_info();
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
+        handle,
+        1,
+        csrilu0_info,
+        (csrilu0_info != nullptr) ? csrilu0_info->get_singularity_numeric_exact() : nullptr,
+        (csrilu0_info != nullptr) ? csrilu0_info->get_singularity_numeric_near() : nullptr,
+        handle->pointer_mode,
+        rocsparse::get_indextype<rocsparse_int>(),
+        position));
 
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
-
-    int64_t singular_pivot;
-    if((singular_pivot_value == -1) || (zero_pivot_value == -1))
-    {
-        singular_pivot = ((singular_pivot_value == -1) //
-                              ? zero_pivot_value //
-                              : singular_pivot_value);
-    }
-    else
-    {
-        singular_pivot = std::min(zero_pivot_value, singular_pivot_value);
-    }
-
-    switch(handle->pointer_mode)
-    {
-    case rocsparse_pointer_mode_device:
-    {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(position,
-                                           &singular_pivot,
-                                           sizeof(rocsparse_int),
-                                           hipMemcpyHostToDevice,
-                                           handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
-        break;
-    }
-
-    case rocsparse_pointer_mode_host:
-    {
-        position[0] = singular_pivot;
-        break;
-    }
-    }
 
     return (rocsparse_status_success);
     // LCOV_EXCL_START
