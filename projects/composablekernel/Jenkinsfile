@@ -81,11 +81,9 @@ def checkoutComposableKernel()
     checkout scm
 }
 
-// Given a pattern, check if the log contains the pattern and return the context.
 // Scan the build logs for failures and send notifications.
 def sendFailureNotifications() {
     // Error patterns to scan build logs for specific failure types and send detailed notifications.
-    // Patterns are plain strings so they can be passed directly to grep -E.
     def failurePatterns = [
         [pattern: 'login attempt to .* failed with status: 401 Unauthorized', description: "Docker registry authentication failed"],
         [pattern: 'docker login failed', description: "Docker login failed"],
@@ -98,8 +96,7 @@ def sendFailureNotifications() {
         [pattern: 'No space left on device', description: "Device space error"]
     ]
 
-    // Patterns where the node name is useful for triage — captured by extracting
-    // NODE_NAME = <name> from the context block.
+    // The patterns which we want to know the node's name.
     def nodePatterns = ['cat: .* No such file or directory', 'GPU not found', 'No space left on device']
 
     // Build a single combined grep -E pattern and stream the log through it.
@@ -127,8 +124,7 @@ def sendFailureNotifications() {
     // be checked against every block. Deduplication prevents double-notifying on
     // the same description if a pattern appears in multiple blocks.
     // For GPU-related patterns, the node name is extracted via a separate awk pass
-    // that tracks the most recent NODE_NAME seen and exits as soon as the failure
-    // line is hit, working reliably regardless of log size.
+    // that tracks the most recent NODE_NAME seen and exits as soon as the failure is observed.
     def foundPatterns = []
     def blocks = grepOutput.split('\n--\n')
     for (block in blocks) {
@@ -162,7 +158,6 @@ def sendFailureNotifications() {
             .replace('\n', '\\n')
         withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
         sh '''
-            # Create JSON payload with base64 data
             echo "Creating JSON payload..."
             {
                 printf '{\n'
