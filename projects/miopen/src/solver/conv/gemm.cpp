@@ -816,8 +816,7 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
     decltype(auto) wDesc  = problem.GetWeights();
     decltype(auto) yDesc  = problem.GetOut();
 
-    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
-       wDesc.GetType() != miopenInt8)
+    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) && wDesc.GetType() != miopenInt8)
         return 0;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -906,8 +905,8 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
     if(use_batched_fwd_point_output)
     {
         const auto tmp_gemm_desc = [&]() {
-            auto tmp = CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
-            tmp.deterministic  = problem.GetConv().attribute.deterministic;
+            auto tmp            = CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
+            tmp.deterministic   = problem.GetConv().attribute.deterministic;
             tmp.conv_attributes = problem.GetConv().attribute;
             if(problem.IsTensorsCasted())
             {

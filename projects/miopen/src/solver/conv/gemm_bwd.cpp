@@ -706,14 +706,14 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
             // launch one regular GEMM over N, then one batched Col2Im.
             if(miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
             {
-                auto single_gemm_desc  = gemm_desc;
+                auto single_gemm_desc        = gemm_desc;
                 single_gemm_desc.batch_count = 1;
                 single_gemm_desc.strideA     = 0;
                 single_gemm_desc.strideB     = 0;
                 single_gemm_desc.strideC     = 0;
                 // C[N, C*Z*Y*X] = DY[N, K] * W[K, C*Z*Y*X]
-                single_gemm_desc.m      = static_cast<int>(in_n);
-                single_gemm_desc.n      = static_cast<int>(in_c * wei_spatial_size * out_spatial_size);
+                single_gemm_desc.m = static_cast<int>(in_n);
+                single_gemm_desc.n = static_cast<int>(in_c * wei_spatial_size * out_spatial_size);
                 single_gemm_desc.transA = false;
                 single_gemm_desc.transB = false;
                 single_gemm_desc.lda    = static_cast<int>(wei_k);
