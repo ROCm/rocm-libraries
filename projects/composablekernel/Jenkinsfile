@@ -104,16 +104,14 @@ def sendFailureNotifications() {
 
     // Build a single combined grep -E pattern and stream the log through it.
     // grep does the scanning natively so the full log is never loaded into Groovy.
-    // -B 10 captures enough preceding lines to include NODE_NAME = <name>, which
-    // appears 6 lines before the cat: failure line in the build log.
-    // -A 2 captures 2 lines of context after each match.
+    // -B 2 -A 2 captures 2 lines of context around each match.
     // || true prevents a non-zero grep exit code (no matches) from failing the stage.
     def combinedPattern = failurePatterns.collect { it.pattern }.join('|')
     echo "Checking for failure patterns..."
     def grepOutput = sh(
         script: """
             set +x
-            wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | grep -E -B 10 -A 2 '${combinedPattern}' || true
+            wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | grep -E -B 2 -A 2 '${combinedPattern}' || true
         """,
         returnStdout: true
     ).trim()
@@ -128,7 +126,9 @@ def sendFailureNotifications() {
     // Adjacent matches share one block (no '--' separator), so all patterns must
     // be checked against every block. Deduplication prevents double-notifying on
     // the same description if a pattern appears in multiple blocks.
-    // For GPU-related patterns, also extract the node name from the context block.
+    // For GPU-related patterns, the node name is extracted via a separate awk pass
+    // that tracks the most recent NODE_NAME seen and exits as soon as the failure
+    // line is hit, working reliably regardless of log size.
     def foundPatterns = []
     def blocks = grepOutput.split('\n--\n')
     for (block in blocks) {
@@ -136,10 +136,16 @@ def sendFailureNotifications() {
             if ((block =~ patternMap.pattern) && !foundPatterns.any { it.description == patternMap.description }) {
                 def nodeName = ""
                 if (gpuPatterns.contains(patternMap.pattern)) {
-                    def nodeNameMatcher = (block =~ /NODE_NAME\s*=\s*(\S+)/)
-                    if (nodeNameMatcher) {
-                        nodeName = nodeNameMatcher[0][1]
-                    }
+                    nodeName = sh(
+                        script: """
+                            set +x
+                            wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | awk '
+                                /NODE_NAME[[:space:]]*=/ { node = \$NF }
+                                /${patternMap.pattern}/ { print node; exit }
+                            '
+                        """,
+                        returnStdout: true
+                    ).trim()
                 }
                 foundPatterns.add([description: patternMap.description, context: block, nodeName: nodeName])
             }
@@ -1488,6 +1494,15 @@ pipeline {
                     checkoutComposableKernel()
                     env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || shouldRunCICheck())
                     echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
+
+                    // TEST ONLY: Generate a large volume of dummy output to simulate a real
+                    // build log, then emit all failure patterns near the end to verify that
+                    // sendFailureNotifications() correctly detects patterns in a large log.
+                    sh 'echo "NODE_NAME = \$NODE_NAME"'
+                    sh 'for i in $(seq 1 30000); do echo "Dummy build log line $i: compiling and processing..."; done'
+                    echo "cat: /dev/dri/renderD128: No such file or directory"
+                    sh 'for i in $(seq 1 50000); do echo "Dummy build log line $i: compiling and processing..."; done'
+                    error("TEST: Forcing stage failure to trigger sendFailureNotifications() and validate all failure pattern checks")
                 }
             }
         }
