@@ -105,6 +105,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::SdpaAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
             return typeid(hipdnn_data_sdk::data_objects::CustomOpAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::ReductionAttributes);
         default:
             throw std::invalid_argument("Node attributes type is not recognized");
         }

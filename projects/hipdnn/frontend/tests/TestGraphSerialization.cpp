@@ -1740,6 +1740,24 @@ TEST_P(TestGraphSerializationRoundTrip, CustomOpNode)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, ReductionNode)
+{
+    Graph graph;
+    graph.set_name("reduction_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {2, 8, 16, 64}, DataType::FLOAT, 1);
+
+    Reduction_attributes reductionAttrs;
+    reductionAttrs.set_mode(ReductionMode::ADD);
+
+    auto y = graph.reduction(x, reductionAttrs);
+    y->set_output(true).set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_uid(2);
+
+    roundTripAndCompare(graph);
+}
+
 //==============================================================================
 // Test Suite Instantiation
 //==============================================================================

@@ -83,6 +83,7 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -108,6 +109,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
@@ -788,6 +790,19 @@ private:
                     attr.set_compute_data_type(fromSdkType(fbNode->compute_data_type()));
                     _sub_nodes.emplace_back(
                         std::make_shared<CustomOpNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+                {
+                    auto attr = ReductionAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_ReductionAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    attr.set_compute_data_type(fromSdkType(fbNode->compute_data_type()));
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ReductionNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -2280,6 +2295,40 @@ public:
             std::make_shared<PointwiseNode>(std::move(attributes), graph_attributes));
 
         return out0;
+    }
+
+    /** @brief Reduction operation
+     *
+     * Reduces an input tensor to a scalar output using the specified reduction
+     * mode. The output tensor must have the same rank as the input tensor, with
+     * all dimensions set to 1.
+     *
+     * @param x Input tensor (arbitrary shape)
+     * @param attributes Configuration specifying the reduction mode
+     * @return y: Output tensor (all dimensions reduced to 1)
+     *
+     * @see ReductionAttributes, ReductionMode
+     */
+    std::shared_ptr<TensorAttributes> reduction(std::shared_ptr<TensorAttributes> x,
+                                                ReductionAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ReductionNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     /** @brief Matrix multiplication
