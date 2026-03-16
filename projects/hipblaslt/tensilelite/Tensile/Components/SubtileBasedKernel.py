@@ -482,6 +482,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
 
   wavesize = kernel["WavefrontSize"]
   depthUBytes = kernel["DepthU"] * tileInfo.bpe
+  MT = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
   loadWidth = tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe // wavesize
   bytes_loaded = wavesize * loadWidth
 
@@ -499,11 +500,11 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
     else:
       module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
     
-    # If interleaved, W0 and W1 get consecutive subtitles otherwise W0 and W1 are spaced by MT0//2 (half subtiles)
+    # If interleaved, W0 and W1 get consecutive subtitles otherwise W0 and W1 are spaced by MT//2 (half subtiles)
     if interleaved:
-      module.add(SMovB32(dst=sgpr(tmpSgpr), src=tileInfo.subtileSize*2, comment="%s: bytes loaded per wave"%tc))
+      module.add(SMovB32(dst=sgpr(tmpSgpr), src=tileInfo.subtileSize, comment="%s: bytes loaded per wave"%tc))
     else:
-      module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
+      module.add(SMovB32(dst=sgpr(tmpSgpr), src=MT*depthUBytes//2, comment="%s: bytes loaded per wave / 2"%tc))
 
     module.add(VMulLOU32(dst=vgpr(tmp), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="%s: wave partition offset"%tc))
 
@@ -587,7 +588,7 @@ def lraTileAssignment(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId % 16"))
 
-  swizzling = True
+  swizzling = False
   if swizzling:
     # Get lds row id
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
@@ -612,8 +613,8 @@ def lraTileAssignment(writer, kernel):
   _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
 
   # Apply wavesplit offset separately on A & B as they are different for 1x4 and 4x1
-  _applySplitOffset(module, writer, kernel, tileInfoA, lane16)
-  _applySplitOffset(module, writer, kernel, tileInfoB, lane16)
+  # _applySplitOffset(module, writer, kernel, tileInfoA, lane16)
+  # _applySplitOffset(module, writer, kernel, tileInfoB, lane16)
 
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -623,7 +624,7 @@ def lraTileAssignment(writer, kernel):
   # Apply global offset on B (B data follows A in LDS).
   MT0A = tileInfoA.globalMMATileGrid[0] * tileInfoA.mmaTileShape[0]
   tmpSgpr = writer.sgprPool.checkOut(1)
-  module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(MT0A*depthUBytes), comment="LDS offset for B matrix"))
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetB), comment="LDS offset for B matrix"))
   for vgprId in range(len(tileInfoB.sharedVgprLROffset)):
     module.add(VAddU32(dst=vgpr(tileInfoB.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfoB.sharedVgprLROffset[vgprId]), src1=sgpr(tmpSgpr), comment="B matrix offset : mt0*depthUBytes"))
   writer.sgprPool.checkIn(tmpSgpr)
@@ -854,7 +855,7 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
   module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
 
-  useSwizzling = True
+  useSwizzling = False
   if useSwizzling:
     module.addComment0("Swizzling")
     module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(rowId), comment="lds row id"))
@@ -977,9 +978,7 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
   subtileInfo = tileInfo.localSubtiles[linearId]
-  readSizePerWg = 2*tileInfo.subtileSize
-  waveSize = kernel["WavefrontSize"]
-  loadWidth = 16
+  offsetStride = tileInfo.subtileSize
 
   # Reads mma tiles in a subtile row-major
   # TODO: Check if this ordering can be used for TLU=1
@@ -993,13 +992,9 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
       interleaved = True
       if interleaved:
-        # Space reads by 2 subtiles and apply half-wave offset for 2nd block of subtiles.
-        numSubtiles = tileInfo.localSubtileGrid[0]                                                                                                                                                                                                                          
-        halfWaveBytes = loadWidth * waveSize // 2                                                                                                                                                                                                                           
-        half, rem = divmod(sId0 * 2, numSubtiles)             
-        offset = rem * readSizePerWg + half * halfWaveBytes
+        offset = sId0*2*offsetStride
       else:
-        offset = sId0*readSizePerWg
+        offset = sId0*offsetStride
 
       module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegs), src=vgpr(addrVgpr), ds=DSModifiers(offset=offset),
                             comment="Subtile%s[%u,%u] mfmaId=[%u,%u]"%(tileInfo.tc, sId0, sId1, mfmaR, mfmaC)))
