@@ -151,6 +151,16 @@ TEST(TestFp4E2M1, Underflow)
     fp4_e2m1 val2(-0.1f);
     EXPECT_EQ(static_cast<float>(val2), -0.0f);
     EXPECT_TRUE(std::signbit(static_cast<float>(val2)));
+
+    // fp32 subnormal inputs (exercises shift > 24 path with fp32Exp == 0)
+    fp4_e2m1 val3(std::numeric_limits<float>::denorm_min());
+    EXPECT_EQ(static_cast<float>(val3), 0.0f);
+
+    fp4_e2m1 val4(-std::numeric_limits<float>::denorm_min());
+    EXPECT_EQ(static_cast<float>(val4), 0.0f);
+
+    fp4_e2m1 val5(1e-40f);
+    EXPECT_EQ(static_cast<float>(val5), 0.0f);
 }
 
 // ============================================================================
