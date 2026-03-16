@@ -75,7 +75,7 @@ extern "C" {
 *  @param[in]
 *  percentage         \p percentage>=0 and \p percentage<=100.
 *  @param[in]
-*  descr              the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
+*  descr              the descriptor of the dense matrix \p A. The supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
 *                     any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  csrVal             array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
@@ -238,7 +238,7 @@ hipsparseStatus_t
 *  which determines the size of the temporary storage buffer. After this is determined, this buffer must be allocated
 *  by the user. Next, the user allocates the \p csrRowPtr array to have \p m+1 elements and calls
 *  \p hipsparseXpruneDense2csrNnzByPercentage. Finally, the user finishes the conversion
-*  by allocating the \p csrColInd and \p csrVal arrays (whos size is determined by the value
+*  by allocating the \p csrColInd and \p csrVal arrays (which have a size determined by the value
 *  at \p nnzTotalDevHostPtr) and calling \ref hipsparseSpruneDense2csrByPercentage
 *  "hipsparseXpruneDense2csrByPercentage()".
 *
@@ -331,7 +331,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *  temporary storage buffer. After this is determined, this buffer must be allocated by the user.
 *  Next, the user allocates the \p csrRowPtr array to have \p m+1 elements and calls
 *  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()". Finally, the
-*  user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays (whos size is
+*  user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays (which have a size
 *  determined by the value at \p nnzTotalDevHostPtr) and calling \p hipsparseXpruneDense2csrByPercentage.
 *
 *  The pruning by percentage works by first sorting the absolute values of the dense

@@ -103,7 +103,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
 *  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$
-*  is a dense vector of length \f$n\f$ and \f$y\f$ is a dense vector of length \f$m\f$. This step is
+*  is a dense vector of length \f$n\f$, and \f$y\f$ is a dense vector of length \f$m\f$. This step is
 *  optional but it might result in better performance.
 *
 *  \p hipsparseSpMV_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for

@@ -204,12 +204,12 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \p hipsparseSpMM requires three stages to complete. First, the user calls \ref hipsparseSpMM_bufferSize to determine
 *  the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
 *  \ref hipsparseSpMM_preprocess, which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user calls
-*  \p hipsparseSpMM to perform the actual computation. The buffer size and preprecess routines only need to be called once for a given
+*  \p hipsparseSpMM to perform the actual computation. The buffer size and preprocess routines only need to be called once for a given
 *  sparse matrix \f$op(A)\f$, while the computation routine can be repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
 *  After all calls to \p hipsparseSpMM are complete, the temporary buffer can be deallocated.
 *
 *  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
-*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as
+*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ because
 *  this provides the best memory access.
 *
 *  \p hipsparseSpMM supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity

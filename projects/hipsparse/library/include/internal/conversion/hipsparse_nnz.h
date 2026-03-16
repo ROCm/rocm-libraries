@@ -75,7 +75,7 @@ extern "C" {
 *  @param[in]
 *  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
+*  dirA               direction that specifies whether to count non-zero elements by \ref HIPSPARSE_DIRECTION_ROW
 *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  m                  number of rows of the dense matrix \p A. Must be non-negative.

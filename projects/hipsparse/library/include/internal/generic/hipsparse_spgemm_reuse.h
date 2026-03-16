@@ -33,7 +33,7 @@ extern "C" {
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
 *  \p hipsparseSpGEMMreuse_workEstimation is called twice. First, call it to compute the size of the first required user-allocated
@@ -70,7 +70,7 @@ extern "C" {
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    void*  dBuffer1  = NULL;
 *    size_t bufferSize1 = 0;
@@ -121,7 +121,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  @param[in]
 *  handle           handle to the hipSPARSE library context queue.
@@ -161,7 +161,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    // Determine size of second, third, and fourth user allocated buffer
 *    hipsparseSpGEMMreuse_nnz(handle, opA, opB, matA, matB,
@@ -225,7 +225,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  @param[in]
 *  handle           handle to the hipSPARSE library context queue.
@@ -256,7 +256,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    // Get matrix C non-zero entries nnzC
 *    int64_t rowsC, colsC, nnzC;
@@ -317,7 +317,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  @param[in]
 *  handle           handle to the hipSPARSE library context queue.

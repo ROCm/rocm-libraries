@@ -173,8 +173,8 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
 *    \end{align}
 *  \f]
-*  For the lowest array, the first \p 2*batchCount entries are zero, and for the lower array, the first \p batchCount entries are zero,
-*  for the upper array, the last \p batchCount entries are zero, and for the highest array, the last \p 2*batchCount entries are zero.
+*  For the lowest array, the first \p 2*batchCount entries are zero, and for the lower array, the first \p batchCount entries are zero.
+*  For the upper array, the last \p batchCount entries are zero, and for the highest array, the last \p 2*batchCount entries are zero.
 *
 *  \note
 *  This function is non-blocking and executed asynchronously with respect to the host.

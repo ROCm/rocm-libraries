@@ -33,7 +33,7 @@ extern "C" {
  *
  *  \details
  *  \p hipsparseXpruneCsr2csr_bufferSize returns the size of the temporary buffer that
- *  is required by \p hipsparseXpruneCsr2csrNnz and hipsparseXpruneCsr2csr. The
+ *  is required by \p hipsparseXpruneCsr2csrNnz and \p hipsparseXpruneCsr2csr. The
  *  temporary storage buffer must be allocated by the user.
  *
  *  @param[in]
@@ -202,10 +202,10 @@ hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSizeExt(hipsparseHandle_t        
  *  number of non-zero elements in a sparse CSR matrix after elements less than the threshold are
  *  pruned from the matrix.
  *
- *  \note The routine does support asynchronous execution if the pointer mode is set to device.
+ *  \note The routine supports asynchronous execution if the pointer mode is set to device.
  *
  *  @param[in]
- *  handle             handle to the hipsparse library context queue.
+ *  handle             handle to the hipSPARSE library context queue.
  *  @param[in]
  *  m                  number of rows in the sparse CSR matrix.
  *  @param[in]
@@ -285,10 +285,10 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnz(hipsparseHandle_t         handle,
  *  that are less than the threshold. All the parameters are assumed to have been preallocated by the user.
  *  The user first calls \ref hipsparseSpruneCsr2csr_bufferSize "hipsparseXpruneCsr2csr_bufferSize()" to
  *  determine the size of the buffer used by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()"
- *  and \p hipsparseXpruneCsr2csr() which the user then allocates. The user then allocates \p csrRowPtrC to
+ *  and \p hipsparseXpruneCsr2csr(), which the user then allocates. The user then allocates \p csrRowPtrC to
  *  have \p m+1 elements and then calls hipsparseXpruneCsr2csrNnz(), which fills in the \p csrRowPtrC array
  *  and stores the number of elements that are larger than the pruning \p threshold in \p nnzTotalDevHostPtr.
- *  The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. It is executed asynchronously
+ *  The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. This function is executed asynchronously
  *  with respect to the host and can return control to the application on the host before the entire result is ready.
  *
  *  @param[in]

@@ -36,7 +36,7 @@ extern "C" {
 *  \p hipsparseXcsrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity
 *  pattern of the matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph
 *  such that no two adjacent nodes are of the same color. The \p fractionToColor is a parameter to only color
-*  a given percentage of the graph nodes, the remaining uncolored nodes receive distinct new colors. The optional
+*  a given percentage of the graph nodes. The remaining uncolored nodes receive distinct new colors. The optional
 *  \p reordering array is a permutation array that groups unknowns of the same color. The matrix \f$A\f$
 *  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric,
 *  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.

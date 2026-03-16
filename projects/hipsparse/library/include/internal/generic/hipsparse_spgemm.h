@@ -53,7 +53,7 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
 *  \p hipsparseSpGEMM_workEstimation is called twice. First, call it to compute the size of the first required user-allocated
@@ -99,7 +99,7 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    void*  dBuffer1  = NULL;
 *    size_t bufferSize1 = 0;
@@ -158,7 +158,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
 *  \p hipsparseSpGEMM_compute is called twice, first to compute the size of the second required user-allocated
@@ -205,7 +205,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 *
-*  \par Example (See full example below)
+*  \par Example (see full example below)
 *  \code{.c}
 *    void*  dBuffer2  = NULL;
 *    size_t bufferSize2 = 0;
@@ -261,7 +261,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
+*  where \f$C'\f$, \f$A\f$, \f$B\f$, and \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
 *  \p hipsparseSpGEMM_copy is called once to copy the results (that are currently stored in the temporary arrays)

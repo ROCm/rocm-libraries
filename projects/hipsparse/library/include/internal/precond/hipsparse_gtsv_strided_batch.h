@@ -55,7 +55,7 @@ extern "C" {
 *  batchStride        The number of elements that separate each system, which must satisfy \p batchStride >= m.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
+*                     \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl,
@@ -124,7 +124,7 @@ hipsparseStatus_t hipsparseZgtsv2StridedBatch_bufferSizeExt(hipsparseHandle_t   
 *
 *  Solving the batched tridiagonal system involves two steps. First, the user calls
 *  \ref hipsparseSgtsv2StridedBatch_bufferSizeExt "hipsparseXgtsv2StridedBatch_bufferSizeExt()"
-*  to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  to determine the size of the required temporary storage buffer. After this is determined, the user allocates
 *  this buffer and passes it to \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()"
 *  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
 *  overwritten with the solution after the call to
@@ -177,7 +177,7 @@ hipsparseStatus_t hipsparseZgtsv2StridedBatch_bufferSizeExt(hipsparseHandle_t   
 *  @param[in]
 *  du          upper diagonal of the tridiagonal system. The last entry must be zero.
 *  @param[inout]
-*  x           Dense array of right- hand sides where the ith right-hand side starts at \p x+batchStride*i.
+*  x           Dense array of right-hand sides where the ith right-hand side starts at \p x+batchStride*i.
 *  @param[in]
 *  batchCount  The number of systems to solve.
 *  @param[in]

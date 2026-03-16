@@ -43,7 +43,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  Calling \p hipsparseXcsr2coo() results in the COO row indices array:
+*  Calling \p hipsparseXcsr2coo results in the COO row indices array:
 *  \f[
 *    \begin{align}
 *    \text{cooRowInd} &= \begin{bmatrix} 0 & 1 & 1 & 2 \end{bmatrix}

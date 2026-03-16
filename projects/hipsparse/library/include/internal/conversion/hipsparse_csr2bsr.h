@@ -152,7 +152,7 @@ extern "C" {
 *  @param[out]
 *  bsrRowPtrC  integer array containing \p mb+1 elements that point to the start of each block row of the BSR matrix.
 *  @param[out]
-*  bsrNnzb     total number of nonzero elements in device or host memory.
+*  bsrNnzb     total number of non-zero elements in device or host memory.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p csrRowPtrA, \p csrColIndA,

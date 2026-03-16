@@ -118,7 +118,7 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  \brief Tridiagonal solver with pivoting
 *
 *  \details
-*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right hand sides using pivoting
+*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right-hand sides using pivoting
 *  \f[
 *    T*B = B
 *  \f]
@@ -128,7 +128,7 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *
 *  Solving the tridiagonal system involves two steps. First, the user calls
 *  \ref hipsparseSgtsv2_bufferSizeExt "hipsparseXgtsv2_bufferSizeExt()" to determine the size of the required
-*  temporary storage buffer. Once determined, the user allocates this buffer and passes it to
+*  temporary storage buffer. After this is determined, the user allocates the buffer and passes it to
 *  \ref hipsparseSgtsv2 "hipsparseXgtsv2()" to perform the actual solve. The \f$B\f$ dense matrix, which initially
 *  stores the \p n right-hand side vectors, is overwritten with the \p n solution vectors after the call to
 *  \ref hipsparseSgtsv2 "hipsparseXgtsv2()".

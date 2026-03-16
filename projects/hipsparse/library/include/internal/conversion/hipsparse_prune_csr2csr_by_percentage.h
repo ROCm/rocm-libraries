@@ -214,7 +214,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
  *  number of non-zero elements in a sparse CSR matrix after elements less than the threshold are
  *  pruned from the matrix.
  *
- *  \note The routine does support asynchronous execution if the pointer mode is set to device.
+ *  \note The routine supports asynchronous execution if the pointer mode is set to device.
  *
  *  @param[in]
  *  handle             handle to the hipSPARSE library context queue.
@@ -252,7 +252,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC,
- *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr ,or \p buffer
+ *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr, or \p buffer
  *              pointer is invalid.
  */
 /**@{*/

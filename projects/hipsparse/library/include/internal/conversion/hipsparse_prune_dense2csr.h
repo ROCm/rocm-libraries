@@ -35,7 +35,7 @@ extern "C" {
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
-*  Specifically given an input dense column-ordered matrix A, with leading dimension \p lda where \p lda>=m,
+*  Specifically given an input dense column-ordered matrix A, with leading dimension \p lda, where \p lda>=m,
 *  the resulting pruned sparse CSR matrix C is computed using:
 *  \f[
 *   |C(i,j)| = A(i, j) \text{  if |A(i, j)| > threshold}
@@ -45,7 +45,7 @@ extern "C" {
 *  using \p hipsparseXpruneDense2csr_bufferSize() that will be passed to the subsequent steps of the conversion.
 *  After the buffer size has been determined, the user must allocate it. This user-allocated buffer is then passed
 *  to \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()" and \ref hipsparseSpruneDense2csr
-*  "hipsparseXpruneDense2csr()" to complete the conversion. The user is responsible to then free the buffer after
+*  "hipsparseXpruneDense2csr()" to complete the conversion. The user is responsible for then freeing the buffer after
 *  the conversion has been completed.
 *
 *  See hipsparseSpruneDense2csr() for a full code example.
@@ -65,7 +65,7 @@ extern "C" {
 *  @param[in]
 *  lda                leading dimension of dense array \p A. Must be at least \p m.
 *  @param[in]
-*  threshold          pointer to the pruning non-negative threshold which can exist in either host or device memory.
+*  threshold          pointer to the pruning non-negative threshold, which can exist in either host or device memory.
 *  @param[in]
 *  descr              the descriptor of the dense matrix \p A. The supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL
 *                     and any valid value of the \ref hipsparseIndexBase_t.
@@ -148,7 +148,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 /*! \ingroup conv_module
 *  \brief
 *  \p hipsparseXpruneDense2csrNnz computes the number of non-zero elements per row and the total
-*  number of non-zero elements in a dense matrix once the elements less than the (non-negative) threshold are
+*  number of non-zero elements in a dense matrix after the elements less than the (non-negative) threshold are
 *  pruned from the matrix.
 *
 *  \details
@@ -266,7 +266,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *  to have been pre-allocated by the user.
 *
 *  \details
-*  Given an input dense column ordered matrix \p A, with leading dimension \p lda where \p lda>=m,
+*  Given an input dense column ordered matrix \p A, with leading dimension \p lda, where \p lda>=m,
 *  the resulting pruned sparse CSR matrix C is computed using:
 *  \f[
 *   |C(i,j)| = A(i, j) \text{  if |A(i, j)| > threshold}
@@ -275,12 +275,12 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *  The user first calls \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" to
 *  determine the size of the required user-allocated temporary storage buffer. The user then allocates this
 *  buffer. Next, the user allocates \p csrRowPtr to have \p m+1 elements and then calls
-*  \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()" which fills in the \p csrRowPtr array
+*  \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()", which fills in the \p csrRowPtr array
 *  and stores the number of elements that are larger than the pruning \p threshold in \p nnzTotalDevHostPtr.
 *  The user then allocates \p csrColInd and \p csrVal to have size \p nnzTotalDevHostPtr and completes the
 *  conversion by calling \p hipsparseXpruneDense2csr().
 *
-*  For example, performing these steps with the dense input matrix \p A:
+*  For example, performing these steps with the dense input matrix \p A :
 *  \f[
 *    \begin{bmatrix}
 *    6 & 2 & 3 & 7 \\
@@ -336,7 +336,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *  csrColInd  integer array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) column indices of the non-zero elements of matrix \p A.
 *
 *  @param[in]
-*  buffer     temporary storage buffer allocated by the user, size is returned by
+*  buffer     temporary storage buffer allocated by the user. The size is returned by
 *             \ref hipsparseSpruneDense2csr_bufferSize "hipsparseXpruneDense2csr_bufferSize()" or
 *             \ref hipsparseSpruneDense2csr_bufferSizeExt "hipsparseXpruneDense2csr_bufferSizeExt()".
 *

@@ -189,7 +189,7 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
  *  @param[in]
  *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
- *  dirA        direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW or by
+ *  dirA        direction that specifies whether to count non-zero elements by \ref HIPSPARSE_DIRECTION_ROW or by
  *              \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
  *  mb          number of block rows in the sparse BSR matrix.
@@ -319,7 +319,7 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *  @param[in]
  *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
- *  dirA        direction that specified whether to count non-zero elements by \ref HIPSPARSE_DIRECTION_ROW or by
+ *  dirA        direction that specifies whether to count non-zero elements by \ref HIPSPARSE_DIRECTION_ROW or by
  *              \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
  *  mb          number of block rows in the sparse BSR matrix.

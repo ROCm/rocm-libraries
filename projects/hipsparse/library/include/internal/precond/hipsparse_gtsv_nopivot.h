@@ -52,7 +52,7 @@ extern "C" {
 *  ldb                Leading dimension of B. Must satisfy \p ldb >= max(1, m).
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
+*                     \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.

@@ -34,7 +34,7 @@ extern "C" {
 *  \p hipsparseXdense2csc functions convert the matrix \p A in dense format into a sparse matrix in CSC format.
 *
 *  \details
-*  Given a dense, column-ordered, matrix \p A with leading dimension \p ld where \p ld>=m,
+*  Given a dense, column-ordered, matrix \p A with leading dimension \p ld, where \p ld>=m,
 *  \p hipsparseXdense2csc converts the matrix to a sparse CSC format matrix.
 *  All the parameters are assumed to have been preallocated by the user and the arrays
 *  are filled in based on number of non-zeros per row, which can be pre-computed with
@@ -68,7 +68,7 @@ extern "C" {
 *  \f]
 *
 *  This function works very similar to \ref hipsparseSdense2csr "hipsparseXdense2csr()".
-&  See hipsparseSdense2csr() for a code example.
+*  See hipsparseSdense2csr() for a code example.
 *
 *  \note
 *  This function is executed asynchronously with respect to the host and can return control to the
