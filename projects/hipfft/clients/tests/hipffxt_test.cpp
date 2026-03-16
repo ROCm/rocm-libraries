@@ -204,23 +204,25 @@ INSTANTIATE_TEST_SUITE_P(
     );
 
 
-
-class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat>>
+class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t>>
 {};
 
 
 // FIXME: is this just for pre-transform?
-// real/complex, tx direction, subformat
-static std::vector<std::tuple<bool, int, hipfftXtSubFormat>> in_goodlist =
+// Real/complex, tx direction, subformat, dimension
+static std::vector<std::tuple<bool, int, hipfftXtSubFormat, size_t>> in_goodlist =
 {
-    // real/complex must be inplace 
-    {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
-    {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    // complex/complex can be in-place or out-of-place
-    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE},
-    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
-    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT},
-    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT}
+    // Real/complex must be inplace 
+    {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 2},
+    {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 2},
+    {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 3},
+    // Complex/complex can be in-place or out-of-place
+    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 2},
+    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 2},
+
+    // It seems that cufftxt only wants to do in-place, even for c2c?
+    //{0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT, 2},
+    //{0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_OUTPUT, 2}
 };
 
 TEST_P(hipfftxtunitdesc, desccreation)
@@ -228,12 +230,13 @@ TEST_P(hipfftxtunitdesc, desccreation)
     const bool realcomplex = std::get<0>(GetParam());
     const int direction = std::get<1>(GetParam());
     const hipfftXtSubFormat format = std::get<2>(GetParam());
+    const size_t dimension = std::get<3>(GetParam()); // FIXME: use
 
     if(verbose > 0)
     {
         std::cout << "hipfftxt plan creation test: " << directionname(direction)
                   << (realcomplex ? " real/complex" : "complex/complex")
-                  << "\n";
+                  << " dimension " << dimension << "\n";
     }
 
     // FIXME: handle variable number of GPUs
@@ -244,11 +247,14 @@ TEST_P(hipfftxtunitdesc, desccreation)
     // FIXME: handle 3D as well.
     const int Nx    = 32;
     const int Ny    = 36;
+    const int Nz    = 38;
     // Just batch=1 for now.
 
     // TODO: 3D, other sizes, batch, etc.
     std::vector<size_t> batches = {1};
-    std::vector<size_t> lengths = {Nx, Ny};
+    std::vector<size_t> lengths =  {Nx, Ny};
+    if(dimension == 3)
+        lengths.push_back(Nz);
     std::vector<size_t> batchlengths = batches;
     batchlengths.insert(batchlengths.end(), lengths.begin(), lengths.end());
 
@@ -352,35 +358,75 @@ TEST_P(hipfftxtunitdesc, desccreation)
                            const bool isreal,
                            std::vector<size_t> batchlengths,
                            const std::vector<size_t> &hostdiststrides) -> void  {
-        // FIXME: handle 3D as well.
-        for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+        switch(batchlengths.size())
         {
-            for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+        case 3:
+            // 1 batch + 2D FFT
+            for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
             {
-                for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
                 {
-                    const std::vector<size_t> idx = {ibatch, xidx, yidx};
-                    
-                    const size_t pos = std::inner_product(std::begin(idx),
-                                                          std::end(idx),
-                                                          std::begin(hostdiststrides), 0);
-                    if(isreal) {
-                        const auto hostdat = reinterpret_cast<const double*>(hostbuf);
-                        if(yidx > 0)
-                            std::cout << " ";
-                        std::cout << hostdat[pos];
-                    }
-                    else
+                    for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
                     {
-                        const auto hostdat
-                            = reinterpret_cast<const std::complex<double>*>(hostbuf);
-                        if(yidx > 0)
-                            std::cout << " ";
-                        std::cout << hostdat[pos];
+                        const std::vector<size_t> idx = {ibatch, xidx, yidx};
+                        const size_t pos = std::inner_product(std::begin(idx),
+                                                              std::end(idx),
+                                                              std::begin(hostdiststrides), 0);
+                        if(isreal) {
+                            const auto hostdat = reinterpret_cast<const double*>(hostbuf);
+                            if(yidx > 0)
+                                std::cout << " ";
+                            std::cout << hostdat[pos];
+                        }
+                        else
+                        {
+                            const auto hostdat
+                                = reinterpret_cast<const std::complex<double>*>(hostbuf);
+                            if(yidx > 0)
+                                std::cout << " ";
+                            std::cout << hostdat[pos];
+                        }
+                    }
+                    std::cout << "\n";
+                }
+            }
+            break;
+        case 4:
+            // 1 batch + 3D FFT
+            for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+            {
+                for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+                {
+                    for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                    {
+                        for(size_t zidx = 0; zidx < batchlengths[3]; ++zidx)
+                        {
+                            const std::vector<size_t> idx = {ibatch, xidx, yidx, zidx};
+                            const size_t pos = std::inner_product(std::begin(idx),
+                                                                  std::end(idx),
+                                                                  std::begin(hostdiststrides), 0);
+                            if(isreal) {
+                                const auto hostdat = reinterpret_cast<const double*>(hostbuf);
+                                if(yidx > 0)
+                                    std::cout << " ";
+                                std::cout << hostdat[pos];
+                            }
+                            else
+                            {
+                                const auto hostdat
+                                    = reinterpret_cast<const std::complex<double>*>(hostbuf);
+                                if(yidx > 0)
+                                    std::cout << " ";
+                                std::cout << hostdat[pos];
+                            }
+                        }
+                        std::cout << "\n";
                     }
                 }
-                std::cout << "\n";
             }
+            break;
+        default:
+            FAIL() << "dimension not handled";
         }
     };
         
@@ -404,29 +450,68 @@ TEST_P(hipfftxtunitdesc, desccreation)
                           const std::vector<size_t> &hostdiststrides) -> void  {
         using lint = decltype(batchlengths)::value_type;
         // FIXME: just have the 2D case right now.
-        for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+        switch(batchlengths.size())
         {
-            for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+        case 3:
+            // 1 batch + 2D FFT
+            for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
             {
-                for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
                 {
-                    const std::vector<size_t> idx = {ibatch, xidx, yidx};
-                    
-                    const size_t pos = std::inner_product(std::begin(idx),
-                                                          std::end(idx),
-                                                          std::begin(hostdiststrides), 0);
-                    if(isreal) {
-                        auto hostdat = reinterpret_cast<double*>(hostbuf.data());
-                        hostdat[pos] = xidx + 0.01 * yidx;
-                    }
-                    else
+                    for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
                     {
-                        auto hostdat
-                            = reinterpret_cast<std::complex<double>*>(hostbuf.data());
-                        hostdat[pos] = std::complex<double>(xidx, yidx);
+                        const std::vector<size_t> idx = {ibatch, xidx, yidx};
+                    
+                        const size_t pos = std::inner_product(std::begin(idx),
+                                                              std::end(idx),
+                                                              std::begin(hostdiststrides), 0);
+                        if(isreal) {
+                            auto hostdat = reinterpret_cast<double*>(hostbuf.data());
+                            hostdat[pos] = xidx + 0.01 * yidx;
+                        }
+                        else
+                        {
+                            auto hostdat
+                                = reinterpret_cast<std::complex<double>*>(hostbuf.data());
+                            hostdat[pos] = std::complex<double>(xidx, yidx);
+                        }
                     }
                 }
             }
+            break;
+        case 4:
+            // 1 batch + 3D FFT
+            for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+            {
+                for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+                {
+                    for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                    {
+                        for(size_t zidx = 0; zidx < batchlengths[3]; ++zidx)
+                        {
+
+                            const std::vector<size_t> idx = {ibatch, xidx, yidx, zidx};
+                            
+                            const size_t pos = std::inner_product(std::begin(idx),
+                                                                  std::end(idx),
+                                                                  std::begin(hostdiststrides), 0);
+                            if(isreal) {
+                                auto hostdat = reinterpret_cast<double*>(hostbuf.data());
+                                hostdat[pos] = xidx + 0.01 * yidx;
+                            }
+                            else
+                            {
+                                auto hostdat
+                                    = reinterpret_cast<std::complex<double>*>(hostbuf.data());
+                                hostdat[pos] = std::complex<double>(xidx, yidx);
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        default:
+            FAIL() << "dimension not handled";
         }
     };
 
@@ -505,7 +590,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                        copydir);
         }
         
-        const decltype(in_goodlist)::value_type v = {realcomplex, forward, format};
+        const decltype(in_goodlist)::value_type v = {realcomplex, forward, format, dimension};
         ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
                                                  << " failed with code "
                                                  << hipfft_rt
@@ -672,7 +757,6 @@ TEST_P(hipfftxtunitdesc, desccreation)
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
 
-
 INSTANTIATE_TEST_SUITE_P(
     hipfftxttest,
     hipfftxtunitdesc,
@@ -681,15 +765,14 @@ INSTANTIATE_TEST_SUITE_P(
         const bool realcomplex = std::get<0>(info.param);
         const int direction = std::get<1>(info.param);
         const hipfftXtSubFormat format = std::get<2>(info.param);
+        const size_t dimension = std::get<3>(info.param);
         std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += realcomplex ? "rc" : "cc";
         name += format_name(format);
+        name += "dim" + std::to_string(dimension);
         return name;
     }
     );
-
-
-
 
 // Params are direction, format, and batch size.
 class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat,
