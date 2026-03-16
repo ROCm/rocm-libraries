@@ -5,7 +5,6 @@
 #ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
 namespace hipdnn_data_sdk::data_objects

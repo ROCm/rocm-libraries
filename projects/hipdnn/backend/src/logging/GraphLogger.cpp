@@ -33,8 +33,6 @@ bool GraphLogger::isEnabled()
 
 void GraphLogger::resetCache()
 {
-    std::lock_guard<std::mutex> lock(cacheMutex);
-    cachedPath.clear();
     cacheInitialized.store(false, std::memory_order_release);
 }
 
@@ -49,10 +47,9 @@ std::filesystem::path GraphLogger::getOutputDirectory()
     }
 
     // Slow path: another thread may have initialized while we waited for the
-    // lock, so check again. memory_order_relaxed is sufficient here because
-    // the mutex provides the necessary ordering.
+    // lock, so check again.
     std::lock_guard<std::mutex> lock(cacheMutex);
-    if(cacheInitialized.load(std::memory_order_relaxed))
+    if(cacheInitialized.load(std::memory_order_acquire))
     {
         return cachedPath;
     }
@@ -74,7 +71,16 @@ std::filesystem::path GraphLogger::getOutputDirectory()
         cachedPath = std::filesystem::current_path() / cachedPath;
     }
 
-    std::filesystem::create_directories(cachedPath);
+    try
+    {
+        std::filesystem::create_directories(cachedPath);
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN(
+            "Failed to create graph output directory {}: {}", cachedPath.string(), e.what());
+        cachedPath.clear();
+    }
 
     // memory_order_release pairs with the acquire above: any thread that
     // reads cacheInitialized as true is guaranteed to see the final cachedPath.
@@ -89,6 +95,12 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
     std::ostringstream oss;
     oss << "graph_" << std::hex << std::setfill('0') << std::setw(16) << hash << ".json";
     auto fullPath = getOutputDirectory() / oss.str();
+
+    if(fullPath.empty())
+    {
+        HIPDNN_BACKEND_LOG_WARN("Graph logging is enabled but no valid output directory is set");
+        return;
+    }
 
     if(std::filesystem::exists(fullPath))
     {

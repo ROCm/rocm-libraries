@@ -9,7 +9,6 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
-#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <logging/GraphLogger.hpp>
 #include <unordered_map>
 
