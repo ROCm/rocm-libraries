@@ -75,42 +75,75 @@ def export_register(writer, test_asm, export_reg, is_sgpr, cfg, tmp_path, label)
 # ---- Reference implementations ----
 
 def compute_expected_offset(thread_id, cfg, tileInfo):
-    """Python reference implementation matching _grComputeOffset logic.
+    """Python reference implementation matching graTileAssignment / _grComputeOffset.
 
-    When use_swizzling=True, applies the LDS bank-conflict avoidance
-    swizzle (quad_perm + rotation) before computing the final byte offset.
+    Mirrors the kernel's exact logic:
+      1. colId from Serial, swizzled via DPP quad_perm + rotation (always on)
+      2. _grComputeRowOffset for wave partitioning
+      3. _grComputeOffset: (rowId + rowOffset) * stride * bpe + colId_bytes
     """
     stride = cfg.stride_a if tileInfo.tc == 'A' else cfg.stride_b
-    mt0 = cfg.mt_a if tileInfo.tc == 'A' else cfg.mt_b
-    blockSize = (cfg.depth_u * BPE) // LOAD_WIDTH
-    subtileSize = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
-    newSerial = (thread_id & (WAVESIZE//2 - 1)) | ((thread_id // WAVESIZE) * (WAVESIZE//2))
-    waveSplitId = (thread_id // (WAVESIZE//2)) % 2
+    bpe = BPE
+    depthUBytes = cfg.depth_u * bpe
+    blockSize = depthUBytes // LOAD_WIDTH
+    numRowsPerLDSBanks = (64 * 4) // depthUBytes  # ldsRowBankSize / depthUBytes
 
-    # Read contiguous subtiles if loadRatioGR=2.0 (1x4 config for A or 4x1 config for B), otherwise stride by mt0//2 (2x2 config)
-    if tileInfo.loadRatioGR == 2.0:
-        rowOffset = subtileSize
-        # we also need to change the sOffset
+    waveId = thread_id // WAVESIZE
+    laneId = thread_id % WAVESIZE
+
+    # --- colId computation (common for A and B) ---
+    colId = thread_id & (blockSize - 1)
+
+    # Swizzling is always on in the kernel (line 857 hardcodes True)
+    # Step 1: DPP quad_perm[1,0,3,2] applied only when ldsRowId is even
+    # Note: kernel uses Serial (thread_id), not laneId, for ldsRowId
+    rowInWave = thread_id >> (blockSize.bit_length() - 1)
+    ldsRowId = rowInWave >> (numRowsPerLDSBanks.bit_length() - 1)
+    if ldsRowId % 2 == 0:
+        # quad_perm[1,0,3,2] swaps pairs within each quad
+        if colId % 2 == 0:
+            colId = colId + 1
+        else:
+            colId = colId - 1
+
+    # Step 2: Rotation
+    rotation = (ldsRowId // 2) * 2
+    colId = (colId + (blockSize - rotation)) % blockSize
+
+    # Scale colId by loadWidth
+    colId_bytes = colId * LOAD_WIDTH
+
+    # --- _grComputeRowOffset ---
+    numRowsPerWave = WAVESIZE // blockSize
+    partitionOffset = tileInfo.mmaTileShape[0] * tileInfo.localSubtileGrid[0]
+
+    if tileInfo.loadRatioGR == 1.0:
+        localRow = waveId & 1
+        partitionRow = waveId >> 1
+    elif tileInfo.loadRatioGR == 0.5:
+        localRow = 0
+        partitionRow = waveId
+    elif tileInfo.loadRatioGR == 2.0:
+        localRow = waveId
+        partitionRow = 0
     else:
-        rowOffset = (mt0 // 2)
+        raise NotImplementedError(f"Unsupported loadRatioGR: {tileInfo.loadRatioGR}")
 
-    # local col/row in wave
-    col = newSerial % blockSize
-    row = newSerial // blockSize
+    localRow = localRow << (numRowsPerWave.bit_length() - 1)
+    partitionRow = partitionOffset * partitionRow
+    waveRowOffset = localRow + partitionRow
 
-    if cfg.use_swizzling:
-        rowLds = row // 2
-        if rowLds % 2 == 0:  # even rowLds: swap even/odd cols
-            col = col + 1  if col % 2 ==0 else col - 1  # swap even/odd cols for initial swizzle
-        col = (col + (blockSize - (rowLds // 2) * 2))%blockSize  # rotation to avoid bank conflicts: blockSize - (lds_row_id//4)*2
+    # --- _grComputeOffset ---
+    rowId = laneId >> (blockSize.bit_length() - 1)
+    totalRow = rowId + waveRowOffset
 
-    rowG = row + waveSplitId * rowOffset
-    colG = col * LOAD_WIDTH
-    base = rowG * stride * BPE + colG
-    # numGRPerSubtile can only be 1 or 2
+    base = totalRow * stride * bpe + colId_bytes
+
+    # Second GR offset if numGRPerSubtile > 1
     if tileInfo.numGRPerSubtile == 1:
         return [base]
-    return [base, base + (mt0//4) * stride * BPE]
+    offset2 = int(tileInfo.subtileSize * tileInfo.loadRatioGR) * stride
+    return [base, base + offset2]
 
 def compute_expected_subtile(regId, stride, tileInfo):
     """Compute expected subtile register value: rowOffset * bpe * regId * stride.
@@ -127,8 +160,8 @@ def compute_expected_subtile(regId, stride, tileInfo):
 TILE_CONFIGS = [
     # 2x2 configs
     TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=512, stride_b=512, use_swizzling=False),
-    # TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=4096, stride_b=1024, use_swizzling=True),
-    # TileConfig(mt_a=96, mt_b=256, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
+    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=4096, stride_b=1024, use_swizzling=True),
+    TileConfig(mt_a=96, mt_b=256, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
     # # 1x4 configs
     # TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
     # TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),

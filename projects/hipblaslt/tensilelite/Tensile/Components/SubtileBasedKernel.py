@@ -513,15 +513,15 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
 
   elif tileInfo.loadRatioGR == 0.5:
     MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
-    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(MT0 * depthUBytes // 4), comment="%s: interleave stride"%tc))
-    module.add(VAndB32(dst=vgpr(tmp1), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId & 1"%tc))
-    module.add(VMulLOU32(dst=vgpr(tmp1), src1=vgpr(tmp1), src0=sgpr(tmpSgpr), comment="%s: interleave offset"%tc))
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(tileInfo.subtileSize // 2), comment="%s: interleave stride"%tc))
+    # module.add(VAndB32(dst=vgpr(tmp1), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId & 1"%tc))
+    module.add(VMulLOU32(dst=vgpr(tmp), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment=""))
 
     
-    module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-    module.add(VMulLOU32(dst=vgpr(tmp), src1=vgpr(tmp), src0=sgpr(tmpSgpr), comment="%s: wave pair offset"%tc))
-    module.add(VAddU32(dst=vgpr(tmp), src0=vgpr(tmp), src1=vgpr(tmp1), comment="%s: total partition offset"%tc))
+    # module.add(SMovB32(dst=sgpr(tmpSgpr), src=bytes_loaded // 2, comment="%s: bytes loaded per wave / 2"%tc))
+    # module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
+    # module.add(VMulLOU32(dst=vgpr(tmp), src1=vgpr(tmp), src0=sgpr(tmpSgpr), comment="%s: wave pair offset"%tc))
+    # module.add(VAddU32(dst=vgpr(tmp), src0=vgpr(tmp), src1=vgpr(tmp1), comment="%s: total partition offset"%tc))
 
     for vgprId in range(len(tileInfo.sharedVgprLROffset)):
       module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(tmp), comment="%s: wave partition LR offset"%tc))

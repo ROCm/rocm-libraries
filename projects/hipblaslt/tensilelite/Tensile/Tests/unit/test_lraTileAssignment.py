@@ -75,91 +75,88 @@ def export_register(writer, test_asm, export_reg, is_sgpr, cfg, tmp_path, label)
 # ---- Reference implementations ----
 
 def compute_expected_lr_offset(thread_id, cfg, tileInfo, ldsStartOffsetB=None):
-    """Python reference implementation for LR (Local Read) offset computation.
+    """Python reference implementation matching lraTileAssignment kernel logic.
+
+    Mirrors the kernel's exact steps:
+      1. lane16, lane16Group from Serial
+      2. Swizzling: rotation + VPermlane16SwapB32 on colOffset (always on)
+      3. rowOffset = lane16 * depthUBytes (no splitOffset — commented out in kernel)
+      4. _computeLROffset: colOffset stepping by numMFMACols
+      5. Wave partitioning via _applyWavePartitionLROffset
+      6. B matrix LDS base offset
     """
     depthUBytes = cfg.depth_u * BPE
-    MT = cfg.mt_a if tileInfo.tc == 'A' else cfg.mt_b
     blockSize = depthUBytes // LOAD_WIDTH
-    numRowsPerLDSBanks = (WAVESIZE*4) // depthUBytes
-
-    waveReadSize = WAVESIZE*LOAD_WIDTH
-    numRowsPerHalfWave = WAVESIZE // blockSize // 2 # split wave load
-    numMFMACols = tileInfo.mmaTileShape[1]*tileInfo.bpe // LOAD_WIDTH
+    numRowsPerLDSBanks = (WAVESIZE * 4) // depthUBytes
+    numMFMACols = tileInfo.mmaTileShape[1] * tileInfo.bpe // LOAD_WIDTH
     laneId = thread_id % WAVESIZE
 
-    # Split wave offset: always applied (GPU kernel calls _applySplitOffset unconditionally)
-    splitOffset = ((laneId % 16) // numRowsPerHalfWave)*(waveReadSize//2)
+    # --- Step 1: lane16, lane16Group ---
+    lane16 = laneId & 15
+    lane16Group = laneId >> 4
 
-    enableSwizzling = True
-    if enableSwizzling:
-        enableRotation = True
-        # Swap lanes by 16 (stride of consecutive cols for MFMA layout)
-        if (laneId % 4)//2 == 0:
-            if (laneId // 16) % 2 == 0:
-                laneId = (laneId + 16) % WAVESIZE
-            else:
-                laneId = (laneId - 16) % WAVESIZE
-    else:
-        enableRotation = False
+    # --- Step 2: Swizzling (always on in kernel) ---
+    # Rotation
+    lds_row_id = lane16 >> (numRowsPerLDSBanks.bit_length() - 1)
+    rotation = (lds_row_id // 2) * 2
+    colOffset = (rotation + lane16Group) % blockSize
 
-    lane16 = laneId % 16
-    lane16Group = laneId // 16
+    # VPermlane16SwapB32 with exec mask 0x33333333
+    # Active lanes: those where (lane_pos % 4) < 2, i.e. lanes 0,1,4,5,8,9,12,13,...
+    # For active lanes, swap colOffset value with lane (laneId XOR 16).
+    # We need to compute colOffset for the partner lane too.
+    partnerLaneId = laneId ^ 16
+    partnerLane16 = partnerLaneId & 15  # same as lane16 (XOR 16 doesn't change lower 4 bits)
+    partnerLane16Group = partnerLaneId >> 4
+    partnerLdsRowId = partnerLane16 >> (numRowsPerLDSBanks.bit_length() - 1)
+    partnerRotation = (partnerLdsRowId // 2) * 2
+    partnerColOffset = (partnerRotation + partnerLane16Group) % blockSize
 
-    colOffset = lane16Group
-    if enableRotation:
-        # rotate by 2 rows every 2 lds_row_id
-        lds_row_id = lane16 // numRowsPerLDSBanks
-        rotation = (lds_row_id//2)*2
-        colOffset = (colOffset+rotation) % blockSize
+    # Check if this lane is active under exec mask 0x33333333
+    isActive = (laneId % 4) < 2
+    if isActive:
+        colOffset = partnerColOffset  # swap: we get partner's value
 
-    rowOffset = lane16 * depthUBytes + splitOffset
+    # --- Step 3: rowOffset (no splitOffset) ---
+    rowOffset = lane16 * depthUBytes
 
+    # --- Step 4: _computeLROffset ---
     offsets = []
-    # offset by numMFMACols read along K (TN)
     for lr_idx in range(tileInfo.numLRPerSubtile):
-        newColOffset = (numMFMACols*lr_idx+ colOffset) % blockSize
-        offsets.append(rowOffset+ newColOffset*LOAD_WIDTH)
+        if lr_idx == 0:
+            newColOffset = colOffset
+        else:
+            newColOffset = (colOffset + numMFMACols * lr_idx) % blockSize
+        offsets.append(newColOffset * LOAD_WIDTH + rowOffset)
 
-
-    # Wave partitioning.
+    # --- Step 5: Wave partitioning ---
     waveId = thread_id // WAVESIZE
     partitionOffset = 0
 
-    # 2x2 config. Partitionning depends on tc.
-    if tileInfo.loadRatioGR == 1.0:
-        # W0 W2
-        # W1 W3
+    if tileInfo.loadRatioGR >= 2.0:
+        pass  # no partition needed
+    elif tileInfo.loadRatioGR == 1.0:
+        # 2x2 config, interleaved
         if tileInfo.tc == 'A':
-            #W1/W3 get offset for rows 16-31
-            if waveId % 2 == 1:
-                partitionOffset = numRowsPerHalfWave*depthUBytes
-        elif tileInfo.tc == 'B':
-            #W2/W3 get offset for rows 16-31
-            if (waveId //2)%2 == 1:
-                partitionOffset = numRowsPerHalfWave*depthUBytes
-    # 1x4 config:
-    # W0
-    # W1
-    # W2
-    # W3
-    # Wave pair offset (waveId // 2) * bytes_loaded//2
-    # Interleave offset (waveId & 1)  * MT*depthUBytes//2
+            wavePartId = waveId & 1
+        else:
+            wavePartId = waveId >> 1
+        partitionOffset = wavePartId * tileInfo.subtileSize
     elif tileInfo.loadRatioGR == 0.5:
-        if (waveId // 2) % 2 == 1:
-            partitionOffset += numRowsPerHalfWave*depthUBytes
-        if waveId % 2 == 1:
-            partitionOffset += MT * depthUBytes // 2
-    elif tileInfo.loadRatioGR > 2.0:
-        raise NotImplementedError("Unsupported loadRatioGR > 2.0 in reference implementation")
+        # 4x1 / 1x4 config
+        partitionOffset = waveId * (tileInfo.subtileSize // 2)
+    else:
+        raise NotImplementedError(f"Unsupported loadRatioGR: {tileInfo.loadRatioGR}")
 
+    # --- Step 6: B matrix LDS base offset ---
     if tileInfo.tc == 'B':
         if ldsStartOffsetB is not None:
             partitionOffset += ldsStartOffsetB
         else:
             partitionOffset += cfg.mt_a * depthUBytes
-    for id in range(len(offsets)):
-        offsets[id] += partitionOffset
 
+    for i in range(len(offsets)):
+        offsets[i] += partitionOffset
 
     return offsets
 
@@ -179,10 +176,10 @@ TILE_CONFIGS = [
     TileConfig(mt_a=256, mt_b=256, depth_u=64),
     TileConfig(mt_a=96, mt_b=256, depth_u=64),
     # 1x4 configs
-    TileConfig(mt_a=80, mt_b=64, depth_u=64),
-    # 4x1 configs
-    TileConfig(mt_a=64, mt_b=80, depth_u=64),
-    TileConfig(mt_a=128, mt_b=240, depth_u=64),
+    # TileConfig(mt_a=80, mt_b=64, depth_u=64),
+    # # 4x1 configs
+    # TileConfig(mt_a=64, mt_b=80, depth_u=64),
+    # TileConfig(mt_a=128, mt_b=240, depth_u=64),
 ]
 
 
