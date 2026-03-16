@@ -40,6 +40,8 @@
 
 #ifdef _WIN32
 #define PATH_SEPARATOR "\\"
+#define popen _popen
+#define pclose _pclose
 #else
 #define PATH_SEPARATOR "/"
 #endif
