@@ -19,7 +19,7 @@ This document describes the environment variables and runtime configuration opti
 
 ### Logging Variables
 
-hipDNN provides two environment variables to control logging behavior:
+hipDNN provides the following environment variables to control logging behavior:
 #### HIPDNN_LOG_LEVEL
 
 Sets the minimum severity that will be emitted. Levels are inclusive: choosing a level enables messages at that level and all higher severities.
@@ -46,23 +46,22 @@ Specifies the file path where logs will be **appended**. If not set, logs are wr
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
 ```
 
-#### HIPDNN_LOG_GRAPH
+#### HIPDNN_LOG_GRAPH_DIR
 
-Controls graph structure logging. When enabled alongside an appropriate log level, graphs are written as JSON files during finalization.
+Controls graph structure logging. When set to a non-empty directory path, graphs are written as JSON files during finalization.
 
-| Value  | Description                                                |
-|--------|------------------------------------------------------------|
-| (unset)| Graph logging disabled (default)                           |
-| `json` | Write graph structures as JSON files                       |
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Graph logging disabled (default)                       |
+| `<path>`   | Write graph structures as JSON files to the given directory |
 
-Graph JSON files are written to the same directory as `HIPDNN_LOG_FILE` (if set), or the current working directory. Files are named `graph_<hash>.json` where `<hash>` is derived from the graph content, ensuring identical graphs are not duplicated.
+Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<hash>.json` where `<hash>` is derived from the graph content, ensuring identical graphs are not duplicated.
 
-Requires `HIPDNN_LOG_LEVEL=info` (or lower severity threshold) to be active.
+This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 
 **Example:**
 ```bash
-export HIPDNN_LOG_LEVEL=info
-export HIPDNN_LOG_GRAPH=json
+export HIPDNN_LOG_GRAPH_DIR=/tmp/hipdnn_graphs
 ```
 
 ### MIOpen Plugin Logging

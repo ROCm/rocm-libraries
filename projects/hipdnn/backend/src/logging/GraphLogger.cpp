@@ -4,44 +4,95 @@
 #include "GraphLogger.hpp"
 #include "Logging.hpp"
 
+#include <atomic>
 #include <flatbuffers/flatbuffers.h>
 #include <fstream>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#include <iomanip>
+#include <mutex>
 #include <nlohmann/json.hpp>
-
-#include <spdlog/fmt/fmt.h>
+#include <sstream>
 
 namespace hipdnn_backend::logging
 {
 
+namespace
+{
+std::mutex cacheMutex;
+std::filesystem::path cachedPath;
+std::atomic<bool> cacheInitialized{false};
+} // namespace
+
+bool GraphLogger::isEnabled()
+{
+    return !getOutputDirectory().empty();
+}
+
+void GraphLogger::resetCache()
+{
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cachedPath.clear();
+    cacheInitialized.store(false, std::memory_order_release);
+}
+
 std::filesystem::path GraphLogger::getOutputDirectory()
 {
-    std::string logFilePath = hipdnn_data_sdk::utilities::trim(
-        hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE", ""));
-
-    if(!logFilePath.empty())
+    // Double-checked locking: the first check is a lock-free fast path so that
+    // subsequent calls avoid the mutex entirely. memory_order_acquire ensures
+    // that if we read true, all prior writes to cachedPath are visible.
+    if(cacheInitialized.load(std::memory_order_acquire))
     {
-        auto parentPath = std::filesystem::path(logFilePath).parent_path();
-        if(!parentPath.empty())
-        {
-            return parentPath;
-        }
+        return cachedPath;
     }
 
-    return std::filesystem::current_path();
+    // Slow path: another thread may have initialized while we waited for the
+    // lock, so check again. memory_order_relaxed is sufficient here because
+    // the mutex provides the necessary ordering.
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    if(cacheInitialized.load(std::memory_order_relaxed))
+    {
+        return cachedPath;
+    }
+
+    std::string dirPath = hipdnn_data_sdk::utilities::trim(
+        hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_GRAPH_DIR", ""));
+
+    if(dirPath.empty())
+    {
+        cachedPath.clear();
+        cacheInitialized.store(true, std::memory_order_release);
+        return cachedPath;
+    }
+
+    cachedPath = std::filesystem::path(dirPath);
+
+    if(cachedPath.is_relative())
+    {
+        cachedPath = std::filesystem::current_path() / cachedPath;
+    }
+
+    std::filesystem::create_directories(cachedPath);
+
+    // memory_order_release pairs with the acquire above: any thread that
+    // reads cacheInitialized as true is guaranteed to see the final cachedPath.
+    cacheInitialized.store(true, std::memory_order_release);
+    return cachedPath;
 }
 
 void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
 {
     auto hash = hipdnn_data_sdk::utilities::fnv1aHash(serializedGraph, size);
-    auto filename = fmt::format("graph_{:016x}.json", hash);
-    auto fullPath = getOutputDirectory() / filename;
+
+    std::ostringstream oss;
+    oss << "graph_" << std::hex << std::setfill('0') << std::setw(16) << hash << ".json";
+    auto fullPath = getOutputDirectory() / oss.str();
 
     if(std::filesystem::exists(fullPath))
     {
+        HIPDNN_BACKEND_LOG_INFO("Skipping duplicate graph logged to {}", fullPath.string());
         return;
     }
 

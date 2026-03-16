@@ -19,9 +19,17 @@ public:
     /// @param size size of the flatbuffer binary
     static void logGraph(const uint8_t* serializedGraph, size_t size);
 
+    /// Checks if graph logging is enabled by the environment variable HIPDNN_LOG_GRAPH_DIR
+    /// being non-empty.
+    static bool isEnabled();
+
+    /// Resets the cached output directory so it will be re-read from the environment
+    /// on the next call to getOutputDirectory().
+    static void resetCache();
+
 private:
     /// Returns the output directory for graph JSON files.
-    /// Uses the directory from HIPDNN_LOG_FILE if set, otherwise current working directory.
+    /// Uses the directory from HIPDNN_LOG_GRAPH_DIR. Returns an empty path if unset.
     static std::filesystem::path getOutputDirectory();
 };
 

@@ -10,9 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -23,27 +21,15 @@ class TestGraphLogger : public ::testing::Test
 {
 protected:
     std::filesystem::path _tempDir;
-    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
-    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
-    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logGraphGuard;
+    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logGraphDirGuard;
 
     void SetUp() override
     {
-        _logLevelGuard
+        _logGraphDirGuard
             = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
-                "HIPDNN_LOG_LEVEL");
-        _logFileGuard
-            = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
-                "HIPDNN_LOG_FILE");
-        _logGraphGuard
-            = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
-                "HIPDNN_LOG_GRAPH");
+                "HIPDNN_LOG_GRAPH_DIR");
 
         hipdnn_backend::logging::loggerShutdown();
-
-        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
-        hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_FILE");
-        hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_GRAPH");
 
         // Create a unique temp directory for each test
         _tempDir
@@ -62,9 +48,7 @@ protected:
 
         testing::internal::GetCapturedStderr();
 
-        _logGraphGuard.reset();
-        _logFileGuard.reset();
-        _logLevelGuard.reset();
+        _logGraphDirGuard.reset();
 
         if(std::filesystem::exists(_tempDir))
         {
@@ -106,36 +90,8 @@ protected:
 
 TEST_F(TestGraphLogger, GraphNotLoggedWhenDisabled)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_GRAPH");
-    auto logFilePath = (_tempDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
-
-    auto descriptor = createAndFinalizeGraph();
-
-    auto jsonFiles = getJsonFilesInDir(_tempDir);
-    EXPECT_TRUE(jsonFiles.empty());
-}
-
-TEST_F(TestGraphLogger, GraphNotLoggedWhenLogLevelOff)
-{
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
-    auto logFilePath = (_tempDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
-
-    auto descriptor = createAndFinalizeGraph();
-
-    auto jsonFiles = getJsonFilesInDir(_tempDir);
-    EXPECT_TRUE(jsonFiles.empty());
-}
-
-TEST_F(TestGraphLogger, GraphNotLoggedWhenLogLevelWarn)
-{
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "warn");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
-    auto logFilePath = (_tempDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_GRAPH_DIR");
+    hipdnn_backend::logging::loggerShutdown();
 
     auto descriptor = createAndFinalizeGraph();
 
@@ -145,10 +101,8 @@ TEST_F(TestGraphLogger, GraphNotLoggedWhenLogLevelWarn)
 
 TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
-    auto logFilePath = (_tempDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
 
     auto descriptor = createAndFinalizeGraph();
 
@@ -172,10 +126,8 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
 
 TEST_F(TestGraphLogger, DuplicateGraphNotLoggedTwice)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
-    auto logFilePath = (_tempDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
 
     // Finalize the same graph twice
     auto descriptor1 = createAndFinalizeGraph();
@@ -187,10 +139,8 @@ TEST_F(TestGraphLogger, DuplicateGraphNotLoggedTwice)
 
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
-    auto logFilePath = (_tempDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
 
     // Create first graph with default data types
     auto descriptor1 = createAndFinalizeGraph();
@@ -223,20 +173,17 @@ TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
     EXPECT_EQ(jsonFiles.size(), 2u);
 }
 
-TEST_F(TestGraphLogger, OutputDirectoryDerivedFromLogFile)
+TEST_F(TestGraphLogger, OutputDirectoryUsesEnvVar)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
-
-    // Create a subdirectory and point HIPDNN_LOG_FILE there
-    auto subDir = _tempDir / "logs";
+    // Create a subdirectory and point HIPDNN_LOG_GRAPH_DIR there
+    auto subDir = _tempDir / "graphs";
     std::filesystem::create_directories(subDir);
-    auto logFilePath = (subDir / "hipdnn.log").string();
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", subDir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
 
     auto descriptor = createAndFinalizeGraph();
 
-    // JSON should be in the same directory as HIPDNN_LOG_FILE
+    // JSON should be in the specified directory
     auto jsonFiles = getJsonFilesInDir(subDir);
     EXPECT_EQ(jsonFiles.size(), 1u);
 
@@ -245,20 +192,35 @@ TEST_F(TestGraphLogger, OutputDirectoryDerivedFromLogFile)
     EXPECT_TRUE(rootJsonFiles.empty());
 }
 
-TEST_F(TestGraphLogger, GraphLogModeResetOnShutdown)
+TEST_F(TestGraphLogger, OutputDirectoryCreatedIfMissing)
+{
+    auto newDir = _tempDir / "new_subdir" / "graphs";
+    ASSERT_FALSE(std::filesystem::exists(newDir));
+
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", newDir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto descriptor = createAndFinalizeGraph();
+
+    EXPECT_TRUE(std::filesystem::exists(newDir));
+    auto jsonFiles = getJsonFilesInDir(newDir);
+    EXPECT_EQ(jsonFiles.size(), 1u);
+}
+
+TEST_F(TestGraphLogger, CacheResetOnShutdown)
 {
     // Enable graph logging
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH", "json");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_backend::logging::loggerShutdown();
 
-    EXPECT_TRUE(hipdnn_data_sdk::logging::isGraphLoggingEnabled());
+    EXPECT_TRUE(logging::GraphLogger::isEnabled());
 
     // Shutdown resets the cache
     hipdnn_backend::logging::loggerShutdown();
 
-    // Now change the env var
-    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_GRAPH");
+    // Now unset the env var
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_GRAPH_DIR");
 
-    // After shutdown + env var change, the mode should be re-read as OFF
-    EXPECT_FALSE(hipdnn_data_sdk::logging::isGraphLoggingEnabled());
+    // After shutdown + env var change, isEnabled should return false
+    EXPECT_FALSE(logging::GraphLogger::isEnabled());
 }

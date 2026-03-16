@@ -29,7 +29,7 @@ void GraphDescriptor::finalize()
     THROW_IF_NULL(_graph, HIPDNN_STATUS_BAD_PARAM, "GraphDescriptor::finalize: graph is null");
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
 
-    if(hipdnn_data_sdk::logging::isGraphLoggingEnabled())
+    if(logging::GraphLogger::isEnabled())
     {
         auto serialized = getSerializedGraph();
         logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
