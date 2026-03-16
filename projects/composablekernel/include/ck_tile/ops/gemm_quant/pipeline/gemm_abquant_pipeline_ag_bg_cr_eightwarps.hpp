@@ -142,7 +142,7 @@ struct ABQuantGemmPipelineAgBgCrEightWarps : public BaseGemmPipelineAgBgCrCompV3
         constexpr index_t smem_size_a = Policy::template GetSmemSizeA<Problem>() * APackedSize;
         constexpr index_t smem_size_b = Policy::template GetSmemSizeB<Problem>() * BPackedSize;
 
-        return smem_size_a + smem_size_b;
+        return 2 * (smem_size_a + smem_size_b);
     }
 
     CK_TILE_HOST static std::string Print() { return "ABQuantGemmPipelineAgBgCrEightWarps\n"; }
