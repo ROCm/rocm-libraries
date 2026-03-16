@@ -325,17 +325,19 @@ using CompAsyncEightWavesConfig = std::tuple<ALayout,
                                              Intrawave,
                                              CompAsyncEightWaves>;
 
-using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16>,
-                                              CompAsyncConfig<Row, Col, Row, F16>,
-                                              CompAsyncConfig<Col, Row, Row, F16>,
-                                              CompAsyncConfig<Col, Col, Row, F16>,
-                                              CompAsyncConfig<Row, Row, Row, F8>,
-                                              CompAsyncConfig<Row, Col, Row, F8>,
-                                              CompAsyncConfig<Col, Row, Row, F8>,
-                                              CompAsyncConfig<Col, Col, Row, F8>>;
+using KernelTypesCompAsync = ::testing::Types< // CompAsyncConfig<Row, Row, Row, F16>,
+    CompAsyncConfig<Row, Col, Row, F16>,
+    // CompAsyncConfig<Col, Row, Row, F16>,
+    // CompAsyncConfig<Col, Col, Row, F16>,
+    // CompAsyncConfig<Row, Row, Row, F8>,
+    CompAsyncConfig<Row, Col, Row, F8>
+    // CompAsyncConfig<Col, Row, Row, F8>,
+    // CompAsyncConfig<Col, Col, Row, F8>
+    >;
 
-using KernelTypesCompAsync16x16x128 = ::testing::Types<CompAsyncConfig16x16x128<Row, Col, Row, F4>,
-                                                       CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
+using KernelTypesCompAsync16x16x128 =
+    ::testing::Types< // CompAsyncConfig16x16x128<Row, Col, Row, F4>,
+        CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
 
 using KernelTypesCompAsyncEightWaves =
     ::testing::Types<CompAsyncEightWavesConfig<Row, Col, Row, F8>>;

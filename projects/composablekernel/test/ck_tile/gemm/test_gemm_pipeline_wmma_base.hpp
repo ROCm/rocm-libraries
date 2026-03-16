@@ -39,4 +39,14 @@ class TestCkTileGemmPipelineWmmaBase : public TestCkTileGemmPipeline<Tuple, Deri
                                           ck_tile::constant<Base::N_Warp_Tile>::value,
                                           ck_tile::constant<Base::K_Warp_Tile>::value>;
     }
+
+    static constexpr bool check_data_type([[maybe_unused]] ck_tile::index_t M,
+                                          [[maybe_unused]] ck_tile::index_t N,
+                                          [[maybe_unused]] ck_tile::index_t K,
+                                          [[maybe_unused]] bool padM,
+                                          [[maybe_unused]] bool padN,
+                                          [[maybe_unused]] bool padK)
+    {
+        return check_data_type();
+    }
 };
