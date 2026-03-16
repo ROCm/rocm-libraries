@@ -16,7 +16,8 @@
  * - half: 16-bit IEEE 754 half precision (1 sign, 5 exponent, 10 mantissa)
  * - fp8_e4m3: 8-bit floating point (1 sign, 4 exponent, 3 mantissa) - OCP format
  * - fp8_e5m2: 8-bit floating point (1 sign, 5 exponent, 2 mantissa) - OCP format
- * - fp8_e8m0: 8-bit floating point (8 exponent, 0 mantissa) - MX scale format (unsigned)
+ * - fp8_e8m0: 8-bit floating point (0 sign, 8 exponent, 0 mantissa) - OCP MX scale format
+ * - fp4_e2m1: 4-bit floating point (1 sign, 2 exponent, 1 mantissa) - OCP MX format
  *
  * **Forwarding Functions:**
  * Also includes forwarding functions for built-in types (float, double,
@@ -50,6 +51,7 @@
 #include "types/Bfloat16.hpp"
 #include "types/Double.hpp"
 #include "types/Float.hpp"
+#include "types/Fp4E2M1.hpp"
 #include "types/Fp8E4M3.hpp"
 #include "types/Fp8E5M2.hpp"
 #include "types/Fp8E8M0.hpp"
