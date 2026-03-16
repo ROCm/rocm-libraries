@@ -438,16 +438,18 @@ class TestCkTileGemmPipeline : public ::testing::Test
              const int StrideC = 0)
     {
         // Some unsupported tests don't compile, so we check here before attempting to.
-        if(Derived::check_data_type(M, N, K, PadM, PadN, PadK))
+        if constexpr(Derived::check_data_type())
         {
-            for(auto kb : k_batches_)
+            if(Derived::check_data_shape(M, N, K, PadM, PadN, PadK))
             {
-                // skip test when split k' number is not evenly distributed
+                for(auto kb : k_batches_)
+                {
                 if((K / K_Tile) % kb != 0)
                 {
                     continue;
                 }
-                RunSingle<PadM, PadN, PadK, Preshuffle>(M, N, K, StrideA, StrideB, StrideC, kb);
+                    RunSingle<PadM, PadN, PadK, Preshuffle>(M, N, K, StrideA, StrideB, StrideC, kb);
+                }
             }
         }
     }

@@ -20,14 +20,14 @@ class TestCkTileGemmPipelineCompV4
         return true;
     }
 
-    static constexpr bool check_data_type([[maybe_unused]] ck_tile::index_t M,
-                                          [[maybe_unused]] ck_tile::index_t N,
-                                          [[maybe_unused]] ck_tile::index_t K,
-                                          [[maybe_unused]] bool padM,
-                                          [[maybe_unused]] bool padN,
-                                          [[maybe_unused]] bool padK)
+    static constexpr bool check_data_shape([[maybe_unused]] ck_tile::index_t M,
+                                           [[maybe_unused]] ck_tile::index_t N,
+                                           [[maybe_unused]] ck_tile::index_t K,
+                                           [[maybe_unused]] bool padM,
+                                           [[maybe_unused]] bool padN,
+                                           [[maybe_unused]] bool padK)
     {
-        return check_data_type();
+        return true;
     }
 };
 

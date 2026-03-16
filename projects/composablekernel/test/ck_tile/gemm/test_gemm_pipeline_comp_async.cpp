@@ -12,15 +12,14 @@ class TestCkTileGemmPipelineCompAsync
     public:
     static constexpr bool check_data_type() { return true; }
 
-    static constexpr bool check_data_type([[maybe_unused]] ck_tile::index_t M,
-                                          [[maybe_unused]] ck_tile::index_t N,
-                                          [[maybe_unused]] ck_tile::index_t K,
-                                          [[maybe_unused]] bool padM,
-                                          [[maybe_unused]] bool padN,
-                                          [[maybe_unused]] bool padK)
+    static constexpr bool check_data_shape([[maybe_unused]] ck_tile::index_t M,
+                                           [[maybe_unused]] ck_tile::index_t N,
+                                           [[maybe_unused]] ck_tile::index_t K,
+                                           [[maybe_unused]] bool padM,
+                                           [[maybe_unused]] bool padN,
+                                           [[maybe_unused]] bool padK)
     {
-        return check_data_type() &&
-               (!padK ||
+        return (!padK ||
                 (K % TestCkTileGemmPipeline<T, TestCkTileGemmPipelineCompAsync>::K_Tile) == 0);
     }
 };
@@ -40,14 +39,14 @@ class TestCkTileGemmPipelineCompAsync16x16x128
     public:
     static constexpr bool check_data_type() { return true; }
 
-    static constexpr bool check_data_type([[maybe_unused]] ck_tile::index_t M,
-                                          [[maybe_unused]] ck_tile::index_t N,
-                                          [[maybe_unused]] ck_tile::index_t K,
-                                          [[maybe_unused]] bool padM,
-                                          [[maybe_unused]] bool padN,
-                                          [[maybe_unused]] bool padK)
+    static constexpr bool check_data_shape([[maybe_unused]] ck_tile::index_t M,
+                                           [[maybe_unused]] ck_tile::index_t N,
+                                           [[maybe_unused]] ck_tile::index_t K,
+                                           [[maybe_unused]] bool padM,
+                                           [[maybe_unused]] bool padN,
+                                           [[maybe_unused]] bool padK)
     {
-        return check_data_type();
+        return true;
     }
 };
 
