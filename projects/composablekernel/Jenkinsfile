@@ -775,18 +775,7 @@ def cmake_build(Map conf=[:]){
 
         //run tests except when NO_CK_BUILD is set
         if(!setup_args.contains("NO_CK_BUILD")){
-            sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
-            archiveArtifacts "ck_build_trace_${arch_name}.json"
-            sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
             if (params.NINJA_BUILD_TRACE || params.BUILD_INSTANCES_ONLY){
-                if (params.NINJA_FTIME_TRACE) {
-                    echo "running ClangBuildAnalyzer"
-                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
-                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
-                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                }
-
-
                 // do not run unit tests when building instances only
                 if(!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
@@ -819,6 +808,18 @@ def cmake_build(Map conf=[:]){
                                 echo "Building targets: ${buildTargets}"
                                 sh "ninja -j${nt} ${buildTargets}"
 
+                                // Process ninja build trace after selective build
+                                sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                                archiveArtifacts "ck_build_trace_${arch_name}.json"
+                                sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+
+                                if (params.NINJA_FTIME_TRACE) {
+                                    echo "running ClangBuildAnalyzer"
+                                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
+                                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
+                                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                                }
+
                                 // Run affected tests using regex_chunks
                                 def numChunks = sh(
                                     script: 'jq -r ".regex_chunks | length" tests_to_run.json',
@@ -847,11 +848,35 @@ def cmake_build(Map conf=[:]){
                             // Full build required (smartBuildStatus == 1)
                             echo "⚠ Full build mode - building and testing everything"
                             sh "ninja -j${nt} check"
+
+                            // Process ninja build trace after full build
+                            sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                            archiveArtifacts "ck_build_trace_${arch_name}.json"
+                            sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+
+                            if (params.NINJA_FTIME_TRACE) {
+                                echo "running ClangBuildAnalyzer"
+                                sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
+                                sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
+                                archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                            }
                         }
                     }
                     else{
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} check"
+
+                        // Process ninja build trace after full build
+                        sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                        archiveArtifacts "ck_build_trace_${arch_name}.json"
+                        sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
+
+                        if (params.NINJA_FTIME_TRACE) {
+                            echo "running ClangBuildAnalyzer"
+                            sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
+                            sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
+                            archiveArtifacts "clang_build_analysis_${arch_name}.log"
+                        }
                     }
                     if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
                         sh 'ninja check-builder'
@@ -873,6 +898,8 @@ def cmake_build(Map conf=[:]){
             }
             else{
                 // run unit tests unless building library for all targets
+                // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
+                // So no ninja trace processing needed here
                 if (!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
                         // Smart Build: Use smart_build_ci.sh for dependency analysis and selective building
