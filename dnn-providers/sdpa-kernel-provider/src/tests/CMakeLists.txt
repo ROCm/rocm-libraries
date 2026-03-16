@@ -17,6 +17,7 @@ endif()
 add_executable(
     sdpa_kernel_plugin_tests
     main.cpp
+    TestAsmSdpaFwdKernelArgs.cpp
     TestSdpaKernelContainer.cpp
     TestSdpaKernelHandle.cpp
     TestSdpaKernelContext.cpp
