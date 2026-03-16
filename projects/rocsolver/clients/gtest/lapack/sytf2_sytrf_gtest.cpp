@@ -62,6 +62,7 @@ const vector<vector<int>> large_matrix_size_range = {
     {192, 192, 1},
     {640, 640, 0},
     {1000, 1024, 1},
+    {1000, 1024, 0},
 };
 
 Arguments sytrf_setup_arguments(sytrf_tuple tup)
