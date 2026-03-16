@@ -120,7 +120,6 @@ Data SDK (``data_sdk``)
 The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation.
 The serialized structures allow data to be marshalled and passed between the backend and plugins in a type-safe and highly version-compatible fashion.
 
-- **Dependencies**: ``FlatBuffers`` and ``spdlog``.
 - **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations.
 - **Expected usage**: Consumed by the backend and plugins for graph data handling.
 - **Core functionality**:
@@ -250,39 +249,6 @@ Key characteristics
 - **Dependencies**: :ref:`data`.
 - **Purpose**: Provides a stable C API for interacting with the hipDNN kernel providers.
 - **Expected usage**: Library linked to the frontend API and expert user projects that provides access to the backend API.
-
-Workflow
-~~~~~~~~
-
-1. **Create a graph**: Build an operation graph using the frontend.
-2. **Create heuristic descriptor**: Initialize with the graph and desired heuristic mode.
-3. **Get engine configs**: Query the available engine configurations from the heuristic.
-4. **Create execution plan**: Combine the selected engine configuration with the graph.
-5. **Run execution plan**: Execute with a variant pack containing the tensor data.
-
-.. code:: c
-
-  // Simplified Backend workflow
-  hipdnnBackendDescriptor_t graph_desc, heuristic_desc, config_desc, plan_desc, variant_desc;
-
-  // 1. Create graph (from serialized data)
-  hipdnnBackendCreateAndDeserializeGraph_ext(&graph_desc, serialized_graph, size);
-
-  // 2. Create and configure heuristic
-  hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &heuristic_desc);
-  hipdnnBackendSetAttribute(heuristic_desc, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, ...);
-  hipdnnBackendFinalize(heuristic_desc);
-
-  // 3. Get engine configurations
-  hipdnnBackendGetAttribute(heuristic_desc, HIPDNN_ATTR_ENGINEHEUR_RESULTS, ...);
-
-  // 4. Create execution plan
-  hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &plan_desc);
-  hipdnnBackendSetAttribute(plan_desc, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, ...);
-  hipdnnBackendFinalize(plan_desc);
-
-  // 5. Execute
-  hipdnnBackendExecute(handle, plan_desc, variant_desc);
 
 Error handling strategy
 -----------------------
