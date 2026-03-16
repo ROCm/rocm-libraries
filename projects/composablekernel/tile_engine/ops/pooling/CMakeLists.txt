@@ -175,7 +175,7 @@ message(STATUS "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
 # Filter GPU targets
 set(POOLING_GPU_TARGETS "")
-set(DESIRED_TARGETS "gfx90a;gfx942")
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1201")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST DESIRED_TARGETS)
@@ -185,7 +185,7 @@ foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
 endforeach()
 
 if(NOT POOLING_GPU_TARGETS)
-    message(WARNING "Skipping Tile Engine Pooling build: No supported GPU targets (gfx90a, gfx942) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine Pooling build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(STATUS "Building pooling targets for GPU targets: ${POOLING_GPU_TARGETS}")
 

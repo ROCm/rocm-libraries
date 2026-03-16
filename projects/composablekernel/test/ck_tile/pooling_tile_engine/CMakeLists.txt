@@ -253,7 +253,7 @@ message(STATUS "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
 # GPU architecture filtering - only build tests for supported architectures
 set(POOLING_TEST_GPU_TARGETS "")
-set(DESIRED_TARGETS "gfx90a;gfx942")
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1201")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST DESIRED_TARGETS)
@@ -264,7 +264,7 @@ endforeach()
 
 # Early exit if no compatible GPU architectures are available
 if(NOT POOLING_TEST_GPU_TARGETS)
-    message(WARNING "Skipping Pooling Tile Engine tests: No supported GPU targets (gfx90a, gfx942) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Pooling Tile Engine tests: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
     return()
 endif()
 
