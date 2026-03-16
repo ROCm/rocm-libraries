@@ -426,7 +426,12 @@ public:
         PRIMBENCH_CHECK(hipGetDeviceProperties(&dev_prop, m_hip_device));
         ss << "\"name\":\"" << dev_prop.name << "\"";
 
-        ss << ",\"arch\":\"" << dev_prop.gcnArchName << "\"";
+        std::string arch = dev_prop.gcnArchName;
+        size_t pos = arch.find(':');
+        if (pos != std::string::npos) {
+            arch = arch.substr(0, pos);
+        }
+        ss << ",\"arch\":\"" << arch << "\"";
 
         char pci_bus_id_arr[32];
         PRIMBENCH_CHECK(
