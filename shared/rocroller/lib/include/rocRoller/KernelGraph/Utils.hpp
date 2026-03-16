@@ -585,12 +585,18 @@ namespace rocRoller
          *
          * @return Tuple of: row MacroTileNumber, row MacroTileIndex,
          * column MacroTileNumber, column MacroTileIndex.
+         *
+         * @param updatePreTiledSubDimStrides When `sdim` has four elements (pre-tiled
+         * load path), whether to rewrite outer SubDimension strides/sizes before adding
+         * CTs. Default true; callers that duplicate an existing pre-tiled graph (e.g.
+         * swizzle scale) should pass false.
          */
         std::tuple<int, int, int, int>
             addLoadMacroTileCT(KernelGraph&                     graph,
                                std::vector<DeferredConnection>& connections,
                                int                              macTileTag,
-                               std::vector<int> const&          sdim);
+                               std::vector<int> const&          sdim,
+                               bool                             updatePreTiledSubDimStrides = true);
 
         /**
          * @brief Add coordinate-transforms for tiling the X
