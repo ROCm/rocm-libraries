@@ -81,109 +81,6 @@ def checkoutComposableKernel()
     checkout scm
 }
 
-// Scan the build logs for failures and send notifications.
-def sendFailureNotifications() {
-    // Error patterns to scan build logs for specific failure types and send detailed notifications.
-    def failurePatterns = [
-        [pattern: 'login attempt to .* failed with status: 401 Unauthorized', description: "Docker registry authentication failed"],
-        [pattern: 'docker login failed', description: "Docker login failed"],
-        [pattern: 'HTTP request sent .* 404 Not Found', description: "HTTP request failed with 404"],
-        [pattern: 'cat: .* No such file or directory', description: "Missing drivers"],
-        [pattern: 'GPU not found', description: "GPU not found"],
-        [pattern: 'Could not connect to Redis at .* Connection timed out', description: "Redis connection timed out"],
-        [pattern: 'unauthorized: your account must log in with a Personal Access Token', description: "Docker login failed"],
-        [pattern: 'sccache: error: Server startup failed: Address in use', description: "Sccache Error"],
-        [pattern: 'No space left on device', description: "Device space error"]
-    ]
-
-    // The patterns which we want to know the node's name.
-    def nodePatterns = ['cat: .* No such file or directory', 'GPU not found', 'No space left on device']
-
-    // Build a single combined grep -E pattern and stream the log through it.
-    // grep does the scanning natively so the full log is never loaded into Groovy.
-    // -B 2 -A 2 captures 2 lines of context around each match.
-    // || true prevents a non-zero grep exit code (no matches) from failing the stage.
-    def combinedPattern = failurePatterns.collect { it.pattern }.join('|')
-    echo "Checking for failure patterns..."
-    def grepOutput = sh(
-        script: """
-            set +x
-            wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | grep -E -B 2 -A 2 '${combinedPattern}' || true
-        """,
-        returnStdout: true
-    ).trim()
-
-    if (!grepOutput) {
-        echo "No failure patterns found in build log"
-        return
-    }
-
-    // grep separates non-adjacent match blocks with '--'. Split on that to get
-    // one context block per match, then identify which patterns each block hit.
-    // Adjacent matches share one block (no '--' separator), so all patterns must
-    // be checked against every block. Deduplication prevents double-notifying on
-    // the same description if a pattern appears in multiple blocks.
-    // For GPU-related patterns, the node name is extracted via a separate awk pass
-    // that tracks the most recent NODE_NAME seen and exits as soon as the failure is observed.
-    def foundPatterns = []
-    def blocks = grepOutput.split('\n--\n')
-    for (block in blocks) {
-        for (patternMap in failurePatterns) {
-            if ((block =~ patternMap.pattern) && !foundPatterns.any { it.description == patternMap.description }) {
-                def nodeName = ""
-                if (nodePatterns.contains(patternMap.pattern)) {
-                    nodeName = sh(
-                        script: """
-                            set +x
-                            wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | awk '
-                                /NODE_NAME[[:space:]]*=/ { node = \$NF }
-                                /${patternMap.pattern}/ { print node; exit }
-                            '
-                        """,
-                        returnStdout: true
-                    ).trim()
-                }
-                foundPatterns.add([description: patternMap.description, context: block, nodeName: nodeName])
-            }
-        }
-    }
-    echo "Done checking for failure patterns..."
-    // Send a notification for each matched failure pattern.
-    for (patternMap in foundPatterns) {
-        // Escape the context string for safe embedding in a JSON value:
-        // backslashes first, then quotes, then convert real newlines to \n.
-        def escapedContext = patternMap.context
-            .replace('\\', '\\\\')
-            .replace('"', '\\"')
-            .replace('\n', '\\n')
-        withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
-        sh '''
-            echo "Creating JSON payload..."
-            {
-                printf '{\n'
-                printf '    "jobName": "%s",\n' "''' + env.JOB_NAME + '''"
-                printf '    "buildNumber": "%s",\n' "''' + env.BUILD_NUMBER + '''"
-                printf '    "jobUrl": "%s",\n' "''' + env.RUN_DISPLAY_URL + '''"
-                printf '    "detectedIssue": "%s",\n' "''' + patternMap.description + '''"
-                printf '    "logContext": "%s",\n' "''' + escapedContext + '''"
-                printf '    "nodeName": "%s",\n' "''' + (patternMap.nodeName ? patternMap.nodeName : "") + '''"
-                printf '}\n'
-            } > webhook_payload.json
-            
-            echo "JSON payload created, size: $(wc -c < webhook_payload.json) bytes"
-            
-            curl -X POST "${WEBHOOK_URL}" \
-            -H "Content-Type: application/json" \
-            -d @webhook_payload.json
-            
-            # Clean up temporary file
-            rm -f webhook_payload.json
-        '''
-        }
-    }
-    echo "Done failure pattern checking and notifications"
-}
-
 def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
     try {
         checkoutComposableKernel()
@@ -1489,6 +1386,14 @@ pipeline {
                     checkoutComposableKernel()
                     env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || shouldRunCICheck())
                     echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
+
+                    // TEST ONLY: Generate a large volume of dummy output to simulate a real
+                    // build log, then emit all failure patterns near the end to verify that
+                    // sendFailureNotifications() correctly detects patterns in a large log.
+                    sh 'for i in $(seq 1 30000); do echo "Dummy build log line $i: compiling and processing..."; done'
+                    echo "cat: /dev/dri/renderD128: No such file or directory"
+                    sh 'for i in $(seq 1 50000); do echo "Dummy build log line $i: compiling and processing..."; done'
+                    error("TEST: Forcing stage failure to trigger sendFailureNotifications() and validate all failure pattern checks")
                 }
             }
         }
@@ -2147,8 +2052,8 @@ pipeline {
                          status: 'FAILURE',
                          description: 'Some checks have failed'
             node(rocmnode("nogpu")) {
-                script {
-                    sendFailureNotifications()
+                withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
+                    sh 'bash projects/composablekernel/script/infra_helper/send_failure_notifications.sh'
                 }
             }
         }
