@@ -835,7 +835,7 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   colId     = tmpVgpr
   rowIdA     = tmpVgpr + 1
   rowIdB     = tmpVgpr + 2
-  lds_row_id = tmpVgpr + 3
+  ldsRowId = tmpVgpr + 3
   waveId    = tmpVgpr + 4
   tmp = tmpVgpr + 5
   laneId = tmpVgpr + 6
@@ -849,20 +849,19 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   module.add(VLShiftRightB32(dst=vgpr(rowIdA), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
   module.add(VMovB32(dst=vgpr(rowIdB), src=vgpr(rowIdA), comment=""))
 
-  useSwizzling = False
+  useSwizzling = True
   if useSwizzling:
     module.addComment0("Swizzling")
-    module.add(VLShiftRightB32(dst=vgpr(lds_row_id), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(row_id), comment="lds row id"))
-    module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(lds_row_id), src1=hex(1), comment="lds row id % 2"))
+    module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(rowIdA), comment="lds row id"))
+    module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="lds row id % 2"))
     module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
-    module.add(VMovB32(dst=vgpr(colId), src=vgpr(colId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap col_id pairs for swizzling"))
+    module.add(VMovB32(dst=vgpr(colId), src=vgpr(colId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
     module.add(SMovB64(dst=EXEC(), src=-1))
-    module.addComment0("Rotation")
-    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(lds_row_id), comment=""))
-    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(lds_row_id //2) * 2"))
-    module.add(VSubU32(dst=vgpr(tmp), src0=hex(block_size), src1=vgpr(tmp), comment="rotation offset : block_size - (lds_row_id//2)*2"))
+    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
+    module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
     module.add(VAddU32(dst=vgpr(colId), src0=vgpr(tmp), src1=vgpr(colId), comment=""))
-    module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(block_size-1), comment="(col + offset) % block_size"))
+    module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
 
 
   module.add(VLShiftLeftB32(dst=vgpr(colId), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
