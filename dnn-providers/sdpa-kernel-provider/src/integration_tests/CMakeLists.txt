@@ -26,6 +26,7 @@ target_compile_definitions(
     sdpa_kernel_plugin_integration_tests
     PRIVATE
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/sdpa_kernel_plugin"
+        AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../asm/asm_kernels"
 )
 
 target_link_libraries(

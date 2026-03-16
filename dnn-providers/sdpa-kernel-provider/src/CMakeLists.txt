@@ -10,6 +10,9 @@ add_library(
 )
 target_include_directories(sdpa_kernel_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sdpa_kernel_plugin_impl PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk)
+target_compile_definitions(sdpa_kernel_plugin_impl PRIVATE
+    AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/asm_kernels"
+)
 
 target_compile_options(sdpa_kernel_plugin_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(sdpa_kernel_plugin_impl PROPERTIES
