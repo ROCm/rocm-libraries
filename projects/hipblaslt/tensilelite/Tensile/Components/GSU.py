@@ -1039,8 +1039,8 @@ class GSUOn(GSU):
     
         tmpS01 = tmpSgpr.idx
 
-        # If not set scope=SCOPE_DEV, will cause infinite loop in gfx12
         if kernel["ISA"][0] == 12:
+            # In gfx12, if not set scope=SCOPE_DEV, will cause infinite loop in lastGsuWgBusyWaiting
             module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True, scope=CacheScope.SCOPE_DEV), comment="get atomic_dec value"))
         else:
             module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True), comment="get atomic_dec value"))
@@ -1048,6 +1048,7 @@ class GSUOn(GSU):
         module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
         module.add(SCBranchSCC0(labelName=lastGsuWgBusyWaitingLabel.getLabelName(), comment="branch if false"))
         if kernel["ISA"][0] == 12:
+            # In gfx12, no s_store_b32 instruction can be used
             tmpV01 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
             tmpV02 = writer.vgprPool.checkOut(1, preventOverflow=False)
             module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr("SrdSync+0"), comment="copy SrdSync to vgpr"))
@@ -1417,14 +1418,11 @@ class GSUOn(GSU):
             module.add(SWaitCnt(waitAll=True, comment="wait store done before synchronizer start load and add"))
             module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
             module.add(SSubU32(dst=sgpr(tmpS02), src0=sgpr(tmpS02), src1=1, comment=""))
-            # Since gfx12 has no s_atomic_dec, here use flat_atomic_dec_u32 instead.
-            # flat_atomic_dec is not a scalar instruction, so we need one dec per wavefront.
-            # Mask exec so that only lane 0 performs the atomic_dec, then restore exec.
+            
             if kernel["ISA"][0] == 12:
-                # flat_atomic_dec_u32 behavior is:
-                #   tmp = Mem[vaddr]
-                #   Mem[vaddr] = ((tmp == 0) | (tmp > vsrc)) ? vsrc : tmp - 1
-                #   vsrc = tmp
+                # Since gfx12 has no s_atomic_dec, here use flat_atomic_dec_u32 instead.
+                # flat_atomic_dec is not a scalar instruction, so we need one dec per wavefront.
+                # Mask exec so that only lane 0 performs the atomic_dec, then restore exec.
                 tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
                 tmpV02 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
                 waveSize = kernel["WavefrontSize"]
@@ -1433,6 +1431,10 @@ class GSUOn(GSU):
                 module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr(tmpS02), comment="copy (GSU - 1) to vgpr"))
                 module.add(VMovB32(dst=vgpr(tmpV02), src=sgpr("SrdSync+0"), comment="copy value of SrdSync to vgpr"))
                 module.add(VMovB32(dst=vgpr(tmpV02+1), src=sgpr("SrdSync+1"), comment="copy value of SrdSync to vgpr"))
+                # flat_atomic_dec_u32 behavior is:
+                #   tmp = Mem[vaddr]
+                #   Mem[vaddr] = ((tmp == 0) | (tmp > vsrc)) ? vsrc : tmp - 1
+                #   vsrc = tmp
                 module.add(FlatAtomicDecU32(vdst=vgpr(tmpV01), vaddr=vgpr(tmpV02, 2), vsrc=vgpr(tmpV01), flat=FLATModifiers(glc=True, thAtomicRt=True), comment=""))
                 # restore full exec mask
                 if waveSize == 32:
@@ -1452,6 +1454,7 @@ class GSUOn(GSU):
             # wait for synchronizer and check whether to branch or not
             module.addComment("check synchronizer done")
             if kernel["ISA"][0] == 12:
+                # Need to wait loadcnt to use the returned value from flat_atomic_dec_u32
                 module.add(SWaitCnt(vlcnt=0, comment="Wait for synchronizer"))
                 module.add(VReadfirstlaneB32(dst=sgpr(tmpS02), src=vgpr(tmpV01), comment=""))
             else:
@@ -1586,6 +1589,7 @@ class GSUOn(GSU):
                     module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
 
                     if kernel["ISA"][0] == 12:
+                        # Some of operands of gfx12's v_cmp_ge_i32 & v_cndmask_b32 can't be used as sgpr
                         tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
                         module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr("GSUSync"), comment="copy GSUSync to vgpr"))
                         module.add(VCmpGEI32(dst=VCC(), src0=0, src1=vgpr(tmpV01), comment=""))
