@@ -452,7 +452,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel
 
     std::vector<float> features =
         GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    bool transform = (arch == "gfx90a") ? false : true;
+    bool transform = arch == "gfx90a";
     if(ai::tuning::ModelSetParams(arch,
                                   solver,
                                   problem.GetDirection(),

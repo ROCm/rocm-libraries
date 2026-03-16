@@ -521,7 +521,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel
     static const std::string solver = kWrwSolverConfig.GetSolverNameForArch(arch);
 
     std::vector<float> features = GetFeaturesKTN(problem, arch);
-    bool transform              = arch != "gfx90a";
+    bool transform              = arch == "gfx90a";
     if(ai::tuning::ModelSetParams(arch,
                                   solver,
                                   problem.GetDirection(),
