@@ -474,7 +474,7 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithOptionalTensorsAndSc
 
     SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("sdpa_with_optionals");
-    sdpaAttrs.set_attn_mask(attnMask);
+    sdpaAttrs.set_bias(attnMask);
     sdpaAttrs.set_dropout(0.1f, seed, offset);
     sdpaAttrs.set_dropout_mask(dropoutMask);
     sdpaAttrs.set_generate_stats(true);
