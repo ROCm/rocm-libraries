@@ -35,6 +35,8 @@ FOLDER_PATH = "../../test/gtest"
 #              (keep the list sorted to min. git conflicts)
 IGNORE_LIST = {
     "../../test/gtest/binary_tensor_ops.cpp",
+    "../../test/gtest/graphapi_conv_bias_res_add_activ_fwd.cpp",
+    "../../test/gtest/graphapi_operation_rng.cpp",
     "../../test/gtest/layout_transpose.cpp",
     "../../test/gtest/reduce_custom_fp32.cpp",
     "../../test/gtest/unary_tensor_ops.cpp",

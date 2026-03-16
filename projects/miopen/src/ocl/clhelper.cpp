@@ -30,6 +30,7 @@
 #include <miopen/kernel.hpp>
 #include <miopen/kernel_warnings.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/mlir_build.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/ocldeviceinfo.hpp>
 #include <miopen/tmp_dir.hpp>
@@ -149,7 +150,8 @@ ClProgramPtr LoadProgram(cl_context ctx,
     std::string source;
     fs::path program_name{program};
 
-    if(kernel_src.empty())
+    // For mlir build, leave both source and kernel_src to be empty
+    if((kernel_src.empty()) && program_name.extension() != ".mlir")
         source = miopen::GetKernelSrc(program_name);
     else
         source = kernel_src;
@@ -177,6 +179,14 @@ ClProgramPtr LoadProgram(cl_context ctx,
         bin_file_to_str(hsaco_file, buf);
         return LoadBinaryProgram(ctx, device, buf);
     }
+#if MIOPEN_USE_MLIR
+    else if(program_name.extension() == ".mlir")
+    {
+        std::vector<char> buffer;
+        MiirGenBin(params, buffer);
+        return LoadBinaryProgram(ctx, device, buffer);
+    }
+#endif
     else // OpenCL programs.
     {
         ClProgramPtr result{CreateProgram(ctx, source.data(), source.size())};

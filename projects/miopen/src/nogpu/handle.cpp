@@ -158,6 +158,11 @@ Program Handle::LoadProgram(const fs::path& program_name,
 {
     std::ignore = force_attach_binary;
 
+    if(program_name.extension() == ".mlir")
+    {
+        params += " -mcpu=" + this->GetTargetProperties().Name();
+    }
+
     auto hsaco =
         miopen::LoadBinary(GetTargetProperties(), GetMaxComputeUnits(), program_name, params);
     auto pgmImpl     = std::make_shared<HIPOCProgramImpl>();

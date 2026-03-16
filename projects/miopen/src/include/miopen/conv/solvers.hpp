@@ -35,6 +35,8 @@
 #include <miopen/miopen.h>
 #include <miopen/performance_config.hpp>
 #include <miopen/solver.hpp>
+#include <miopen/utility/transposing_solver.hpp>
+#include <miopen/conv/data_invoke_params.hpp>
 
 #include <initializer_list>
 #include <string>
@@ -829,6 +831,153 @@ private:
     friend struct PerformanceImplicitGemmV4R4Fwd;
 };
 
+struct PerformanceConvMlirIgemm : PerfConfigBase<PerformanceConvMlirIgemm>
+{
+    int BlockSize;
+    int GemmMPerBlock;
+    int GemmNPerBlock;
+    int GemmKPerBlock;
+    int GemmMPerThread;
+    int GemmNPerThread;
+    bool use_spare_set;
+
+    /// \ref https://github.com/ROCm/MIOpen/issues/1154
+    static PerformanceConvMlirIgemm& MlirHeuristicInitRequest()
+    {
+        static PerformanceConvMlirIgemm heur;
+        heur.SetMlirHeuristicInitRequest();
+        return heur;
+    }
+
+    PerformanceConvMlirIgemm(int, int, int, int, int, int, bool);
+
+    PerformanceConvMlirIgemm(int a, int b, int c, int d, int e, int f)
+        : PerformanceConvMlirIgemm(a, b, c, d, e, f, false)
+    {
+    }
+
+    PerformanceConvMlirIgemm() : PerformanceConvMlirIgemm(-1, -1, -1, -1, -1, -1, false) {}
+
+    PerformanceConvMlirIgemm(bool spare);
+
+    bool operator==(const PerformanceConvMlirIgemm& other) const;
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.BlockSize, "BlockSize");
+        f(self.GemmMPerBlock, "GemmMPerBlock");
+        f(self.GemmNPerBlock, "GemmNPerBlock");
+        f(self.GemmKPerBlock, "GemmKPerBlock");
+        f(self.GemmMPerThread, "GemmMPerThread");
+        f(self.GemmNPerThread, "GemmNPerThread");
+    }
+
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
+    bool SetNextValue(const miopen::conv::ProblemDescription&);
+
+private:
+    void SetMlirHeuristicInitRequest();
+};
+
+struct ConvMlirIgemmFwd final : ConvTunableSolver<PerformanceConvMlirIgemm>
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvMlirIgemmFwd>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    PerformanceConvMlirIgemm
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConvMlirIgemm&) const override;
+    PerformanceConvMlirIgemm Search(const ExecutionContext&,
+                                    const miopen::conv::ProblemDescription&,
+                                    const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConvMlirIgemm&) const override;
+};
+
+struct PerformanceConvMlirIgemmXdlops : PerfConfigBase<PerformanceConvMlirIgemmXdlops>
+{
+    int GemmMPerBlock; // 2^n[32..128]
+    int GemmNPerBlock; // 2^n[8..16]
+    int GemmKPerBlock; // 2^n[4..16]
+    int GemmMPerWave;
+    int GemmNPerWave;
+    int GemmKPACKSize; // 2^[1..4]
+
+    // GemmAThreadCopyMoreGemmK is currently a fix value, is untunable
+    bool GemmAThreadCopyMoreGemmK;
+    bool GemmBThreadCopyMoreGemmKPack;
+
+    bool use_spare_set;
+
+    /// \ref https://github.com/ROCm/MIOpen/issues/1154
+    static PerformanceConvMlirIgemmXdlops& MlirHeuristicInitRequest()
+    {
+        static PerformanceConvMlirIgemmXdlops heur;
+        heur.SetMlirHeuristicInitRequest();
+        return heur;
+    }
+
+    MIOPEN_INTERNALS_EXPORT
+    PerformanceConvMlirIgemmXdlops(int, int, int, int, int, int, bool, bool, bool);
+
+    PerformanceConvMlirIgemmXdlops();
+    PerformanceConvMlirIgemmXdlops(bool spare);
+    PerformanceConvMlirIgemmXdlops(int a, int b, int c, int d, int e, int f, bool g, bool h)
+        : PerformanceConvMlirIgemmXdlops(a, b, c, d, e, f, g, h, false)
+    {
+    }
+
+    bool operator==(const PerformanceConvMlirIgemmXdlops& other) const;
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.GemmNPerBlock, "GemmNPerBlock");
+        f(self.GemmMPerBlock, "GemmMPerBlock");
+        f(self.GemmKPerBlock, "GemmKPerBlock");
+        f(self.GemmMPerWave, "GemmMPerWave");
+        f(self.GemmNPerWave, "GemmNPerWave");
+        f(self.GemmKPACKSize, "GemmKPACKSize");
+        f(self.GemmAThreadCopyMoreGemmK, "GemmAThreadCopyMoreGemmK");
+        f(self.GemmBThreadCopyMoreGemmKPack, "GemmBThreadCopyMoreGemmKPack");
+    }
+
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
+    bool SetNextValue(const miopen::conv::ProblemDescription&);
+
+private:
+    void SetMlirHeuristicInitRequest();
+};
+
+struct ConvMlirIgemmFwdXdlops final : ConvTunableSolver<PerformanceConvMlirIgemmXdlops>
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvMlirIgemmFwdXdlops>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    PerformanceConvMlirIgemmXdlops
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConvMlirIgemmXdlops&) const override;
+    PerformanceConvMlirIgemmXdlops Search(const ExecutionContext&,
+                                          const miopen::conv::ProblemDescription&,
+                                          const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConvMlirIgemmXdlops&) const override;
+};
+
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmV4R4WrW final
     : ConvTunableSolver<PerformanceImplicitGemmV4R4WrW>
 {
@@ -856,6 +1005,52 @@ private:
     static std::tuple<int, int, int> CalculateGemmSize(const miopen::conv::ProblemDescription&);
 
     friend struct PerformanceImplicitGemmV4R4WrW;
+};
+
+struct ConvMlirIgemmWrW final : ConvTunableSolver<PerformanceConvMlirIgemm>
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvMlirIgemmWrW>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    PerformanceConvMlirIgemm
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConvMlirIgemm&) const override;
+    PerformanceConvMlirIgemm Search(const ExecutionContext&,
+                                    const miopen::conv::ProblemDescription&,
+                                    const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConvMlirIgemm&) const override;
+};
+
+struct ConvMlirIgemmWrWXdlops final : ConvTunableSolver<PerformanceConvMlirIgemmXdlops>
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvMlirIgemmWrWXdlops>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    PerformanceConvMlirIgemmXdlops
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConvMlirIgemmXdlops&) const override;
+    PerformanceConvMlirIgemmXdlops Search(const ExecutionContext&,
+                                          const miopen::conv::ProblemDescription&,
+                                          const AnyInvokeParams& invoke_ctx) const override;
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override;
+    bool MayNeedWorkspace() const override { return true; }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConvMlirIgemmXdlops&) const override;
 };
 
 struct PerformanceImplicitGemmForwardV4R4Xdlops
@@ -1224,6 +1419,49 @@ private:
                                                        const miopen::conv::ProblemDescription&);
 
     friend struct PerformanceImplicitGemmBwdDataV1R1;
+};
+
+struct ConvMlirIgemmBwd final : ConvTunableSolver<PerformanceConvMlirIgemm>
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvMlirIgemmBwd>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    PerformanceConvMlirIgemm
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConvMlirIgemm&) const override;
+    PerformanceConvMlirIgemm Search(const ExecutionContext&,
+                                    const miopen::conv::ProblemDescription&,
+                                    const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConvMlirIgemm&) const override;
+};
+
+struct ConvMlirIgemmBwdXdlops final : ConvTunableSolver<PerformanceConvMlirIgemmXdlops>
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvMlirIgemmBwdXdlops>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    PerformanceConvMlirIgemmXdlops
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConvMlirIgemmXdlops&) const override;
+    PerformanceConvMlirIgemmXdlops Search(const ExecutionContext&,
+                                          const miopen::conv::ProblemDescription&,
+                                          const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConvMlirIgemmXdlops&) const override;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmBwdDataV4R1 final
@@ -3923,7 +4161,8 @@ struct PerformanceConfigHipImplicitGemmFwdXdlops
         : PerformanceConfigHipImplicitGemmFwdXdlops(0, "")
     {
     }
-    void HeuristicInit(const miopen::conv::ProblemDescription&);
+    void DefaultKernelFromList(const ExecutionContext& ctx);
+    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
@@ -4003,7 +4242,8 @@ struct PerformanceConfigHipImplicitGemmBwdXdlops
         : PerformanceConfigHipImplicitGemmBwdXdlops(0, "")
     {
     }
-    void HeuristicInit(const miopen::conv::ProblemDescription&);
+    void DefaultKernelFromList(const ExecutionContext& ctx);
+    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
@@ -4073,6 +4313,8 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
         : PerformanceConfigHipImplicitGemmGroupFwdXdlops(0, "")
     {
     }
+
+    void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
@@ -4164,6 +4406,7 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
         : PerformanceConfigHipImplicitGemm3DGroupFwdXdlops(0, "")
     {
     }
+    void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
@@ -4241,6 +4484,7 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
         : PerformanceConfigHipImplicitGemm3DGroupWrwXdlops(0, "")
     {
     }
+    void DefaultKernelFromList(const ExecutionContext& ctx);
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
@@ -4325,6 +4569,7 @@ struct PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
         : PerformanceConfigHipImplicitGemm3DGroupBwdXdlops(0, "")
     {
     }
+    void DefaultKernelFromList(const ExecutionContext& ctx);
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
@@ -4406,6 +4651,7 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     {
     }
 
+    void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
@@ -4502,6 +4748,8 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
         : PerformanceConfigHipImplicitGemmGroupWrwXdlops(0, "")
     {
     }
+
+    void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
@@ -4648,6 +4896,263 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
     uint32_t GetSupportedSolutionCount(const ExecutionContext&,
                                        const miopen::conv::ProblemDescription&) const;
 };
+/// Common base for ConvWinogradNHWC transposing solvers (tunable and non-tunable).
+/// Provides ConvertFromApiParams, ConvertForInnerSolver, Transpose, and GetTransposes.
+/// Template params:
+///   Derived    - CRTP derived class
+///   Inner      - the inner (NCHW) winograd solver
+///   SolverBase - ConvSolver or ConvTunableSolver<PerformanceConfigType>
+template <class Derived, class Inner, class SolverBase>
+struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
+                                                           SolverBase,
+                                                           miopen::conv::ProblemDescription,
+                                                           miopen::conv::TransposeConvInvokeParams,
+                                                           Inner>
+{
+    using Problem      = miopen::conv::ProblemDescription;
+    using InvokeParams = miopen::conv::TransposeConvInvokeParams;
+    using Base         = TransposingSolver<Derived, SolverBase, Problem, InvokeParams, Inner>;
+
+    /// Convert from API params to TransposeConvInvokeParams.
+    /// The API passes DataInvokeParams for Fwd/Bwd and WrWInvokeParams for WrW.
+    static InvokeParams ConvertFromApiParams(const AnyInvokeParams& any_params)
+    {
+        if(any_params.IsOfType<miopen::conv::WrWInvokeParams>())
+        {
+            const auto& wrw_params = any_params.CastTo<miopen::conv::WrWInvokeParams>();
+            return InvokeParams{wrw_params};
+        }
+        const auto& data_params = any_params.CastTo<miopen::conv::DataInvokeParams>();
+        return InvokeParams{data_params};
+    }
+
+    /// Convert TransposeConvInvokeParams back to the correct type for inner solver.
+    /// Inner Winograd solvers expect DataInvokeParams for Fwd/Bwd and WrWInvokeParams for WrW.
+    static AnyInvokeParams ConvertForInnerSolver(const InvokeParams& params)
+    {
+        if(params.is_wrw)
+            return params.ToWrWInvokeParams();
+        return params.ToDataInvokeParams();
+    }
+
+    /// Override Transpose to recompute layout strings after transposing tensors.
+    /// This is needed because conv::ProblemDescription caches layout strings at construction,
+    /// and they must be updated to reflect the new NCHW-like strides after transposition.
+    inline static Problem Transpose(const Problem& problem)
+    {
+        auto transposed_problem = Base::Transpose(problem);
+        // CRITICAL: Attempt to update cached layout strings to match transposed strides.
+        // Some inner solvers (e.g., RxSf2x3g1) check IsLayoutDefault() which validates
+        // cached layout strings. Note: For degenerate dimensions (N=1, C=1, etc.), the cached
+        // string may not be updated since strides satisfy multiple layouts. Solvers using
+        // IsPossibleLayout4D5D() will work correctly regardless as they check actual strides.
+        transposed_problem.HeuristicUpdateLayouts();
+        return transposed_problem;
+    }
+
+    inline static auto GetTransposes(const Problem& problem)
+    {
+        const bool is_wrw = problem.IsDirectionBackwardWrW();
+
+        // Layout string "NCDHW" supports both 4D (NCHW) and 5D (NCDHW) tensors:
+        // - For 4D tensors: Automatically interpreted as NCHW (D dimension is implicit/1)
+        // - For 5D tensors: Full NCDHW layout for 3D convolutions
+        // This makes the transposing solver future-proof for both 2D and 3D convolutions.
+        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 3>{{
+            {
+                &Problem::GetIn,
+                &InvokeParams::inDesc,
+                &InvokeParams::in, // in (dy for WrW): always an input
+                nullptr,
+                "NCDHW", // transpose NHWC/NDHWC->NCHW/NCDHW
+                true,
+            },
+            {
+                &Problem::GetWeights,
+                &InvokeParams::wDesc,
+                is_wrw ? nullptr : &InvokeParams::w,           // Fwd/Bwd: w is input
+                is_wrw ? &InvokeParams::w_as_output : nullptr, // WrW: dw is output
+                "NCDHW", // weights: layout adapts to tensor dimensionality
+                !is_wrw, // Fwd/Bwd: input; WrW: output
+            },
+            {
+                &Problem::GetOut,
+                &InvokeParams::outDesc,
+                is_wrw ? &InvokeParams::out_as_input : nullptr, // WrW: x is input
+                is_wrw ? nullptr : &InvokeParams::out,          // Fwd/Bwd: out is output
+                "NCDHW", // out: layout adapts to tensor dimensionality
+                is_wrw,  // Fwd/Bwd: output; WrW: input
+            },
+        }};
+
+        return ret;
+    }
+};
+
+/// Non-tunable transposing wrapper for NHWC winograd solvers.
+template <class Inner>
+struct ConvWinogradNHWCTransposingSolver
+    : ConvWinogradNHWCTransposingBase<ConvWinogradNHWCTransposingSolver<Inner>, Inner, ConvSolver>
+{
+};
+
+/// Tunable transposing wrapper for NHWC winograd solvers.
+/// Uses ConvTunableSolver<Inner::PerformanceConfigType> as base so that the transposed
+/// solver properly exposes tuning methods (GetDefaultPerformanceConfig, IsValidPerformanceConfig,
+/// Search, GetSolution with config). The TransposingSolverGetSolution<..., true> specialization
+/// handles delegation of all tunable methods to the inner solver with transposed problems.
+template <class Inner>
+struct ConvWinogradNHWCTransposingTunableSolver
+    : ConvWinogradNHWCTransposingBase<ConvWinogradNHWCTransposingTunableSolver<Inner>,
+                                      Inner,
+                                      ConvTunableSolver<typename Inner::PerformanceConfigType>>
+{
+};
+
+struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinograd3x3U final
+    : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
+{
+    const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinograd3x3U>(); }
+};
+
+struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinogradRxS final
+    : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
+{
+    const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinogradRxS>(); }
+};
+
+struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinogradRxSf2x3g1 final
+    : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxSf2x3g1>
+{
+    const std::string& SolverDbId() const
+    {
+        return GetSolverDbId<TransposedConvBinWinogradRxSf2x3g1>();
+    }
+};
+template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
+struct TransposedConvMPBidirectWinograd final
+    : ConvWinogradNHWCTransposingSolver<
+          ConvMPBidirectWinograd<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>
+{
+    const std::string& SolverDbId() const
+    {
+        return this->template GetSolverDbId<
+            TransposedConvMPBidirectWinograd<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>();
+    }
+};
+
+#ifndef CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP
+extern template struct TransposedConvMPBidirectWinograd<2, 3>;
+extern template struct TransposedConvMPBidirectWinograd<3, 3>;
+extern template struct TransposedConvMPBidirectWinograd<4, 3>;
+extern template struct TransposedConvMPBidirectWinograd<5, 3>;
+extern template struct TransposedConvMPBidirectWinograd<6, 3>;
+#endif
+
+template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
+struct TransposedConvWinograd3x3MultipassWrW final
+    : ConvWinogradNHWCTransposingSolver<
+          ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>
+{
+    const std::string& SolverDbId() const
+    {
+        return this->template GetSolverDbId<TransposedConvWinograd3x3MultipassWrW<WinoDataH,
+                                                                                  WinoFilterH,
+                                                                                  WinoDataW,
+                                                                                  WinoFilterW>>();
+    }
+};
+
+#ifndef CONV_MULTIPASS_WINO3X3WRW_CPP
+extern template struct TransposedConvWinograd3x3MultipassWrW<3, 2>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<3, 3>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<3, 4>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<3, 5>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<3, 6>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<7, 2>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<7, 3>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 3>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<7, 2, 1, 1>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<7, 3, 1, 1>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<5, 3>;
+extern template struct TransposedConvWinograd3x3MultipassWrW<5, 4>;
+#endif
+
+template <uint32_t Winodata, uint32_t Winofilter>
+struct TransposedConvWinoFuryRxS final
+    : ConvWinogradNHWCTransposingSolver<ConvWinoFuryRxS<Winodata, Winofilter>>
+{
+    const std::string& SolverDbId() const
+    {
+        return this->template GetSolverDbId<TransposedConvWinoFuryRxS<Winodata, Winofilter>>();
+    }
+};
+
+#ifndef CONV_WINO_FURY_RXS_CPP
+extern template struct TransposedConvWinoFuryRxS<2, 3>;
+#endif
+
+template <uint32_t Winodata, uint32_t Winofilter>
+struct TransposedConvWinoRageRxS final
+    : ConvWinogradNHWCTransposingSolver<ConvWinoRageRxS<Winodata, Winofilter>>
+{
+    const std::string& SolverDbId() const
+    {
+        return this->template GetSolverDbId<TransposedConvWinoRageRxS<Winodata, Winofilter>>();
+    }
+};
+
+#ifndef CONV_WINO_RAGE_RXS_CPP
+extern template struct TransposedConvWinoRageRxS<2, 3>;
+#endif
+
+// Tunable transposed Winograd solvers for NHWC layout support
+template <int Winodata, int Winofilter>
+struct TransposedConvBinWinoRxS final
+    : ConvWinogradNHWCTransposingTunableSolver<ConvBinWinoRxS<Winodata, Winofilter>>
+{
+    const std::string& SolverDbId() const override
+    {
+        return this->template GetSolverDbId<TransposedConvBinWinoRxS<Winodata, Winofilter>>();
+    }
+};
+
+// Suppress misleading clang warnings
+#ifndef CONV_BIN_WINO_RXS_CPP
+
+extern template struct TransposedConvBinWinoRxS<2, 3>;
+extern template struct TransposedConvBinWinoRxS<3, 2>;
+
+#endif
+
+template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
+struct TransposedConvMPBidirectWinograd_xdlops final
+    : ConvWinogradNHWCTransposingTunableSolver<
+          ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>
+{
+    const std::string& SolverDbId() const
+    {
+        return this->template GetSolverDbId<TransposedConvMPBidirectWinograd_xdlops<WinoDataH,
+                                                                                    WinoFilterH,
+                                                                                    WinoDataW,
+                                                                                    WinoFilterW>>();
+    }
+};
+
+// To suppress misleading clang warnings
+#if defined(__clang__) && defined(CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-template-vtables"
+#endif
+extern template struct TransposedConvMPBidirectWinograd_xdlops<2, 3>;
+extern template struct TransposedConvMPBidirectWinograd_xdlops<3, 3>;
+extern template struct TransposedConvMPBidirectWinograd_xdlops<4, 3>;
+extern template struct TransposedConvMPBidirectWinograd_xdlops<5, 3>;
+extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
+#if defined(__clang__) && defined(CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP)
+#pragma clang diagnostic pop
+#endif
 
 // Test helper functions for metadata validation
 // These functions return all CK kernel TypeStrings without problem-based filtering

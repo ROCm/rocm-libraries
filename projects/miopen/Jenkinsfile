@@ -27,7 +27,7 @@ def get_branch_name(){
 ///   * The default compiler is usually not specified.
 /// BuildType := { Release* | Debug | Install } [ BuildTypeModifier ]
 ///   * BuildTypeModifier := { NOCOMGR | Embedded | Static | Normal-Find | Fast-Find
-///                            NOCK | Tensile | Tensile-Latest | Package | ... }
+///                            NOCK | NOMLIR | Tensile | Tensile-Latest | Package | ... }
 /// TestSet := { All | Smoke* | <Performance Dataset> | Build-only }
 ///   * "All" corresponds to "cmake -DMIOPEN_TEST_ALL=On".
 ///   * "Smoke" (-DMIOPEN_TEST_ALL=Off) is the default and usually not specified.
@@ -300,7 +300,7 @@ pipeline {
 
         Smoke_targets   = " check MIOpenDriver"
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
-
+        NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
         CK_DIR          = "${ckDir}"
         MIOPEN_DIR      = "${miopenDir}"
         PROJ_DIR        = "${projDir}"
@@ -658,7 +658,7 @@ pipeline {
                     }
                 }
                 // GFX90A Tests
-                stage('Fp32 Hip Debug gfx90a') {
+                stage('Fp32 Hip Debug NOMLIR gfx90a') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX90A }
@@ -669,12 +669,12 @@ pipeline {
                     agent{ label rocmnode("gfx90a") }
                     environment{
                         // Can be removed altogether with when WORKAROUND_SWDEV_290754.
-                        debug_build_cmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
+                        NOMLIR_build_cmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
                     }
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( build_type: 'debug', setup_flags: gfx90a_flags, build_cmd: debug_build_cmd, test_flags: ' --verbose ', build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true, gpu_family: "gfx90X")
                             }
                         }
                     }
@@ -718,7 +718,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, build_install: true, gpu_family: "gfx90X")
+                                utils.buildHipClangJob( setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "gfx90X")
                             }
                         }
                     }
