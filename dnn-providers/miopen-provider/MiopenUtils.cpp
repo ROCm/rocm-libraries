@@ -120,7 +120,7 @@ ActivationParams mapPointwiseModeToMiopenActivation(
                                     0.0,
                                     0.0};
         }
-        if(lowerClip.has_value() && lowerClip.value() != 0.f)
+        if(lowerClip && *lowerClip != 0.f)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
