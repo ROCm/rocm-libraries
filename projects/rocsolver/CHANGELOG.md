@@ -5,7 +5,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
-
 * Support added for the gfx1150, gfx1152, and gfx1153 architectures
 * Computation of different matrix norms
     * LANGE
@@ -19,6 +18,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
+* Fixed an issue in memory error in SYTRF and fixed a synchronization issue in LASYF and SYTF2
 * Fixed a synchronization issue in STEBZ and downstream functions, such as SYEVX and SYEVDX.
 * Fixed a synchronization issue in GETF2.
 
