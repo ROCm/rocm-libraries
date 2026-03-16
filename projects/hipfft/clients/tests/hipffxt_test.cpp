@@ -216,9 +216,12 @@ static std::vector<std::tuple<bool, int, hipfftXtSubFormat, size_t>> in_goodlist
     {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 2},
     {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 2},
     {1, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 3},
+    {1, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 3},
     // Complex/complex can be in-place or out-of-place
     {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 2},
     {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 2},
+    {0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE, 3},
+    {0, HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, 3},
 
     // It seems that cufftxt only wants to do in-place, even for c2c?
     //{0, HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPUT, 2},
@@ -266,7 +269,10 @@ TEST_P(hipfftxtunitdesc, desccreation)
     const bool isinput = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
 
     // FIXME: check for 3D and output formats
-    const size_t splitdim = isinput ? lastdim - 1 : lastdim; 
+    //const size_t splitdim = isinput ? lastdim - 1 : lastdim;
+    //const size_t splitdim = isinput ? lastdim - 1 : lastdim;
+    //const size_t splitdim = lastdim - 2; // FIXME
+    const size_t splitdim = isinput ? 1 : 2; // FIXME
 
     if(verbose)
     {
@@ -333,9 +339,21 @@ TEST_P(hipfftxtunitdesc, desccreation)
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
 
     std::vector<size_t> workSize(ngpus);
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
-                                 transform_type,
-                                 workSize.data());
+    switch(dimension)
+    {
+    case 2:
+        hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
+                                     transform_type,
+                                     workSize.data());
+        break;
+    case 3:
+        hipfft_rt = hipfftMakePlan3d(plan, Nx, Ny, Nz,
+                                     transform_type,
+                                     workSize.data());
+        break;
+    default:
+        FAIL();
+    }
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
                                          << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
     std::cout << "plan created\n";
@@ -407,7 +425,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                                                   std::begin(hostdiststrides), 0);
                             if(isreal) {
                                 const auto hostdat = reinterpret_cast<const double*>(hostbuf);
-                                if(yidx > 0)
+                                if(zidx > 0)
                                     std::cout << " ";
                                 std::cout << hostdat[pos];
                             }
@@ -415,13 +433,14 @@ TEST_P(hipfftxtunitdesc, desccreation)
                             {
                                 const auto hostdat
                                     = reinterpret_cast<const std::complex<double>*>(hostbuf);
-                                if(yidx > 0)
+                                if(zidx > 0)
                                     std::cout << " ";
                                 std::cout << hostdat[pos];
                             }
                         }
                         std::cout << "\n";
                     }
+                    std::cout << "\n";
                 }
             }
             break;
@@ -497,13 +516,13 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                                                   std::begin(hostdiststrides), 0);
                             if(isreal) {
                                 auto hostdat = reinterpret_cast<double*>(hostbuf.data());
-                                hostdat[pos] = xidx + 0.01 * yidx;
+                                hostdat[pos] = xidx + 0.01 * yidx +  + 0.0001 * zidx;
                             }
                             else
                             {
                                 auto hostdat
                                     = reinterpret_cast<std::complex<double>*>(hostbuf.data());
-                                hostdat[pos] = std::complex<double>(xidx, yidx);
+                                hostdat[pos] = std::complex<double>(xidx + 0.01 * yidx, zidx);
                             }
                         }
                     }
@@ -570,7 +589,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
         std::vector<char> hostbuf(valsize * nelem);
         fillhostbuf(hostbuf, isreal, hostdatabatchlengths, hostdiststrides);
 
-        if(verbose > 3)
+        if(verbose > 4)
         {
             printhostbuf(hostbuf.data(), isreal, hostdatabatchlengths, hostdiststrides);
         }
