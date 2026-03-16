@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <miopen/solution.hpp>
@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "miopen/conv/db_getter.hpp"
 #include "miopen/fusion/problem_description.hpp"
 #include "miopen/fusion/context.hpp"
 
@@ -143,7 +144,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     auto x       = get_input_checked(miopenTensorConvolutionX, "miopenTensorConvolutionX");
@@ -270,7 +271,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const mha::ProblemDescription problem_description = problem_casted.AsMha();
@@ -466,7 +467,7 @@ void Solution::RunImpl(const Handle& handle,
         auto ret = found->second;
         if(!ret.descriptor.has_value())
             ret.descriptor = problem_casted.GetTensorDescriptorChecked(name, name_str);
-        return ret;
+        return std::move(ret);
     };
 
     const softmax::ProblemDescription problem_description = problem_casted.AsSoftmax();
@@ -518,11 +519,14 @@ void Solution::RunImpl(const Handle& handle,
 
     if(!kernels.empty())
     {
-        const auto ctx              = ExecutionContext{&handle};
-        const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                          ? regularSoftmax.GetSolution(ctx, problem_description)
-                                          : attnSoftmax.GetSolution(ctx, problem_description);
-        auto kernel_handles         = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
+        const auto ctx = ExecutionContext{&handle};
+        auto db_getter = MakeConvDbGetter(ctx);
+        const auto softmax_solution =
+            GetSolver() == regularSoftmax.SolverDbId()
+                ? solver::FindSolution(
+                      regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
+                : attnSoftmax.GetSolution(ctx, problem_description);
+        auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         if(softmax_solution.invoker_factory.has_value())
         {
@@ -546,11 +550,12 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    auto ctx = ExecutionContext{&handle};
-
-    const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                      ? regularSoftmax.GetSolution(ctx, problem_description)
-                                      : attnSoftmax.GetSolution(ctx, problem_description);
+    auto ctx       = ExecutionContext{&handle};
+    auto db_getter = MakeConvDbGetter(ctx);
+    const auto softmax_solution =
+        GetSolver() == regularSoftmax.SolverDbId()
+            ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
+            : attnSoftmax.GetSolution(ctx, problem_description);
 
     if(softmax_solution.invoker_factory.has_value())
     {

@@ -245,9 +245,11 @@ namespace TensileLite
 
             double_millis totalTime(0.0);
 
+            // Skip the first warmup event (cold start) when multiple warmups are available
+            size_t warmupStartIdx = startEvents->size() == 1 ? 0 : 1;
             float enqTime = 0.0f;
             HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-            for(size_t i = 0; i < startEvents->size(); i++)
+            for(size_t i = warmupStartIdx; i < startEvents->size(); i++)
             {
                 HIP_CHECK_EXC(hipEventElapsedTime(
                     &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));

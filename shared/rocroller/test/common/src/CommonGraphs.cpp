@@ -207,10 +207,10 @@ namespace rocRollerTest::Graphs
                                               ? std::vector<size_t>({(size_t)0, (size_t)1})
                                               : std::vector<size_t>({});
 
-        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(
+        m_tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(
             2, m_ta, {}, m_problem.transA == "N" ? oneStridesN : oneStridesT)); // A
-        m_tagA          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
-        auto tagA       = m_tagA;
+        m_tagA       = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagTensorA));
+        auto tagA    = m_tagA;
 
         if(m_problem.scaleAMode == Operations::ScaleMode::Separate)
         {
@@ -222,10 +222,10 @@ namespace rocRollerTest::Graphs
                 tagA, 2, m_tagScaleA, {1ul, static_cast<size_t>(m_problem.scaleBlockSize)}));
         }
 
-        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(
+        m_tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(
             2, m_tb, {}, m_problem.transB == "N" ? oneStridesN : oneStridesT)); // B
-        m_tagB          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
-        auto tagB       = m_tagB;
+        m_tagB       = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagTensorB));
+        auto tagB    = m_tagB;
 
         if(m_problem.scaleBMode == Operations::ScaleMode::Separate)
         {
@@ -237,18 +237,18 @@ namespace rocRollerTest::Graphs
                 tagB, 2, m_tagScaleB, {static_cast<size_t>(m_problem.scaleBlockSize), 1ul}));
         }
 
-        auto tagTensorC
+        m_tagTensorC
             = m_command->addOperation(rocRoller::Operations::Tensor(2, m_tc, {}, oneStridesN)); // C
-        m_tagC = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
+        m_tagC = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagTensorC));
 
-        auto tagScalarAlpha
+        m_tagScalarAlpha
             = m_command->addOperation(rocRoller::Operations::Scalar(DataType::Float)); // alpha
         auto tagLoadAlpha
-            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarAlpha));
+            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(m_tagScalarAlpha));
 
-        auto tagScalarBeta = m_command->addOperation(rocRoller::Operations::Scalar(m_tc)); // beta
-        auto tagLoadBeta
-            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarBeta)); // beta
+        m_tagScalarBeta  = m_command->addOperation(rocRoller::Operations::Scalar(m_tc)); // beta
+        auto tagLoadBeta = m_command->addOperation(
+            rocRoller::Operations::T_Load_Scalar(m_tagScalarBeta)); // beta
 
         auto tagAB = m_command->addOperation(rocRoller::Operations::T_Mul(tagA, tagB)); // A * B
 
@@ -272,9 +272,9 @@ namespace rocRollerTest::Graphs
         }
         m_command->addOperation(std::move(execute));
 
-        auto tagTensorD
+        m_tagTensorD
             = m_command->addOperation(rocRoller::Operations::Tensor(2, m_td, {}, oneStridesN)); // D
-        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, tagTensorD)); // D
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, m_tagTensorD)); // D
 
         if(m_problem.streamK)
         {
@@ -403,6 +403,12 @@ namespace rocRollerTest::Graphs
         m_problem.transB = transB;
     }
 
+    void GEMM::setPad(decltype(m_problem.padA) padA, decltype(m_problem.padB) padB)
+    {
+        m_problem.padA = padA;
+        m_problem.padB = padB;
+    }
+
     std::pair<std::optional<Operations::OperationTag>, std::optional<Operations::OperationTag>>
         GEMM::getABScaleTags() const
     {
@@ -432,9 +438,15 @@ namespace rocRollerTest::Graphs
     {
         using namespace rocRoller::KernelGraph::CoordinateGraph;
 
+        AssertFatal(!m_tagA.uninitialized() && !m_tagB.uninitialized() && !m_tagC.uninitialized()
+                        && !m_tagD.uninitialized(),
+                    "Command not yet created, call getCommand() first");
+
         auto params = std::make_shared<CommandParameters>();
 
         params->setManualKernelDimension(2);
+        params->ldsPadding[LayoutType::MATRIX_A] = m_problem.padA;
+        params->ldsPadding[LayoutType::MATRIX_B] = m_problem.padB;
 
         AssertFatal(m_problem.workgroupSizeX % m_problem.wavefrontSize == 0,
                     "Workgroup Size X must be multiply of wave front size");
