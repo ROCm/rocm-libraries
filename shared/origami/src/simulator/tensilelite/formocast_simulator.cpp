@@ -683,9 +683,11 @@ namespace origami
     {
         uint32_t MT0 = sizeMapping.macroTile[0];
         uint32_t MT1 = sizeMapping.macroTile[1];
-        uint32_t XCC = sizeMapping.workGroupMappingXCC;
-        uint32_t XCCG = (sizeMapping.workGroupMappingXCCGroup < 0)? hw.NumCUs : sizeMapping.workGroupMappingXCCGroup;
         uint32_t depthU = sizeMapping.depthU;
+
+        // can't make these two unsigned, they could be -1 in special cases
+        int XCC = sizeMapping.workGroupMappingXCC;
+        int XCCG = (sizeMapping.workGroupMappingXCCGroup < 0)? hw.NumCUs : sizeMapping.workGroupMappingXCCGroup;
 
         auto hr = simulator::computeL2CacheHitRate(
             M, N, K, MT0, MT1, depthU, hw.L2CacheCapacity, hw.NumCUs, hw.NumXCDs,

@@ -381,7 +381,7 @@ namespace origami
         L2CacheHitRate computeL2CacheHitRate(uint32_t M, uint32_t N, uint32_t K,
                                              uint32_t MT0, uint32_t MT1, uint32_t depthU,
                                              uint32_t L2CacheCapacity, uint32_t NumCUs, uint32_t NumXCDs,
-                                             uint32_t XCC, uint32_t XCCG, uint32_t gsu, int32_t wgm,
+                                             int XCC, int XCCG, uint32_t gsu, int32_t wgm,
                                              uint32_t batches, uint32_t bpeA, uint32_t bpeB, int32_t NTA,
                                              int32_t NTB, bool isGSUWGMRR)
         {
@@ -416,9 +416,15 @@ namespace origami
             std::vector<uint32_t> arrA_2(gsuMulBatch * wg0, 0);
             std::vector<uint32_t> arrB_2(gsuMulBatch * wg1, 0);
 
-            uint32_t WGMXCC  = XCC;
-            uint32_t WGMXCCG = (XCCG == -1)? NumCUs : XCCG;
-            assert((WGMXCCG % WGMXCC) == 0);
+            int WGMXCC  = XCC;
+            int WGMXCCG = (XCCG > 0)? XCCG : NumCUs;
+            // NB:
+            //  tensilelite has the limitations for XCC and XCCG,
+            //  so there shouldn't be solutions failing the assertions.
+            //  (Besides: WGMXCC can only > 0 for non-streamK )
+            assert(WGMXCC != 0);
+            if(WGMXCC > 0)
+                assert((WGMXCCG % WGMXCC) == 0);
 
             uint32_t totalWGNum  = gsuMulBatch * wg0 * wg1;
 
@@ -431,7 +437,9 @@ namespace origami
             std::vector<std::vector<uint32_t>> xcd_wgs(NumXCDs);
             std::vector<std::unordered_set<uint32_t>> xcd_cachedWG_A(NumXCDs);
             std::vector<std::unordered_set<uint32_t>> xcd_cachedWG_B(NumXCDs);
-            std::vector<uint32_t> xcd_cachedSizes(NumXCDs, 0);
+            // TODO- This should be a better way, but currently the prediction results are not better.
+            //   Remain this part here, and do more tests as TODO
+            // std::vector<uint32_t> xcd_cachedSizes(NumXCDs, 0); // Use this when cache-size-estimation is better
             uint32_t xccIdx = 0;
 
             for(uint32_t wg = 0; wg < std::min(totalWGNum, 10 * NumCUs); wg++)
@@ -465,7 +473,6 @@ namespace origami
                     else
                         xccMappedWGId += (wg % WGMXCC) * (WGMXCCG / WGMXCC);
                 }
-                // std::cout  << std::endl << "wgID = " << wg << ", xccIdx = " << xccIdx << ", XCC-Remapped wgID = " << xccMappedWGId;
                 xcd_wgs[xccIdx++].emplace_back(xccMappedWGId);
                 xccIdx %= NumXCDs;
             }
@@ -490,8 +497,6 @@ namespace origami
                     uint32_t idxWG01 = xccMappedWGId - (wg2 * sgprNumWorkGroups0 * sgprNumWorkGroups1 * gsu);
                     uint32_t sgprWorkGroup1 = idxWG01 / wg0;
                     uint32_t sgprWorkGroup0 = idxWG01 - (sgprWorkGroup1 * wg0);
-
-                    // std::cout  << std::endl << "XCDID = " << xccIdx << ", XCC-Remapped wgID = " << xccMappedWGId;
 
                     //go GSUWGMRR
                     uint32_t gsuSumIdx = 0;
@@ -581,7 +586,7 @@ namespace origami
                     // clean cache for each WGMXCCG
                     if((counter % wgPerXCDIter) == 0)
                     {
-                        xcd_cachedSizes[xccIdx] = 0;
+                        // xcd_cachedSizes[xccIdx] = 0;
                         xcd_cachedWG_A[xccIdx].clear();
                         xcd_cachedWG_B[xccIdx].clear();
                     }
@@ -598,7 +603,7 @@ namespace origami
                         {
                             aMissElements += (MT_Size0 * (K / gsu));
                             xcd_cachedWG_A[xccIdx].insert(idxA);
-                            xcd_cachedSizes[xccIdx] += (MT_Size0 * (K / gsu)) * bpeA;
+                            // xcd_cachedSizes[xccIdx] += (MT_Size0 * (K / gsu)) * bpeA;
                         }
                     }
                     // B
@@ -613,10 +618,12 @@ namespace origami
                         {
                             bMissElements += (MT_Size1 * (K / gsu));
                             xcd_cachedWG_B[xccIdx].insert(idxB);
-                            xcd_cachedSizes[xccIdx] += (MT_Size1 * (K / gsu)) * bpeB;
+                            // xcd_cachedSizes[xccIdx] += (MT_Size1 * (K / gsu)) * bpeB;
                         }
                     }
-                    // // FIXME: clean cache when full
+                    // // TODO: clean cache when full
+                    // //   This should be a better way, but currently the prediction results are not better.
+                    // //   Remain this part here as TODO
                     // if(xcd_cachedSizes[xccIdx] > L2CacheCapacity)
                     // {
                     //     // std::cout << "clean cache when: xccId = " << xccIdx << ", with remapped-wgID = " << xccMappedWGId << std::endl;

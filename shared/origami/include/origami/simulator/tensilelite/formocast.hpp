@@ -224,7 +224,7 @@ namespace origami
         L2CacheHitRate computeL2CacheHitRate(uint32_t M, uint32_t N, uint32_t K,
                                              uint32_t MT0, uint32_t MT1, uint32_t depthU,
                                              uint32_t L2CacheCapacity, uint32_t NumCUs, uint32_t NumXCDs,
-                                             uint32_t XCC, uint32_t XCCG, uint32_t gsu, int32_t wgm,
+                                             int XCC, int XCCG, uint32_t gsu, int32_t wgm,
                                              uint32_t batches, uint32_t bpeA, uint32_t bpeB, int32_t NTA,
                                              int32_t NTB, bool isGSUWGMRR);
 
