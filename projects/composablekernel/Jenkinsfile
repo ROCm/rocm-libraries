@@ -94,7 +94,7 @@ def sendFailureNotifications() {
         [pattern: 'GPU not found', description: "GPU not found"],
         [pattern: 'Could not connect to Redis at .* Connection timed out', description: "Redis connection timed out"],
         [pattern: 'unauthorized: your account must log in with a Personal Access Token', description: "Docker login failed"],
-        [pattern: 'sccache: error: Server startup failed: Address in use', description: "Sccache Error"]
+        [pattern: 'sccache: error: Server startup failed: Address in use', description: "Sccache Error"],
         [pattern: 'No space left on device', description: "Device space error"]
     ]
 
