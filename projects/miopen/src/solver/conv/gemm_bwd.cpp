@@ -703,17 +703,22 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
             float time_gemm = 0;
 
             // Specialized 3D path for non-grouped convolutions:
-            // launch one strided-batched GEMM over N, then one batched Col2Im.
+            // launch one regular GEMM over N, then one batched Col2Im.
             if(miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
             {
-                auto batched_gemm_desc        = gemm_desc;
-                batched_gemm_desc.batch_count = static_cast<int>(in_n);
-                batched_gemm_desc.strideA     = 0;
-                batched_gemm_desc.strideB =
-                    static_cast<long long>(wei_k) * static_cast<long long>(out_spatial_size);
-                batched_gemm_desc.strideC = static_cast<long long>(in_c) *
-                                            static_cast<long long>(wei_spatial_size) *
-                                            static_cast<long long>(out_spatial_size);
+                auto single_gemm_desc  = gemm_desc;
+                single_gemm_desc.batch_count = 1;
+                single_gemm_desc.strideA     = 0;
+                single_gemm_desc.strideB     = 0;
+                single_gemm_desc.strideC     = 0;
+                // C[N, C*Z*Y*X] = DY[N, K] * W[K, C*Z*Y*X]
+                single_gemm_desc.m      = static_cast<int>(in_n);
+                single_gemm_desc.n      = static_cast<int>(in_c * wei_spatial_size * out_spatial_size);
+                single_gemm_desc.transA = false;
+                single_gemm_desc.transB = false;
+                single_gemm_desc.lda    = static_cast<int>(wei_k);
+                single_gemm_desc.ldb    = single_gemm_desc.n;
+                single_gemm_desc.ldc    = single_gemm_desc.n;
 
                 constexpr auto batched_backend =
 #if MIOPEN_USE_HIPBLASLT
@@ -722,10 +727,10 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                     GemmBackend_t::rocblas;
 #endif
 
-                const auto gemm_status = CallGemmStridedBatched(
-                    handle, batched_gemm_desc, w, 0, dy, 0, workspace, 0, batched_backend);
+                const auto gemm_status =
+                    CallGemm(handle, single_gemm_desc, dy, 0, w, 0, workspace, 0, batched_backend);
                 if(gemm_status != miopenStatusSuccess)
-                    MIOPEN_THROW("GemmBwdRest batched GEMM execution failure.");
+                    MIOPEN_THROW("GemmBwdRest single GEMM execution failure.");
 
                 if(handle.IsProfilingEnabled())
                     time_gemm += handle.GetKernelTime();

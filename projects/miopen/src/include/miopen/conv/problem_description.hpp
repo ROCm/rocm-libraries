@@ -433,20 +433,22 @@ private:
     mutable bool use_tf32                 = false;
 };
 
-inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+inline bool IsPointOutput3dStrideEqFilter(const ProblemDescription& problem,
+                                          Direction direction,
+                                          bool require_input_spatial_eq_filter)
 {
-    if(problem.GetDirection() != Direction::BackwardData)
+    if(problem.GetDirection() != direction)
         return false;
 
     const auto& conv = problem.GetConv();
     if(conv.GetSpatialDimension() != 3 || conv.group_count != 1)
         return false;
 
-    const auto& dy_desc = problem.GetIn();
+    const auto& in_desc = problem.GetIn();
     const auto& w_desc  = problem.GetWeights();
 
-    const auto& dy_lens = dy_desc.GetLengths();
-    if(dy_lens.size() != 5 || dy_lens[2] != 1 || dy_lens[3] != 1 || dy_lens[4] != 1)
+    const auto& in_lens = in_desc.GetLengths();
+    if(in_lens.size() != 5 || in_lens[2] != 1 || in_lens[3] != 1 || in_lens[4] != 1)
         return false;
 
     const auto& pads      = conv.GetConvPads();
@@ -462,9 +464,23 @@ inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& probl
             return false;
         if(static_cast<int>(w_lens[2 + i]) != strides[i])
             return false;
+        if(require_input_spatial_eq_filter &&
+           static_cast<int>(in_lens[2 + i]) != static_cast<int>(w_lens[2 + i]))
+            return false;
     }
 
     return true;
+}
+
+inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    return IsPointOutput3dStrideEqFilter(problem, Direction::BackwardData, false);
+}
+
+inline bool IsFwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    // For direct GEMM without Im2Col, input spatial must equal filter spatial.
+    return IsPointOutput3dStrideEqFilter(problem, Direction::Forward, true);
 }
 
 } // namespace conv
