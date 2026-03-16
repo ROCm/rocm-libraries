@@ -1283,11 +1283,11 @@ TEST_F(CPU_RunKTNGeneric_NONE, Documentation_Test)
 // RunAIHeuristics Integration Tests
 // ===============================================================================
 
-class GPU_RunAIHeuristics_Integration : public GPU_ConvNDKernelTuningAI_Base
+class GPU_RunAIHeuristics_Integration_FP32 : public GPU_ConvNDKernelTuningAI_Base
 {
 };
 
-TEST_F(GPU_RunAIHeuristics_Integration, CandidateSelection_BasicFlow)
+TEST_F(GPU_RunAIHeuristics_Integration_FP32, CandidateSelection_BasicFlow)
 {
     // Skip if not on supported architecture
     if(device_arch != "gfx942" && device_arch != "gfx950")
@@ -1338,7 +1338,7 @@ TEST_F(GPU_RunAIHeuristics_Integration, CandidateSelection_BasicFlow)
     }
 }
 
-TEST_F(GPU_RunAIHeuristics_Integration, Deterministic_EnforcesSplitK1)
+TEST_F(GPU_RunAIHeuristics_Integration_FP32, Deterministic_EnforcesSplitK1)
 {
     // Skip if not on supported architecture
     if(device_arch != "gfx942" && device_arch != "gfx950")
@@ -1384,7 +1384,7 @@ TEST_F(GPU_RunAIHeuristics_Integration, Deterministic_EnforcesSplitK1)
     }
 }
 
-TEST_F(GPU_RunAIHeuristics_Integration, ForwardSolver_NoSplitK)
+TEST_F(GPU_RunAIHeuristics_Integration_FP32, ForwardSolver_NoSplitK)
 {
     // Skip if not on supported architecture
     if(device_arch != "gfx942" && device_arch != "gfx950")
@@ -1433,13 +1433,13 @@ TEST_F(GPU_RunAIHeuristics_Integration, ForwardSolver_NoSplitK)
 // Parameterized Split_k Validation Tests
 // ===============================================================================
 
-class CPU_SplitKValidation_Parameterized
+class CPU_SplitKValidation_Parameterized_NONE
     : public ::testing::TestWithParam<std::tuple<int, int, int, bool>>
 {
     // Parameters: (split_k_value, min, max, expected_valid)
 };
 
-TEST_P(CPU_SplitKValidation_Parameterized, ValidateSplitKRange)
+TEST_P(CPU_SplitKValidation_Parameterized_NONE, ValidateSplitKRange)
 {
     auto [value, min, max, expected] = GetParam();
     SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, min, max, false, true};
@@ -1450,8 +1450,8 @@ TEST_P(CPU_SplitKValidation_Parameterized, ValidateSplitKRange)
                                 << " but got " << (actual ? "true" : "false");
 }
 
-INSTANTIATE_TEST_SUITE_P(SplitKEdgeCases,
-                         CPU_SplitKValidation_Parameterized,
+INSTANTIATE_TEST_SUITE_P(Unit,
+                         CPU_SplitKValidation_Parameterized_NONE,
                          ::testing::Values(
                              // (value, min, max, expected)
                              std::make_tuple(0, 1, 128, false),   // Below minimum
