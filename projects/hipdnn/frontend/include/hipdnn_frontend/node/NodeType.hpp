@@ -11,22 +11,23 @@ namespace hipdnn_frontend::graph
 /// visiting the graph's node tree via INode::visit().
 enum class NodeType
 {
-    UNKNOWN,
-    CONVOLUTION_FPROP,
-    CONVOLUTION_DGRAD,
-    CONVOLUTION_WGRAD,
-    BATCHNORM,
-    BATCHNORM_INFERENCE,
-    BATCHNORM_BACKWARD,
-    BATCHNORM_INFERENCE_VARIANCE_EXT,
-    POINTWISE,
-    MATMUL,
-    LAYER_NORM,
-    RMS_NORM,
-    SDPA_FPROP,
-    BLOCK_SCALE_QUANTIZE,
-    BLOCK_SCALE_DEQUANTIZE,
-    CUSTOM_OP
+    UNKNOWN = 0,
+    CONVOLUTION_FPROP = 1,
+    CONVOLUTION_DGRAD = 2,
+    CONVOLUTION_WGRAD = 3,
+    BATCHNORM = 4,
+    BATCHNORM_INFERENCE = 5,
+    BATCHNORM_BACKWARD = 6,
+    BATCHNORM_INFERENCE_VARIANCE_EXT = 7,
+    POINTWISE = 8,
+    MATMUL = 9,
+    LAYER_NORM = 10,
+    RMS_NORM = 11,
+    SDPA_FPROP = 12,
+    SDPA_BPROP = 13,
+    BLOCK_SCALE_QUANTIZE = 14,
+    BLOCK_SCALE_DEQUANTIZE = 15,
+    CUSTOM_OP = 16
 };
 
 } // namespace hipdnn_frontend::graph
