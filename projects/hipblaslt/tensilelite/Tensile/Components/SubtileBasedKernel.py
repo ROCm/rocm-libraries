@@ -772,6 +772,38 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
         writer.sgprPool.checkIn(stmp)
 
 ##################################################
+# Apply wave partition offset to rowId for a single matrix (A or B)
+#
+def _grApplyWavePartition(module, writer, tileInfo, waveId, numRowsPerWave, rowId):
+  tc = tileInfo.tc
+  tmpVgpr1 = writer.vgprPool.checkOut(2)
+  tmpSgpr = writer.sgprPool.checkOut(1)
+  localRow = tmpVgpr1
+  partitionRow = tmpVgpr1+1
+  rowOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=rowOffset, comment="%s: row offset"%tc))
+
+  if tileInfo.loadRatioGR == 1.0:
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
+  elif tileInfo.loadRatioGR == 0.5:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
+  elif tileInfo.loadRatioGR == 2.0:
+    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
+  else:
+    raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+
+  module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
+  module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
+  module.add(VAddU32(dst=vgpr(localRow), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
+  module.add(VAddU32(dst=vgpr(rowId), src0=vgpr(rowId), src1=vgpr(localRow), comment="%s: row offset"%tc))
+
+  writer.vgprPool.checkIn(tmpVgpr1)
+  writer.sgprPool.checkIn(tmpSgpr)
+
+##################################################
 # Subroutine to generate GR offset calculation code
 #
 def graTileAssignment(writer, kernel, useSwizzling=True):
@@ -846,34 +878,16 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
   module.add(VLShiftLeftB32(dst=vgpr(colId), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
 
+
   # Wave partitionning
   # Offset based on waveId
-
-  tmpSgpr = writer.sgprPool.checkOut(1)
-  localRow = tmp
-  partitionRow = tmp1
-  rowOffset = tileInfoA.mmaTileShape[0]*tileInfoA.localSubtileGrid[0]
-  module.add(SMovB32(dst=sgpr(tmpSgpr), src=rowOffset, comment=""))
-  
-  if tileInfoA.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="waveId %% 2"))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="waveId / 2"))
-  elif tileInfoA.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment=""))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment=""))
-  elif tileInfoA.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment=""))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment=""))
-  else:
-    raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfoA.loadRatioGR))
-
-  module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(tmp), comment="local row offset"))
-  module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="wave row offset"))
-  module.add(VAddU32(dst=vgpr(localRow), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="row offset"))
-  module.add(VAddU32(dst=vgpr(rowId), src0=vgpr(rowId), src1=vgpr(localRow), comment="row offset"))
-
+  _grApplyWavePartition(module, writer, tileInfoA, waveId, numRowsPerWave, rowId)
   # module.add(VMovB32(dst=vgpr(tileInfoA.sharedVgprGROffset[0]), src=vgpr(rowId), comment="New Serial"))
   # return module
+  #TODO
+  # _grApplyWavePartition(module, writer, tileInfoB, waveId, numRowsPerWave, rowId)
+ 
+
 
 
 
