@@ -588,7 +588,7 @@ def lraTileAssignment(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId % 16"))
 
-  swizzling = False
+  swizzling = True
   if swizzling:
     # Get lds row id
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
@@ -853,12 +853,12 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   # Common code for both A & B
   # Calculate col and row id within a wave for 128b loads
   module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
-  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
 
-  useSwizzling = False
+  useSwizzling = True
   if useSwizzling:
     module.addComment0("Swizzling")
-    module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(rowId), comment="lds row id"))
+    module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr("Serial"), comment="row id within wave"))
+    module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(ldsRowId), comment="lds row id"))
     module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="lds row id % 2"))
     module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
     module.add(VMovB32(dst=vgpr(colId), src=vgpr(colId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
@@ -875,7 +875,8 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   # Apply row offset based on wave partitioning (e.g. 2x2, 4x1/1x4)
   _grComputeRowOffset(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
   _grComputeRowOffset(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
-
+  
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
   # Compute GR offset for A
   _grComputeOffset(module, writer, tileInfoA, colId, rowId, rowOffsetA)
   # Compute GR offset for B
