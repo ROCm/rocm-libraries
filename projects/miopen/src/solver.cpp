@@ -505,19 +505,16 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(registry, ++id, conv::GemmBwd1x1_stride1{}, miopenConvolutionAlgoGEMM);
     RegisterWithSolver(registry, ++id, conv::GemmBwdRest{}, miopenConvolutionAlgoGEMM);
 
-    RegisterWithSolver(registry, ++id, conv::ConvMlirIgemmFwd{}, miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(registry, ++id, conv::ConvMlirIgemmBwd{}, miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(registry, ++id, conv::ConvMlirIgemmWrW{}, miopenConvolutionAlgoImplicitGEMM);
+    ++id; // removed solver ConvMlirIgemmFwd
+    ++id; // removed solver ConvMlirIgemmBwd
+    ++id; // removed solver ConvMlirIgemmWrW
 
     RegisterWithSolver(registry, ++id, conv::GemmWrw1x1_stride1{}, miopenConvolutionAlgoGEMM);
     RegisterWithSolver(registry, ++id, conv::GemmWrwUniversal{}, miopenConvolutionAlgoGEMM);
 
-    RegisterWithSolver(
-        registry, ++id, conv::ConvMlirIgemmFwdXdlops{}, miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvMlirIgemmBwdXdlops{}, miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvMlirIgemmWrWXdlops{}, miopenConvolutionAlgoImplicitGEMM);
+    ++id; // removed solver ConvMlirIgemmFwdXdlops
+    ++id; // removed solver ConvMlirIgemmBwdXdlops
+    ++id; // removed solver ConvMlirIgemmWrWXdlops
 
     Register(registry, ++id, Primitive::Activation, activ::ActivFwdSolver0{}.SolverDbId());
 
