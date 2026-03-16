@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
@@ -77,8 +78,15 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceBwd<float>(),
-                                                           conv::getToleranceBwd<float>());
+    // Calculate dynamic tolerance for conv dgrad
+    // ConvolutionBwdTensorBundle initializes dy and w with range [-1.0, 1.0]
+    auto tolerance = conv::calculateConvDgradTolerance<float, float, float>(-1.0,
+                                                                            1.0, // dyMin, dyMax
+                                                                            -1.0,
+                                                                            1.0, // wMin, wMax
+                                                                            wDims); // wDims
+
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));

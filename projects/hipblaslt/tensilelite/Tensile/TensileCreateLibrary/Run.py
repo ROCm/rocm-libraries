@@ -68,6 +68,7 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
+from Tensile.SolutionStructs.Solution import printTypeMismatchSummary
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -650,6 +651,10 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         else:
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
+
+    # After all YAML files have been parsed and Solution objects created,
+    # print a summary of any type mismatches that were collected.
+    printTypeMismatchSummary()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0

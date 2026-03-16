@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 #include "TensorDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
@@ -167,19 +167,11 @@ void TensorDescriptor::setName(hipdnnBackendAttributeType_t attributeType,
                                int64_t elementCount,
                                const void* arrayOfElements)
 {
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "TensorDescriptor::setAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "TensorDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_LT(elementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                "TensorDescriptor::setAttribute(): elementCount is negative");
-
-    _data.name
-        = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
+    setString(_data.name,
+              attributeType,
+              elementCount,
+              arrayOfElements,
+              "TensorDescriptor::setAttribute()");
 }
 
 void TensorDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
@@ -187,32 +179,12 @@ void TensorDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
                                int64_t* elementCount,
                                void* arrayOfElements) const
 {
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "TensorDescriptor::getAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "TensorDescriptor::getAttribute(): elementCount is null");
-        *elementCount = static_cast<int64_t>(_data.name.size() + 1);
-        return;
-    }
-
-    THROW_IF_LT(requestedElementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                "TensorDescriptor::getAttribute(): requestedElementCount is negative");
-
-    auto maxSize = static_cast<size_t>(requestedElementCount);
-    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-        static_cast<char*>(arrayOfElements), _data.name.c_str(), maxSize);
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = static_cast<int64_t>(std::min(_data.name.size() + 1, maxSize));
-    }
+    getString(_data.name,
+              attributeType,
+              requestedElementCount,
+              elementCount,
+              arrayOfElements,
+              "TensorDescriptor::getAttribute()");
 }
 
 void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType,
@@ -420,6 +392,24 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
     {
         *elementCount = byteSize;
     }
+}
+
+std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
+    const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorT)
+{
+    auto desc = std::make_shared<TensorDescriptor>();
+    desc->_data = tensorT;
+    desc->finalize();
+    return desc;
+}
+
+std::shared_ptr<TensorDescriptor>
+    TensorDescriptor::fromFlatBuffer(hipdnn_data_sdk::data_objects::TensorAttributesT&& tensorT)
+{
+    auto desc = std::make_shared<TensorDescriptor>();
+    desc->_data = std::move(tensorT);
+    desc->finalize();
+    return desc;
 }
 
 hipdnnBackendDescriptorType_t TensorDescriptor::getStaticType()

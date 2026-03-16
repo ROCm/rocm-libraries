@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/detail/SdpaFpropPacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -108,7 +109,7 @@ public:
                                   + ", num_kv_heads=" + std::to_string(numKvHeadsK));
 
         // Rule 5: Optional attention mask validation
-        const auto attnMask = attributes.get_attn_mask();
+        const auto attnMask = attributes.get_bias();
         if(attnMask)
         {
             const auto& maskDims = attnMask->get_dim();
@@ -140,7 +141,7 @@ public:
         }
 
         // Rule 6: Optional scale must be a scalar tensor (volume == 1)
-        const auto scale = attributes.get_scale();
+        const auto scale = attributes.get_attn_scale();
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
@@ -232,6 +233,13 @@ public:
         }
 
         return {};
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createSdpaFpropOperation(attributes, tensorDescs, operations);
     }
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
