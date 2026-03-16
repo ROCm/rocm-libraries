@@ -39,7 +39,7 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-function(add_benchmark benchmark_src legacy)
+function(add_benchmark benchmark_src)
   get_filename_component(BENCHMARK_TARGET ${benchmark_src} NAME_WE)
   add_executable(${BENCHMARK_TARGET} ${benchmark_src})
 
@@ -53,10 +53,7 @@ function(add_benchmark benchmark_src legacy)
     target_link_libraries(${BENCHMARK_TARGET} ${CUDA_curand_LIBRARY})
   else()
     target_link_libraries(${BENCHMARK_TARGET} hip::device)
-  endif()
-  target_link_libraries(${BENCHMARK_TARGET} rocrand)
-  if(NOT legacy)
-    target_link_libraries(${BENCHMARK_TARGET} benchmark::benchmark)
+    target_link_libraries(${BENCHMARK_TARGET} rocrand)
   endif()
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
@@ -93,13 +90,13 @@ function(add_benchmark benchmark_src legacy)
 endfunction()
 
 # rocrand
-add_benchmark("rocrand/benchmark_rocrand_host_api.cpp" OFF)
-add_benchmark("rocrand/benchmark_rocrand_device_api.cpp" OFF)
+add_benchmark("rocrand/benchmark_rocrand_host_api.cpp")
+add_benchmark("rocrand/benchmark_rocrand_device_api.cpp")
 
 # curand
 if(HIP_COMPILER STREQUAL "nvcc")
-  add_benchmark("curand/benchmark_curand_host_api.cpp" OFF)
-  add_benchmark("curand/benchmark_curand_device_api.cpp" OFF)
+  add_benchmark("curand/benchmark_curand_host_api.cpp")
+  add_benchmark("curand/benchmark_curand_device_api.cpp")
 endif()
 
 if(BUILD_BENCHMARK_TUNING)
