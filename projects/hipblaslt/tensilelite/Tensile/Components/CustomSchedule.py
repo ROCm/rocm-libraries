@@ -272,17 +272,22 @@ class ScheduleInfo:
     def pretty_print(self):
         print("{")
         keys = list(self.optSchedule.keys())
+        maxKeyLen = max(len(k) for k in keys) if keys else 0
         for i, k in enumerate(keys):
             v = self.optSchedule[k]
             comma = "," if i < len(keys) - 1 else ""
+            pad = " " * (maxKeyLen - len(k))
             if len(v) == 1:
-                print(f"    '{k}': [{v[0]}]{comma}")
+                print(f"    '{k}':{pad} [{v[0]}]{comma}")
             else:
-                print(f"    '{k}': [")
+                # Align continuation rows after the opening bracket
+                bracketCol = 8 + maxKeyLen
+                indent = " " * (bracketCol + 1)
+                print(f"    '{k}':{pad} [")
                 for j, row in enumerate(v):
                     row_comma = "," if j < len(v) - 1 else ""
-                    print(f"        {row}{row_comma}")
-                print(f"    ]{comma}")
+                    print(f"{indent}{row}{row_comma}")
+                print(f"{' ' * bracketCol}]{comma}")
         print("}")
 
         if snops := self.optSchedule.get('SNOP', []):
