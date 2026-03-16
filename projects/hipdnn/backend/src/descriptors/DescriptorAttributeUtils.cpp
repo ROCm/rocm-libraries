@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
 {
@@ -79,6 +80,54 @@ void getInt64Vector(const std::vector<int64_t>& source,
         *elementCount = static_cast<int64_t>(copyCount);
     }
     std::memcpy(arrayOfElements, source.data(), copyCount * sizeof(int64_t));
+}
+
+void setString(std::string& target,
+               hipdnnBackendAttributeType_t attributeType,
+               int64_t elementCount,
+               const void* arrayOfElements,
+               const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_CHAR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_LT(elementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": elementCount is negative");
+    target
+        = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
+}
+
+void getString(const std::string& source,
+               hipdnnBackendAttributeType_t attributeType,
+               int64_t requestedElementCount,
+               int64_t* elementCount,
+               void* arrayOfElements,
+               const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_CHAR, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = static_cast<int64_t>(source.size() + 1);
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    auto maxSize = static_cast<size_t>(requestedElementCount);
+    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+        static_cast<char*>(arrayOfElements), source.c_str(), maxSize);
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = static_cast<int64_t>(std::min(source.size() + 1, maxSize));
+    }
 }
 
 void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
@@ -256,6 +305,34 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     }
     auto tmp = fromSdkNormFwdPhase(source);
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+}
+
+void getOperationType(hipdnnOperationType_t source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_OPERATION_TYPE_EXT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_t));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
 }
 
 std::shared_ptr<TensorDescriptor>
