@@ -118,8 +118,54 @@ def fixed_value(value):
     return factory
 
 
+class WeightsABC:
+    @classmethod
+    def Combine(cls, inputs: list, mutation: float = 0.1):
+        vals = {}
+        for fld in fields(cls):
+            if random.uniform(0, 1) < mutation:
+                vals[fld.name] = fld.default_factory()
+            else:
+                vals[fld.name] = getattr(random.choice(inputs), fld.name)
+        return cls(**vals)
+
+    @property
+    def short_hash(self):
+        d = hashlib.shake_128()
+
+        the_hash = hash(self)
+        num_bits = the_hash.bit_length()
+        num_bytes = (num_bits + 7) // 8
+        the_bytes = the_hash.to_bytes(num_bytes + 1, byteorder="big", signed=True)
+
+        d.update(the_bytes)
+
+        return d.hexdigest(4)
+
+    @classmethod
+    def from_dict(cls, d):
+        assert 'type' in d
+
+        if d["type"] == "FullWeights":
+            return FullWeights(**d)
+        else:
+            return SimplifiedWeights(**d)
+
+    @classmethod
+    def subclass(cls, name):
+        lookup = {"Full": FullWeights,
+                  "FullWeights": FullWeights,
+                  "Simplified": SimplifiedWeights,
+                  "SimplifiedWeights": SimplifiedWeights}
+
+        assert name in lookup
+        return lookup[name]
+
+
 @dataclass(frozen=True, order=True, unsafe_hash=True)
-class Weights:
+class FullWeights(WeightsABC):
+    type: str = field(default_factory=fixed_value("FullWeights"))
+
     nops: float = field(default_factory=random_inv_exp())
 
     vmcnt: float = field(default_factory=random_inv_exp())
@@ -183,28 +229,41 @@ class Weights:
         default_factory=random_bool(), metadata={"isCoefficient": False}
     )
 
-    @classmethod
-    def Combine(cls, inputs: list, mutation: float = 0.1):
-        vals = {}
-        for fld in fields(cls):
-            if random.uniform(0, 1) < mutation:
-                vals[fld.name] = fld.default_factory()
-            else:
-                vals[fld.name] = getattr(random.choice(inputs), fld.name)
-        return cls(**vals)
 
-    @property
-    def short_hash(self):
-        d = hashlib.shake_128()
+@dataclass(frozen=True, order=True, unsafe_hash=True)
+class SimplifiedWeights(WeightsABC):
+    type: str = field(default_factory=fixed_value("SimplifiedWeights"))
 
-        the_hash = hash(self)
-        num_bits = the_hash.bit_length()
-        num_bytes = (num_bits + 7) // 8
-        the_bytes = the_hash.to_bytes(num_bytes + 1, byteorder="big", signed=True)
+    nops: float = field(default_factory=random_inv_exp())
 
-        d.update(the_bytes)
+    vmemCycles: int = field(
+        default_factory=random_int(max=500), metadata={"isCoefficient": False}
+    )
+    vmemQueueSize: int = field(
+        default_factory=random_int(min=1, max=6), metadata={"isCoefficient": False}
+    )
+    dsmemCycles: int = field(
+        default_factory=random_int(max=100), metadata={"isCoefficient": False}
+    )
+    dsmemQueueSize: int = field(
+        default_factory=random_int(min=1, max=6), metadata={"isCoefficient": False}
+    )
 
-        return d.hexdigest(4)
+    # Fix the cost of a stall cycle to provide a common reference point
+    # so that different randomly generated weights are of comparable magnitudes.
+    stallCycles: float = field(default_factory=fixed_value(1000.0))
+
+    isSALU: float = field(default_factory=random_inv_exp())
+    isVALU: float = field(default_factory=random_inv_exp())
+
+    # It doesn't make a lot of sense to allow the optimizer to choose
+    # whether to run out of registers should the opportunity arise.
+    # Therefore, fix this parameter at a high value.
+    outOfRegisters: float = field(default_factory=fixed_value(1e9))
+
+    zeroFreeBarriers: bool = field(
+        default_factory=random_bool(), metadata={"isCoefficient": False}
+    )
 
 
 @dataclass(order=True, unsafe_hash=True)
@@ -212,14 +271,14 @@ class Result:
     # The time field must be first so that results are sorted by speed.
     time: float = field(default=math.inf)
 
-    weights: Weights = field(default_factory=Weights)
-
     command: str = field(default="", compare=False)
     output: str = field(default="", compare=False)
 
     output_file: str = field(default="", compare=False)
 
     rnorm: float = field(default=math.inf)
+
+    weights: WeightsABC = field(default=None)
 
     @property
     def passed(self):
@@ -250,7 +309,7 @@ class Result:
     def from_dict(cls, d):
         args = {k: v for k, v in d.items() if k != "hash"}
         if "weights" in args:
-            args["weights"] = Weights(**args["weights"])
+            args["weights"] = WeightsABC.from_dict(args["weights"])
         return cls(**args)
 
 
@@ -259,7 +318,7 @@ def bench_star(arg):
 
 
 def bench(
-    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weights
+    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: WeightsABC
 ) -> Result:
     device, lock = acquire_lock()
 
@@ -275,7 +334,7 @@ def bench(
 
         env = dict(os.environ)
         env["ROCROLLER_SCHEDULER_WEIGHTS"] = str(weights_path.absolute())
-        env["OMP_NUM_THREADS"] = str(1)
+        # env["OMP_NUM_THREADS"] = str(1)
 
         cmd = problem.command(device=device, yaml=result_path.absolute())
 
@@ -329,7 +388,7 @@ def sanity_check(results: List[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
+def split_old_new_results(weights) -> Tuple[List[WeightsABC], List[WeightsABC]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
@@ -344,7 +403,7 @@ def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
 
 
 def generation(
-    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
+    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[WeightsABC]
 ) -> List[Result]:
     global prev_results  # noqa: disable=F824
 
@@ -390,12 +449,12 @@ def write_generation(thedir: pathlib.Path, name, results: List[Result]):
 
 
 def new_inputs(
-    all_results: List[Result], population, num_parents, num_random, mutation
+    all_results: List[Result], population, num_parents, num_random, mutation, weight_type
 ):
     if len(all_results) == 0:
         rv = set()
         while len(rv) < population:
-            rv.add(Weights())
+            rv.add(weight_type())
         return list(rv)
 
     num_children = population - num_random
@@ -412,24 +471,24 @@ def new_inputs(
         i += 1
     # use new random values if there aren't enough.
     while len(parents) < num_parents:
-        parents.add(Weights())
+        parents.add(weight_type())
     parents = list(parents)
 
     # create children: Half from sets of 2 parents
     rv = set(parents)
     while len(rv) < len(parents) + (num_children // 2):
         these_parents = random.choices(parents, k=2)
-        new_child = Weights.Combine(these_parents, mutation)
+        new_child = weight_type.Combine(these_parents, mutation)
         rv.add(new_child)
 
     # create children: Half from all parents together.
     while len(rv) < len(parents) + num_children:
-        new_child = Weights.Combine(parents, mutation)
+        new_child = weight_type.Combine(parents, mutation)
         rv.add(new_child)
 
     # Add num_random new random weights.
     while len(rv) < rv_len:
-        new_weights = Weights()
+        new_weights = weight_type()
         rv.add(new_weights)
 
     return list(rv)
@@ -449,11 +508,12 @@ def genetic(args):
                 num_parents=args.num_parents,
                 num_random=args.num_random,
                 mutation=args.mutation,
+                weight_type=args.weight_type
             )
 
             gen_dir = args.output_dir / f"gen_{i}"
             results = generation(gen_dir, args.problem, inputs)
-            sanity_check(results)
+            # sanity_check(results)
 
             write_generation(args.output_dir, i, results)
 
@@ -559,6 +619,13 @@ def get_args(parser: argparse.ArgumentParser):
         type=read_gen_results,
         dest="all_results",
         help="Start from results_*.yaml from previous run",
+    )
+
+    parser.add_argument(
+        "--weight-type",
+        default="Simplified",
+        type=WeightsABC.subclass,
+        help="Which subset of weights to optimize.",
     )
 
     parser.add_argument(

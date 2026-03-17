@@ -19,37 +19,40 @@ namespace rocRoller
 
         static void mapping(IO& io, Scheduling::Weights& weights)
         {
-            iot::mapRequired(io, "nops", weights.nops);
-            iot::mapRequired(io, "vmcnt", weights.vmcnt);
-            iot::mapRequired(io, "lgkmcnt", weights.lgkmcnt);
-            iot::mapRequired(io, "vectorQueueSat", weights.vectorQueueSat);
-            iot::mapRequired(io, "vmQueueLen", weights.vmQueueLen);
-            iot::mapRequired(io, "ldsQueueSat", weights.ldsQueueSat);
-            iot::mapRequired(io, "lgkmQueueLen", weights.lgkmQueueLen);
-            iot::mapRequired(io, "stallCycles", weights.stallCycles);
-            iot::mapRequired(io, "newSGPRs", weights.newSGPRs);
-            iot::mapRequired(io, "newVGPRs", weights.newVGPRs);
-            iot::mapRequired(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
-            iot::mapRequired(io, "highWaterMarkVGPRs", weights.highWaterMarkVGPRs);
-            iot::mapRequired(io, "notMFMA", weights.notMFMA);
-            iot::mapRequired(io, "isMFMA", weights.isMFMA);
-            iot::mapRequired(io, "fractionOfSGPRs", weights.fractionOfSGPRs);
-            iot::mapRequired(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
-            iot::mapRequired(io, "outOfRegisters", weights.outOfRegisters);
-            iot::mapRequired(io, "zeroFreeBarriers", weights.zeroFreeBarriers);
+            std::string type;
+            iot::mapOptional(io, "type", type);
 
-            iot::mapRequired(io, "isSMEM", weights.isSMEM);
-            iot::mapRequired(io, "isSControl", weights.isSControl);
-            iot::mapRequired(io, "isSALU", weights.isSALU);
+            iot::mapOptional(io, "nops", weights.nops);
+            iot::mapOptional(io, "vmcnt", weights.vmcnt);
+            iot::mapOptional(io, "lgkmcnt", weights.lgkmcnt);
+            iot::mapOptional(io, "vectorQueueSat", weights.vectorQueueSat);
+            iot::mapOptional(io, "vmQueueLen", weights.vmQueueLen);
+            iot::mapOptional(io, "ldsQueueSat", weights.ldsQueueSat);
+            iot::mapOptional(io, "lgkmQueueLen", weights.lgkmQueueLen);
+            iot::mapOptional(io, "stallCycles", weights.stallCycles);
+            iot::mapOptional(io, "newSGPRs", weights.newSGPRs);
+            iot::mapOptional(io, "newVGPRs", weights.newVGPRs);
+            iot::mapOptional(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
+            iot::mapOptional(io, "highWaterMarkVGPRs", weights.highWaterMarkVGPRs);
+            iot::mapOptional(io, "notMFMA", weights.notMFMA);
+            iot::mapOptional(io, "isMFMA", weights.isMFMA);
+            iot::mapOptional(io, "fractionOfSGPRs", weights.fractionOfSGPRs);
+            iot::mapOptional(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
+            iot::mapOptional(io, "outOfRegisters", weights.outOfRegisters);
+            iot::mapOptional(io, "zeroFreeBarriers", weights.zeroFreeBarriers);
 
-            iot::mapRequired(io, "isVMEMRead", weights.isVMEMRead);
-            iot::mapRequired(io, "isVMEMWrite", weights.isVMEMWrite);
-            iot::mapRequired(io, "isLDSRead", weights.isLDSRead);
-            iot::mapRequired(io, "isLDSWrite", weights.isLDSWrite);
-            iot::mapRequired(io, "isVALU", weights.isVALU);
+            iot::mapOptional(io, "isSMEM", weights.isSMEM);
+            iot::mapOptional(io, "isSControl", weights.isSControl);
+            iot::mapOptional(io, "isSALU", weights.isSALU);
 
-            iot::mapRequired(io, "isACCVGPRWrite", weights.isACCVGPRWrite);
-            iot::mapRequired(io, "isACCVGPRRead", weights.isACCVGPRRead);
+            iot::mapOptional(io, "isVMEMRead", weights.isVMEMRead);
+            iot::mapOptional(io, "isVMEMWrite", weights.isVMEMWrite);
+            iot::mapOptional(io, "isLDSRead", weights.isLDSRead);
+            iot::mapOptional(io, "isLDSWrite", weights.isLDSWrite);
+            iot::mapOptional(io, "isVALU", weights.isVALU);
+
+            iot::mapOptional(io, "isACCVGPRWrite", weights.isACCVGPRWrite);
+            iot::mapOptional(io, "isACCVGPRRead", weights.isACCVGPRRead);
 
             iot::mapOptional(io, "vmemCycles", weights.vmemCycles);
             iot::mapOptional(io, "vmemQueueSize", weights.vmemQueueSize);
@@ -65,6 +68,21 @@ namespace rocRoller
 
     namespace Scheduling
     {
+#if 1
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {
+            .nops             = 10000.0,
+            .stallCycles      = 1000.0,
+            .isSALU           = 154.26834112288643,
+            .isVALU           = 96.5815329589789,
+            .outOfRegisters   = 1000000000.0,
+            .zeroFreeBarriers = true,
+            .vmemCycles       = 410,
+            .vmemQueueSize    = 3,
+            .dsmemCycles      = 94,
+            .dsmemQueueSize   = 1,
+        };
+
+#else
         constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {.nops               = 10000.,
                                                        .vmcnt              = 0,
                                                        .lgkmcnt            = 0,
@@ -97,6 +115,7 @@ namespace rocRoller
                                                        .vmemQueueSize      = 3,
                                                        .dsmemCycles        = 32,
                                                        .dsmemQueueSize     = 3};
+#endif
 
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
                                             .vmcnt              = 526.093932290615,
@@ -230,7 +249,10 @@ namespace rocRoller
             {
                 try
                 {
-                    return Serialization::readYAMLFile<Weights>(settingsFile);
+                    auto weights = Serialization::readYAMLFile<Weights>(settingsFile);
+                    Log::critical(
+                        "Read weights from {}:\n{}", settingsFile, Serialization::toYAML(weights));
+                    return weights;
                 }
                 catch(const std::exception& e)
                 {
@@ -261,7 +283,7 @@ namespace rocRoller
                 else if(arch.isCDNA3GPU())
                     return GFX942_WEIGHTS;
                 else if(arch.isCDNA4GPU())
-                    return GFX950_WEIGHTS;
+                    return GFX950_SIMPLIFIED_WEIGHTS;
                 else
                 {
                     Log::warn("Unsupported architecture {} for linear weighted cost; defaulting to "
