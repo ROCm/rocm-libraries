@@ -87,7 +87,9 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeConvFwd)
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
-    auto rebuiltNode = graphOp->buildNode();
+    auto* op = graphOp->asGraphOperation();
+    ASSERT_NE(op, nullptr);
+    auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
     auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());

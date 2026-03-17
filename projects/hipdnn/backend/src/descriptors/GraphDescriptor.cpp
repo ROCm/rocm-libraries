@@ -63,8 +63,10 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGra
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
-    for(const auto& op : _operations)
+    for(const auto& desc : _operations)
     {
+        auto* op = desc->asGraphOperation();
+
         // Collect unique tensors (deduplicated by UID)
         for(const auto& tensorDesc : op->getTensorDescriptors())
         {
@@ -221,7 +223,7 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
         auto graphT
             = hipdnn_data_sdk::data_objects::GetGraph(_graphSerializedBuffer.data())->UnPack();
         auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
-        std::vector<std::shared_ptr<IGraphOperation>> unpacked;
+        std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
         unpacked.reserve(graphT->nodes.size());
         for(const auto& nodeT : graphT->nodes)
         {
@@ -259,12 +261,7 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
     {
         for(const auto& operation : _operations)
         {
-            auto backendDesc = std::dynamic_pointer_cast<const IBackendDescriptor>(operation);
-            THROW_IF_NULL(backendDesc,
-                          HIPDNN_STATUS_INTERNAL_ERROR,
-                          "GraphDescriptor::getAttribute(): operation does not implement "
-                          "IBackendDescriptor");
-            packed.push_back(HipdnnBackendDescriptor::packDescriptor(backendDesc));
+            packed.push_back(HipdnnBackendDescriptor::packDescriptor(operation));
         }
     }
     catch(...)
@@ -317,7 +314,7 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
 
     // Validate all descriptors into a temporary vector before modifying state,
     // so that a validation failure doesn't leave _operations in a partial state.
-    std::vector<std::shared_ptr<IGraphOperation>> newOperations;
+    std::vector<std::shared_ptr<IBackendDescriptor>> newOperations;
     newOperations.reserve(static_cast<size_t>(elementCount));
 
     for(int64_t i = 0; i < elementCount; ++i)
@@ -329,12 +326,12 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
                        HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
                        "GraphDescriptor::setOperations: Operation descriptor not finalized");
 
-        auto graphOp = descriptors[i]->tryAsGraphOperation();
-        THROW_IF_NULL(graphOp,
+        // Validate that the descriptor implements IGraphOperation before storing.
+        THROW_IF_NULL(descriptors[i]->tryAsGraphOperation(),
                       HIPDNN_STATUS_NOT_SUPPORTED,
                       "GraphDescriptor::setOperations: Descriptor does not implement "
                       "IGraphOperation");
-        newOperations.push_back(graphOp);
+        newOperations.push_back(descriptors[i]->getImpl());
     }
 
     // Accumulate operations (multiple setAttribute calls append to existing operations)

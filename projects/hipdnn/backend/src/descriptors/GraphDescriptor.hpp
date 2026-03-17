@@ -41,7 +41,9 @@ private:
     mutable flatbuffers::DetachedBuffer _graphSerializedBuffer;
 
     // Populated via setOperations() (C-API flow) or lazily from _graphSerializedBuffer (FlatBuffer flow).
-    mutable std::vector<std::shared_ptr<IGraphOperation>> _operations;
+    // Stored as IBackendDescriptor so getOperations() can pack them without cross-casting.
+    // All entries are validated to implement IGraphOperation at insertion time.
+    mutable std::vector<std::shared_ptr<IBackendDescriptor>> _operations;
 
     // Graph-level attributes set via setAttribute (applied during buildGraphFromOperations)
     hipdnn_data_sdk::data_objects::DataType _computeDataType
