@@ -42,9 +42,9 @@ struct BlockFmhaBwdOGradDotO
                                         const OGradDramBlockWindowTmp& do_dram_block_window_tmp,
                                         const LSEDramBlockWindowTmp& ls_e_dram_block_window_tmp,
                                         DDramBlockWindowTmp& d_dram_block_window_tmp,
-                                        const float sink_value,
+                                        const LSEDataType sink_value,
                                         float p_undrop,
-                                        float* atomic_sink_grad_ptr = nullptr) const
+                                        LSEDataType* atomic_sink_grad_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<ODataType, remove_cvref_t<typename ODramBlockWindowTmp::DataType>> &&
@@ -120,7 +120,8 @@ struct BlockFmhaBwdOGradDotO
             auto sink_val_tensor = make_static_distributed_tensor<float>(d_dstr);
             tile_elementwise_inout(
                 [&](auto& s_out, const auto& l_in, const auto& d_in) {
-                    float p_sink = ck_tile::exp(sink_value - type_convert<float>(l_in));
+                    float p_sink = ck_tile::exp(type_convert<float>(sink_value) -
+                                                type_convert<float>(l_in));
                     s_out        = -p_sink * type_convert<float>(d_in);
                 },
                 sink_val_tensor,
@@ -144,7 +145,7 @@ struct BlockFmhaBwdOGradDotO
 
             // Only lane 0 of each warp writes to global memory
             if(get_lane_id() == 0)
-                atomicAdd(atomic_sink_grad_ptr, thread_sum);
+                atomicAdd(reinterpret_cast<float*>(atomic_sink_grad_ptr), thread_sum);
 #endif
         }
     }

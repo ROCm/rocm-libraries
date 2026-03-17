@@ -116,8 +116,8 @@ struct fmha_bwd_args
     void* dv_ptr;
     void* dbias_ptr;
     void* dq_acc_ptr;
-    void* sink_ptr;   // sink scores [batch, nhead] in log-space; nullptr disables sink
-    void* d_sink_ptr; // sink gradient output [nhead]; nullptr disables sink gradient
+    const void* sink_ptr;   // sink scores [batch, nhead] in log-space (LSEDataType); nullptr disables sink
+    void*       d_sink_ptr; // sink gradient output [nhead] (LSEDataType); nullptr disables sink gradient
 
     // Usage notes for sequence length pointer parameters:
     //

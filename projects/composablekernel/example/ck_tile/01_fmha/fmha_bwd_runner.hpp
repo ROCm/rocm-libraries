@@ -285,11 +285,11 @@ bwd_result fmha_bwd_run(mode_enum mode,
         get_lengths(o_perm, shape_batch, nhead, shape_seqlen_q, hdim_v));
     ck_tile::HostTensor<LSEDataType> lse_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
-    ck_tile::HostTensor<AccDataType> sink_host(std::array<ck_tile::index_t, 2>{shape_batch, nhead});
+    ck_tile::HostTensor<LSEDataType> sink_host(std::array<ck_tile::index_t, 2>{shape_batch, nhead});
     {
         std::uniform_real_distribution<float> sink_dist(30.0f, 60.0f);
         sink_host.ForEach(
-            [&](auto& self, auto i) { self(i) = static_cast<AccDataType>(sink_dist(random_engine)); });
+            [&](auto& self, auto i) { self(i) = static_cast<LSEDataType>(sink_dist(random_engine)); });
     }
     ck_tile::HostTensor<DDataType> d_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
@@ -308,7 +308,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
         use_dbias
             ? get_lengths(i_perm, shape_batch, nhead, shape_seqlen_q, max_seqlen_k)
             : std::array<ck_tile::index_t, 4>{1, 1, 1, 1} /* dummy shape for simplifying code */);
-    ck_tile::HostTensor<AccDataType> d_sink_host(sink_grad ? std::array<ck_tile::index_t, 1>{nhead}
+    ck_tile::HostTensor<LSEDataType> d_sink_host(sink_grad ? std::array<ck_tile::index_t, 1>{nhead}
                                                            : std::array<ck_tile::index_t, 1>{0});
     if(sink_grad)
     {

@@ -1367,8 +1367,8 @@ struct FmhaBwdOGradDotOKernel
         const void* do_ptr;
         void* d_ptr;
         const void* lse_ptr;  // log-sum-exp from forward pass, shape [batch, nhead, seqlen_q]
-        const void* sink_ptr; // sink scores, shape [batch, nhead]; nullptr disables sink
-        void* d_sink_ptr;     // sink gradient output, shape [nhead]; nullptr disables sink grad
+        const LSEDataType* sink_ptr; // sink scores, shape [batch, nhead]; nullptr disables sink
+        LSEDataType*       d_sink_ptr; // sink gradient output, shape [nhead]; nullptr disables sink grad
 
         float p_undrop;
 
@@ -1426,8 +1426,8 @@ struct FmhaBwdOGradDotOKernel
                      do_ptr,
                      d_ptr,
                      lse_ptr,
-                     sink_ptr,
-                     d_sink_ptr,
+                     reinterpret_cast<const LSEDataType*>(sink_ptr),
+                     reinterpret_cast<LSEDataType*>(d_sink_ptr),
                      p_undrop,
                      seqlen_q,
                      hdim_v,
@@ -1468,8 +1468,8 @@ struct FmhaBwdOGradDotOKernel
                      do_ptr,
                      d_ptr,
                      lse_ptr,
-                     sink_ptr,
-                     d_sink_ptr,
+                     reinterpret_cast<const LSEDataType*>(sink_ptr),
+                     reinterpret_cast<LSEDataType*>(d_sink_ptr),
                      p_undrop,
                      -1, // seqlen will be updated by another pointer
                      hdim_v,
@@ -1557,11 +1557,10 @@ struct FmhaBwdOGradDotOKernel
         }
 
         // Read per-head sink score; use -inf when sink is disabled so P_sink -> 0
-        const float sink_value =
+        const LSEDataType sink_value =
             kargs.sink_ptr != nullptr
-                ? (*(static_cast<const float*>(kargs.sink_ptr) +
-                     static_cast<long_index_t>(i_batch) * kargs.nhead + i_nhead))
-                : -numeric<float>::infinity();
+                ? kargs.sink_ptr[static_cast<long_index_t>(i_batch) * kargs.nhead + i_nhead]
+                : -numeric<LSEDataType>::infinity();
 
         // for simplicity, batch stride we just modify the pointer
         const ODataType* o_ptr = reinterpret_cast<const ODataType*>(kargs.o_ptr) +
@@ -1615,9 +1614,8 @@ struct FmhaBwdOGradDotOKernel
         auto d_dram_window = make_tile_window(d_dram, make_tuple(number<kM0>{}), {i_m0});
 
         // nullptr when sink grad is disabled; the pipeline checks this to skip the sink path
-        float* atomic_sink_grad_ptr =
-            kargs.d_sink_ptr == nullptr ? nullptr
-                                        : reinterpret_cast<float*>(kargs.d_sink_ptr) + i_nhead;
+        LSEDataType* atomic_sink_grad_ptr =
+            kargs.d_sink_ptr == nullptr ? nullptr : kargs.d_sink_ptr + i_nhead;
 
         // lse_ptr is always valid (also needed by the main bwd kernel).
         // The actual load happens inside the pipeline only when atomic_sink_grad_ptr != nullptr.
