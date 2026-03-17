@@ -67,7 +67,7 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
 {
     // Parse optional named arguments first
     ck_tile::index_t instance_index = -1;
-    bool list_instances        = false;
+    bool list_instances             = false;
     ck_tile::profiler::parse_named_args(argc, argv, instance_index, list_instances);
     const int named_arg_count = ck::profiler::count_named_args(argc, argv);
 
@@ -102,7 +102,7 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
     std::cout << params << std::endl;
 
     ck_tile::index_t split_k_index = std::stoi(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
-    const auto& split_k = std::to_string(split_k_index);
+    const auto& split_k            = std::to_string(split_k_index);
 
     if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
