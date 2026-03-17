@@ -6,7 +6,6 @@
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
 #include <stdexcept>
-#include <typeinfo>
 
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 
@@ -27,17 +26,15 @@ public:
     // Default value accessors
     virtual bool hasDefaultValue() const = 0;
     virtual hipdnn_data_sdk::data_objects::KnobValue defaultValueType() const = 0;
-    virtual const std::type_info& defaultValueClassType() const = 0;
 
     // Constraint accessors
     virtual bool hasConstraint() const = 0;
     virtual hipdnn_data_sdk::data_objects::KnobConstraint constraintType() const = 0;
-    virtual const std::type_info& constraintClassType() const = 0;
 
     template <typename T>
     const T& defaultValueAs() const
     {
-        if(defaultValueClassType() != typeid(T))
+        if(defaultValueType() != hipdnn_data_sdk::data_objects::KnobValueTraits<T>::enum_value)
         {
             throw std::invalid_argument("Default value is not of the expected type");
         }
@@ -54,7 +51,7 @@ public:
     template <typename T>
     const T& constraintAs() const
     {
-        if(constraintClassType() != typeid(T))
+        if(constraintType() != hipdnn_data_sdk::data_objects::KnobConstraintTraits<T>::enum_value)
         {
             throw std::invalid_argument("Constraint is not of the expected type");
         }
@@ -137,23 +134,6 @@ public:
         return _shallowKnob->default_value_type();
     }
 
-    const std::type_info& defaultValueClassType() const override
-    {
-        throwIfNotValid();
-        switch(defaultValueType())
-        {
-        case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-            return typeid(hipdnn_data_sdk::data_objects::IntValue);
-        case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-            return typeid(hipdnn_data_sdk::data_objects::FloatValue);
-        case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-            return typeid(hipdnn_data_sdk::data_objects::StringValue);
-        case hipdnn_data_sdk::data_objects::KnobValue::NONE:
-        default:
-            throw std::invalid_argument("Default value type is not recognized");
-        }
-    }
-
     bool hasConstraint() const override
     {
         throwIfNotValid();
@@ -164,23 +144,6 @@ public:
     {
         throwIfNotValid();
         return _shallowKnob->constraint_type();
-    }
-
-    const std::type_info& constraintClassType() const override
-    {
-        throwIfNotValid();
-        switch(constraintType())
-        {
-        case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
-            return typeid(hipdnn_data_sdk::data_objects::IntConstraint);
-        case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
-            return typeid(hipdnn_data_sdk::data_objects::FloatConstraint);
-        case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
-            return typeid(hipdnn_data_sdk::data_objects::StringConstraint);
-        case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
-        default:
-            throw std::invalid_argument("Constraint type is not recognized");
-        }
     }
 
 private:

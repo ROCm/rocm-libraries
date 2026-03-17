@@ -15,6 +15,7 @@ add_executable(
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleQuantize.cpp
+    IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
     IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
@@ -32,6 +33,7 @@ add_executable(
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 
@@ -67,6 +69,7 @@ target_compile_definitions(
 add_dependencies(
     public_hipdnn_frontend_tests
     test_good_plugin
+    test_good_default_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin

@@ -672,7 +672,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -684,7 +684,7 @@ TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestPointwiseOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _in0Desc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _in0Desc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 

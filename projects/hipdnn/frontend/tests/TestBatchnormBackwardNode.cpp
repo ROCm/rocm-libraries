@@ -818,3 +818,10 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
     EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
                 != std::string::npos);
 }
+
+TEST(TestBatchnormBackwardNode, GetNodeTypeReturnsBatchnormBackward)
+{
+    GraphAttributes graphAttrs;
+    BatchnormBackwardNode node(BatchnormBackwardAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_BACKWARD);
+}

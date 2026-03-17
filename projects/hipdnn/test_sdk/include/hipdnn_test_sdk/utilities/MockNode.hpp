@@ -21,7 +21,6 @@ public:
                 attributesType,
                 (),
                 (const, override));
-    MOCK_METHOD(const std::type_info&, attributesClassType, (), (const, override));
     MOCK_METHOD(std::string, name, (), (const, override));
     MOCK_METHOD(hipdnn_data_sdk::data_objects::DataType, computeDataType, (), (const, override));
 };

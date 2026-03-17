@@ -253,8 +253,11 @@ TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
-    auto desc = std::dynamic_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
-    ASSERT_NE(desc, nullptr);
+    // Verify the factory dispatched to the correct operation type, then static_cast.
+    // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+    auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path

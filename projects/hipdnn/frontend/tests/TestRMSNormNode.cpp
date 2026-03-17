@@ -618,3 +618,10 @@ TEST(TestRMSNormNode, PreValidateAcceptsSingleElementSpatialDimensions)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
+
+TEST(TestRMSNormNode, GetNodeTypeReturnsRmsNorm)
+{
+    GraphAttributes graphAttrs;
+    RMSNormNode node(RMSNormAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::RMS_NORM);
+}
