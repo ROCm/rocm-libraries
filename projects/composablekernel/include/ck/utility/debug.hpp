@@ -92,11 +92,11 @@ __device__ static bool is_thread_local_1d_id_idx()
 // In a non-evaluated context, you can use `using _dummy = decltype(CK_PRINT<...>());`
 // Set BUILD_DEV to OFF to avoid enabling Werror
 template <auto... val>
-[[deprecated("Help function to print value")]] inline constexpr void CK_PRINT()
+[[deprecated("CK_DEBUG: Compile-time value(s)")]] inline constexpr void CK_PRINT()
 {
 }
 template <typename... type>
-[[deprecated("Help function to print value")]] inline constexpr void CK_PRINT()
+[[deprecated("CK_DEBUG: Compile-time type(s)")]] inline constexpr void CK_PRINT()
 {
 }
 
