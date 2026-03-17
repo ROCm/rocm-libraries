@@ -37,7 +37,7 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR AND NOT ROCM_LIBS_SUPERBUILD)
 endif()
 target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_MXDATAGENERATOR)
     target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
 endif()
 
