@@ -53,65 +53,75 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<BatchnormOperationDescriptor>();
     auto desc = wrapper->asDescriptor<BatchnormOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &scaleDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &biasDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&scaleDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&biasDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
-                       &epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yDesc);
+                       static_cast<const void*>(&epsilonDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&yDesc));
 
     if(meanDesc != nullptr)
     {
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &meanDesc);
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&meanDesc));
     }
     if(invVarianceDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INV_VARIANCE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &invVarianceDesc);
+                           static_cast<const void*>(&invVarianceDesc));
     }
     if(prevRunningMeanDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_MEAN_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &prevRunningMeanDesc);
+                           static_cast<const void*>(&prevRunningMeanDesc));
     }
     if(prevRunningVarianceDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_VARIANCE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &prevRunningVarianceDesc);
+                           static_cast<const void*>(&prevRunningVarianceDesc));
     }
     if(momentumDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &momentumDesc);
+                           static_cast<const void*>(&momentumDesc));
     }
     if(nextRunningMeanDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_MEAN_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &nextRunningMeanDesc);
+                           static_cast<const void*>(&nextRunningMeanDesc));
     }
     if(nextRunningVarianceDesc != nullptr)
     {
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
-                           &nextRunningVarianceDesc);
+                           static_cast<const void*>(&nextRunningVarianceDesc));
     }
 
     desc->setAttribute(HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -121,7 +131,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
         desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            static_cast<int64_t>(peerStatsDescs.size()),
-                           peerStatsDescs.data());
+                           static_cast<const void*>(peerStatsDescs.data()));
     }
 
     desc->finalize();
@@ -140,7 +150,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
     // Creates a finalized op using the standard fixture tensors, with optional overrides
@@ -241,8 +254,10 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -284,8 +299,10 @@ TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -306,8 +323,10 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
