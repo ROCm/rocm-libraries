@@ -294,27 +294,17 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else if(abc == ABC_dims::B)
             {
                 // Checkerboard ±: (i^j)&1 so first element of each row and column alternates
-                if(stride >= lda)
-                {
-                    stride = std::max(lda * N, stride);
-                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
-                        auto b     = idx / stride;
-                        auto j     = (idx - b * stride) / lda;
-                        auto i     = (idx - b * stride) - j * lda;
-                        auto value = small_int_positive<T>(idx);
-                        return (i ^ j) & 1 ? value : negate(value);
-                    });
-                }
-                else
-                {
-                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
-                        auto j     = idx / lda;
-                        auto b     = (idx - j * lda) / stride;
-                        auto i     = (idx - j * lda) - b * stride;
-                        auto value = small_int_positive<T>(idx);
-                        return (i ^ j) & 1 ? value : negate(value);
-                    });
-                }
+                // Use an effective stride that is never zero and at least large enough
+                // to contain one full matrix, to avoid division by a potentially zero stride.
+                size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
+                fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda](size_t idx) -> T {
+                    auto b        = idx / effective_stride;
+                    auto in_batch = idx - b * effective_stride;
+                    auto j        = in_batch / lda;
+                    auto i        = in_batch - j * lda;
+                    auto value    = small_int_positive<T>(idx);
+                    return (i ^ j) & 1 ? value : negate(value);
+                });
             }
             break;
         default:

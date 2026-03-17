@@ -618,7 +618,8 @@ inline void unit_print_first_mismatch(int64_t       M,
                              || (hipblaslt_isnan(cpu[idx]) && hipblaslt_isnan(gpu[idx]))));
         break;
     default:
-        hipblaslt_cerr << "unit_print_first_mismatch: unhandled type" << std::endl;
+        hipblaslt_cerr << "unit_print_first_mismatch: unhandled type (value="
+                       << static_cast<int>(type) << ")" << std::endl;
         return;
     }
 #undef FIND_FIRST_MISMATCH
