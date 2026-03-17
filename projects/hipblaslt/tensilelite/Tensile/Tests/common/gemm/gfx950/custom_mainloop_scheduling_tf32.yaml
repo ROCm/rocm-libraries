@@ -664,7 +664,7 @@ BenchmarkProblems:
     #     - BiasTypeArgs: ['s']
 
     - # BenchmarkProblemSizeGroup - Standard - All problem
-      # MT 128x128x64, DU=32, PGR=2, PLR=1, MI=32x32x16
+      # MT 128x128x32, DU=32, PGR=2, PLR=1, MI=32x32x16
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]

@@ -23,6 +23,7 @@
 #pragma once
 
 #include "../blas2/rocblas_trsv.hpp"
+#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #ifdef BUILD_WITH_TENSILE
@@ -194,7 +195,7 @@ rocblas_status rocblas_copy_block_unit(rocblas_handle handle,
                                        rocblas_stride offset_dst = 0)
 {
     static constexpr int COPY_DIM_X = 128;
-    static constexpr int COPY_DIM_Y = 8;
+    static constexpr int COPY_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
@@ -271,7 +272,7 @@ rocblas_status set_block_unit(rocblas_handle handle,
                               rocblas_stride offset_src)
 {
     static constexpr int DIM_X = 128;
-    static constexpr int DIM_Y = 8;
+    static constexpr int DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
 
     int         batches = handle->getBatchGridDim((int)batch_count);
     rocblas_int blocksX = (m - 1) / DIM_X + 1; // parameters for device kernel

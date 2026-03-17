@@ -502,7 +502,7 @@ void RNNForwardDataModularAlgo::PropY(const Handle& handle, const runtimeArgsFwd
 
         ws_ht_layer_size[0] = 1;
 
-        return ws_ht_layer_size;
+        return std::move(ws_ht_layer_size);
     }(reservLayout.hStateSizes);
 
     auto tmp_y_desc = miopen::TensorDescriptor(rnn_data_type, tmp_y_size, tmp_y_strides);
