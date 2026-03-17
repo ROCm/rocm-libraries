@@ -154,8 +154,14 @@ It outputs this `results.json`:
                 "hip_version": "6.4.43482-0f2d60242",
                 "runtime_version": "6.4.43482",
                 "driver_version": "6.4.43482",
-                "amdsmi_version": "25.3.0",
-                "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+                "compiler": {
+                    "name": "clang",
+                    "version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+                },
+                "monitoring": {
+                    "name": "amdsmi",
+                    "version": "25.3.0"
+                }
             },
             "temperature_type": "edge",
             "host_name": "host",

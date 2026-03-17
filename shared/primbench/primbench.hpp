@@ -470,13 +470,19 @@ public:
         patch = driver_ver % 100000;
         ss << ",\"driver_version\":\"" << major << "." << minor << "." << patch << "\"";
 
-        // AMD SMI version.
+        // Compiler.
+        ss << ",\"compiler\":{";
+        ss << "\"name\":\"clang\"";
+        ss << ",\"version\":\"" << __clang_version__ << "\"";
+        ss << "}";
+
+        // Monitoring.
+        ss << ",\"monitoring\":{";
+        ss << "\"name\":\"amdsmi\"";
         amdsmi_version_t amdsmi_version;
         PRIMBENCH_AMDSMI_CHECK(amdsmi_get_lib_version(&amdsmi_version));
-        ss << ",\"amdsmi_version\":\"" << amdsmi_version.build << "\"";
-
-        // Clang compiler version.
-        ss << ",\"clang_version\":\"" << __clang_version__ << "\"";
+        ss << ",\"version\":\"" << amdsmi_version.build << "\"";
+        ss << "}";
 
         ss << "}";
         return ss.str();
@@ -652,16 +658,22 @@ public:
         minor = (driver_ver % 1000) / 10;
         ss << ",\"driver_version\":\"" << major << "." << minor << "\"";
 
-        // NVML version.
-        char nvml_ver[NVML_SYSTEM_NVML_VERSION_BUFFER_SIZE];
-        PRIMBENCH_NVML_CHECK(nvmlSystemGetNVMLVersion(nvml_ver, sizeof(nvml_ver)));
-        ss << ",\"nvml_version\":\"" << nvml_ver << "\"";
-
-        // NVCC compiler version.
-        ss << ",\"nvcc_version\":\""
+        // Compiler.
+        ss << ",\"compiler\":{";
+        ss << "\"name\":\"nvcc\"";
+        ss << ",\"version\":\""
             << __CUDACC_VER_MAJOR__ << "."
             << __CUDACC_VER_MINOR__ << "."
             << __CUDACC_VER_BUILD__ << "\"";
+        ss << "}";
+
+        // Monitoring.
+        ss << ",\"monitoring\":{";
+        ss << "\"name\":\"nvml\"";
+        char nvml_ver[NVML_SYSTEM_NVML_VERSION_BUFFER_SIZE];
+        PRIMBENCH_NVML_CHECK(nvmlSystemGetNVMLVersion(nvml_ver, sizeof(nvml_ver)));
+        ss << ",\"version\":\"" << nvml_ver << "\"";
+        ss << "}";
 
         ss << "}";
         return ss.str();
