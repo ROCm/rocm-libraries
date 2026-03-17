@@ -240,3 +240,10 @@ TEST(TestMatmulNode, InferPropertiesNodeInferBatchedDimsAndStrides)
     EXPECT_EQ(strides[1], 5);
     EXPECT_EQ(strides[0], 20);
 }
+
+TEST(TestMatmulNode, GetNodeTypeReturnsMatmul)
+{
+    GraphAttributes graphAttrs;
+    MatmulNode node(MatmulAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::MATMUL);
+}

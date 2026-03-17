@@ -12,7 +12,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormNode : public BaseNode<BatchnormNode>
+class BatchnormNode : public BaseNode<BatchnormNode, NodeType::BATCHNORM>
 {
 public:
     BatchnormAttributes attributes;
@@ -235,7 +235,7 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormNode>::gather_hipdnn_tensors(allTensors);
+        BaseNode<BatchnormNode, NodeType::BATCHNORM>::gather_hipdnn_tensors(allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {

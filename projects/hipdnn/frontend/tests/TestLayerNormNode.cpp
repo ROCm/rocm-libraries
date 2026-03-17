@@ -899,3 +899,10 @@ TEST(TestLayerNormNode, GatherHipdnnTensorsRequired)
     EXPECT_TRUE(allTensors.find(epsilon) != allTensors.end());
     EXPECT_EQ(allTensors.size(), 5u);
 }
+
+TEST(TestLayerNormNode, GetNodeTypeReturnsLayerNorm)
+{
+    GraphAttributes graphAttrs;
+    LayerNormNode node(LayernormAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::LAYER_NORM);
+}

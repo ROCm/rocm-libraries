@@ -459,7 +459,7 @@ void setTensorDescriptorArray(std::vector<std::shared_ptr<TensorDescriptor>>& de
     for(int64_t i = 0; i < elementCount; ++i)
     {
         auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
-            &descs[i],
+            static_cast<const void*>(&descs[i]),
             HIPDNN_STATUS_BAD_PARAM,
             std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
         THROW_IF_FALSE(tensorDesc->isFinalized(),
