@@ -73,7 +73,7 @@ struct adjacent_find_impl_kernels
             1,
             TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
-        // 'tile_id' and 'global_reduce_output' are both pretty small, so we can get 
+        // 'tile_id' and 'global_reduce_output' are both pretty small, so we can get
         // away by storing it in a struct instead of a union.
         ROCPRIM_SHARED_MEMORY struct
         {
@@ -86,8 +86,7 @@ struct adjacent_find_impl_kernels
         while(true)
         {
             // Get the block id as a reference to shared memory
-            const auto& til_id_ref
-                = ordered_tile_id.get_async(threadIdx.x, storage.tile_id);
+            const auto& til_id_ref = ordered_tile_id.get_async(threadIdx.x, storage.tile_id);
 
             // First thread of each block loads the latest global adjacent index found
             if(thread_id == 0)
