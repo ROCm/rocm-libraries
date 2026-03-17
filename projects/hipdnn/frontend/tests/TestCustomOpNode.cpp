@@ -364,3 +364,10 @@ TEST(TestCustomOpNode, PackNodeWithMultipleOutputs)
     EXPECT_EQ(fbCustomOp->output_tensor_uids()->Get(0), 2);
     EXPECT_EQ(fbCustomOp->output_tensor_uids()->Get(1), 3);
 }
+
+TEST(TestCustomOpNode, GetNodeTypeReturnsCustomOp)
+{
+    GraphAttributes graphAttrs;
+    CustomOpNode node(CustomOpAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::CUSTOM_OP);
+}

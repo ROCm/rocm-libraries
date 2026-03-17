@@ -878,7 +878,7 @@ TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     auto tensors = graphOp->getTensorDescriptors();
@@ -888,7 +888,7 @@ TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
 TEST_F(TestLayernormOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 

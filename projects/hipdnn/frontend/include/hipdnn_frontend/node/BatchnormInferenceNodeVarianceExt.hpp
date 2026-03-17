@@ -12,7 +12,8 @@
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormInferenceNodeVarianceExt : public BaseNode<BatchnormInferenceNodeVarianceExt>
+class BatchnormInferenceNodeVarianceExt
+    : public BaseNode<BatchnormInferenceNodeVarianceExt, NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT>
 {
 public:
     BatchnormInferenceAttributesVarianceExt attributes;

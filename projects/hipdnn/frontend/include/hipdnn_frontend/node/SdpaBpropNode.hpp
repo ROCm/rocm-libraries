@@ -29,7 +29,7 @@ namespace hipdnn_frontend::graph
  *   dQ = dS * K / sqrt(d_k)
  *   dK = dS^T * Q / sqrt(d_k)
  */
-class SdpaBpropNode : public BaseNode<SdpaBpropNode>
+class SdpaBpropNode : public BaseNode<SdpaBpropNode, NodeType::SDPA_BPROP>
 {
 public:
     SdpaBackwardAttributes attributes;

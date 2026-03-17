@@ -220,3 +220,9 @@ TEST(TestINode, CreateOperationDefaultReturnsError)
     EXPECT_TRUE(err.err_msg.find("not implemented") != std::string::npos);
     EXPECT_TRUE(operations.empty());
 }
+
+TEST(TestINode, GetNodeTypeDefaultReturnsUnknown)
+{
+    FakeNode node(0);
+    EXPECT_EQ(node.getNodeType(), NodeType::UNKNOWN);
+}

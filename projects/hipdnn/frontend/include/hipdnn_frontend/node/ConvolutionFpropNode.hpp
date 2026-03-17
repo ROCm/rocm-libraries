@@ -14,7 +14,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode>
+class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode, NodeType::CONVOLUTION_FPROP>
 {
 public:
     ConvFpropAttributes attributes;

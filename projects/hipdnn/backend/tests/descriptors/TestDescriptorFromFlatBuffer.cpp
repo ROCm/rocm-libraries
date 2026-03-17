@@ -253,8 +253,11 @@ TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
-    auto desc = std::dynamic_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
-    ASSERT_NE(desc, nullptr);
+    // Verify the factory dispatched to the correct operation type, then static_cast.
+    // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+    auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -456,6 +459,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &xCount,
                        static_cast<void*>(&xTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedXDesc(xTensorDesc);
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xTensorDesc, nullptr);
     int64_t xUid = 0;
@@ -472,6 +476,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &wCount,
                        static_cast<void*>(&wTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedWDesc(wTensorDesc);
     ASSERT_EQ(wCount, 1);
     ASSERT_NE(wTensorDesc, nullptr);
     int64_t wUid = 0;
@@ -488,6 +493,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &yCount,
                        static_cast<void*>(&yTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedYDesc(yTensorDesc);
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yTensorDesc, nullptr);
     int64_t yUid = 0;
@@ -542,11 +548,11 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
 
     // Wrap tensor descriptors into HipdnnBackendDescriptor for the C API boundary
-    std::unique_ptr<HipdnnBackendDescriptor> const xPacked(
+    std::unique_ptr<HipdnnBackendDescriptor> xPacked(
         HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_X_UID]));
-    std::unique_ptr<HipdnnBackendDescriptor> const wPacked(
+    std::unique_ptr<HipdnnBackendDescriptor> wPacked(
         HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_W_UID]));
-    std::unique_ptr<HipdnnBackendDescriptor> const yPacked(
+    std::unique_ptr<HipdnnBackendDescriptor> yPacked(
         HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_Y_UID]));
 
     // setAttribute takes void* pointing to a HipdnnBackendDescriptor*, so use raw pointers
@@ -594,7 +600,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType);
 
     // Set the name
-    std::string const name = "my_conv_op";
+    std::string name = "my_conv_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(name.size()),

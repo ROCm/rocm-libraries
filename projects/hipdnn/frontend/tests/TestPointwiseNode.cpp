@@ -788,3 +788,10 @@ TEST(TestPointwiseNode, NullSecondInputInferProperties)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
+
+TEST(TestPointwiseNode, GetNodeTypeReturnsPointwise)
+{
+    GraphAttributes graphAttrs;
+    PointwiseNode node(PointwiseAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::POINTWISE);
+}

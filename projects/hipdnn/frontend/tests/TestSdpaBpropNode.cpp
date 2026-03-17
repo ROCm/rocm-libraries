@@ -804,3 +804,10 @@ TEST(TestSdpaBpropNode, InferPropertiesPreservesExplicitShape)
     EXPECT_EQ(dq->get_dim(), (std::vector<int64_t>{2, 8, 16, 64}));
     EXPECT_EQ(dq->get_stride(), (std::vector<int64_t>{8192, 1024, 64, 1}));
 }
+
+TEST(TestSdpaBpropNode, GetNodeTypeReturnsSdpaBprop)
+{
+    GraphAttributes graphAttrs;
+    SdpaBpropNode node(SdpaBackwardAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::SDPA_BPROP);
+}

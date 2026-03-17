@@ -1371,3 +1371,10 @@ TEST(TestConvolutionDgradNode, PreValidateNodeInputTooSmall)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
+
+TEST(TestConvolutionDgradNode, GetNodeTypeReturnsConvolutionDgrad)
+{
+    GraphAttributes graphAttrs;
+    ConvolutionDgradNode node(ConvDgradAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_DGRAD);
+}

@@ -8,11 +8,12 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormPacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormNode : public BaseNode<BatchnormNode>
+class BatchnormNode : public BaseNode<BatchnormNode, NodeType::BATCHNORM>
 {
 public:
     BatchnormAttributes attributes;
@@ -235,7 +236,7 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormNode>::gather_hipdnn_tensors(allTensors);
+        BaseNode<BatchnormNode, NodeType::BATCHNORM>::gather_hipdnn_tensors(allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {
@@ -255,6 +256,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBatchnormOperation(attributes, tensorDescs, operations);
     }
 };
 

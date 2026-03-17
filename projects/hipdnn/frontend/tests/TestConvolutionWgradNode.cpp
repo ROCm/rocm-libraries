@@ -2047,3 +2047,10 @@ TEST_F(TestConvolutionWgradNodeCreateOperation, SuccessCreatesThreeTensorsAndOne
     EXPECT_EQ(tensorDescs.size(), 3u);
     EXPECT_EQ(operations.size(), 1u);
 }
+
+TEST(TestConvolutionWgradNode, GetNodeTypeReturnsConvolutionWgrad)
+{
+    GraphAttributes graphAttrs;
+    ConvolutionWgradNode node(ConvWgradAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_WGRAD);
+}
