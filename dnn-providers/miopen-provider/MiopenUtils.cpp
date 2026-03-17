@@ -107,18 +107,14 @@ ActivationParams mapPointwiseModeToMiopenActivation(
         {
             // Clipped ReLU
             // act(x) = max(0, min(\alpha, x))
-            return ActivationParams{miopenActivationCLIPPEDRELU,
-                                    static_cast<double>(*upperClip),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                miopenActivationCLIPPEDRELU, static_cast<double>(*upperClip), 0.0, 0.0};
         }
         if(lowerClipSlope)
         {
             // Leaky ReLU
-            return ActivationParams{miopenActivationLEAKYRELU,
-                                    static_cast<double>(*lowerClipSlope),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                miopenActivationLEAKYRELU, static_cast<double>(*lowerClipSlope), 0.0, 0.0};
         }
         if(lowerClip && *lowerClip != 0.f)
         {

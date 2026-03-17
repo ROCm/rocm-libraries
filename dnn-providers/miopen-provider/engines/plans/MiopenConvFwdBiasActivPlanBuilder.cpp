@@ -248,8 +248,7 @@ void nodeAttrsCheckTensors(
         // Bias: input tensor from convolution must be virtual, other input must be non-virtual, output must be virtual
         const auto& biasIn0Attr
             = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid());
-        const auto& biasIn1Attr
-            = miopen_utils::findTensorAttributes(tensorMap, *biasIn1Uid);
+        const auto& biasIn1Attr = miopen_utils::findTensorAttributes(tensorMap, *biasIn1Uid);
         const auto& biasOutAttr
             = miopen_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid());
 
