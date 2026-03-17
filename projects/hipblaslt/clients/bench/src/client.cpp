@@ -989,10 +989,10 @@ try
                                         + compute_type);
 
         // For C and D, only F32/BF16/F16 allowed when A or B is block scaling format
-        if(arg.c_type != HIP_R_32F && arg.c_type != HIP_R_16F && arg.c_type != HIP_R_16BF)
+        if(arg.c_type != HIP_R_32F && arg.c_type != HIP_R_16F && arg.c_type != HIP_R_16BF && arg.c_type != HIP_R_8F_E4M3 && arg.c_type != HIP_R_8F_E5M2)
             throw std::invalid_argument("Invalid c_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.c_type));
-        if(arg.d_type != HIP_R_32F && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF)
+        if(arg.d_type != HIP_R_32F && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF && arg.c_type != HIP_R_8F_E4M3 && arg.c_type != HIP_R_8F_E5M2)
             throw std::invalid_argument("Invalid d_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.d_type));
     }
