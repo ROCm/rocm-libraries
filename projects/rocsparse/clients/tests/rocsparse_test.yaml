@@ -58,6 +58,9 @@ include: test_bsric0.yaml
 include: test_bsrilu0.yaml
 include: test_csric0.yaml
 include: test_csrilu0.yaml
+include: test_spic0.yaml
+include: test_spilu0.yaml
+include: test_sptrsv.yaml
 include: test_csritilu0.yaml
 include: test_csritilu0_ex.yaml
 include: test_gtsv.yaml

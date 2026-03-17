@@ -135,12 +135,7 @@ namespace TensileLite
         template <typename SubMap, typename K>
         void add_impl(SubMap& map, Value const& value, K const& key)
         {
-            // use faster emplace entry when key is new, otherwise update value with []
-            if(!map.count(key))
-                map.emplace(key, value);
-            else
-                map[key] = value;
-
+            map.insert_or_assign(key, value);
         }
 
         template <typename SubMap, typename K, typename... Ks>

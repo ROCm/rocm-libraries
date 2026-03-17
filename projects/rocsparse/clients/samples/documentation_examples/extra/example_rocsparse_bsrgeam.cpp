@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -175,6 +175,9 @@ int main()
     HIP_CHECK(hipFree(d_bsr_row_ptr_B));
     HIP_CHECK(hipFree(d_bsr_col_ind_B));
     HIP_CHECK(hipFree(d_bsr_val_B));
+    HIP_CHECK(hipFree(d_bsr_row_ptr_C));
+    HIP_CHECK(hipFree(d_bsr_col_ind_C));
+    HIP_CHECK(hipFree(d_bsr_val_C));
 
     return 0;
 }

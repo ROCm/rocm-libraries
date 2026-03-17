@@ -29,6 +29,8 @@
 rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            handle,
                                                     rocsparse_operation         trans,
                                                     rocsparse_const_spmat_descr A,
+                                                    rocsparse_const_dnvec_descr x,
+                                                    rocsparse_const_dnvec_descr y,
                                                     size_t* buffer_size_in_bytes)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -37,15 +39,16 @@ rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            
     ROCSPARSE_CHECKARG_ENUM(1, trans);
     ROCSPARSE_CHECKARG_POINTER(2, A);
     ROCSPARSE_CHECKARG_POINTER(3, buffer_size_in_bytes);
+    const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
 
     // Quick return if possible
-    if(A->get_rows() == 0 || A->get_batch_count() == 0)
+    if(A->rows == 0 || batch_count == 0)
     {
         *buffer_size_in_bytes = 0;
         return rocsparse_status_success;
     }
 
-    rocsparse_mat_descr descr = A->get_descr();
+    rocsparse_mat_descr descr = A->descr;
     ROCSPARSE_CHECKARG(2,
                        descr,
                        (descr->type != rocsparse_matrix_type_general
@@ -57,38 +60,38 @@ rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            
                        rocsparse_status_requires_sorted_storage);
 
     *buffer_size_in_bytes            = 0;
-    const bool                use_32 = (A->get_nnz() < std::numeric_limits<int32_t>::max());
+    const bool                use_32 = (A->nnz < std::numeric_limits<int32_t>::max());
     const rocsparse_indextype indextype
         = (use_32) ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
 
     _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                               A->get_analysed(),
-                               A->get_batch_count(),
-                               A->get_rows(),
-                               A->get_cols(),
-                               A->get_nnz(),
+                               A->analysed,
+                               A->batch_count,
+                               A->rows,
+                               A->cols,
+                               A->nnz,
 
-                               A->get_data_type(),
-                               A->get_const_val_data(),
-                               nullptr,
-                               A->get_batch_stride(),
+                               A->data_type,
+                               A->const_val_data,
+                               A->val_data,
+                               A->batch_stride,
 
                                indextype,
                                (const void*)0x4,
                                (void*)0x4,
                                0,
 
-                               A->get_col_type(),
-                               A->get_const_col_data(),
-                               nullptr,
-                               A->get_columns_values_batch_stride(),
+                               A->col_type,
+                               A->const_col_data,
+                               A->col_data,
+                               A->columns_values_batch_stride,
 
-                               A->get_idx_base(),
-                               A->get_descr(),
-                               A->get_info());
+                               A->idx_base,
+                               A->descr,
+                               A->info);
 
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrsv_solve_buffer_size(handle, trans, &csr, buffer_size_in_bytes));
+        rocsparse::csrsv_solve_buffer_size(handle, trans, &csr, x, y, buffer_size_in_bytes));
 
     return rocsparse_status_success;
 }

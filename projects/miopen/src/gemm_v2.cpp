@@ -301,15 +301,15 @@ inline void ProfilingRecordStart(const Handle& handle, HipEventPtr& start, HipEv
 {
     start = make_hip_event();
     stop  = make_hip_event();
-    hipEventRecord(start.get(), handle.GetStream());
+    (void)hipEventRecord(start.get(), handle.GetStream());
 }
 
 inline void ProfilingRecordStop(const Handle& handle, HipEventPtr& start, HipEventPtr& stop)
 {
-    hipEventRecord(stop.get(), handle.GetStream());
-    hipEventSynchronize(stop.get());
+    (void)hipEventRecord(stop.get(), handle.GetStream());
+    (void)hipEventSynchronize(stop.get());
     float mS = 0;
-    hipEventElapsedTime(&mS, start.get(), stop.get());
+    (void)hipEventElapsedTime(&mS, start.get(), stop.get());
     handle.ResetKernelTime();
     handle.AccumKernelTime(mS);
 }

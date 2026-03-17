@@ -116,8 +116,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
 {
 #if MIOPEN_BUILD_DEV
     GTEST_SKIP() << "Network filesystem detection is disabled in MIOPEN_BUILD_DEV mode";
-#endif
-
+#else
     // Ensure environment variable is NOT set for this test
     ScopedEnvironment<std::string> unset_user_db(MIOPEN_USER_DB_PATH, "");
 
@@ -142,6 +141,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
         << "User DB path should contain '.config' folder";
     EXPECT_TRUE(PathContains(user_db_path, "miopen"))
         << "User DB path should contain 'miopen' folder";
+#endif
 }
 
 TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_EnvVarSet)
@@ -220,8 +220,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_NoEnvVar)
 {
 #if MIOPEN_BUILD_DEV
     GTEST_SKIP() << "Network filesystem detection is disabled in MIOPEN_BUILD_DEV mode";
-#endif
-
+#else
     // Ensure environment variable is NOT set for this test
     ScopedEnvironment<std::string> unset_cache(MIOPEN_CUSTOM_CACHE_DIR, "");
 
@@ -248,6 +247,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_NoEnvVar)
     const std::string expected_version = GetExpectedVersionString();
     EXPECT_TRUE(PathContains(cache_path, expected_version))
         << "Cache path should contain version string '" << expected_version << "'";
+#endif
 }
 
 TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_EnvVarSet)

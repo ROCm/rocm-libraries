@@ -1208,11 +1208,7 @@ try
         hipStream_t default_stream{};
         dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
-
-    dest->boost_enable   = src->boost_enable;
-    dest->boost_tol_size = src->boost_tol_size;
-    dest->boost_tol      = src->boost_tol;
-    dest->boost_val      = src->boost_val;
+    dest->get_boost()->copy(*src->get_boost());
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -1337,6 +1333,7 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_info   info_)
 
 {
+
     auto    spattern = this->get_spattern();
     auto    row      = spattern->get_row_data();
     auto    col      = spattern->get_col_data();
@@ -2120,6 +2117,34 @@ try
 
     *batch_count  = descr->get_batch_count();
     *batch_stride = descr->get_batch_stride();
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_dnvec_get_strided_batch gets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
+                                                   rocsparse_int*              batch_count,
+                                                   int64_t*                    batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, batch_count);
+    ROCSPARSE_CHECKARG_POINTER(2, batch_stride);
+
+    *batch_count  = descr->batch_count;
+    *batch_stride = descr->batch_stride;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

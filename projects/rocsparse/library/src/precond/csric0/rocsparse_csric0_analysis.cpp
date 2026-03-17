@@ -34,7 +34,7 @@ rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    if(A->get_rows() == 0)
+    if(A->rows == 0)
     {
         //
         // Quick return
@@ -42,7 +42,7 @@ rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    auto info        = A->get_info();
+    auto info        = A->info;
     auto csric0_info = p_csric0_info[0];
 
     if(analysis == rocsparse_analysis_policy_reuse)
@@ -92,26 +92,16 @@ rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
                                                     rocsparse_fill_mode_lower,
                                                     handle,
                                                     rocsparse_operation_none,
-                                                    A->get_rows(),
-                                                    A->get_nnz(),
-                                                    A->get_descr(),
-                                                    A->get_data_type(),
-                                                    A->get_const_val_data(),
-                                                    A->get_row_type(),
-                                                    A->get_const_row_data(),
-                                                    A->get_col_type(),
-                                                    A->get_const_col_data(),
+                                                    A->rows,
+                                                    A->nnz,
+                                                    A->descr,
+                                                    A->data_type,
+                                                    A->const_val_data,
+                                                    A->row_type,
+                                                    A->const_row_data,
+                                                    A->col_type,
+                                                    A->const_col_data,
                                                     temp_buffer));
-
-    csric0_info->create_singular_pivot_async(
-        A->get_batch_count(), A->get_col_type(), handle->stream);
-
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(csric0_info->get_singular_pivot(),
-                       csric0_info->get_zero_pivot(),
-                       rocsparse::indextype_sizeof(A->get_col_type()) * A->get_batch_count(),
-                       hipMemcpyDeviceToDevice,
-                       handle->stream));
 
     return rocsparse_status_success;
 }

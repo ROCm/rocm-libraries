@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -192,6 +192,10 @@ int main()
     std::cout << "" << std::endl;
 
     // Clean up
+    HIP_CHECK(hipFree(dcsr_row_ptr));
+    HIP_CHECK(hipFree(dcsr_col_ind));
+    HIP_CHECK(hipFree(dcsr_val));
+    HIP_CHECK(hipFree(dB));
     HIP_CHECK(hipFree(temp_buffer));
     ROCSPARSE_CHECK(rocsparse_destroy_mat_info(info));
     ROCSPARSE_CHECK(rocsparse_destroy_mat_descr(descr));

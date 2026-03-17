@@ -43,6 +43,7 @@ set(rocsparse_source
   src/common/rocsparse_spattern_descr.cpp
   src/common/rocsparse_spmat_descr.cpp
   src/common/rocsparse_spvec_descr.cpp
+  src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
   src/common/rocsparse_valset.cpp
   src/common/rocsparse_conjugate.cpp
@@ -55,6 +56,8 @@ set(rocsparse_source
   src/common/rocsparse_pivot_info_t.cpp
   src/common/rocsparse_csric0_info.cpp
   src/common/rocsparse_csrilu0_info.cpp
+  src/common/rocsparse_bsric0_info.cpp
+  src/common/rocsparse_bsrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
@@ -72,6 +75,7 @@ set(rocsparse_source
   src/common/rocsparse_trm_data_t.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
+  src/common/rocsparse_numeric_boost.cpp
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -150,7 +154,6 @@ set(rocsparse_source
   src/level2/rocsparse_sellmv.cpp
   #
   src/level2/rocsparse_csrsv.cpp
-  src/level2/rocsparse_csrsv_zero_pivot.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
   src/level2/rocsparse_xcsrsv_buffer_size.cpp
   src/level2/rocsparse_csrsv_analysis_kernels.cpp
@@ -679,4 +682,17 @@ set(rocsparse_source
   src/util/rocsparse_check_matrix_ell_buffer_size.cpp
   src/util/rocsparse_check_matrix_hyb_buffer_size.cpp
   src/util/rocsparse_check_spmat.cpp
+
+# Generic
+  src/generic/spilu0/rocsparse_spilu0_descr.cpp
+  src/generic/spilu0/rocsparse_spilu0_set_input.cpp
+  src/generic/spilu0/rocsparse_spilu0_get_output.cpp
+  src/generic/spilu0/rocsparse_spilu0.cpp
+  src/generic/spilu0/rocsparse_spilu0_buffer_size.cpp
+  src/generic/spic0/rocsparse_spic0_descr.cpp
+  src/generic/spic0/rocsparse_spic0_set_input.cpp
+  src/generic/spic0/rocsparse_spic0_get_output.cpp
+  src/generic/spic0/rocsparse_spic0.cpp
+  src/generic/spic0/rocsparse_spic0_buffer_size.cpp
+
 )

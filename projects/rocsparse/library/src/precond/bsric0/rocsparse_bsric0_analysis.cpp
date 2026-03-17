@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_bsric0.hpp"
 #include "rocsparse_utility.hpp"
 

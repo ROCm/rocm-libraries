@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,10 +86,11 @@ int main()
     ROCSPARSE_CHECK(rocsparse_sdense2csr(
         handle, m, n, descr, ddense_A, m, dnnz_per_row, dcsr_val, dcsr_row_ptr, dcsr_col_ind));
 
+    HIP_CHECK(hipFree(ddense_A));
+    HIP_CHECK(hipFree(dnnz_per_row));
     HIP_CHECK(hipFree(dcsr_row_ptr));
     HIP_CHECK(hipFree(dcsr_col_ind));
     HIP_CHECK(hipFree(dcsr_val));
-    HIP_CHECK(hipFree(dnnz_per_row));
 
     rocsparse_destroy_mat_descr(descr);
     rocsparse_destroy_handle(handle);

@@ -30,11 +30,12 @@
 #include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
-rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
-                                                  rocsparse_bsrilu0_info bsrilu0_info,
-                                                  rocsparse_spmat_descr  A,
-                                                  size_t                 buffer_size,
-                                                  void*                  buffer)
+rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          handle,
+                                                  rocsparse_bsrilu0_info    bsrilu0_info,
+                                                  rocsparse_spmat_descr     A,
+                                                  rocsparse::numeric_boost* boost,
+                                                  size_t                    buffer_size,
+                                                  void*                     buffer)
 {
     rocsparse::bsrilu0_kernel_launch_t launch        = nullptr;
     const std::string                  gcn_arch_name = rocsparse::handle_get_arch_name(handle);
@@ -60,11 +61,17 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
         launch = find_bsrilu0_kernel_33_64_launch(handle, bsrilu0_info, A);
     }
 
+    //
+    // Set done array to zero.
+    //
     RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                        0,
                                        sizeof(int32_t) * A->get_rows() * A->get_batch_count(),
                                        handle->stream));
 
-    RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsrilu0_info, A, buffer_size, buffer));
+    //
+    // Launch gpu kernel.
+    //
+    RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsrilu0_info, A, boost, buffer_size, buffer));
     return rocsparse_status_success;
 }

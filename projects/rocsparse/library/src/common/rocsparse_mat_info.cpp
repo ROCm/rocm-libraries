@@ -25,6 +25,16 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+const rocsparse::numeric_boost* _rocsparse_mat_info::get_boost() const
+{
+    return &this->m_boost;
+}
+
+rocsparse::numeric_boost* _rocsparse_mat_info::get_boost()
+{
+    return &this->m_boost;
+}
+
 rocsparse_csrsm_info _rocsparse_mat_info::get_csrsm_info()
 {
     return this->m_trm.create_csrsm_info();
