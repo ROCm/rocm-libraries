@@ -25,6 +25,13 @@ else()
     message(DEBUG "Skipping gfx9 mma layout validation tests for current target")
 endif()
 
+if(GPU_TARGETS MATCHES "gfx950")
+    add_gtest_executable(test_amdgcn_mma_layout_gfx950 test_amdgcn_mma_layout_gfx950.cpp)
+    target_compile_options(test_amdgcn_mma_layout_gfx950 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS} -Wno-header-hygiene)
+else()
+    message(DEBUG "Skipping gfx950 mma layout validation tests for current target")
+endif()
+
 if(GPU_TARGETS MATCHES "gfx11")
     add_gtest_executable(test_amdgcn_mma_layout_gfx11 test_amdgcn_mma_layout_gfx11.cpp)
     target_compile_options(test_amdgcn_mma_layout_gfx11 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS} -Wno-header-hygiene)
