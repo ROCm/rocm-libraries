@@ -2170,7 +2170,7 @@ namespace
     {
         pageable_host,
         pinned_host,
-#ifndef WIN32
+#ifndef _WIN32
         // linux-only
         managed,
 #endif
@@ -2184,7 +2184,7 @@ namespace
             std::vector<hipfftw_data_memory_type> ret = {hipfftw_data_memory_type::pageable_host,
                                                          hipfftw_data_memory_type::pinned_host,
                                                          hipfftw_data_memory_type::device};
-#ifndef WIN32
+#ifndef _WIN32
             // "managed" may or may not be supported
             hipDeviceProp_t props;
             if(hipGetDeviceProperties(&props, get_current_device_id()) == hipSuccess)
@@ -2210,7 +2210,7 @@ namespace
         case hipfftw_data_memory_type::pinned_host:
             return "pinned_host";
             break;
-#ifndef WIN32
+#ifndef _WIN32
         case hipfftw_data_memory_type::managed:
             return "managed";
             break;
@@ -2683,7 +2683,7 @@ namespace
                         }
                         else
                         {
-#ifndef WIN32
+#ifndef _WIN32
                             const auto hip_status = gpu_io_buffer[map_key].alloc(
                                 data_size, mem_type == hipfftw_data_memory_type::managed);
 #else

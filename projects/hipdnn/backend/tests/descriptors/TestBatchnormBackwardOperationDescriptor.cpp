@@ -74,7 +74,10 @@ public:
         auto desc = getDescriptor();
         for(const auto& [attributeName, tensorDesc] : tensorMap)
         {
-            desc->setAttribute(attributeName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensorDesc);
+            desc->setAttribute(attributeName,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               static_cast<const void*>(&tensorDesc));
         }
     }
 
@@ -515,7 +518,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawDy));
+                                       static_cast<void*>(&rawDy)));
     std::unique_ptr<HipdnnBackendDescriptor> retrievedDy(rawDy);
 
     ASSERT_EQ(elementCount, 1);
@@ -870,7 +873,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraph
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -882,7 +885,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraph
 TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _dyDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _dyDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
@@ -898,7 +901,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, SetPeerStatsTensorArray)
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        2,
-                                       descs.data()));
+                                       static_cast<const void*>(descs.data())));
 
     auto& data = desc->getData();
     ASSERT_EQ(data.peer_stats_tensor_uid.size(), 2);
@@ -938,7 +941,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetPeerStatsTensorArray)
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        2,
-                       descs.data());
+                       static_cast<const void*>(descs.data()));
     setRequiredAttributes();
     desc->finalize();
 
@@ -948,7 +951,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetPeerStatsTensorArray)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        2,
                                        &elementCount,
-                                       retrieved.data()));
+                                       static_cast<void*>(retrieved.data())));
     std::unique_ptr<HipdnnBackendDescriptor> retrieved0(retrieved[0]);
     std::unique_ptr<HipdnnBackendDescriptor> retrieved1(retrieved[1]);
 

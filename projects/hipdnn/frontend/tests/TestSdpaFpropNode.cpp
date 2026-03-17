@@ -445,3 +445,10 @@ TEST(TestSdpaFpropNode, PreValidateFailsBatchMismatchQV)
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
+
+TEST(TestSdpaFpropNode, GetNodeTypeReturnsSdpaFprop)
+{
+    GraphAttributes graphAttrs;
+    SdpaFpropNode node(SdpaAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::SDPA_FPROP);
+}

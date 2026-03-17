@@ -24,7 +24,7 @@ namespace hipdnn_data_sdk::utilities
  * @param str The string to hash
  * @return uint64_t The hash value
  */
-inline uint64_t fnv1aHash(const uint8_t* data, size_t size)
+inline uint64_t fnv1aHash(const uint8_t* data, size_t size) noexcept
 {
     if(data == nullptr || size == 0)
     {
@@ -51,7 +51,7 @@ inline uint64_t fnv1aHash(const uint8_t* data, size_t size)
  * @param str The string to hash
  * @return uint64_t The hash value, or 0 for null/empty input
  */
-inline uint64_t fnv1aHash(const char* str)
+inline uint64_t fnv1aHash(const char* str) noexcept
 {
     if(str == nullptr)
     {
@@ -63,7 +63,7 @@ inline uint64_t fnv1aHash(const char* str)
 /**
  * @brief Overload for std::string
  */
-inline uint64_t fnv1aHash(const std::string& str)
+inline uint64_t fnv1aHash(const std::string& str) noexcept
 {
     return fnv1aHash(str.c_str());
 }
@@ -71,7 +71,7 @@ inline uint64_t fnv1aHash(const std::string& str)
 /**
  * @brief Overload for std::string_view
  */
-inline uint64_t fnv1aHash(std::string_view str)
+inline uint64_t fnv1aHash(std::string_view str) noexcept
 {
     return fnv1aHash(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 }
