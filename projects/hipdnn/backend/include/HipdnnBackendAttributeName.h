@@ -49,6 +49,7 @@
  * - 2500-2599: Matmul operation attributes
  * - 2600-2699: SDPA forward propagation operation attributes
  * - 2700-2799: Layernorm operation attributes
+ * - 2800-2899: Block scale quantize operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -801,6 +802,35 @@ typedef enum
     /** @} */
 
     /**
+     * @name Block Scale Quantize Operation Attributes (2800-2899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT = 2800,
+
+    /** @brief Output tensor (Y) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT = 2801,
+
+    /** @brief Scale tensor for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT = 2802,
+
+    /** @brief Block size parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT = 2803,
+
+    /** @brief Axis parameter for block scale quantize (optional) */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT = 2804,
+
+    /** @brief Transpose parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2805,
+
+    /** @brief Math precision for block scale quantize */
+    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT = 2806,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
@@ -821,6 +851,24 @@ typedef enum
      * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
      */
     HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT = 60100,
+
+    /**
+     * @brief Operation type of an operation descriptor (read-only extension)
+     *
+     * Returns the hipdnnOperationType_t of an operation descriptor, enabling
+     * type-based dispatch without trial-and-error probing.
+     * Type: HIPDNN_TYPE_OPERATION_TYPE_EXT
+     */
+    HIPDNN_ATTR_OPERATION_TYPE_EXT = 60200,
+
+    /**
+     * @brief Name of an operation descriptor (extension)
+     *
+     * Gets or sets a human-readable name for an operation node, useful for
+     * debugging, logging, and round-tripping through serialized graphs.
+     * Type: HIPDNN_TYPE_CHAR
+     */
+    HIPDNN_ATTR_OPERATION_NAME_EXT = 60300,
 
     /** @} */
 
