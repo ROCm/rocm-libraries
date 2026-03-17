@@ -223,6 +223,7 @@ protected:
 };
 
 // --- MetadataND tests ---
+// cppcheck-suppress syntaxError
 TEST_P(GPU_ConvNDAIHeuristics_FP32, MetadataND_LoadValidArchitecture)
 {
     immed_mode::MetadataND metadata(device_name, spatial_dim);

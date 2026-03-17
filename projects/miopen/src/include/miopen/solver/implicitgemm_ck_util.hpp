@@ -300,6 +300,47 @@ std::vector<std::string> FillValidKernelsGeneric(const ProblemDescriptionType& p
 }
 
 /**
+ * @brief Helper function to dispatch by alpha/beta case for specific data types
+ * It dispatches to the appropriate DeviceOp type based on the problem's alpha/beta case.
+ *
+ * @tparam BilinearPtrs CK DeviceOp factory for BILINEAR operations
+ * @tparam ScalePtrs CK DeviceOp factory for SCALE operations
+ * @tparam DefaultPtrs CK DeviceOp factory for DEFAULT (PassThrough) operations
+ * @tparam CKArgs CK argument structure (must be templated on DataType, ComputeType)
+ * @tparam DataType Input/output data type
+ * @tparam ComputeType Computation type (may differ from DataType, e.g., tf32 for float)
+ * @tparam ProblemDescriptionType Problem description type
+ *
+ * @param problem Convolution problem description
+ * @return Vector of valid kernel ID strings for the problem
+ */
+template <template <typename, typename> class BilinearPtrs,
+          template <typename, typename>
+          class ScalePtrs,
+          template <typename, typename>
+          class DefaultPtrs,
+          template <typename, typename>
+          class CKArgs,
+          typename DataType,
+          typename ComputeType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+std::vector<std::string> FillKernelsByAlphaBeta(const ProblemDescriptionType& problem)
+{
+    switch(problem.GetAlphaBetaCase())
+    {
+    case BILINEAR:
+        return FillValidKernelsIDs<BilinearPtrs<DataType, ComputeType>,
+                                   CKArgs<DataType, ComputeType>>(problem);
+    case SCALE:
+        return FillValidKernelsIDs<ScalePtrs<DataType, ComputeType>, CKArgs<DataType, ComputeType>>(
+            problem);
+    default: // DEFAULT case (PassThrough)
+        return FillValidKernelsIDs<DefaultPtrs<DataType, ComputeType>,
+                                   CKArgs<DataType, ComputeType>>(problem);
+    }
+}
+
+/**
  * @brief Generic implementation for filling valid kernel IDs with alpha/beta case dispatch
  *
  * This template function extends FillValidKernelsGeneric to handle 3D solvers that support
@@ -339,39 +380,43 @@ template <template <typename, typename> class BilinearPtrs,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 std::vector<std::string> FillValidKernelsWithAlphaBetaGeneric(const ProblemDescriptionType& problem)
 {
-    // Helper lambda to dispatch by alpha_beta case for a specific data type
-    auto fill_by_alpha_beta = [&problem]<typename DataType, typename ComputeType>() {
-        switch(problem.GetAlphaBetaCase())
-        {
-        case BILINEAR:
-            return FillValidKernelsIDs<BilinearPtrs<DataType, ComputeType>,
-                                       CKArgs<DataType, ComputeType>>(problem);
-        case SCALE:
-            return FillValidKernelsIDs<ScalePtrs<DataType, ComputeType>,
-                                       CKArgs<DataType, ComputeType>>(problem);
-        default: // DEFAULT case (PassThrough)
-            return FillValidKernelsIDs<DefaultPtrs<DataType, ComputeType>,
-                                       CKArgs<DataType, ComputeType>>(problem);
-        }
-    };
-
-    // Data type dispatch with TF32 support
+    // Data type dispatch with TF32 support (C++17 compatible - uses helper function)
     switch(problem.GetInDataType())
     {
-    case miopenHalf: return fill_by_alpha_beta.template operator()<ck::half_t, ck::half_t>();
+    case miopenHalf:
+        return FillKernelsByAlphaBeta<BilinearPtrs,
+                                      ScalePtrs,
+                                      DefaultPtrs,
+                                      CKArgs,
+                                      ck::half_t,
+                                      ck::half_t>(problem);
 
     case miopenFloat:
         if(problem.UseTF32())
         {
-            auto tf32_kernels = fill_by_alpha_beta.template operator()<float, ck::tf32_t>();
+            auto tf32_kernels = FillKernelsByAlphaBeta<BilinearPtrs,
+                                                       ScalePtrs,
+                                                       DefaultPtrs,
+                                                       CKArgs,
+                                                       float,
+                                                       ck::tf32_t>(problem);
             if(!tf32_kernels.empty())
                 return tf32_kernels;
         }
-        return fill_by_alpha_beta.template operator()<float, float>();
+        return FillKernelsByAlphaBeta<BilinearPtrs, ScalePtrs, DefaultPtrs, CKArgs, float, float>(
+            problem);
 
-    case miopenBFloat16: return fill_by_alpha_beta.template operator()<ck::bhalf_t, ck::bhalf_t>();
+    case miopenBFloat16:
+        return FillKernelsByAlphaBeta<BilinearPtrs,
+                                      ScalePtrs,
+                                      DefaultPtrs,
+                                      CKArgs,
+                                      ck::bhalf_t,
+                                      ck::bhalf_t>(problem);
 
-    case miopenInt8: return fill_by_alpha_beta.template operator()<int8_t, int8_t>();
+    case miopenInt8:
+        return FillKernelsByAlphaBeta<BilinearPtrs, ScalePtrs, DefaultPtrs, CKArgs, int8_t, int8_t>(
+            problem);
 
     default: return {};
     }
