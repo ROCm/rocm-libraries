@@ -1324,6 +1324,7 @@ struct FmhaBwdOGradDotOKernel
     using DDataType     = ck_tile::remove_cvref_t<typename FmhaBwdOGradDotO::DDataType>;
     using ODataType     = ck_tile::remove_cvref_t<typename FmhaBwdOGradDotO::ODataType>;
     using OGradDataType = ck_tile::remove_cvref_t<typename FmhaBwdOGradDotO::OGradDataType>;
+    using LSEDataType   = ck_tile::remove_cvref_t<typename FmhaBwdOGradDotO::LSEDataType>;
 
     static constexpr bool kIsGroupMode = FmhaBwdOGradDotO::kIsGroupMode;
     static constexpr bool kPadSeqLenQ  = FmhaBwdOGradDotO::kPadSeqLenQ;
@@ -1365,11 +1366,15 @@ struct FmhaBwdOGradDotOKernel
         const void* o_ptr;
         const void* do_ptr;
         void* d_ptr;
+        const void* lse_ptr;  // log-sum-exp from forward pass, shape [batch, nhead, seqlen_q]
+        const void* sink_ptr; // sink scores, shape [batch, nhead]; nullptr disables sink
+        void* d_sink_ptr;     // sink gradient output, shape [nhead]; nullptr disables sink grad
 
         float p_undrop;
 
         ck_tile::index_t seqlen_q;
         ck_tile::index_t hdim_v;
+        ck_tile::index_t nhead; // used to index sink_ptr / d_sink_ptr
 
         ck_tile::index_t stride_do;
         ck_tile::index_t stride_o;
@@ -1401,9 +1406,13 @@ struct FmhaBwdOGradDotOKernel
     MakeKargs(const void* o_ptr,
               const void* do_ptr,
               void* d_ptr,
+              const void* lse_ptr,
+              const void* sink_ptr,
+              void* d_sink_ptr,
               float p_undrop,
               ck_tile::index_t seqlen_q,
               ck_tile::index_t hdim_v,
+              ck_tile::index_t nhead,
               ck_tile::index_t stride_do,
               ck_tile::index_t stride_o,
               ck_tile::index_t nhead_stride_do,
@@ -1416,9 +1425,13 @@ struct FmhaBwdOGradDotOKernel
         Kargs kargs{{o_ptr,
                      do_ptr,
                      d_ptr,
+                     lse_ptr,
+                     sink_ptr,
+                     d_sink_ptr,
                      p_undrop,
                      seqlen_q,
                      hdim_v,
+                     nhead,
                      stride_do,
                      stride_o,
                      nhead_stride_do,
@@ -1436,11 +1449,15 @@ struct FmhaBwdOGradDotOKernel
     MakeKargs(const void* o_ptr,
               const void* do_ptr,
               void* d_ptr,
+              const void* lse_ptr,
+              const void* sink_ptr,
+              void* d_sink_ptr,
               float p_undrop,
               const void* seqstart_q_ptr,
               const void* seqlen_q_ptr,
               const void* cu_seqlen_q_ptr,
               ck_tile::index_t hdim_v,
+              ck_tile::index_t nhead,
               ck_tile::index_t stride_do,
               ck_tile::index_t stride_o,
               ck_tile::index_t nhead_stride_do,
@@ -1450,9 +1467,13 @@ struct FmhaBwdOGradDotOKernel
         Kargs kargs{{o_ptr,
                      do_ptr,
                      d_ptr,
+                     lse_ptr,
+                     sink_ptr,
+                     d_sink_ptr,
                      p_undrop,
                      -1, // seqlen will be updated by another pointer
                      hdim_v,
+                     nhead,
                      stride_do,
                      stride_o,
                      nhead_stride_do,
@@ -1535,6 +1556,13 @@ struct FmhaBwdOGradDotOKernel
             batch_offset_d  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_d;
         }
 
+        // Read per-head sink score; use -inf when sink is disabled so P_sink -> 0
+        const float sink_value =
+            kargs.sink_ptr != nullptr
+                ? (*(static_cast<const float*>(kargs.sink_ptr) +
+                     static_cast<long_index_t>(i_batch) * kargs.nhead + i_nhead))
+                : -numeric<float>::infinity();
+
         // for simplicity, batch stride we just modify the pointer
         const ODataType* o_ptr = reinterpret_cast<const ODataType*>(kargs.o_ptr) +
                                  static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_o +
@@ -1542,6 +1570,10 @@ struct FmhaBwdOGradDotOKernel
         const OGradDataType* do_ptr = reinterpret_cast<const OGradDataType*>(kargs.do_ptr) +
                                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_do +
                                       batch_offset_do;
+        const LSEDataType* lse_ptr = reinterpret_cast<const LSEDataType*>(kargs.lse_ptr) +
+                                     static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_d +
+                                     batch_offset_d;
+
         DDataType* d_ptr = reinterpret_cast<DDataType*>(kargs.d_ptr) +
                            static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_d +
                            batch_offset_d;
@@ -1578,13 +1610,32 @@ struct FmhaBwdOGradDotOKernel
 
         auto o_dram_window =
             make_tile_window(o_dram, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {i_m0, 0});
-
         auto do_dram_window =
             make_tile_window(do_dram, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {i_m0, 0});
-
         auto d_dram_window = make_tile_window(d_dram, make_tuple(number<kM0>{}), {i_m0});
 
-        FmhaBwdOGradDotO{}(o_dram_window, do_dram_window, d_dram_window, kargs.p_undrop);
+        // nullptr when sink grad is disabled; the pipeline checks this to skip the sink path
+        DDataType* atomic_sink_grad_ptr =
+            kargs.d_sink_ptr == nullptr ? nullptr
+                                        : reinterpret_cast<DDataType*>(kargs.d_sink_ptr) + i_nhead;
+
+        // lse_ptr is always valid (also needed by the main bwd kernel).
+        // The actual load happens inside the pipeline only when atomic_sink_grad_ptr != nullptr.
+        auto lse_dram = [&]() {
+            const auto lse_dram_naive = make_naive_tensor_view_packed<address_space_enum::global>(
+                lse_ptr, make_tuple(kargs.seqlen_q), number<1>{});
+            return pad_tensor_view(
+                lse_dram_naive, make_tuple(number<kM0>{}), sequence<kPadSeqLenQ>{});
+        }();
+        auto lse_dram_window = make_tile_window(lse_dram, make_tuple(number<kM0>{}), {i_m0});
+
+        FmhaBwdOGradDotO{}(o_dram_window,
+                           do_dram_window,
+                           lse_dram_window,
+                           d_dram_window,
+                           sink_value,
+                           kargs.p_undrop,
+                           atomic_sink_grad_ptr);
     }
 };
 

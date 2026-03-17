@@ -55,7 +55,7 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   --targets ${FMHA_TARGETS_ARG}
   --api bwd
   --receipt 3
-  --optdim 32,64,96,128,256
+  --optdim 128
   # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
 
@@ -135,6 +135,8 @@ set(FMHA_BWD_INTERFACE_COMPILE_OPTIONS)
 #       ... because they are auto-generated
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
+# list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-gnu-line-marker)
+# list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -save-temps)
 
 # Allow comparing floating points directly in order to check sentinel values
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-float-equal)
