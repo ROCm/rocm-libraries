@@ -19,6 +19,7 @@ set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
 add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
+    descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
     descriptors/TestEngineDescriptor.cpp
@@ -30,10 +31,13 @@ add_executable(
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestBatchnormOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnorm.cpp
     descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
     descriptors/TestMatmulOperationDescriptor.cpp
     descriptors/TestGraphDescriptorMatmul.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
@@ -87,7 +91,7 @@ target_compile_definitions(
             TEST_NO_API_VERSION_PLUGIN_NAME="${TEST_NO_API_VERSION_PLUGIN_NAME}"
             TEST_ENGINE_PLUGIN1_NAME="${TEST_ENGINE_PLUGIN1_NAME}"
 )
-target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
 
 # libhipdnn_test_plugin1.so or hipdnn_test_plugin1.dll (used by TestPlugin.cpp and

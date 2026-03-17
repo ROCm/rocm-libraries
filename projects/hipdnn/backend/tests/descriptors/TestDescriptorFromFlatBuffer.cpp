@@ -253,8 +253,11 @@ TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
-    auto desc = std::dynamic_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
-    ASSERT_NE(desc, nullptr);
+    // Verify the factory dispatched to the correct operation type, then static_cast.
+    // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
+    auto rebuiltNode = graphOp->buildNode();
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+    auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -455,7 +458,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &xCount,
-                       &xTensorDesc);
+                       static_cast<void*>(&xTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedXDesc(xTensorDesc);
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xTensorDesc, nullptr);
     int64_t xUid = 0;
@@ -471,7 +475,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &wCount,
-                       &wTensorDesc);
+                       static_cast<void*>(&wTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedWDesc(wTensorDesc);
     ASSERT_EQ(wCount, 1);
     ASSERT_NE(wTensorDesc, nullptr);
     int64_t wUid = 0;
@@ -487,7 +492,8 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &yCount,
-                       &yTensorDesc);
+                       static_cast<void*>(&yTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedYDesc(yTensorDesc);
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yTensorDesc, nullptr);
     int64_t yUid = 0;
@@ -554,12 +560,18 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     auto* wRaw = wPacked.get();
     auto* yRaw = yPacked.get();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xRaw);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &wRaw);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yRaw);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xRaw));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&wRaw));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&yRaw));
 
     // Set convolution parameters
     std::vector<int64_t> padding = toVec(K_CONV_PADDING);

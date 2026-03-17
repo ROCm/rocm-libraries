@@ -17,6 +17,7 @@ using namespace hipdnn_backend;
 namespace
 {
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
 const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto LIBRARY_PATH = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
@@ -30,6 +31,7 @@ const auto WRONG_SYMBOL_NAME = std::string("wrong_symbol_name");
 const auto FULL_LIBRARY_PATH
     = (hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
        / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME));
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 }
 

@@ -8,11 +8,13 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BlockScaleQuantizePacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BlockScaleQuantizeNode : public BaseNode<BlockScaleQuantizeNode>
+class BlockScaleQuantizeNode
+    : public BaseNode<BlockScaleQuantizeNode, NodeType::BLOCK_SCALE_QUANTIZE>
 {
 public:
     BlockScaleQuantizeAttributes attributes;
@@ -200,6 +202,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBlockScaleQuantizeOperation(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph

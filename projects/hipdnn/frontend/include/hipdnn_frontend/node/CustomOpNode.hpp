@@ -21,6 +21,11 @@ public:
     {
     }
 
+    NodeType getNodeType() const override
+    {
+        return NodeType::CUSTOM_OP;
+    }
+
     std::string getNodeName() const override
     {
         return attributes.get_name();

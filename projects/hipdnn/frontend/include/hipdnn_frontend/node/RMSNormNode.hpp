@@ -13,7 +13,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class RMSNormNode : public BaseNode<RMSNormNode>
+class RMSNormNode : public BaseNode<RMSNormNode, NodeType::RMS_NORM>
 {
 public:
     RMSNormAttributes attributes;
