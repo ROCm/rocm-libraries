@@ -96,6 +96,24 @@ static size_t offset_count(rocfft_array_type type)
                : 1;
 }
 
+namespace
+{
+    // functor to search for bricks on a comm rank, in a container of bricks
+    // sorted by comm rank
+    struct match_comm_rank
+    {
+        bool operator()(const rocfft_brick_t& b, int comm_rank) const
+        {
+            return b.location.comm_rank < comm_rank;
+        }
+        bool operator()(int comm_rank, const rocfft_brick_t& b) const
+        {
+            return comm_rank < b.location.comm_rank;
+        }
+    };
+
+}
+
 std::optional<rocfft_location_t>
     rocfft_plan_description_t::expected_undistributed_location_for(io_data_label io) const
 {
@@ -1383,20 +1401,17 @@ rocfft_status
                 for(size_t field_idx = 0; field_idx < std::min(inFields.size(), outFields.size());
                     field_idx++)
                 {
-                    const auto& ibricks = inFields[field_idx].bricks;
-                    const auto& obricks = outFields[field_idx].bricks;
-                    auto        ibrick  = std::find_if(
-                        ibricks.begin(), ibricks.end(), [&local_rank](const auto& brick) {
-                            return brick.location.comm_rank == local_rank;
-                        });
-                    auto obrick = std::find_if(
-                        obricks.begin(), obricks.end(), [&local_rank](const auto& brick) {
-                            return brick.location.comm_rank == local_rank;
-                        });
-                    while(ibrick != inFields[field_idx].bricks.end()
-                          && obrick != outFields[field_idx].bricks.end()
-                          && ibrick->location.comm_rank == local_rank
-                          && obrick->location.comm_rank == local_rank)
+                    const auto local_ibricks = std::equal_range(inFields[field_idx].bricks.begin(),
+                                                                inFields[field_idx].bricks.end(),
+                                                                local_rank,
+                                                                match_comm_rank());
+                    const auto local_obricks = std::equal_range(outFields[field_idx].bricks.begin(),
+                                                                outFields[field_idx].bricks.end(),
+                                                                local_rank,
+                                                                match_comm_rank());
+                    auto       ibrick        = local_ibricks.first;
+                    auto       obrick        = local_obricks.first;
+                    while(ibrick != local_ibricks.second && obrick != local_obricks.second)
                     {
                         if(ibrick->location.device != obrick->location.device)
                         {
@@ -1519,20 +1534,6 @@ static std::vector<BufferPtr> GatherUserBuffers(BufferPtrConstruct              
 
     auto rank_sorter = [](const rocfft_brick_t& a, const rocfft_brick_t& b) {
         return a.location.comm_rank < b.location.comm_rank;
-    };
-
-    // functor to search for bricks on a comm rank, in a container of bricks
-    // sorted by comm rank
-    struct match_comm_rank
-    {
-        bool operator()(const rocfft_brick_t& b, int comm_rank) const
-        {
-            return b.location.comm_rank < comm_rank;
-        }
-        bool operator()(int comm_rank, const rocfft_brick_t& b) const
-        {
-            return comm_rank < b.location.comm_rank;
-        }
     };
 
     // In a multi-process environment, we've gathered the bricks on
