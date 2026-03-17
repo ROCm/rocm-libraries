@@ -769,18 +769,19 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
     makeFinalized();
     auto desc = getDescriptor();
 
-    HipdnnBackendDescriptor* retrievedQ = nullptr;
+    HipdnnBackendDescriptor* rawQ = nullptr;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedQ));
+                                       &rawQ));
+    std::unique_ptr<HipdnnBackendDescriptor> retrievedQ(rawQ);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedQ, nullptr);
     auto unpackedQ = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
-        &retrievedQ, HIPDNN_STATUS_BAD_PARAM, "unpack retrieved Q");
+        retrievedQ.get(), HIPDNN_STATUS_BAD_PARAM, "unpack retrieved Q");
     ASSERT_EQ(unpackedQ->getData().uid, K_SDPA_TENSOR_Q_UID);
 
     const auto& qData = unpackedQ->getData();

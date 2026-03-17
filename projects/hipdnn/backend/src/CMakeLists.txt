@@ -21,6 +21,7 @@ add_library(
     descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
+    descriptors/BlockScaleQuantizeOperationDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
     descriptors/ConvolutionWrwOperationDescriptor.cpp
@@ -39,6 +40,7 @@ add_library(
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaFpropOperationDescriptor.cpp
     descriptors/TensorDescriptor.cpp
+    descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp
