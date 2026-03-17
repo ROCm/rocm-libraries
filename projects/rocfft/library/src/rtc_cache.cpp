@@ -42,6 +42,11 @@ namespace fs = std::filesystem;
 
 std::unique_ptr<RTCCache> RTCCache::single;
 
+const bool RTCCache::db_file::cache_read_disabled
+    = !rocfft_getenv("ROCFFT_RTC_CACHE_READ_DISABLE").empty();
+const bool RTCCache::db_file::cache_write_disabled
+    = !rocfft_getenv("ROCFFT_RTC_CACHE_WRITE_DISABLE").empty();
+
 static const char* default_cache_filename_prefix = "rocfft_kernel_cache_";
 static const char* default_cache_filename_suffix = ".db";
 
@@ -199,9 +204,6 @@ static sqlite3_stmt_ptr prepare_stmt(sqlite3* db, const char* sql)
 void RTCCache::db_file::connect_db(const fs::path& path, bool readonly)
 {
     db.reset();
-
-    cache_read_disabled  = !rocfft_getenv("ROCFFT_RTC_CACHE_READ_DISABLE").empty();
-    cache_write_disabled = !rocfft_getenv("ROCFFT_RTC_CACHE_WRITE_DISABLE").empty();
 
     sqlite3* db_raw = nullptr;
     int      flags  = SQLITE_OPEN_FULLMUTEX;

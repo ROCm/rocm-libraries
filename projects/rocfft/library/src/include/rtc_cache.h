@@ -156,8 +156,8 @@ private:
         sqlite3_stmt_ptr store_stmt;
         std::mutex       store_mutex;
 
-        bool cache_read_disabled  = false;
-        bool cache_write_disabled = false;
+        static const bool cache_read_disabled;
+        static const bool cache_write_disabled;
     };
 
     // Database handles to system- and user-level caches.  System
