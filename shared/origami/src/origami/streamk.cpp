@@ -158,7 +158,7 @@ reduction_t select_reduction(const problem_t& problem,
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
       constexpr int MinItersForParallel = 64;
-      const int MaxTilesForParallel = cu_count / 4;
+      const int MaxTilesForParallel     = cu_count / 4;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
         reduction_strategy = reduction_t::parallel;
     }
@@ -266,7 +266,6 @@ size_t grid_reduction_cost_aware(const problem_t& problem,
       min_grid_runtime_v2.second = runtime_v2;
     }
   }
-
 
   return min_grid_runtime_v2.first;
 }
@@ -425,8 +424,7 @@ size_t select_grid_size(const problem_t& problem,
     case grid_selection_t::reduction_cost_aware:
       return streamk::grid_reduction_cost_aware(problem, config, 1, cu_count);
 
-    case grid_selection_t::data_parallel: 
-      return streamk::grid_data_parallel(problem, config);
+    case grid_selection_t::data_parallel: return streamk::grid_data_parallel(problem, config);
 
     case grid_selection_t::analytical:
       return streamk::grid_analytical(problem, hardware, config, 10, max_cus);

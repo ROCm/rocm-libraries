@@ -37,8 +37,8 @@ struct context_t {
   size_t d_bytes = 0;
 
   /// Grid dimensions.
-  size_t grid_m    = 0;
-  size_t grid_n    = 0;
+  size_t grid_m           = 0;
+  size_t grid_n           = 0;
   size_t num_output_tiles = 0;
 
   /// Launch parameters.
@@ -62,8 +62,8 @@ struct context_t {
   workgroup_mapping_t wgm{0, 8, 1};
 
   /// Occupancy-derived decay factor.
-  size_t real_occupancy    = 0;
-  double occupancy_factor  = 1.0;
+  size_t real_occupancy   = 0;
+  double occupancy_factor = 1.0;
 
   /// Debug flag (cached from runtime_options to avoid repeated singleton lookups).
   bool debug = false;
@@ -89,7 +89,8 @@ struct context_t {
 };
 
 /**
- * @brief calculate the work utilization which is the ratio of the useful problem volume to the total scheduled volume.
+ * @brief calculate the work utilization which is the ratio of the useful problem volume to the
+ * total scheduled volume.
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param config Kernel configuration.
@@ -98,26 +99,29 @@ struct context_t {
 double calculate_work_utilization(const problem_t& problem, const config_t& config);
 
 /**
- * @brief calculate the output utilization which is the ratio of the useful problem volume to the total scheduled volume.
+ * @brief calculate the output utilization which is the ratio of the useful problem volume to the
+ * total scheduled volume.
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param config Kernel configuration.
  * @param vector_elems elements in the vector.
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
-double calculate_output_utilization(const problem_t& problem, const config_t& config, size_t vector_elems);
+double calculate_output_utilization(const problem_t& problem,
+                                    const config_t& config,
+                                    size_t vector_elems);
 
 /**
- * @brief This function rounds the number of elements up to the smallest value whose total size 
+ * @brief This function rounds the number of elements up to the smallest value whose total size
  * (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
  *
  * @param elements Macro tile dimension
  * @param element_size_bits size in bits
  * @return size_t
  */
- size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
+size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
- /**
+/**
  * @brief Fast WGM prediction based on last-XCD L2 working set minimization.
  *
  * Evaluates a small set of WGM candidates and picks the one that minimizes
@@ -134,7 +138,7 @@ double calculate_output_utilization(const problem_t& problem, const config_t& co
 workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const config_t& config,
-                                              size_t grid_m, 
+                                              size_t grid_m,
                                               size_t grid_n,
                                               size_t splitting_factor);
 /**
@@ -239,7 +243,7 @@ dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, s
  * @param count Number of workgroups in the range.
  * @return dim4_t Unique tile counts in each dimension.
  */
- dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t count);
+dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t count);
 
 /**
  * @brief Count unique tiles for a specific XCD during a specific timestep.
@@ -255,9 +259,12 @@ dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, s
  * @param timestep_id Timestep index (0-based).
  * @return dim4_t Unique tile counts in each dimension.
  */
-dim4_t count_unique_tiles(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping,
-                          size_t N_CU, size_t num_xcd,
-                          size_t xcd_id, size_t timestep_id);
+dim4_t count_unique_tiles(const dim4_t& grid,
+                          const workgroup_mapping_t& wgm_mapping,
+                          size_t N_CU,
+                          size_t num_xcd,
+                          size_t xcd_id,
+                          size_t timestep_id);
 
 /**
  * @brief Count unique tiles for an entire timestep (all XCDs combined).
@@ -268,8 +275,10 @@ dim4_t count_unique_tiles(const dim4_t& grid, const workgroup_mapping_t& wgm_map
  * @param timestep_id Timestep index (0-based).
  * @return dim4_t Unique tile counts in each dimension.
  */
-dim4_t count_unique_tiles_timestep(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping,
-                                   size_t N_CU, size_t timestep_id);
+dim4_t count_unique_tiles_timestep(const dim4_t& grid,
+                                   const workgroup_mapping_t& wgm_mapping,
+                                   size_t N_CU,
+                                   size_t timestep_id);
 
 /**
  * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K
@@ -370,7 +379,7 @@ double estimate_mall_hit(const problem_t& problem,
 /**
  * @brief Estimate per-operand L1, L2, and MALL hit rates using the analytical model.
  *
- * Computes unique tiles counts for the first two timesteps using WGM, 
+ * Computes unique tiles counts for the first two timesteps using WGM,
  * then estimates temporal reuse from T0->T1 overlap. Extrapolates to all timesteps.
  *
  * @param problem Problem description (M, N, K, etc.)

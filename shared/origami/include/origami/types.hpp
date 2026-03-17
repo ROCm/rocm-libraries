@@ -350,7 +350,7 @@ struct runtime_options {
    */
   void update_from_env();
 
-  private:
+ private:
   /**
    * @brief Default constructor that reads from environment variables.
    *
@@ -423,22 +423,35 @@ struct tensile_params_t {
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
            wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
            prefetch_global_read == o.prefetch_global_read &&
-           math_clocks_unrolled_loop == o.math_clocks_unrolled_loop &&
-           swizzle_a == o.swizzle_a && swizzle_b == o.swizzle_b &&
-           workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
+           math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
+           swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
            global_split_u_coalesced == o.global_split_u_coalesced &&
            global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin;
   }
 
   std::size_t hash() const {
-    return math::hash_combine(
-        depth_u, global_split_u, global_accumulation, local_split_u,
-        direct_to_vgpr_a, direct_to_vgpr_b, direct_to_lds_a, direct_to_lds_b,
-        num_loads_coalesced_a, num_loads_coalesced_b, wave_num,
-        wave_group_m, wave_group_n, prefetch_global_read, math_clocks_unrolled_loop,
-        swizzle_a, swizzle_b, workgroup_mapping_xcc, workgroup_mapping_xcc_group,
-        global_split_u_coalesced, global_split_u_wgm_round_robin);
+    return math::hash_combine(depth_u,
+                              global_split_u,
+                              global_accumulation,
+                              local_split_u,
+                              direct_to_vgpr_a,
+                              direct_to_vgpr_b,
+                              direct_to_lds_a,
+                              direct_to_lds_b,
+                              num_loads_coalesced_a,
+                              num_loads_coalesced_b,
+                              wave_num,
+                              wave_group_m,
+                              wave_group_n,
+                              prefetch_global_read,
+                              math_clocks_unrolled_loop,
+                              swizzle_a,
+                              swizzle_b,
+                              workgroup_mapping_xcc,
+                              workgroup_mapping_xcc_group,
+                              global_split_u_coalesced,
+                              global_split_u_wgm_round_robin);
   }
 };
 
@@ -511,16 +524,12 @@ struct config_t {
 
   /// Get mutable reference to Tensile params. Initializes if not already set.
   tensile_params_t& tensile() {
-    if (!std::holds_alternative<tensile_params_t>(backend)) {
-      backend = tensile_params_t{};
-    }
+    if (!std::holds_alternative<tensile_params_t>(backend)) { backend = tensile_params_t{}; }
     return std::get<tensile_params_t>(backend);
   }
 
   /// Get const reference to Tensile params. Throws if not set.
-  const tensile_params_t& tensile() const {
-    return std::get<tensile_params_t>(backend);
-  }
+  const tensile_params_t& tensile() const { return std::get<tensile_params_t>(backend); }
 
   /// Check if Tensile params are currently set.
   bool has_tensile_params() const noexcept {
@@ -537,20 +546,34 @@ struct config_t {
   }
 
   std::size_t hash() const {
-    std::size_t seed = math::hash_combine(
-        mt.m, mt.n, mt.k, mi.m, mi.n, mi.k,
-        hand_optimized_main_loop, cache_hints_a, cache_hints_b, workgroup_mapping,
-        static_cast<std::uint32_t>(reduction_strategy),
-        static_cast<std::uint32_t>(prediction_mode), static_cast<std::uint32_t>(target),
-        grvw_a, grvw_b, gwvw_d, vector_width_a, vector_width_b);
+    std::size_t seed = math::hash_combine(mt.m,
+                                          mt.n,
+                                          mt.k,
+                                          mi.m,
+                                          mi.n,
+                                          mi.k,
+                                          hand_optimized_main_loop,
+                                          cache_hints_a,
+                                          cache_hints_b,
+                                          workgroup_mapping,
+                                          static_cast<std::uint32_t>(reduction_strategy),
+                                          static_cast<std::uint32_t>(prediction_mode),
+                                          static_cast<std::uint32_t>(target),
+                                          grvw_a,
+                                          grvw_b,
+                                          gwvw_d,
+                                          vector_width_a,
+                                          vector_width_b);
     // Hash backend-specific parameters if present. The visitor pattern allows
     // automatic handling of any backend type that provides a hash() method,
     // while std::monostate (no backend params) is a no-op.
-    std::visit([&seed](const auto& params) {
-      if constexpr (!std::is_same_v<std::decay_t<decltype(params)>, std::monostate>) {
-        math::hash_combine(seed, params.hash());
-      }
-    }, backend);
+    std::visit(
+        [&seed](const auto& params) {
+          if constexpr (!std::is_same_v<std::decay_t<decltype(params)>, std::monostate>) {
+            math::hash_combine(seed, params.hash());
+          }
+        },
+        backend);
     return seed;
   }
 
@@ -625,7 +648,7 @@ struct workgroup_mapping_t {
  *
  * Contains all the parameters needed to describe various staggerU parameters.
  */
- struct staggerU_t {
+struct staggerU_t {
   /// StaggerU mapping size.
   std::size_t staggerUMapping = 0;
 

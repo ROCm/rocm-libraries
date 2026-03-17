@@ -365,7 +365,7 @@ void heuristics_database_t::initialize_defaults() {
 
     // BF16 TN configurations
     std::vector<cms_config> bf16_tt_configs = {
-      {256, 256, 64, 1.0 / 1.10},
+        {256, 256, 64, 1.0 / 1.10},
     };
 
     for (const auto& cfg : bf16_tt_configs) {
