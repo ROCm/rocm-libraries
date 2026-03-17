@@ -47,8 +47,8 @@ CONFIGS = [
     # TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=64,  stride_b=64),
     # TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
     # # 1x4 config (mt_a//16 odd, mt_b//16 div by 4)
-    TileConfig(mt_a=48,  mt_b=64, depth_u=64, stride_a=64,  stride_b=64),
-    # TileConfig(mt_a=48,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
+    # TileConfig(mt_a=48,  mt_b=64, depth_u=64, stride_a=64,  stride_b=64),
+    TileConfig(mt_a=48,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
     # # 4x1 config (mt_a//16 div by 4, mt_b//16 odd)
     # TileConfig(mt_a=128, mt_b=48,  depth_u=64, stride_a=64,  stride_b=64),
     # TileConfig(mt_a=64,  mt_b=48, depth_u=64, stride_a=64,  stride_b=64),

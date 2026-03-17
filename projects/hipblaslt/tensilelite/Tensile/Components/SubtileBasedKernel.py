@@ -760,7 +760,9 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
   tc = tileInfo.tc
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
   subtile_size = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
-  rowOffset = math.ceil(tileInfo.loadRatioGR*subtile_size)
+  # rowOffset between 2 subtiles offset, ie how many consecutive subtile covered by a single subtileOffset.
+  # rowOffset = numGRPerSubtile * (local load ratio * subtile size)
+  rowOffset = math.ceil(tileInfo.numGRPerSubtile*tileInfo.loadRatioGR*subtile_size)
   s_stride = rowOffset * tileInfo.bpe
 
   for regId in range(len(tileInfo.localSubtilesRegister)):
