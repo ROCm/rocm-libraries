@@ -892,7 +892,7 @@ TEST_F(TestBatchnormOperationDescriptor, BuildNodeWithoutOptionalTensors)
 TEST_F(TestBatchnormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors[0]->getData().uid, K_BATCHNORM_TENSOR_X_UID);
@@ -900,7 +900,7 @@ TEST_F(TestBatchnormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
 TEST_F(TestBatchnormOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
