@@ -870,7 +870,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraph
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -882,7 +882,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraph
 TEST_F(TestBatchnormBackwardOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _dyDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _dyDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 

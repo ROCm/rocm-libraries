@@ -8,10 +8,9 @@
 /// - Unsigned type behavior (no sign bit, clamping of negative values)
 /// - No zero representation (scale=0 = 2^-127)
 /// - Power of 2 only representation
-/// - Cross-type conversions
 ///
 /// Generic tests (construction, conversion, numeric_limits basics, stream output)
-/// are in TestPortableTypes.cpp.
+/// are in TestPortableTypes.cpp. Cross-type conversions are tested in TestCrossTypeConversion.cpp.
 ///
 /// @see fp8_e8m0 struct for format specification.
 
@@ -251,36 +250,4 @@ TEST(TestFp8E8M0, NumericLimitsRoundError)
     fp8_e8m0 roundErr = std::numeric_limits<fp8_e8m0>::round_error();
     EXPECT_EQ(roundErr.data, E8M0_BITS_ONE);
     EXPECT_EQ(static_cast<float>(roundErr), 1.0f);
-}
-
-// ============================================================================
-// Cross-Type Conversion Tests
-// ============================================================================
-
-TEST(TestFp8E8M0, ConvertFromBfloat16)
-{
-    bfloat16 bf(2.0f);
-    fp8_e8m0 e8m0(bf);
-    EXPECT_EQ(static_cast<float>(e8m0), 2.0f);
-}
-
-TEST(TestFp8E8M0, ConvertFromHalf)
-{
-    half h(4.0f);
-    fp8_e8m0 e8m0(h);
-    EXPECT_EQ(static_cast<float>(e8m0), 4.0f);
-}
-
-TEST(TestFp8E8M0, ConvertToBfloat16)
-{
-    fp8_e8m0 e8m0(2.0f);
-    bfloat16 bf(e8m0);
-    EXPECT_EQ(static_cast<float>(bf), 2.0f);
-}
-
-TEST(TestFp8E8M0, ConvertToHalf)
-{
-    fp8_e8m0 e8m0(4.0f);
-    half h(e8m0);
-    EXPECT_EQ(static_cast<float>(h), 4.0f);
 }
