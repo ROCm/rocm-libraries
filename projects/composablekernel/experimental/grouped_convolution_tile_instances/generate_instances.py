@@ -521,7 +521,7 @@ def parse_bwd_data_instances(instances, problem_name):
 
         # Block GEMM pipeline parameters
         block_gemm_pipeline_scheduler = "Intrawave"
-        blk_gemm_pipeline_version = "v1"
+        blk_gemm_pipeline_version = "v3"
 
         # Sanity check for Block GEMM pipeline parameters
         # Scheduler must be either Intrawave or Interwave.
