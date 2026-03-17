@@ -68,7 +68,10 @@ protected:
         descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
 
         auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                HIPDNN_TYPE_HANDLE,
+                                1,
+                                static_cast<const void*>(&handle));
         descriptor.finalize();
         return descriptor;
     }
@@ -168,7 +171,10 @@ TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
         GraphDescriptor descriptor2;
         descriptor2.deserializeGraph(serialized.data(), serialized.size());
         auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-        descriptor2.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        descriptor2.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                 HIPDNN_TYPE_HANDLE,
+                                 1,
+                                 static_cast<const void*>(&handle));
         descriptor2.finalize();
     }
 
