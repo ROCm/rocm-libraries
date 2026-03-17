@@ -162,7 +162,21 @@ message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 
 find_package( hip REQUIRED )
 find_package( hiprtc REQUIRED )
-find_package( OpenMP REQUIRED )
+find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+if(NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR)
+   # Fall-back to module mode.
+   find_package(OpenMP MODULE REQUIRED)
+endif()
+
+if(TARGET OpenMP::omp)
+  set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
+  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
+  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
+else()
+  set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
+  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
+endif()
 
 if (ROCWMMA_BUILD_BENCHMARK_TESTS)
     ## Check for AMD-smi
@@ -177,7 +191,7 @@ if (ROCWMMA_BUILD_BENCHMARK_TESTS)
 endif()
 
 add_library(rocwmma INTERFACE)
-target_link_libraries(rocwmma INTERFACE hip::device hip::host OpenMP::OpenMP_CXX ${AMD_SMI_LIBRARY})
+target_link_libraries(rocwmma INTERFACE hip::device hip::host ${ROCWMMA_OPENMP_LIBRARY} ${AMD_SMI_LIBRARY})
 
 rocm_install_targets(
   TARGETS rocwmma

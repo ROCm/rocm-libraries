@@ -163,13 +163,13 @@ def main():
             # Write category test to CMake file and install file.
             # =======================================================================
             print("add_test(")
-            print(f"  NAME {target_name}-{category_name}-suite")
+            print(f"  NAME {target_name}_{category_name}_suite")
             print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
 
             print(
-                f"set_tests_properties({target_name}-{category_name}-suite PROPERTIES"
+                f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES"
             )
             print(f"  LABELS {label_string}")
             print(f"  TIMEOUT {timeout}")
@@ -180,10 +180,10 @@ def main():
             if install_file_handle:
                 try:
                     install_file_handle.write(
-                        f'add_test({target_name}-{category_name}-suite "../{target_name}" --gtest_filter={pattern_string})\n'
+                        f'add_test({target_name}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string})\n'
                     )
                     install_file_handle.write(
-                        f"set_tests_properties({target_name}-{category_name}-suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                        f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
                     )
                     install_file_handle.flush()
                 except OSError as e:
@@ -206,7 +206,7 @@ def main():
         # - Uses wildcard 'X' for pattern matching (e.g., gfx11X matches gfx1100, gfx1150, etc.)
 
         # - Generates one test per category (quick, standard, etc.) per unique ex_gpu_* label
-        # - Test name format: {target_name}-{category}-{gpu_arch}-suite
+        # - Test name format: {target_name}_{category}_{gpu_arch}_suite
         # - Uses gtest filter: "{category_patterns}:-{gpu_exclusion_patterns}"
         # ========================================================================
 
@@ -293,13 +293,13 @@ def main():
                 # =======================================================================
                 print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
                 print("add_test(")
-                print(f"  NAME {target_name}-{category_name}-{gpu_arch}-suite")
+                print(f"  NAME {target_name}_{category_name}_{gpu_arch}_suite")
                 print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
                 print(f"  WORKING_DIRECTORY {working_dir}")
                 print(")")
 
                 print(
-                    f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-suite PROPERTIES"
+                    f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES"
                 )
                 print(f"  LABELS {label_string}")
                 print(f"  TIMEOUT {timeout}")
@@ -310,20 +310,20 @@ def main():
                 if install_file_handle:
                     try:
                         install_file_handle.write(
-                            f'add_test({target_name}-{category_name}-{gpu_arch}-suite "../{target_name}" --gtest_filter={pattern_string})\n'
+                            f'add_test({target_name}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string})\n'
                         )
                         install_file_handle.write(
-                            f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                            f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:
                         print(
-                            f"Warning: I/O error writing GPU exclude {category_name}-{gpu_arch} to install test file: {e}",
+                            f"Warning: I/O error writing GPU exclude {category_name}_{gpu_arch} to install test file: {e}",
                             file=sys.stderr,
                         )
                     except Exception as e:
                         print(
-                            f"Warning: Unexpected error writing GPU exclude {category_name}-{gpu_arch} to install test file: {type(e).__name__}: {e}",
+                            f"Warning: Unexpected error writing GPU exclude {category_name}_{gpu_arch} to install test file: {type(e).__name__}: {e}",
                             file=sys.stderr,
                         )
 

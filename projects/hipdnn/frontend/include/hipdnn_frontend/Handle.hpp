@@ -181,22 +181,26 @@ using hipdnn_handle_deleter = HipdnnHandleDeleter;
 /// @brief snake_case alias for HipdnnHandlePtr
 using hipdnn_handle_ptr = HipdnnHandlePtr;
 
+/// @brief snake_case alias for createHipdnnHandle() (structured-binding style)
 inline auto create_hipdnn_handle(hipStream_t stream // NOLINT(readability-identifier-naming)
                                  = nullptr)
 {
     return createHipdnnHandle(stream);
 }
+/// @brief snake_case alias for createHipdnnHandle() (output-parameter style)
 inline Error create_hipdnn_handle(HipdnnHandlePtr& handle, // NOLINT(readability-identifier-naming)
                                   hipStream_t stream = nullptr)
 {
     return createHipdnnHandle(handle, stream);
 }
+/// @brief snake_case alias for setHipdnnHandleStream()
 inline Error
     set_hipdnn_handle_stream(const HipdnnHandlePtr& h, // NOLINT(readability-identifier-naming)
                              hipStream_t s)
 {
     return setHipdnnHandleStream(h, s);
 }
+/// @brief snake_case alias for getHipdnnHandleStream()
 inline Error
     get_hipdnn_handle_stream(const HipdnnHandlePtr& h, // NOLINT(readability-identifier-naming)
                              hipStream_t* s)
