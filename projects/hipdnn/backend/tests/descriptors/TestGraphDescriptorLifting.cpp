@@ -800,3 +800,67 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeDataTypesWithoutFinalization)
         HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &ioCount, &ioDt));
     EXPECT_EQ(ioDt, HIPDNN_DATA_FLOAT);
 }
+
+TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphName)
+{
+    auto conv = createDefaultConvOp();
+
+    // Build graph with a name set via setAttribute
+    auto graphWrapper = createDescriptor<GraphDescriptor>();
+    auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
+
+    hipdnnHandle_t handle = &_mockHandle;
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+
+    HipdnnBackendDescriptor* opPtr = conv.convOp.get();
+    graphDesc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &opPtr);
+
+    auto computeDt = HIPDNN_DATA_FLOAT;
+    graphDesc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeDt);
+    auto intermediateDt = HIPDNN_DATA_FLOAT;
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT,
+                            HIPDNN_TYPE_DATA_TYPE,
+                            1,
+                            &intermediateDt);
+    auto ioDt = HIPDNN_DATA_FLOAT;
+    graphDesc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &ioDt);
+
+    const std::string graphName = "TestGraphName";
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                            HIPDNN_TYPE_CHAR,
+                            static_cast<int64_t>(graphName.size()),
+                            graphName.c_str());
+
+    graphDesc->finalize();
+
+    // Get the serialized bytes
+    auto serialized = graphDesc->getSerializedGraph();
+    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
+                               static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
+
+    // Deserialize into a new graph and verify the name is preserved
+    auto liftedGraph = deserializeAndFinalize(bytes);
+
+    // Verify via getAttribute
+    int64_t nameCount = 0;
+    ASSERT_NO_THROW(liftedGraph->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &nameCount, nullptr));
+    ASSERT_EQ(nameCount, static_cast<int64_t>(graphName.size()));
+
+    std::string recovered(static_cast<size_t>(nameCount), '\0');
+    int64_t actualCount = 0;
+    ASSERT_NO_THROW(liftedGraph->getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                              HIPDNN_TYPE_CHAR,
+                                              nameCount,
+                                              &actualCount,
+                                              recovered.data()));
+    EXPECT_EQ(recovered, graphName);
+
+    // Also verify via the serialized FlatBuffer
+    auto reSerializedData = liftedGraph->getSerializedGraph();
+    auto graphT = GetGraph(reSerializedData.ptr)->UnPack();
+    EXPECT_EQ(graphT->name, graphName);
+}

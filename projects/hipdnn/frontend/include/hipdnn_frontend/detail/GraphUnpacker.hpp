@@ -376,6 +376,15 @@ void unpackNodeFromFlatBuffer(
         outPreferredEngineId = preferredEngineId;
     }
 
+    // Query graph name (optional, may not be set)
+    std::string graphName;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrString(
+        graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, graphName, "graph name"));
+    if(!graphName.empty())
+    {
+        outGraphAttrs.set_name(graphName);
+    }
+
     return {};
 }
 

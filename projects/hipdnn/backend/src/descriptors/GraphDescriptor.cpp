@@ -60,6 +60,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGra
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
     graph->preferred_engine_id = toFlatbufferOptional(_preferredEngineId);
+    graph->name = _name;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
@@ -200,6 +201,9 @@ void GraphDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         getPreferredEngineId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
+        getName(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -290,6 +294,27 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                          "GraphDescriptor::getAttribute()");
 }
 
+void GraphDescriptor::setName(hipdnnBackendAttributeType_t attributeType,
+                              int64_t elementCount,
+                              const void* arrayOfElements)
+{
+    setString(
+        _name, attributeType, elementCount, arrayOfElements, "GraphDescriptor::setAttribute()");
+}
+
+void GraphDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
+                              int64_t requestedElementCount,
+                              int64_t* elementCount,
+                              void* arrayOfElements) const
+{
+    getString(_name,
+              attributeType,
+              requestedElementCount,
+              elementCount,
+              arrayOfElements,
+              "GraphDescriptor::getAttribute()");
+}
+
 void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
                                     int64_t elementCount,
                                     const void* arrayOfElements)
@@ -368,6 +393,9 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         setPreferredEngineId(attributeType, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
+        setName(attributeType, elementCount, arrayOfElements);
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -406,6 +434,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
     _preferredEngineId = toStdOptional(graph->preferred_engine_id);
+    _name = graph->name;
 
     // Cache the serialized bytes for getSerializedGraph() by re-serializing from the parsed GraphT
     flatbuffers::FlatBufferBuilder builder;

@@ -448,4 +448,25 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
     EXPECT_NE(result.code, ErrorCode::OK) << "deserialize_via_backend should fail on empty data";
 }
 
+// Verifies that the graph name survives the C-API round-trip (lower -> lift).
+TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughCApi)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
+}
+
 } // namespace

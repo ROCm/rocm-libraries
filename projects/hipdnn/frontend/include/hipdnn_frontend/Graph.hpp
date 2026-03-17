@@ -867,6 +867,7 @@ protected:
                                                            *intermediateDt,
                                                            *ioDt,
                                                            _preferredEngineId,
+                                                           graph_attributes.get_name(),
                                                            _graphDesc));
 
         return {ErrorCode::OK, ""};
