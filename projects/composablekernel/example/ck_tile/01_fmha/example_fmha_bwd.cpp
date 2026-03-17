@@ -87,6 +87,7 @@ auto create_args(int argc, char* argv[])
                 "0",
                 "if set to 1 will use multi-buffer reduction strategy for dq, atomic operation "
                 "will not be used")
+        .insert("sink_grad", "0", "if set to 1, compute and validate sink token gradient")
         .insert("json", "0", "0: No Json, 1: Dump Results in Json format")
         .insert("jsonfile", "fmha_bwd.json", "json file name to dump results");
 
@@ -122,7 +123,7 @@ auto run(const ck_tile::ArgParser& arg_parser)
     bool deterministic       = arg_parser.get_bool("deterministic");
     std::string init_method  = arg_parser.get_str("init");
     uint32_t seed            = arg_parser.get_uint32("seed");
-    bool sink_grad           = true;  // only for validation, no effect on kernel
+    bool sink_grad           = arg_parser.get_bool("sink_grad");
 
     ck_tile::stream_config stream_config{nullptr,
                                          true,
