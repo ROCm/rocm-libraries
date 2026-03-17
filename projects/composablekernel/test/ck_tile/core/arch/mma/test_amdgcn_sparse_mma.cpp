@@ -8,7 +8,9 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
+#include "ck_tile/core/arch/mma/sparse_mma.hpp"
 #include <hip/hip_runtime.h>
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
@@ -150,31 +152,40 @@ template <typename AType,
 __global__ void test_sparse_accum_over_k(void* a, void* b, void* c, void* out)
 {
     using CompilerTarget = decltype(get_compiler_target());
-    using Selector       = MmaDefaultSelector<AType,
-                                              BType,
-                                              CType,
-                                              WaveTileM,
-                                              WaveTileN,
-                                              WaveTileK,
-                                              CompilerTarget,
-                                              MmaOpFamily::SPARSE>;
-    using MmaOp          = typename Selector::SelectedOp;
-    using CVecType       = typename MmaOp::CVecType;
+    using MmaOp          = typename MmaDefaultSelector<AType, // TODO: c++20 MmaOpI MmaOp = typename
+                                                              // MmaDefaultSelector<ADataType,
+                                                       BType,
+                                                       CType,
+                                                       WaveTileM,
+                                                       WaveTileN,
+                                                       WaveTileK,
+                                                       CompilerTarget,
+                                                       MmaOpFamily::SPARSE>::SelectedOp;
 
-    static constexpr uint32_t kIters = WaveTileK / MmaOp::kK;
+    using MmaTraits = MmaOpTraits<MmaOp>;
 
-    // Initialize the accumulator
-    CVecType result = *reinterpret_cast<typename MmaOp::CVecType*>(c);
-
-    // Accumulate input AxB over WaveTileK/FragK iterations
-    for(uint32_t i = 0; i < kIters; ++i)
+    if constexpr(MmaTraits::IsSupported)
     {
-        result = MmaOp::exec(*reinterpret_cast<typename MmaOp::AVecType*>(a),
-                             *reinterpret_cast<typename MmaOp::BVecType*>(b),
-                             result);
-    }
+        using Pipeline = SparseMma<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget>;
 
-    *reinterpret_cast<typename MmaOp::CVecType*>(out) = result;
+        using AVecType = typename Pipeline::AVecType;
+        using BVecType = typename Pipeline::BVecType;
+        using CVecType = typename Pipeline::CVecType;
+
+        static constexpr uint32_t kIters = WaveTileK / MmaOp::kK;
+
+        // Initialize the accumulator
+        CVecType result = *reinterpret_cast<CVecType*>(c);
+
+        // Accumulate input AxB over FragK/BlockK iterations
+        for(uint32_t i = 0; i < kIters; ++i)
+        {
+            result = Pipeline::exec(
+                *reinterpret_cast<AVecType*>(a), *reinterpret_cast<BVecType*>(b), result);
+        }
+
+        *reinterpret_cast<CVecType*>(out) = result;
+    }
 }
 
 // Live test on real hardware for sparse selection and execution.
