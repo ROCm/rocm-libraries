@@ -779,87 +779,23 @@ def cmake_build(Map conf=[:]){
                 // do not run unit tests when building instances only
                 if(!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
-                        // Smart Build: Use smart_build_ci.sh for dependency analysis and selective building
-                        echo "🚀 Using Smart Build System"
+                        // Smart Build: Run smart_build_and_test.sh
+                        sh """
+                            export WORKSPACE_ROOT=${env.WORKSPACE}
+                            export PARALLEL=32
+                            export NINJA_JOBS=${nt}
+                            export ARCH_NAME=${arch_name}
+                            export PROCESS_NINJA_TRACE=true
+                            export NINJA_FTIME_TRACE=${params.NINJA_FTIME_TRACE ? 'true' : 'false'}
+                            bash ../script/dependency-parser/smart_build_and_test.sh
+                        """
 
-                        // Run smart-build script to determine build mode and targets
-                        def smartBuildStatus = sh(
-                            script: """
-                                export WORKSPACE_ROOT=${env.WORKSPACE}
-                                export PARALLEL=32
-                                bash ../script/dependency-parser/smart_build_ci.sh
-                            """,
-                            returnStatus: true
-                        )
-
-                        if (smartBuildStatus == 0) {
-                            // Selective build: Read targets from build_targets.txt
-                            def buildTargets = sh(
-                                script: 'cat build_targets.txt',
-                                returnStdout: true
-                            ).trim()
-
-                            if (buildTargets == "none") {
-                                echo "✓ No tests affected by changes - skipping build and test execution"
-                            } else {
-                                echo "✓ Selective build - building only affected targets"
-
-                                // Build only affected test executables
-                                echo "Building targets: ${buildTargets}"
-                                sh "ninja -j${nt} ${buildTargets}"
-
-                                // Process ninja build trace after selective build
-                                sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
-                                archiveArtifacts "ck_build_trace_${arch_name}.json"
-                                sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
-
-                                if (params.NINJA_FTIME_TRACE) {
-                                    echo "running ClangBuildAnalyzer"
-                                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
-                                    sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
-                                    archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                                }
-
-                                // Run affected tests using regex_chunks
-                                def numChunks = sh(
-                                    script: 'jq -r ".regex_chunks | length" tests_to_run.json',
-                                    returnStdout: true
-                                ).trim().toInteger()
-
-                                echo "Running ${numChunks} test chunk(s)"
-                                if (numChunks == 1) {
-                                    def testRegex = sh(
-                                        script: 'jq -r ".regex_chunks[0]" tests_to_run.json',
-                                        returnStdout: true
-                                    ).trim()
-                                    sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
-                                } else {
-                                    for (int i = 0; i < numChunks; i++) {
-                                        def testRegex = sh(
-                                            script: "jq -r '.regex_chunks[${i}]' tests_to_run.json",
-                                            returnStdout: true
-                                        ).trim()
-                                        echo "Running test chunk ${i + 1}/${numChunks}"
-                                        sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
-                                    }
-                                }
-                            }
-                        } else {
-                            // Full build required (smartBuildStatus == 1)
-                            echo "⚠ Full build mode - building and testing everything"
-                            sh "ninja -j${nt} check"
-
-                            // Process ninja build trace after full build
-                            sh "python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${arch_name}.json"
+                        // Archive artifacts if they were generated
+                        if (fileExists("ck_build_trace_${arch_name}.json")) {
                             archiveArtifacts "ck_build_trace_${arch_name}.json"
-                            sh "python3 ../script/parse_ninja_trace.py ck_build_trace_${arch_name}.json"
-
-                            if (params.NINJA_FTIME_TRACE) {
-                                echo "running ClangBuildAnalyzer"
-                                sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --all . clang_build.log"
-                                sh "/ClangBuildAnalyzer/build/ClangBuildAnalyzer  --analyze clang_build.log > clang_build_analysis_${arch_name}.log"
-                                archiveArtifacts "clang_build_analysis_${arch_name}.log"
-                            }
+                        }
+                        if (fileExists("clang_build_analysis_${arch_name}.log")) {
+                            archiveArtifacts "clang_build_analysis_${arch_name}.log"
                         }
                     }
                     else{
@@ -902,64 +838,16 @@ def cmake_build(Map conf=[:]){
                 // So no ninja trace processing needed here
                 if (!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
-                        // Smart Build: Use smart_build_ci.sh for dependency analysis and selective building
-                        echo "🚀 Using Smart Build System"
-
-                        // Run smart-build script to determine build mode and targets
-                        def smartBuildStatus = sh(
-                            script: """
-                                export WORKSPACE_ROOT=${env.WORKSPACE}
-                                export PARALLEL=32
-                                bash ../script/dependency-parser/smart_build_ci.sh
-                            """,
-                            returnStatus: true
-                        )
-
-                        if (smartBuildStatus == 0) {
-                            // Selective build: Read targets from build_targets.txt
-                            def buildTargets = sh(
-                                script: 'cat build_targets.txt',
-                                returnStdout: true
-                            ).trim()
-
-                            if (buildTargets == "none") {
-                                echo "✓ No tests affected by changes - skipping build and test execution"
-                            } else {
-                                echo "✓ Selective build - building only affected targets"
-
-                                // Build only affected test executables
-                                echo "Building targets: ${buildTargets}"
-                                sh "ninja -j${nt} ${buildTargets}"
-
-                                // Run affected tests using regex_chunks
-                                def numChunks = sh(
-                                    script: 'jq -r ".regex_chunks | length" tests_to_run.json',
-                                    returnStdout: true
-                                ).trim().toInteger()
-
-                                echo "Running ${numChunks} test chunk(s)"
-                                if (numChunks == 1) {
-                                    def testRegex = sh(
-                                        script: 'jq -r ".regex_chunks[0]" tests_to_run.json',
-                                        returnStdout: true
-                                    ).trim()
-                                    sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
-                                } else {
-                                    for (int i = 0; i < numChunks; i++) {
-                                        def testRegex = sh(
-                                            script: "jq -r '.regex_chunks[${i}]' tests_to_run.json",
-                                            returnStdout: true
-                                        ).trim()
-                                        echo "Running test chunk ${i + 1}/${numChunks}"
-                                        sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
-                                    }
-                                }
-                            }
-                        } else {
-                            // Full build required (smartBuildStatus == 1)
-                            echo "⚠ Full build mode - building and testing everything"
-                            sh "ninja -j${nt} check"
-                        }
+                        // Smart Build: Run smart_build_and_test.sh
+                        sh """
+                            export WORKSPACE_ROOT=${env.WORKSPACE}
+                            export PARALLEL=32
+                            export NINJA_JOBS=${nt}
+                            export ARCH_NAME=${arch_name}
+                            export PROCESS_NINJA_TRACE=false
+                            export NINJA_FTIME_TRACE=false
+                            bash ../script/dependency-parser/smart_build_and_test.sh
+                        """
                     }
                     else{
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
