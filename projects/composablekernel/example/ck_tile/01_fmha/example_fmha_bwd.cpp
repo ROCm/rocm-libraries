@@ -122,7 +122,6 @@ auto run(const ck_tile::ArgParser& arg_parser)
     bool deterministic       = arg_parser.get_bool("deterministic");
     std::string init_method  = arg_parser.get_str("init");
     uint32_t seed            = arg_parser.get_uint32("seed");
-    float sink_value         = 10.0f; // only for validation, no effect on kernel
     bool sink_grad           = true;  // only for validation, no effect on kernel
 
     ck_tile::stream_config stream_config{nullptr,
@@ -156,7 +155,6 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         drop_offset,
                                         drop_prefs,
                                         mask_str,
-                                        sink_value,
                                         sink_grad,
                                         deterministic,
                                         init_method,

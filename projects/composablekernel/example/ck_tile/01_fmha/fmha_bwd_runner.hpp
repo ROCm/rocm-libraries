@@ -77,7 +77,6 @@ bwd_result fmha_bwd_run(mode_enum mode,
                         uint64_t drop_offset,
                         bool drop_prefs,
                         std::string mask_str,
-                        float sink_val, // scalar sink score shared across all heads (log-space)
                         bool sink_grad, // if true, compute and validate sink gradient
                         bool deterministic,
                         std::string init_method,
@@ -287,7 +286,11 @@ bwd_result fmha_bwd_run(mode_enum mode,
     ck_tile::HostTensor<LSEDataType> lse_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
     ck_tile::HostTensor<AccDataType> sink_host(std::array<ck_tile::index_t, 2>{shape_batch, nhead});
-    sink_host.ForEach([&](auto& self, auto i) { self(i) = sink_val; });
+    {
+        std::uniform_real_distribution<float> sink_dist(30.0f, 60.0f);
+        sink_host.ForEach(
+            [&](auto& self, auto i) { self(i) = static_cast<AccDataType>(sink_dist(random_engine)); });
+    }
     ck_tile::HostTensor<DDataType> d_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
     ck_tile::HostTensor<RandValOutputDataType> randval_host(
@@ -430,8 +433,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
     std::cout << "[" << data_type << "|" << mode << "|" << io_layout(i_perm, o_perm)
               << "] b:" << batch << ", h:" << nhead << "/" << nhead_k << ", s:" << seqlen_qs[0]
               << "/" << seqlen_ks[0] << ", d:" << hdim_q << "/" << hdim_v << ", scale:" << scale
-              << ", bias:" << bias << ", dbias:" << use_dbias << ", p_drop:" << p_drop << ", sink:("
-              << sink_val << ", " << (sink_grad ? "grad" : "const") << ")"
+              << ", bias:" << bias << ", dbias:" << use_dbias << ", p_drop:" << p_drop
+              << ", sink:(rand[30,60], " << (sink_grad ? "grad" : "const") << ")"
               << ", s_randval:" << s_randval << ", deterministic:" << deterministic
               << (deterministic
                       ? std::string(", workspace:") + std::to_string(workspace_size_in_megabytes) +
@@ -788,7 +791,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
                 s_host_ref, p_hp_host_ref, ck_tile::identity{}, lse_host_ref);
 
             // Incorporate sink token into the softmax distribution (reference computation).
-            // The sink acts as an extra key whose score is sink_val (in log-space).
+            // The sink acts as an extra key whose score is sink_host(wb, i_h) (in log-space),
+            // which is a per-head random value in [30, 60].
             //   lse_new = log(exp(lse_old) + exp(sink))
             //   P_new   = P_old * exp(lse_old - lse_new)   (rescaled token attention)
             //   P_sink  = exp(sink - lse_new)               (sink attention weight)
@@ -796,9 +800,9 @@ bwd_result fmha_bwd_run(mode_enum mode,
                 sink_grad ? std::array<ck_tile::index_t, 2>{nhead, real_seqlen_q}
                           : std::array<ck_tile::index_t, 2>{0, 0});
             {
-                AccDataType exp_sink = ck_tile::exp(sink_val);
                 for(int i_h = 0; i_h < nhead; ++i_h)
                 {
+                    AccDataType exp_sink = ck_tile::exp(sink_host(wb, i_h));
                     for(int i_q = 0; i_q < real_seqlen_q; ++i_q)
                     {
                         AccDataType exp_lse_old = ck_tile::exp(lse_host_ref(i_h, i_q));
