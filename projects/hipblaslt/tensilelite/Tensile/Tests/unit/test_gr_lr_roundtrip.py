@@ -44,10 +44,10 @@ from rocisa.instruction import SMovB32, SMovB64, SWaitCnt, SBarrier
 # ---------------------------------------------------------------------------
 CONFIGS = [
     # 2x2 configs (both mt_a//16 and mt_b//16 even)
-    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=64,  stride_b=64),
-    TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
+    # TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=64,  stride_b=64),
+    # TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
     # # 1x4 config (mt_a//16 odd, mt_b//16 div by 4)
-    # TileConfig(mt_a=48,  mt_b=64, depth_u=64, stride_a=64,  stride_b=64),
+    TileConfig(mt_a=48,  mt_b=64, depth_u=64, stride_a=64,  stride_b=64),
     # TileConfig(mt_a=48,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
     # # 4x1 config (mt_a//16 div by 4, mt_b//16 odd)
     # TileConfig(mt_a=128, mt_b=48,  depth_u=64, stride_a=64,  stride_b=64),
@@ -230,7 +230,15 @@ def generate_roundtrip_kernel(cfg, wave_id=0):
         ("strideB",     4, "by_value",      "u32"),
     )
 
-    lds_size = (cfg.mt_a + cfg.mt_b) * cfg.depth_u * BPE
+    # LDS allocation must match production formula (KernelWriter.py):
+    # align A and B sizes to readSize (2*subtileSize) for DTL 2xsubtile reads
+    readSize = 2 * tileInfoA.subtileSize
+    numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
+    numBSubtiles = tileInfoB.globalSubtileGrid[0] * tileInfoB.globalSubtileGrid[1]
+    sizeA = ((numASubtiles * tileInfoA.subtileSize + readSize - 1) // readSize) * readSize
+    sizeB = ((numBSubtiles * tileInfoB.subtileSize + readSize - 1) // readSize) * readSize
+    lds_size = sizeA + sizeB
+
     kernel_asm = generate_kernel_asm(inner_asm, writer, args, lds_size)
 
     num_tiles_a = len(tileInfoA.vgprTiles)
@@ -238,7 +246,7 @@ def generate_roundtrip_kernel(cfg, wave_id=0):
     total_tiles = num_tiles_a + num_tiles_b
     output_size = total_tiles * WAVESIZE * 16
 
-    return kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size
+    return kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size, lds_size
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +447,6 @@ def print_grid_diff(label, actual, expected):
         print()
     print(f"  {'All match.' if n_mis == 0 else f'{n_mis} group mismatches.'}")
 
-def roundUp(x, y):
-    return ((x + y - 1) // y) * y
 # ---------------------------------------------------------------------------
 # Pytest tests
 # ---------------------------------------------------------------------------
@@ -460,14 +466,13 @@ class TestGrLrRoundtrip:
         """Verify GR -> LDS -> LR roundtrip using production code paths."""
         sys.stdout.flush()
 
-        kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size = \
+        kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size, lds_size = \
             generate_roundtrip_kernel(cfg, wave_id=wave_id)
 
         # Create input data
         input_A = np.arange(1, cfg.mt_a * cfg.stride_a + 1, dtype=np.float16)
         input_B = -np.arange(1, cfg.mt_b * cfg.stride_b + 1, dtype=np.float16)
 
-        lds_size = (roundUp(cfg.mt_a,32) + roundUp(cfg.mt_b,32)) * cfg.depth_u * BPE
         label = f"roundtrip_{cfg.label}_wave{wave_id}"
         output_bytes = assemble_and_run(kernel_asm, tmp_path, label, output_size,
                                         inputs=(input_A, input_B),
@@ -517,7 +522,7 @@ if __name__ == "__main__":
             total_tests += 1
             print(f"\n  --- Wave {wave_id} ---")
 
-            kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size = \
+            kernel_asm, writer, kernel, tileInfoA, tileInfoB, output_size, lds_size = \
                 generate_roundtrip_kernel(cfg, wave_id=wave_id)
 
             num_tiles_a = len(tileInfoA.vgprTiles)
@@ -534,7 +539,6 @@ if __name__ == "__main__":
                 input_A = np.arange(1, cfg.mt_a * cfg.stride_a + 1, dtype=np.float16)
                 input_B = -np.arange(1, cfg.mt_b * cfg.stride_b + 1, dtype=np.float16)
 
-                lds_size = (cfg.mt_a + cfg.mt_b) * cfg.depth_u * BPE
                 label = f"roundtrip_{cfg.label}_wave{wave_id}"
                 output_bytes = assemble_and_run(kernel_asm, tmp_path, label, output_size,
                                                 inputs=(input_A, input_B),

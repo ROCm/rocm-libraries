@@ -513,7 +513,10 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
 
   elif tileInfo.loadRatioGR == 0.5:
     MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
-    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(tileInfo.subtileSize // 2), comment="%s: interleave stride"%tc))
+    if interleaved:
+      module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(tileInfo.subtileSize), comment="%s: interleave stride"%tc))
+    else:
+      module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(MT0*depthUBytes//4), comment="%s: non-interleave stride"%tc))
     # module.add(VAndB32(dst=vgpr(tmp1), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId & 1"%tc))
     module.add(VMulLOU32(dst=vgpr(tmp), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment=""))
 
@@ -588,7 +591,7 @@ def lraTileAssignment(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId % 16"))
 
-  swizzling = True
+  swizzling = False
   if swizzling:
     # Get lds row id
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
@@ -718,7 +721,7 @@ def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id, rowOffset):
   assert len(tileInfo.sharedVgprGROffset)<=2, "Only support 2 GR offset vgpr for now, found %u"%(len(tileInfo.sharedVgprGROffset))
 
   MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
-  subtile_size = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
+  subtileSize = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
 
   tmpVgpr = writer.vgprPool.checkOut(2)
@@ -740,9 +743,11 @@ def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id, rowOffset):
   # module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(tmpVgpr), src1=vgpr(tmpVgpr+1), comment="%s: GR offset = row_offset + split_wave_offset"%tc))
 
   if len(tileInfo.sharedVgprGROffset)>1:
-    offset = tileInfo.subtileSize*tileInfo.loadRatioGR
-    module.add(SMulI32(dst=sgpr(sHalfOffset), src0=sgpr(strideRef), src1=offset, comment="%s: 2nd GR offset calc : + %u rows"%(tc,offset)))
+    offset = math.ceil(subtileSize*tileInfo.loadRatioGR)
+    module.add(SMulI32(dst=sgpr(sHalfOffset), src0=sgpr(strideRef), src1=offset*bpe, comment="%s: 2nd GR offset calc : + %u rows"%(tc,offset)))
+    module.add(SNop(waitState=10, comment="%s: wait for sgpr before 2nd GR offset calc"%tc))
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[1]), src0=vgpr(tileInfo.sharedVgprGROffset[0]), src1=sgpr(sHalfOffset), comment="%s: GR offset for 2nd subtile = GR offset + subtile row offset"%tc))
+    module.add(Label("seb", comment=""))
 
   writer.sgprPool.checkIn(sHalfOffset)
   writer.vgprPool.checkIn(tmpVgpr)
@@ -854,7 +859,7 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   # Calculate col and row id within a wave for 128b loads
   module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
 
-  useSwizzling = True
+  useSwizzling = False
   if useSwizzling:
     module.addComment0("Swizzling")
     module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr("Serial"), comment="row id within wave"))
@@ -993,7 +998,12 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
 
       interleaved = True
       if interleaved:
-        offset = sId0*2*offsetStride
+        if tileInfo.loadRatioGR == 2.0:
+          offset = sId0*offsetStride
+        elif tileInfo.loadRatioGR == 0.5:
+          offset = sId0*4*offsetStride
+        else:
+          offset = sId0*2*offsetStride
       else:
         offset = sId0*offsetStride
 
@@ -1170,6 +1180,8 @@ def mainLoopImpl(writer, kernel, isNLL = False):
     module.add(globalReadDoSubtile('B', writer, kernel))
     module.add(SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all subtile GRs to complete"))
     module.add(SBarrier(comment=""))
+    
+    module.add(Label("debug", comment=""))
 
   
 
