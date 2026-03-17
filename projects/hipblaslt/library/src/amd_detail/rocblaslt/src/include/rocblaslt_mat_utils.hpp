@@ -127,31 +127,31 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 /*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
-inline rocblaslt_status validateMatmulArgs(int64_t                       m,
-                                           int64_t                       n,
-                                           int64_t                       k,
-                                           const void*                   alpha,
-                                           const void*                   a,
-                                           const void*                   b,
-                                           const void*                   beta,
-                                           const void*                   c,
-                                           const void*                   d,
-                                           hipDataType                   type_a,
-                                           hipDataType                   type_b,
-                                           hipDataType                   type_c,
-                                           hipDataType                   type_d,
-                                           rocblaslt_compute_type        compute_type,
-                                           hipblasOperation_t            opA,
-                                           hipblasOperation_t            opB,
-                                           int                           num_batches_a  = 1,
-                                           int                           num_batches_b  = 1,
-                                           int                           num_batches_c  = 1,
-                                           int                           num_batches_d  = 1,
-                                           int64_t                       batch_stride_a = 0,
-                                           int64_t                       batch_stride_b = 0,
-                                           int64_t                       batch_stride_c = 0,
-                                           int64_t                       batch_stride_d = 0,
-                                           const rocblaslt_pointer_mode& pointermode
+inline rocblaslt_status validateMatmulArgs(int64_t                      m,
+                                           int64_t                      n,
+                                           int64_t                      k,
+                                           const void*                  alpha,
+                                           const void*                  a,
+                                           const void*                  b,
+                                           const void*                  beta,
+                                           const void*                  c,
+                                           const void*                  d,
+                                           hipDataType                  type_a,
+                                           hipDataType                  type_b,
+                                           hipDataType                  type_c,
+                                           hipDataType                  type_d,
+                                           rocblaslt_compute_type       compute_type,
+                                           hipblasOperation_t           opA,
+                                           hipblasOperation_t           opB,
+                                           int                          num_batches_a  = 1,
+                                           int                          num_batches_b  = 1,
+                                           int                          num_batches_c  = 1,
+                                           int                          num_batches_d  = 1,
+                                           int64_t                      batch_stride_a = 0,
+                                           int64_t                      batch_stride_b = 0,
+                                           int64_t                      batch_stride_c = 0,
+                                           int64_t                      batch_stride_d = 0,
+                                           const rocblaslt_pointer_mode pointermode
                                            = rocblaslt_pointer_mode_host)
 {
     rocblaslt_status status = rocblaslt_status_continue;
@@ -238,9 +238,51 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_pointer;
 
     // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
-    bool alpha_A_B_violation = (!alpha || ((pointermode || (*((float*)alpha))) && (!a || !b)));
+    bool a_or_b_null = !a || !b;
+    bool alpha_A_B_violation = false;
+    if (k && (!alpha || (pointermode && a_or_b_null)))
+    {   // device mode don't read alpha from device
+        alpha_A_B_violation = true;
+    }
+    else if (k && a_or_b_null)
+    {
+        // dig deeper into the alpha value as if non zero then a and b are required
+        switch (compute_type)
+        {
+        // IEEE not zero tests 
+        case rocblaslt_compute_f16:
+            alpha_A_B_violation = (*((uint16_t*)alpha) & 0x7FFF) != 0; // mask off negative zero bit
+            break;
+        case rocblaslt_compute_f32:
+            alpha_A_B_violation = (*((uint32_t*)alpha) & 0x7FFFFFFF) != 0;
+            break;
+        case rocblaslt_compute_f64:
+            alpha_A_B_violation = (*((uint64_t*)alpha) & 0x7FFFFFFFFFFFFFFF) != 0;
+            break;
+        default:
+            if (type_c != HIP_C_32F && type_c != HIP_C_64F)
+            {
+                // F32 based is default
+                alpha_A_B_violation = (*((uint32_t*)alpha) & 0x7FFFFFFF) != 0;
+            }
+            else
+            {
+                if (type_c == HIP_C_32F)
+                {
+                    alpha_A_B_violation = (*((uint32_t*)alpha) & 0x7FFFFFFF) != 0;
+                    alpha_A_B_violation = alpha_A_B_violation || ((((uint32_t*)alpha)[1] & 0x7FFFFFFF) != 0);
+                }
+                else // HIP_C_64F
+                {
+                    alpha_A_B_violation = (*(uint64_t*)(alpha) & 0x7FFFFFFFFFFFFFFF) != 0;
+                    alpha_A_B_violation = alpha_A_B_violation || ((((uint64_t*)alpha)[1] & 0x7FFFFFFFFFFFFFFF) != 0);
+                }
+            }
+            break;
+        } // switch compute_type
+    }
     // pointers must be valid
-    if(n && ((k && alpha_A_B_violation) || !c || !d))
+    if(n && (alpha_A_B_violation || !c || !d))
         return rocblaslt_status_invalid_pointer;
 
     return rocblaslt_status_continue;
