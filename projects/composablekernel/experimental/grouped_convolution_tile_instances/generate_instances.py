@@ -483,18 +483,20 @@ def parse_bwd_data_instances(instances, problem_name):
         params_str = instance[start:end]
         args = parse_instance_string(params_str)
 
-        is_v1_instance = instance.find("Xdl_CShuffle_v1") != -1
+        is_v1_instance = instance.find("Xdl_CShuffle<") != -1
         
         if is_v1_instance:
             if len(args) != 51:
                 raise RuntimeError(f"Wrong number of parameters in the V1 XDL CShuffle instance string: {instance}\n" + 
                                     f"Expected 51 parameters for V1 instance. Found {len(args)} parameters.")
-
+        else:
+            raise RuntimeError(f"Only V1 XDL CShuffle instances are supported for backward data. Found instance: {instance}")
+        
         spec = args[13]
         block_size = int(args[17])
         m_per_block = int(args[18])
         n_per_block = int(args[19])
-        k0_per_block = int(args[20])
+        k_per_block = int(args[20])
         ak1 = int(args[21])
         bk1 = int(args[22])
         m_per_xdl = int(args[23])
@@ -509,7 +511,6 @@ def parse_bwd_data_instances(instances, problem_name):
             raise RuntimeError(f"Not supported instance {instance_id} since ak1 != bk1. ak1: {ak1}, bk1: {bk1} in instance: {instance}")
         
         k1 = min(ak1, bk1)
-        k_per_block = k0_per_block * k1
 
         # Default optimization parameters
         num_groups_to_merge = 1
