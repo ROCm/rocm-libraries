@@ -44,21 +44,20 @@ from rocisa.instruction import SMovB32, SMovB64, SWaitCnt, SBarrier
 # ---------------------------------------------------------------------------
 CONFIGS = [
     # 2x2 configs (both mt_a//16 and mt_b//16 even)
-    # TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=64,  stride_b=64),
-    # TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
-    # # 1x4 config (mt_a//16 odd, mt_b//16 div by 4)
-    # TileConfig(mt_a=48,  mt_b=64, depth_u=64, stride_a=64,  stride_b=64),
-    TileConfig(mt_a=48,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
-    # # 4x1 config (mt_a//16 div by 4, mt_b//16 odd)
-    # TileConfig(mt_a=128, mt_b=48,  depth_u=64, stride_a=64,  stride_b=64),
-    # TileConfig(mt_a=64,  mt_b=48, depth_u=64, stride_a=64,  stride_b=64),
-    # # Stride > depthU variants
-    # TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=128, stride_b=128),
-    # TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=128, stride_b=128),
-
-    # TileConfig(mt_a=128, mt_b=48,  depth_u=64, stride_a=64,  stride_b=64),
-    # TileConfig(mt_a=256, mt_b=240,  depth_u=64, stride_a=64,  stride_b=64),
-    # TileConfig(mt_a=240, mt_b=256,  depth_u=64, stride_a=64,  stride_b=64),
+    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=512,  stride_b=64),
+    TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=64,  stride_b=1024),
+    # 1x4 config (mt_a//16 odd, mt_b//16 div by 4)
+    TileConfig(mt_a=48,  mt_b=64, depth_u=64, stride_a=512,  stride_b=64),
+    TileConfig(mt_a=48,  mt_b=128, depth_u=64, stride_a=64,  stride_b=1024),
+    # 4x1 config (mt_a//16 div by 4, mt_b//16 odd)
+    TileConfig(mt_a=128, mt_b=48,  depth_u=64, stride_a=512,  stride_b=64),
+    TileConfig(mt_a=64,  mt_b=48, depth_u=64, stride_a=64,  stride_b=1024),
+    # Stride > depthU variants
+    TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=128, stride_b=128),
+    TileConfig(mt_a=96,  mt_b=128, depth_u=64, stride_a=128, stride_b=128),
+    # Larger MT
+    TileConfig(mt_a=256, mt_b=240,  depth_u=64, stride_a=64,  stride_b=64),
+    TileConfig(mt_a=240, mt_b=256,  depth_u=64, stride_a=64,  stride_b=64),
 
 ]
 
@@ -284,11 +283,16 @@ def compute_expected_output(cfg, tileInfoA, tileInfoB, kernel, input_A, input_B,
         wave_row_offset = wave_offset_factor * rows_per_partition
 
         # Build reverse map: vgprTile index -> (mmaId0, mmaId1)
-        # The LDS layout uses interleaving (factor of 2) in the row dimension:
-        # subtile sId0 reads from LDS at offset sId0*2*subtileSize, which means
-        # each subtile slot spans data from 2 consecutive wave-loaded blocks.
+        # The LDS layout uses interleaving in the row dimension:
+        # The interleave factor matches the number of waves sharing the dimension
+        # (1 for loadRatioGR>=2.0, 2 for 1.0, 4 for 0.5).
         # So the effective mmaId0 = sId0 * subtileShape[0] * interleave_factor.
-        interleave_factor = 2 if tileInfo.loadRatioGR <= 1.0 else 1
+        if tileInfo.loadRatioGR >= 2.0:
+            interleave_factor = 1
+        elif tileInfo.loadRatioGR == 1.0:
+            interleave_factor = 2
+        else:  # loadRatioGR == 0.5
+            interleave_factor = 4
         tile_to_mma = {}
         for linearId, subtile in enumerate(tileInfo.localSubtiles):
             for mfmaIdx, tileIdx in enumerate(subtile.localReadMap):
@@ -359,7 +363,12 @@ def compare_tiles(actual_bytes, expected_tiles, tileInfoA, tileInfoB, wave_id, d
 
 def _build_tile_to_mma(tileInfo):
     """Build map from vgprTile index to (mmaId0, mmaId1)."""
-    interleave_factor = 2 if tileInfo.loadRatioGR <= 1.0 else 1
+    if tileInfo.loadRatioGR >= 2.0:
+        interleave_factor = 1
+    elif tileInfo.loadRatioGR == 1.0:
+        interleave_factor = 2
+    else:  # loadRatioGR == 0.5
+        interleave_factor = 4
     tile_to_mma = {}
     for linearId, subtile in enumerate(tileInfo.localSubtiles):
         for mfmaIdx, tileIdx in enumerate(subtile.localReadMap):
