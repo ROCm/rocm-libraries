@@ -844,20 +844,20 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphName)
     // Deserialize into a new graph and verify the name is preserved
     auto liftedGraph = deserializeAndFinalize(bytes);
 
-    // Verify via getAttribute
+    // Verify via getAttribute (getString returns size+1 for null terminator)
     int64_t nameCount = 0;
     ASSERT_NO_THROW(liftedGraph->getAttribute(
         HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &nameCount, nullptr));
-    ASSERT_EQ(nameCount, static_cast<int64_t>(graphName.size()));
+    ASSERT_EQ(nameCount, static_cast<int64_t>(graphName.size() + 1));
 
-    std::string recovered(static_cast<size_t>(nameCount), '\0');
+    std::vector<char> nameBuffer(static_cast<size_t>(nameCount));
     int64_t actualCount = 0;
     ASSERT_NO_THROW(liftedGraph->getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
                                               HIPDNN_TYPE_CHAR,
                                               nameCount,
                                               &actualCount,
-                                              recovered.data()));
-    EXPECT_EQ(recovered, graphName);
+                                              nameBuffer.data()));
+    EXPECT_STREQ(nameBuffer.data(), graphName.c_str());
 
     // Also verify via the serialized FlatBuffer
     auto reSerializedData = liftedGraph->getSerializedGraph();
