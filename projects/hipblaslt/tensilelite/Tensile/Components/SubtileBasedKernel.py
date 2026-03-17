@@ -121,6 +121,8 @@ class TileInfo:
       self.localReadMap = []
 
   tc: str = field(init=False)
+  bpe: float = 0
+  depthUBytes: int = 0
 
   # MMA Shape is w.r.t to data element (not size in bytes)
   #
@@ -173,6 +175,7 @@ class TileInfo:
       depthU = kernel["DepthU"]
       bpe = kernel["ProblemType"]["DataType%s"%tc].numBytes()
       self.bpe = bpe
+      self.depthUBytes = int(depthU * bpe)
 
       numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
 
@@ -202,6 +205,7 @@ class TileInfo:
       depthU = kernel["MacroTile1"]
       bpe = kernel["ProblemType"]["ComputeDataType"].numBytes()
       self.bpe = bpe
+      self.depthUBytes = int(depthU * bpe)
 
       numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
 
@@ -222,7 +226,7 @@ class TileInfo:
       subtileShape0 = self.subtileShape[0]
       subtileShape1 = self.subtileShape[0]
 
-    self.mmaTileSize = mmaTileShape0 * mmaTileShape1 * bpe
+    self.mmaTileSize = int(mmaTileShape0 * mmaTileShape1 * bpe)
     # Number of registers needed for one tile, count w.r.t dword
     self.mmaTileRegCount = (self.mmaTileSize // kernel["WavefrontSize"]) // 4
     # Number of mma tiles for each wave
@@ -438,8 +442,8 @@ def _applySplitOffset(module, writer, kernel, tileInfo, lane16):
   tc = tileInfo.tc
   if tileInfo.loadRatioGR <= 1.0:
     wavesize = kernel["WavefrontSize"]
-    depthUBytes = kernel["DepthU"] * tileInfo.bpe
-    loadWidth = tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe // wavesize
+    depthUBytes = tileInfo.depthUBytes
+    loadWidth = int(tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe) // wavesize
     blockSize = depthUBytes // loadWidth
     numRowsPerWave = wavesize // blockSize
     offset = wavesize * loadWidth // 2  # bytes_loaded // 2
@@ -454,9 +458,9 @@ def _applySplitOffset(module, writer, kernel, tileInfo, lane16):
 def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
   tc = tileInfo.tc
   wavesize = kernel["WavefrontSize"]
-  depthUBytes = kernel["DepthU"] * tileInfo.bpe
-  loadWidth = tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe // wavesize
-  numMFMACols = tileInfo.mmaTileShape[1] * tileInfo.bpe // loadWidth  # TN case only
+  depthUBytes = tileInfo.depthUBytes
+  loadWidth = int(tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe) // wavesize
+  numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
   blockSize = depthUBytes // loadWidth
 
   module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
@@ -481,9 +485,9 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo, waveId):
     return
 
   wavesize = kernel["WavefrontSize"]
-  depthUBytes = kernel["DepthU"] * tileInfo.bpe
+  depthUBytes = tileInfo.depthUBytes
   MT = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
-  loadWidth = tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe // wavesize
+  loadWidth = int(tileInfo.mmaTileShape[0] * tileInfo.mmaTileShape[1] * tileInfo.bpe) // wavesize
   bytes_loaded = wavesize * loadWidth
 
   tmpSgpr = writer.sgprPool.checkOut(1)
@@ -569,14 +573,11 @@ def lraTileAssignment(writer, kernel):
   tileInfoB = writer.states.b.tileInfo
 
   # Input Parameters.
-  depthU = kernel["DepthU"]
-  bpeA = kernel["ProblemType"]["DataTypeA"].numBytes()
-  bpeB = kernel["ProblemType"]["DataTypeB"].numBytes()
-  depthUBytes = depthU * bpeA
+  depthUBytes = tileInfoA.depthUBytes
   wavesize = kernel["WavefrontSize"]
 
   mi_m = tileInfoA.mmaTileShape[0]
-  loadWidth = tileInfoA.mmaTileShape[0]*tileInfoA.mmaTileShape[1]*tileInfoA.bpe//wavesize
+  loadWidth = int(tileInfoA.mmaTileShape[0]*tileInfoA.mmaTileShape[1]*tileInfoA.bpe)//wavesize
   ldsRowBankSize = 64*4 # 64 banks, 4 bytes per bank
   numRowsPerLDSBanks = ldsRowBankSize // depthUBytes
   assert tileInfoA.mmaTileShape == tileInfoB.mmaTileShape, "Expect same MMA tile shape for A and B"
@@ -715,7 +716,7 @@ def graInitPointer(writer, kernel):
 #
 def _grComputeOffset(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
-  bpe = tileInfo.bpe
+  bpeBits = int(8*tileInfo.bpe)
 
   tmpVgpr = writer.vgprPool.checkOut(2)
   colBytes = tmpVgpr + 1 
@@ -734,7 +735,8 @@ def _grComputeOffset(module, writer, tileInfo, colId, rowId, output):
 
   module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
   # TODO : handle FP4 (sub byte type once available)
-  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpe.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
+  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
+  module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
   module.add(VAddU32(dst=vgpr(output), src0=vgpr(colBytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
 
   # if len(tileInfo.sharedVgprGROffset)>1:
@@ -758,7 +760,7 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
   # rowOffset between 2 subtiles offset, ie how many consecutive subtile covered by a single subtileOffset.
   # rowOffset = numGRPerSubtile * (local load ratio * subtile size)
   rowOffset = math.ceil(tileInfo.numGRPerSubtile*tileInfo.loadRatioGR*subtile_size)
-  s_stride = rowOffset * tileInfo.bpe
+  s_stride = int(rowOffset * tileInfo.bpe)
 
   for regId in range(len(tileInfo.localSubtilesRegister)):
     regPool = tileInfo.localSubtilesRegister[regId].regPool
@@ -776,10 +778,7 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
 # Apply wave partition offset to rowId for a single matrix (A or B)
 #
 def _grComputeRowOffset(module, kernel, writer, tileInfo, waveId, rowOffset):
-  depthU = kernel["DepthU"]
-  bpeA = kernel["ProblemType"]["DataTypeA"].numBytes()
-  bpeB = kernel["ProblemType"]["DataTypeB"].numBytes()
-  depthUBytes = depthU * bpeA
+  depthUBytes = tileInfo.depthUBytes
   wavesize = kernel["WavefrontSize"]
   loadWidth = 16
   numRowsPerWave = wavesize // (depthUBytes // loadWidth)
@@ -835,26 +834,22 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
   module = Module()
   module.addComment0("GR Offset Calculation for Subtile Based Tiling")
 
+  tileInfoA = writer.states.a.tileInfo
+  tileInfoB = writer.states.b.tileInfo
+
   # Input Parameters.
-  depthU = kernel["DepthU"]
-  bpeA = kernel["ProblemType"]["DataTypeA"].numBytes()
-  bpeB = kernel["ProblemType"]["DataTypeB"].numBytes()
-  depthUBytes = depthU * bpeA
+  depthUBytes = tileInfoA.depthUBytes
   wavesize = kernel["WavefrontSize"]
   ldsRowBankSize = 64 * 4 # 64 banks, 4 bytes per bank.
 
-  assert bpeA == 2 and bpeB == 2, "Only support fp16 for now"
+  assert tileInfoA.bpe == 2 and tileInfoB.bpe == 2, "Only support fp16 for now"
   assert depthUBytes % 128 == 0, "Only support depthUBytes multiple of 128 for now"
   assert depthUBytes <= ldsRowBankSize, "Only support depthUBytes smaller than %u (lds row bank size) for now"%ldsRowBankSize
 
   loadWidth = 16 # dwordx4 loads only
   blockSize = depthUBytes // loadWidth
-  
 
   numRowsPerLDSBanks = ldsRowBankSize // depthUBytes
-
-  tileInfoA = writer.states.a.tileInfo
-  tileInfoB = writer.states.b.tileInfo
 
   tmpVgpr = writer.vgprPool.checkOut(10)
   colId = tmpVgpr
@@ -975,7 +970,7 @@ def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   subtileInfo = tileInfo.localSubtiles[tileInfo.getLocalSubtileLinearId(sId0, sId1)]
   regList = tileInfo.localSubtilesRegister[subtileInfo.regListId]
 
-  offsetK = sId1 * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe
+  offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
   ldsStartOffset = writer.ldsStartOffsetA if tc == 'A' else writer.ldsStartOffsetB
   m0Offset = ldsStartOffset
 
@@ -1099,7 +1094,7 @@ def globalReadDTLInitCommonSgpr(writer, kernel):
   _grComputeRowOffset(module, kernel, writer, atile, vgprWaveId, rowOffsetA)
   _grComputeRowOffset(module, kernel, writer, btile, vgprWaveId, rowOffsetB)
 
-  depthUBytes = kernel["DepthU"] * atile.bpe
+  depthUBytes = atile.depthUBytes
 
   module.add(VLShiftLeftB32(dst=vgpr(rowOffsetA), shiftHex=hex((depthUBytes).bit_length()-1), src=vgpr(rowOffsetA), comment="Apply wave-specific offset for A"))
   module.add(VLShiftLeftB32(dst=vgpr(rowOffsetB), shiftHex=hex((depthUBytes).bit_length()-1), src=vgpr(rowOffsetB), comment="Apply wave-specific offset for B"))
@@ -1142,7 +1137,7 @@ def localReadLDSBufferSwap(tc, writer, kernel):
 def globalReadPtrUpdates(tc, writer, kernel):
   module = Module()
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  inc = tileInfo.localSubtileGrid[1] * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe
+  inc = int(tileInfo.localSubtileGrid[1] * tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
   module.add(SAddU32(dst=sgpr("Srd%s"%tc), src0=sgpr("Srd%s"%tc), src1=inc))
   module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0))
 
