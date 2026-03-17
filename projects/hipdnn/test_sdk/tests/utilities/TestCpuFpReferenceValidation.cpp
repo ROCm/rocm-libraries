@@ -8,11 +8,13 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::helpers;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 template <typename T>
 void makeTensorsEqual(T& tensor1, T& tensor2)
@@ -449,8 +451,8 @@ TEST(TestCpuIntReferenceValidationStrided, StridedTensorEqual)
 
     // Fill with same values
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = static_cast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
-                                          + (indices[2] * 10) + indices[3]);
+        auto value = safeTestTypeCast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
+                                               + (indices[2] * 10) + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -469,8 +471,8 @@ TEST(TestCpuIntReferenceValidation, StridedTensorNotEqual)
 
     // Fill tensor1
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = static_cast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
-                                          + (indices[2] * 10) + indices[3]);
+        auto value = safeTestTypeCast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
+                                               + (indices[2] * 10) + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -509,7 +511,7 @@ TEST(TestCpuIntReferenceValidation, StridedTensorDifferentStrides)
 
     // Set same logical values despite different memory layouts
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = static_cast<int32_t>(indices[0] + indices[1] + indices[2] + indices[3]);
+        auto value = safeTestTypeCast<int32_t>(indices[0] + indices[1] + indices[2] + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });

@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 
@@ -13,6 +14,7 @@ using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 // User-defined literals
 using hipdnn_data_sdk::types::operator""_bf;
@@ -250,7 +252,7 @@ TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionFwdInferenceBasic)
     // Fill input with sequential values
     for(int i = 0; i < 16; ++i)
     {
-        inputTensor.memory().hostData()[i] = static_cast<int8_t>(i + 1);
+        inputTensor.memory().hostData()[i] = safeTestTypeCast<int8_t>(i + 1);
     }
 
     // Fill weights with 1s
@@ -1058,7 +1060,7 @@ TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionBwdDataBasic)
     // Weight values: simple 3x3 kernel
     for(size_t i = 0; i < 9; ++i)
     {
-        weightTensor.memory().hostData()[i] = static_cast<int8_t>(i + 1);
+        weightTensor.memory().hostData()[i] = safeTestTypeCast<int8_t>(i + 1);
     }
 
     std::vector<int64_t> strides = {1, 1};
