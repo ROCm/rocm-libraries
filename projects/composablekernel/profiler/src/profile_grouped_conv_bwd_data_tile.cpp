@@ -61,14 +61,48 @@ static void print_helper_msg()
     // clang-format on
 }
 
+namespace ckb = ck_tile::builder;
+namespace ckt = ck_tile::builder::test;
+namespace ckp = ck_tile::builder::profiling;
+
+template <auto SIGNATURE>
+int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, bool time_kernel)
+{
+    auto inputs  = ckt::alloc_inputs(args);
+    auto outputs = ckt::alloc_outputs(args);
+    ckt::init_inputs(args, inputs.get());
+
+    std::cout << args.make_input_descriptor() << std::endl;
+    std::cout << args.make_weight_descriptor() << std::endl;
+    std::cout << args.make_output_descriptor() << std::endl;
+    auto&& [valid, avg_time, op_name, best_split_k] =
+        ckp::run_grouped_conv_backward_data_tile_algs(
+            args,
+            split_k,
+            inputs.get(),
+            outputs.get(),
+            ck_tile::stream_config{nullptr,
+                                   time_kernel,
+                                   0 /*log_level*/,
+                                   5 /*cold_iters*/,
+                                   50 /*nrepeat_*/,
+                                   true /*is_gpu_timer_*/});
+    if(time_kernel)
+    {
+        std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name
+                  << "\n\tavg_time: " << avg_time << ", SplitK " << best_split_k << std::endl;
+    }
+    return !valid;
+}
+
 } // namespace
 
-int profile_grouped_conv_bwd_data(int argc, char* argv[])
+int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
 {
     // Parse optional named arguments first
     ck_tile::index_t instance_index = -1;
     bool list_instances             = false;
-    ck_tile::profiler::parse_named_args(argc, argv, instance_index, list_instances);
+    ck::profiler::parse_named_args(argc, argv, instance_index, list_instances);
     const int named_arg_count = ck::profiler::count_named_args(argc, argv);
 
     // Adjust argc for positional argument checking
@@ -83,9 +117,6 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
 
     const auto data_type       = static_cast<ConvDataType>(std::stoi(argv[2]));
     const auto layout          = static_cast<ConvLayout>(std::stoi(argv[3]));
-    const bool do_verification = std::stoi(argv[4]);
-    const int init_method      = std::stoi(argv[5]);
-    const bool do_log          = std::stoi(argv[6]);
     const bool time_kernel     = std::stoi(argv[7]);
     const int num_dim_spatial  = std::stoi(argv[8]);
 
