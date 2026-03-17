@@ -230,16 +230,15 @@ requirements.
 System Software
 ~~~~~~~~~~~~~~~
 
-Currently, libhipcxx is tested only for `ROCm <https://rocm.docs.amd.com/en/latest/>`_ 7.0.2.
+Currently, libhipcxx is tested only for `ROCm <https://rocm.docs.amd.com/en/latest/>`_ 7.2.0.
 
 C++ Dialects
 ~~~~~~~~~~~~
 
 Libhipcxx  supports the following C++ dialects:
 
--  C++11
--  C++14
 -  C++17
+-  C++20
 
 At the moment, libhipcxx is only tested for C++17.
 
@@ -261,6 +260,7 @@ Libhipcxx supports the following AMD device architectures:
 
 -  gfx90a (MI210 + MI250)
 -  gfx942 (MI300)
+-  gfx950 (MI355)
 
 
 RDNA architectures have only experimental support.
@@ -337,23 +337,23 @@ Installation
 
         mkdir build && cd build
 
-2. Run CMake to configure LIT testing
+2. Run CMake to configure LIT testing (DCMAKE_INSTALL_PREFIX is optional)
 
     .. code-block:: bash
 
-        cmake -DCMAKE_INSTALL_PREFIX=<path to install directory> ..
+        cmake -GNinja -DCMAKE_INSTALL_PREFIX=<path to install directory> ..
 
 3. Compile all headers that are part of the library
 
     .. code-block:: bash
 
-        make
+        ninja
 
 4. Install the headers locally:
 
     .. code-block:: bash
 
-        make install
+        ninja install
 
 Usage with HIPRTC
 -----------------
@@ -397,7 +397,7 @@ To run the tests on host and device based on LIT, you can use:
 
 .. code-block:: bash
 
-    make check-hipcxx
+    ninja check-hipcxx
 
 Alternatively, there is a helper script at ``utils/amd/linux/perform_tests.bash`` which can be used as follows:
 
