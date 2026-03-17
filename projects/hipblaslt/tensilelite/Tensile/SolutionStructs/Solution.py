@@ -2191,7 +2191,7 @@ class Solution(collections.abc.Mapping):
                 LdsStride = state["VectorWidthA"] * bpeA * state["DepthU"]
                 MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
                 isM0PadEnough = LdsStride >= MinLdsBlockSizePerPadA
-                ldsPadA = state["MatrixInstK"] if bpeA == 2 and not isM0PadEnough else 2 * lrvw
+                ldsPadA = state["MatrixInstK"] if bpeA == 2 and not isM0PadEnough else 2 * lrvwA
               else:
                 ldsPadA = 0
             else:
@@ -2221,7 +2221,7 @@ class Solution(collections.abc.Mapping):
                 LdsStride = state["VectorWidthB"] * bpeB * state["DepthU"]
                 MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
                 isM0PadEnough = LdsStride >= MinLdsBlockSizePerPadB
-                ldsPadB = state["MatrixInstK"] if bpeB == 2 and not isM0PadEnough else 2 * lrvw
+                ldsPadB = state["MatrixInstK"] if bpeB == 2 and not isM0PadEnough else 2 * lrvwB
               else:
                 ldsPadB = 0
             else:
