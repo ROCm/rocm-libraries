@@ -54,7 +54,7 @@ constexpr const char* get_reduce_method_name(rocprim::block_reduce_algorithm alg
 }
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
@@ -140,8 +140,8 @@ struct device_segmented_reduce_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<value_type> d_aggregates_output(segments_count);
 
-        rocprim::plus<value_type> reduce_op;
-        value_type                init(0);
+        BinaryFunction reduce_op;
+        value_type     init(0);
 
         size_t temporary_storage_bytes = 0;
 
