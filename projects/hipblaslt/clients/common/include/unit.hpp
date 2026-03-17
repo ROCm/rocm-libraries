@@ -553,6 +553,81 @@ inline int64_t unit_check_diff(
     return error;
 }
 
+/*! \brief For integer_exact / debugging: print first mismatch (i, j, batch, CPU, GPU) and total error count.
+ *  Call before unit_check_general when a failure is suspected to get diagnostic output. */
+inline void unit_print_first_mismatch(int64_t       M,
+                                      int64_t       N,
+                                      int64_t       lda,
+                                      int64_t       strideA,
+                                      const void*   hCPU,
+                                      const void*   hGPU,
+                                      int64_t       batch_count,
+                                      hipDataType   type)
+{
+    auto diff_count = int64_t(0);
+    auto first_i = int64_t(-1), first_j = int64_t(-1), first_b = int64_t(-1);
+    auto found = false;
+
+#define FIND_FIRST_MISMATCH(T, EQ_EXPR)                                                             \
+    do                                                                                              \
+    {                                                                                               \
+        const T* cpu = static_cast<const T*>(hCPU);                                                 \
+        const T* gpu = static_cast<const T*>(hGPU);                                                 \
+        for(int64_t k = 0; k < batch_count; k++)                                                   \
+            for(int64_t j = 0; j < N; j++)                                                          \
+                for(int64_t i = 0; i < M; i++)                                                      \
+                {                                                                                   \
+                    int64_t idx = i + j * lda + k * strideA;                                        \
+                    if(!(EQ_EXPR))                                                                  \
+                    {                                                                               \
+                        diff_count++;                                                               \
+                        if(!found)                                                                  \
+                        {                                                                           \
+                            first_i = i;                                                            \
+                            first_j = j;                                                            \
+                            first_b = k;                                                            \
+                            found   = true;                                                        \
+                            hipblaslt_cerr << "First mismatch at (i=" << i << ", j=" << j           \
+                                          << ", batch=" << k << "): CPU=" << static_cast<double>(cpu[idx]) \
+                                          << " GPU=" << static_cast<double>(gpu[idx]) << std::endl; \
+                        }                                                                           \
+                    }                                                                               \
+                }                                                                                   \
+    } while(0)
+
+    switch(type)
+    {
+    case HIP_R_32F:
+        FIND_FIRST_MISMATCH(float,
+                            (cpu[idx] == gpu[idx]
+                             || (hipblaslt_isnan(cpu[idx]) && hipblaslt_isnan(gpu[idx]))));
+        break;
+    case HIP_R_64F:
+        FIND_FIRST_MISMATCH(double,
+                            (cpu[idx] == gpu[idx]
+                             || (hipblaslt_isnan(cpu[idx]) && hipblaslt_isnan(gpu[idx]))));
+        break;
+    case HIP_R_16F:
+        FIND_FIRST_MISMATCH(hipblasLtHalf,
+                            (float(cpu[idx]) == float(gpu[idx])
+                             || (hipblaslt_isnan(cpu[idx]) && hipblaslt_isnan(gpu[idx]))));
+        break;
+    case HIP_R_16BF:
+        FIND_FIRST_MISMATCH(hip_bfloat16,
+                            (float(cpu[idx]) == float(gpu[idx])
+                             || (hipblaslt_isnan(cpu[idx]) && hipblaslt_isnan(gpu[idx]))));
+        break;
+    default:
+        hipblaslt_cerr << "unit_print_first_mismatch: unhandled type" << std::endl;
+        return;
+    }
+#undef FIND_FIRST_MISMATCH
+
+    if(diff_count > 0)
+        hipblaslt_cerr << "Total mismatches: " << diff_count << " (matrix " << M << "x" << N
+                      << ", batch_count=" << batch_count << ")" << std::endl;
+}
+
 inline void unit_check_general(int64_t     M,
                                int64_t     N,
                                int64_t     lda,

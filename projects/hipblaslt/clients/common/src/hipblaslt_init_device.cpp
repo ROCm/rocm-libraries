@@ -95,6 +95,31 @@ __device__ int8_t random_int<int8_t>(size_t idx)
     return pseudo_random_device(idx) % 3 + 1;
 }
 
+/*! \brief  generate a random number in range [0, 1, 2] for integer_exact init */
+template <typename T>
+__device__ T small_int_positive(size_t idx)
+{
+    return T(pseudo_random_device(idx) % 3);
+}
+
+template <>
+__device__ hipblasLtHalf small_int_positive<hipblasLtHalf>(size_t idx)
+{
+    return hipblasLtHalf(pseudo_random_device(idx) % 3);
+}
+
+template <>
+__device__ hip_bfloat16 small_int_positive<hip_bfloat16>(size_t idx)
+{
+    return hip_bfloat16(pseudo_random_device(idx) % 3);
+}
+
+template <>
+__device__ int8_t small_int_positive<int8_t>(size_t idx)
+{
+    return static_cast<int8_t>(pseudo_random_device(idx) % 3);
+}
+
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <typename T>
 __device__ T random_hpl(size_t idx)
@@ -258,6 +283,39 @@ void hipblaslt_init_device(ABC_dims                 abc,
             fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
                 return uniform_01<T>(idx);
             });
+            break;
+        case hipblaslt_initialization::integer_exact:
+            if(abc == ABC_dims::A || abc == ABC_dims::C)
+            {
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                    return small_int_positive<T>(idx);
+                });
+            }
+            else if(abc == ABC_dims::B)
+            {
+                // Checkerboard ±: (i^j)&1 so first element of each row and column alternates
+                if(stride >= lda)
+                {
+                    stride = std::max(lda * N, stride);
+                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
+                        auto b     = idx / stride;
+                        auto j     = (idx - b * stride) / lda;
+                        auto i     = (idx - b * stride) - j * lda;
+                        auto value = small_int_positive<T>(idx);
+                        return (i ^ j) & 1 ? value : negate(value);
+                    });
+                }
+                else
+                {
+                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
+                        auto j     = idx / lda;
+                        auto b     = (idx - j * lda) / stride;
+                        auto i     = (idx - j * lda) - b * stride;
+                        auto value = small_int_positive<T>(idx);
+                        return (i ^ j) & 1 ? value : negate(value);
+                    });
+                }
+            }
             break;
         default:
             hipblaslt_cerr << "Error type in hipblaslt_init_device" << std::endl;

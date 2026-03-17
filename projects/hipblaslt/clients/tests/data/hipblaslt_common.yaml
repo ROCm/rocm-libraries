@@ -44,6 +44,7 @@ Datatypes:
         zero: 555
         norm_dist: 666
         uniform_01: 777
+        integer_exact: 888
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:

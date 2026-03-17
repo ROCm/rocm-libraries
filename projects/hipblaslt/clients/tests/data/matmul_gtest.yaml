@@ -81,6 +81,99 @@ Tests:
   alpha_beta: *alpha_beta_range
   c_equal_d: [false, true]
 
+# Integer-exact init (A in [0,1,2], B alternating ±[0,1,2]) with exact GPU vs CPU match. Same sizes/filters as normal matmul tests.
+- name: matmul_integer_exact_one
+  category: quick
+  function:
+    matmul: *real_precisions
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_small
+  category: quick
+  function:
+    matmul: *real_precisions
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_medium
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_batch_medium
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  batch_count: 10
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_chunk
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *chunk_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+
+- name: matmul_integer_exact_grid_limit_real
+  category: nightly
+  function:
+    matmul: *real_precisions
+  matrix_size: *grid_limit_matrix_size_real
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '120[0-1]'
+
+- name: matmul_integer_exact_grid_limit_double
+  category: nightly
+  function:
+    matmul: *double_precision
+  matrix_size: *grid_limit_matrix_size_double
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+  api_method: [0, 2]
+  gpu_arch: '120[0-1]'
+
+- name: matmul_integer_exact_deepbench
+  category: nightly
+  function:
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
+  matrix_size: *deepbench_sizes
+  alpha_beta: *deepbench_alpha_beta_range
+  transA_transB: *deepbench_transA_transB_range
+  initialization: integer_exact
+  unit_check: 1
+
 - name: matmul_conj_small
   category: quick
   function:

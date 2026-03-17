@@ -903,6 +903,17 @@ void check(hipStream_t                   stream,
             }
             else
             {
+                if(arg.initialization == hipblaslt_initialization::integer_exact)
+                {
+                    unit_print_first_mismatch(M[gemmIdx],
+                                             N[gemmIdx],
+                                             ldd[gemmIdx],
+                                             stride_d[gemmIdx],
+                                             hD_gold[gemmIdx].buf(),
+                                             hD_1[gemmIdx].buf(),
+                                             num_batches[gemmIdx],
+                                             To);
+                }
                 unit_check_general(M[gemmIdx],
                                    N[gemmIdx],
                                    ldd[gemmIdx],
@@ -1247,6 +1258,25 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetRotatingBufferSizeValue(arg.rotating);
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
+
+    // integer_exact: 16-bit formats cannot represent dot product exactly for K > 512
+    if(arg.initialization == hipblaslt_initialization::integer_exact)
+    {
+        const bool is_16bit = (tiA == HIP_R_16F || tiA == HIP_R_16BF);
+        if(is_16bit)
+        {
+            const int32_t gemm_count = std::max(1, arg.grouped_gemm);
+            for(int32_t i = 0; i < gemm_count; i++)
+            {
+                if(arg.K[i] > 512)
+                {
+                    hipblaslt_cout << "Skipping integer_exact: 16-bit format with K=" << arg.K[i]
+                                   << " > 512 (exact representability limit)" << std::endl;
+                    return;
+                }
+            }
+        }
+    }
 
     // for all f8/bf8 cases including mix mode
     if((realDataTypeSize(tiA) == 1 || realDataTypeSize(tiB) == 1) && tc != HIP_R_32I)
@@ -2041,11 +2071,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         lda[i],
                                         realDataTypeSize(TiA),
                                         do_swizzle_a));
+            // B is always stored as K×N in memory; use (K, N, ldb) not (B_row, B_col) to avoid row > lda when transB=T
             CHECK_HIP_ERROR(synchronize(hB[i],
                                         dB[i],
                                         num_batches[i],
-                                        B_row[i],
-                                        B_col[i],
+                                        K[i],
+                                        N[i],
                                         ldb[i],
                                         realDataTypeSize(TiB),
                                         do_swizzle_b));
@@ -3653,6 +3684,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                     tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_gfx11_type(Tc, TiA, To);
                 }
             }
+            if(arg.initialization == hipblaslt_initialization::integer_exact)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 0;
+            }
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
@@ -4068,6 +4104,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     tol[gemmIdx] = K[gemmIdx] * sum_error_tolerance_for_gfx11_type(Tc, TiA, To);
                 }
+            }
+            if(arg.initialization == hipblaslt_initialization::integer_exact)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 0;
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
