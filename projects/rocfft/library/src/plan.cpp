@@ -726,18 +726,16 @@ NodeMetaData
     root_plan.rootIsC2C    = (root_plan.inArrayType != rocfft_array_type_real)
                           && (root_plan.outArrayType != rocfft_array_type_real);
     // root plan's data layouts and placement may be different than the calling plan's
-    std::unique_ptr<data_layout_t> root_plan_input_layout, root_plan_output_layout;
+    std::optional<data_layout_t> root_plan_input_layout, root_plan_output_layout;
     if(desc.has_undistributed_io_on_current_location()
        && desc.get_current_location() == exec_plan_location)
     {
         // "true" single-device usage (no I/O field used or glorified version using
         // lone bricks for some reason): use the calling plan's own parameters
-        root_plan_input_layout
-            = std::make_unique<data_layout_t>(desc.undistributed_layout_for(io_data_label::INPUT));
-        root_plan_output_layout
-            = std::make_unique<data_layout_t>(desc.undistributed_layout_for(io_data_label::OUTPUT));
-        root_plan.placement    = placement;
-        root_plan.input_buffer = BufferPtr::user_input(0, desc.get_local_comm_rank());
+        root_plan_input_layout  = desc.undistributed_layout_for(io_data_label::INPUT);
+        root_plan_output_layout = desc.undistributed_layout_for(io_data_label::OUTPUT);
+        root_plan.placement     = placement;
+        root_plan.input_buffer  = BufferPtr::user_input(0, desc.get_local_comm_rank());
         if(root_plan.placement == rocfft_placement_inplace)
             root_plan.output_buffer = root_plan.input_buffer;
         else
@@ -765,8 +763,7 @@ NodeMetaData
                 root_plan_io_buffer = io == io_data_label::INPUT
                                           ? BufferPtr::user_input(0, desc.get_local_comm_rank())
                                           : BufferPtr::user_output(0, desc.get_local_comm_rank());
-                root_plan_io_layout
-                    = std::make_unique<data_layout_t>(desc.undistributed_layout_for(io));
+                root_plan_io_layout = desc.undistributed_layout_for(io);
                 // other io layout to be set for the execution plan:
                 auto&      root_plan_other_io_layout = other(io) == io_data_label::INPUT
                                                            ? root_plan_input_layout
@@ -791,7 +788,7 @@ NodeMetaData
                            && transformType != rocfft_transform_type_real_inverse)))
                 {
                     // execution plan may and can operate in-place.
-                    root_plan_other_io_layout = std::make_unique<data_layout_t>(std::move(*tmp));
+                    root_plan_other_io_layout = std::move(*tmp);
                     root_plan.placement       = rocfft_placement_inplace;
                     root_plan_other_io_buffer = root_plan_io_buffer;
                 }
@@ -800,8 +797,8 @@ NodeMetaData
                     // in-place is not allowed or it can't be done or it would require a larger buffer
                     // than what's safe to expect from user. Pack results contiguously in a temporary
                     // buffer and work out of place.
-                    root_plan_other_io_layout = std::make_unique<data_layout_t>(
-                        data_layout_t::default_full_layout(other_lengths, desc.batch()));
+                    root_plan_other_io_layout
+                        = data_layout_t::default_full_layout(other_lengths, desc.batch());
                     root_plan.placement = rocfft_placement_notinplace;
                     const auto tmp_size
                         = root_plan_other_io_layout->buffer_element_count()
@@ -825,15 +822,14 @@ NodeMetaData
         // and output of the execution plan. In-place default layout operations are
         // used to minimizing the library's memory footprint.
         root_plan.placement    = rocfft_placement_inplace;
-        root_plan_input_layout = std::make_unique<data_layout_t>(data_layout_t::default_full_layout(
+        root_plan_input_layout = data_layout_t::default_full_layout(
             desc.input_layout.lengths(),
             desc.input_layout.batch(),
-            transformType == rocfft_transform_type_real_forward));
-        root_plan_output_layout
-            = std::make_unique<data_layout_t>(data_layout_t::default_full_layout(
-                desc.output_layout.lengths(),
-                desc.output_layout.batch(),
-                transformType == rocfft_transform_type_real_inverse));
+            transformType == rocfft_transform_type_real_forward);
+        root_plan_output_layout = data_layout_t::default_full_layout(
+            desc.output_layout.lengths(),
+            desc.output_layout.batch(),
+            transformType == rocfft_transform_type_real_inverse);
 
         const auto tmp_size = std::max(root_plan_input_layout->buffer_element_count()
                                            * element_size(precision, desc.inArrayType),
