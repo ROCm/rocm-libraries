@@ -11,28 +11,46 @@
 #include <iostream>
 #include <numeric>
 #include <random>
-#include <typeindex>
 #include <variant>
 #include <vector>
 
 namespace hipdnn_data_sdk::utilities
 {
 
+/**
+ * @brief Describes a tensor memory layout via stride ordering
+ *
+ * TensorLayout encodes how tensor dimensions map to memory. The `strideOrder` vector
+ * specifies the priority of each dimension in memory layout (lower values = tighter
+ * packing in memory).
+ *
+ * @note TensorLayout is primarily used with convolution and batch normalization tensors,
+ * which follow (N, C, H, W) / (N, C, D, H, W) dimension ordering. Other operations
+ * such as matmul and pointwise have their own dimension conventions. The TensorLayout
+ * controls how dimensions map to contiguous memory via strides computed by
+ * `generateStrides()`.
+ *
+ * For example, for a convolution input with dims = {1, 64, 28, 28} (N=1, C=64, H=28, W=28):
+ * - TensorLayout::NCHW (stride order {3,2,1,0}) produces strides {50176, 784, 28, 1} (channel-first; N=50176, C=784, H=28, W=1)
+ * - TensorLayout::NHWC (stride order {3,0,2,1}) produces strides {50176, 1, 1792, 64} (channel-last; N=50176, C=1, H=1792, W=64)
+ */
 struct TensorLayout
 {
-    std::string name;
-    std::vector<int64_t> strideOrder;
+    std::string name; ///< Human-readable layout name (e.g., "NCHW", "NHWC")
+    std::vector<int64_t> strideOrder; ///< Stride priority per dimension (lower = tighter packing)
 
-    static const TensorLayout NCHW;
-    static const TensorLayout NHWC;
-    static const TensorLayout NCDHW;
-    static const TensorLayout NDHWC;
+    static const TensorLayout NCHW; ///< 4D channel-first layout
+    static const TensorLayout NHWC; ///< 4D channel-last layout
+    static const TensorLayout NCDHW; ///< 5D channel-first layout
+    static const TensorLayout NDHWC; ///< 5D channel-last layout
 };
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
 {
@@ -325,8 +343,11 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return throwIfOutOfBounds(
-            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
+        return throwIfOutOfBounds(std::inner_product( // NOLINT(bugprone-fold-init-type)
+            indices.begin(),
+            indices.end(),
+            strides().begin(),
+            int64_t{0}));
     }
 
     virtual ITensorIterator<false> begin() = 0;
@@ -503,7 +524,7 @@ protected:
             std::inner_product(dims.begin(),
                                dims.end(),
                                strides.begin(),
-                               1,
+                               size_t{1},
                                std::plus<>(),
                                [](size_t len, size_t stride) { return (len - 1) * stride; }));
     }
@@ -516,7 +537,7 @@ protected:
         }
 
         return static_cast<size_t>(
-            std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
+            std::accumulate(dims.begin(), dims.end(), int64_t{1}, std::multiplies<>()));
     }
 };
 

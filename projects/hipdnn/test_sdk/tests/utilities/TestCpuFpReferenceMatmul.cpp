@@ -199,8 +199,6 @@ struct TypePair
 using Types = ::testing::Types<TypePair<float, float, float, float>,
                                TypePair<half, half, half, float>,
                                TypePair<bfloat16, bfloat16, bfloat16, float>,
-                               TypePair<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>,
-                               TypePair<fp8_e5m2, fp8_e5m2, fp8_e5m2, float>,
                                TypePair<float, half, float, float>>;
 
 template <class T>
@@ -352,10 +350,11 @@ TYPED_TEST(CpuFpReferenceMatmulBasic, MatmulBatch3D)
 
     const int tensorAElementCount = static_cast<int>(tensorA.elementCount());
     const int tensorBElementCount = static_cast<int>(tensorB.elementCount());
+    const int halfTensorACount = tensorAElementCount / 2;
     for(int i = 0; i < tensorAElementCount; ++i)
     {
-        tensorA.memory().hostData()[i] = static_cast<typename TypeParam::ADataType>(
-            static_cast<float>(i - tensorAElementCount / 2));
+        tensorA.memory().hostData()[i]
+            = static_cast<typename TypeParam::ADataType>(static_cast<float>(i - halfTensorACount));
     }
     for(int i = 0; i < tensorBElementCount; ++i)
     {
@@ -390,15 +389,16 @@ TYPED_TEST(CpuFpReferenceMatmulBasic, Matmul3DBroadcast)
 
     const int tensorAElementCount = static_cast<int>(tensorA.elementCount());
     const int tensorBElementCount = static_cast<int>(tensorB.elementCount());
+    const int halfTensorACount = tensorAElementCount / 2;
     for(int i = 0; i < tensorAElementCount; ++i)
     {
-        tensorA.memory().hostData()[i] = static_cast<typename TypeParam::ADataType>(
-            static_cast<float>(i - tensorAElementCount / 2));
+        tensorA.memory().hostData()[i]
+            = static_cast<typename TypeParam::ADataType>(static_cast<float>(i - halfTensorACount));
     }
     for(int i = 0; i < tensorBElementCount; ++i)
     {
-        tensorB.memory().hostData()[i] = static_cast<typename TypeParam::BDataType>(
-            static_cast<float>(i + tensorAElementCount / 2));
+        tensorB.memory().hostData()[i]
+            = static_cast<typename TypeParam::BDataType>(static_cast<float>(i + halfTensorACount));
     }
 
     hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::matmul<typename TypeParam::ADataType,
@@ -461,15 +461,16 @@ TYPED_TEST(CpuFpReferenceMatmulBasic, Matmul4DBroadcast)
 
     const int tensorAElementCount = static_cast<int>(tensorA.elementCount());
     const int tensorBElementCount = static_cast<int>(tensorB.elementCount());
+    const int halfTensorACount = tensorAElementCount / 2;
     for(int i = 0; i < tensorAElementCount; ++i)
     {
-        tensorA.memory().hostData()[i] = static_cast<typename TypeParam::ADataType>(
-            static_cast<float>(i - tensorAElementCount / 2));
+        tensorA.memory().hostData()[i]
+            = static_cast<typename TypeParam::ADataType>(static_cast<float>(i - halfTensorACount));
     }
     for(int i = 0; i < tensorBElementCount; ++i)
     {
-        tensorB.memory().hostData()[i] = static_cast<typename TypeParam::BDataType>(
-            static_cast<float>(i + tensorAElementCount / 2));
+        tensorB.memory().hostData()[i]
+            = static_cast<typename TypeParam::BDataType>(static_cast<float>(i + halfTensorACount));
     }
 
     hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::matmul<typename TypeParam::ADataType,

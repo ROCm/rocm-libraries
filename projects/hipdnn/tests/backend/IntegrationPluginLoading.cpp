@@ -78,7 +78,7 @@ void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        graph),
+                                        static_cast<const void*>(graph)),
               HIPDNN_STATUS_SUCCESS);
 
     auto backendModes = HIPDNN_HEUR_MODE_FALLBACK;
@@ -323,4 +323,26 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(availableEngineCount, 2);
+}
+
+TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
+{
+
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+        "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
+
+    const std::array<const char*, 1> paths
+        = {hipdnn_tests::plugin_constants::testIncompatibleVersionPluginPath().c_str()};
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
+    hipdnnGetLastErrorString(buffer.data(), buffer.size());
+
+    EXPECT_NE(std::string{buffer.data()}.find("does not match backend major version"),
+              std::string::npos);
+    EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 0);
 }

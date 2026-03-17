@@ -8,13 +8,32 @@ find_package(Threads REQUIRED)
 add_executable(
     public_hipdnn_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
+    IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleQuantize.cpp
+    IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
+    IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
+    IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationLayerNormDescriptorLowering.cpp
+    IntegrationLayernormForward.cpp
+    IntegrationMatmul.cpp
+    IntegrationMatmulDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRMSNormDescriptorLowering.cpp
+    IntegrationRMSNormForward.cpp
+    IntegrationSetPluginPathsExt.cpp
+    IntegrationSdpaFpropDescriptorLowering.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -42,12 +61,14 @@ target_compile_definitions(
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
+            TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
 add_dependencies(
     public_hipdnn_frontend_tests
     test_good_plugin
+    test_good_default_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin

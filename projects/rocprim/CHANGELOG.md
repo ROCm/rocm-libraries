@@ -2,7 +2,15 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM x.y.z for ROCm 8.0
+## rocPRIM 4.4.0 for ROCm 7.13
+
+### Changed
+
+* Building benchmarks on Windows is not currently possible because of the dependency on AMD SMI. 
+  * A CMake-level check has been added to prevent them from being built on Windows.
+  * The rmake.py build script no longer builds benchmarks by default on Windows when passed the `--clients` option.
+
+## rocPRIM 4.3.0 for ROCm 7.12
 
 ### Optimizations
 
@@ -15,6 +23,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Changed
 
 * Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
+* Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
+  * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
+  * See `shared/primbench/README.md` for primbench its documentation.
+
+### Removed
+
+* Removed the CMake option `BENCHMARK_USE_AMDSMI`, as benchmarking now requires AMD SMI to be installed.
 
 ### Removed
 

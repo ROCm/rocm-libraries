@@ -14,8 +14,11 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -38,12 +41,15 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               ConvolutionFwdSignatureKey,
                                               ConvolutionBwdSignatureKey,
                                               ConvolutionWrwSignatureKey,
+                                              LayernormFpropSignatureKey,
                                               MatmulSignatureKey,
-                                              PointwiseSignatureKey>;
+                                              PointwiseSignatureKey,
+                                              RMSNormFwdSignatureKey,
+                                              SdpaFwdSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
 {
-    std::size_t operator()(const PlanRegistrySignatureKey& k) const noexcept
+    std::size_t operator()(const PlanRegistrySignatureKey& k) const
     {
         return std::visit([](auto const& x) { return x.hashSelf(); }, k);
     }
@@ -52,20 +58,19 @@ struct PlanRegistrySignatureKeyHash
 struct PlanRegistrySignatureKeyEqual
 {
     template <typename T, typename U>
-    bool operator()([[maybe_unused]] const T& a, [[maybe_unused]] const U& b) const noexcept
+    bool operator()([[maybe_unused]] const T& a, [[maybe_unused]] const U& b) const
     {
         return false;
     }
 
     template <typename T>
-    bool operator()(const T& a, const T& b) const noexcept
+    bool operator()(const T& a, const T& b) const
     {
         return a == b;
     }
 
     // NOLINTNEXTLINE(readability-redundant-casting)
-    bool operator()(const PlanRegistrySignatureKey& a,
-                    const PlanRegistrySignatureKey& b) const noexcept
+    bool operator()(const PlanRegistrySignatureKey& a, const PlanRegistrySignatureKey& b) const
     {
         return std::visit(*this, a, b);
     }

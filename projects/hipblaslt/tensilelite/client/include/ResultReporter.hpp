@@ -31,6 +31,10 @@
 #include <cstddef>
 #include <string>
 
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -129,6 +133,11 @@ namespace TensileLite
             const std::string FanSpeedRPMs        = "fan-rpm";
             const std::string HardwareSampleCount = "hardware-samples";
             const std::string GfxFrequency        = "gfx-frequency(maximum)"; // GPU freq in Mhz
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+            // rocprof
+            const std::string RocProfCounter      = "rocprof-counters";
+#endif
         }; // namespace ResultKey
 
         class ResultReporter : public RunListener

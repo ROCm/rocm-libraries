@@ -31,6 +31,13 @@ endfunction()
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   get_hipcub_test_target(${TEST_SOURCES} TEST_TARGET)
   add_hipcub_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  # Re-propagate DLLS_COPIED from add_hipcub_test_internal's scope to our
+  # caller (file scope). PARENT_SCOPE only propagates one level, so without
+  # this relay the guard resets on every call and each test target gets
+  # duplicate POST_BUILD copy commands that race on parallel builds.
+  if(DEFINED DLLS_COPIED)
+    set(DLLS_COPIED "${DLLS_COPIED}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
@@ -205,6 +212,10 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
 
   add_hipcub_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
+  # Re-propagate DLLS_COPIED (see comment in add_hipcub_test).
+  if(DEFINED DLLS_COPIED)
+    set(DLLS_COPIED "${DLLS_COPIED}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 # ****************************************************************************

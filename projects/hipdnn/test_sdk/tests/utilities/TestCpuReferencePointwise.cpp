@@ -8,12 +8,14 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 namespace
 {
@@ -325,8 +327,8 @@ protected:
 
         for(int i = 0; i < 5; ++i)
         {
-            input1.setHostValue(static_cast<Input1Type>(static_cast<float>(i + 1)), i);
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>(i * 2)), i);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(static_cast<float>(i + 1)), i);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(i * 2)), i);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -357,14 +359,14 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 input1.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
             }
         }
 
-        // Fill input2 with pattern: [100, 200, 300, 400]
+        // Fill input2 with pattern: [10, 20, 30, 40]
         for(int n = 0; n < 4; ++n)
         {
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>((n + 1) * 100)), n);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -377,8 +379,8 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 auto input1Val = static_cast<float>((m * 10) + n);
-                auto input2Val = static_cast<float>((n + 1) * 100);
-                expected.setHostValue(static_cast<OutputType>(input1Val + input2Val), m, n);
+                auto input2Val = static_cast<float>((n + 1) * 10);
+                expected.setHostValue(safeTestTypeCast<OutputType>(input1Val + input2Val), m, n);
             }
         }
 
@@ -469,12 +471,12 @@ protected:
 
         input2.setHostValue(
             static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
                             0,
                             0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
                             0,
                             2,
                             0,
@@ -498,7 +500,7 @@ protected:
                             (static_cast<float>(c) + 1.0f)
                             * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                         expected.setHostValue(
-                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                            safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -521,7 +523,7 @@ protected:
             for(int h = 0; h < 3; ++h)
             {
                 input1.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
             }
         }
 
@@ -530,7 +532,7 @@ protected:
             for(int w = 0; w < 4; ++w)
             {
                 input2.setHostValue(
-                    static_cast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
             }
         }
 
@@ -552,7 +554,7 @@ protected:
                         // input2[0,c,0,w] broadcasts to input2[n,c,h,w]
                         auto input2Val = static_cast<float>((c * 100) + w);
                         expected.setHostValue(
-                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                            safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -582,13 +584,13 @@ protected:
         // Set channel-specific values in input2
         input2.setHostValue(
             static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
                             0,
                             0,
                             0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
                             0,
                             2,
                             0,
@@ -615,7 +617,7 @@ protected:
                                 (static_cast<float>(c) + 1.0f)
                                 * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                             expected.setHostValue(
-                                static_cast<OutputType>(input1Val + input2Val), n, c, d, h, w);
+                                safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, d, h, w);
                         }
                     }
                 }
@@ -1219,6 +1221,158 @@ protected:
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
+    void testGeluForwardOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        // Fill with values that will test gelu function
+        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // 2.0
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0); // -2.0
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1); // 5.0
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::GELU_FWD, output, input);
+
+        // Create expected tensor: gelu_erf(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
+        auto geluErf = [](float x) {
+            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            ComputeType sqrt2 = hipdnn_data_sdk::types::sqrt(ComputeType{2});
+            return ComputeType{0.5} * xCompute
+                   * (ComputeType{1.0} + hipdnn_data_sdk::types::erf(xCompute / sqrt2));
+        };
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        expected.setHostValue(static_cast<OutputType>(geluErf(0.0f)),
+                              0,
+                              0,
+                              0,
+                              0); // gelu_erf(0) = 0.5
+        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_1)),
+                              0,
+                              0,
+                              0,
+                              1); // gelu_erf(1)
+        expected.setHostValue(static_cast<OutputType>(geluErf(-TEST_VALUE_1)),
+                              0,
+                              0,
+                              1,
+                              0); // gelu_erf(-1)
+        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_2)),
+                              0,
+                              0,
+                              1,
+                              1); // gelu_erf(2)
+        expected.setHostValue(static_cast<OutputType>(geluErf(-TEST_VALUE_2)),
+                              0,
+                              1,
+                              0,
+                              0); // gelu_erf(-2)
+        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_5)),
+                              0,
+                              1,
+                              0,
+                              1); // gelu_erf(5)
+        expected.setHostValue(static_cast<OutputType>(geluErf(-TEST_VALUE_5)),
+                              0,
+                              1,
+                              1,
+                              0); // gelu_erf(-5)
+        expected.setHostValue(static_cast<OutputType>(geluErf(TEST_VALUE_1_5)),
+                              0,
+                              1,
+                              1,
+                              1); // gelu_erf(1.5)
+
+        auto tolerance = getMixedTypeTolerance();
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testGeluApproxTanhForwardOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1);
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::GELU_APPROX_TANH_FWD, output, input);
+
+        // gelu_tanh(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
+        auto geluTanh = [](float x) {
+            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            const auto sqrt2OverPi = static_cast<ComputeType>(
+                hipdnn_data_sdk::types::sqrt(ComputeType{2} / static_cast<ComputeType>(PI)));
+            static const auto s_kCoeff = ComputeType{0.044715};
+            auto inner = sqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
+            return ComputeType{0.5} * xCompute
+                   * (ComputeType{1.0} + hipdnn_data_sdk::types::tanh(inner));
+        };
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        expected.setHostValue(static_cast<OutputType>(geluTanh(0.0f)), 0, 0, 0, 0);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_1)), 0, 0, 0, 1);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(-TEST_VALUE_1)), 0, 0, 1, 0);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_2)), 0, 0, 1, 1);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(-TEST_VALUE_2)), 0, 1, 0, 0);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_5)), 0, 1, 0, 1);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(-TEST_VALUE_5)), 0, 1, 1, 0);
+        expected.setHostValue(static_cast<OutputType>(geluTanh(TEST_VALUE_1_5)), 0, 1, 1, 1);
+
+        auto tolerance = getMixedTypeTolerance();
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testSwishForwardOperation()
+    {
+        Tensor<Input1Type> input({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+
+        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1);
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1, 0, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_5), 0, 1, 0, 1);
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::SWISH_FWD, output, input);
+
+        // swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
+        auto swish = [](float x) {
+            auto xCompute = static_cast<ComputeType>(static_cast<Input1Type>(x));
+            auto exp = hipdnn_data_sdk::types::exp(-xCompute);
+            return xCompute / (ComputeType{1} + exp);
+        };
+        Tensor<OutputType> expected({1, 2, 2, 2});
+        expected.setHostValue(static_cast<OutputType>(swish(0.0f)), 0, 0, 0, 0);
+        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_1)), 0, 0, 0, 1);
+        expected.setHostValue(static_cast<OutputType>(swish(-TEST_VALUE_1)), 0, 0, 1, 0);
+        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_2)), 0, 0, 1, 1);
+        expected.setHostValue(static_cast<OutputType>(swish(-TEST_VALUE_2)), 0, 1, 0, 0);
+        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_5)), 0, 1, 0, 1);
+        expected.setHostValue(static_cast<OutputType>(swish(-TEST_VALUE_5)), 0, 1, 1, 0);
+        expected.setHostValue(static_cast<OutputType>(swish(TEST_VALUE_1_5)), 0, 1, 1, 1);
+
+        auto tolerance = getMixedTypeTolerance();
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
     void testUnary1DOperation()
     {
         Tensor<Input1Type> input({5});
@@ -1482,6 +1636,21 @@ TYPED_TEST(CpuReferencePointwiseFixture, UnaryNegation)
     this->testNegationOperation();
 }
 
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryGeluForward)
+{
+    this->testGeluForwardOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryGeluApproxTanhForward)
+{
+    this->testGeluApproxTanhForwardOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySwishForward)
+{
+    this->testSwishForwardOperation();
+}
+
 TYPED_TEST(CpuReferencePointwiseFixture, Unary1DOperation)
 {
     this->testUnary1DOperation();
@@ -1616,6 +1785,21 @@ TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeSigmoidForward)
     this->testSigmoidForwardOperation();
 }
 
+TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeGeluForward)
+{
+    this->testGeluForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeGeluApproxTanhForward)
+{
+    this->testGeluApproxTanhForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeSwishForward)
+{
+    this->testSwishForwardOperation();
+}
+
 TEST_F(TestCpuReferencePointwiseUnaryMixed1Fp32, UnaryMixedTypeAbsoluteValue)
 {
     this->testAbsoluteValueOperation();
@@ -1629,6 +1813,21 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed1Fp32, UnaryMixedTypeNegation)
 TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeTanhForward)
 {
     this->testTanhForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeGeluForward)
+{
+    this->testGeluForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeGeluApproxTanhForward)
+{
+    this->testGeluApproxTanhForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeSwishForward)
+{
+    this->testSwishForwardOperation();
 }
 
 TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeReluBackward)
@@ -1669,4 +1868,19 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeParameterizedRelu
 TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeIdentity)
 {
     this->testIdentityOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeGeluForward)
+{
+    this->testGeluForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeGeluApproxTanhForward)
+{
+    this->testGeluApproxTanhForwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeSwishForward)
+{
+    this->testSwishForwardOperation();
 }

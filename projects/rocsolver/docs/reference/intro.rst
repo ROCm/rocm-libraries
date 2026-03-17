@@ -30,6 +30,7 @@ LAPACK auxiliary functions
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_lange <lange>`, x, x, x, x
+    :ref:`rocsolver_gecon <gecon>`, x, x, x, x
 
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -182,6 +183,7 @@ LAPACK main functions
 
     :ref:`rocsolver_gesvd <gesvd>`, x, x, x, x
     :ref:`rocsolver_gesvdx <gesvdx>`, x, x, x, x
+    :ref:`rocsolver_gesdd <gesdd>`, x, x, x, x
 
 LAPACK-like functions
 ----------------------------

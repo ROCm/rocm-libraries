@@ -73,11 +73,13 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_laswp.cpp
     common/auxiliary/testing_larfg.cpp
     common/auxiliary/testing_lange.cpp
+    common/auxiliary/testing_gecon.cpp
     common/auxiliary/testing_larf.cpp
     common/auxiliary/testing_larft.cpp
     common/auxiliary/testing_larfb.cpp
     common/auxiliary/testing_lasr.cpp
     common/auxiliary/testing_latrd.cpp
+    common/auxiliary/testing_latrd_forsytrd.cpp
     common/auxiliary/testing_labrd.cpp
     common/auxiliary/testing_lauum.cpp
     common/auxiliary/testing_bdsqr.cpp

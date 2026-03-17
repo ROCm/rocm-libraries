@@ -43,7 +43,7 @@ class Engine;
 class OpGraph;
 
 // Pattern is a family of solvers for the same graph shape
-class MIOPEN_INTERNALS_EXPORT GraphPatternMatcher
+class GraphPatternMatcher
 {
 
 public:
@@ -182,7 +182,7 @@ public:
 
     EngineBuilder& setGlobalIndex(int64_t globalIndex);
 
-    EngineBuilder& setSmCount(int32_t smCount);
+    MIOPEN_INTERNALS_NO_EXPORT EngineBuilder& setSmCount(int32_t smCount);
 
     EngineBuilder& setExecutor(const std::shared_ptr<GraphPatternExecutor>& e);
 

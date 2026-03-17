@@ -129,8 +129,8 @@ DevMem::~DevMem()
     auto err = hipFree(ptr);
     if(err != hipSuccess)
     {
-        fprintf(stderr, "hipFree failed: %s at %s:%d\n",
-                hipGetErrorString(err), __FILE__, __LINE__);
+        fprintf(
+            stderr, "hipFree failed: %s at %s:%d\n", hipGetErrorString(err), __FILE__, __LINE__);
         abort();
     }
 }
