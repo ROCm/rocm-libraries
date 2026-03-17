@@ -32,6 +32,7 @@
 #include "../test/verify.hpp"
 
 #include <numeric>
+#include <vector>
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
