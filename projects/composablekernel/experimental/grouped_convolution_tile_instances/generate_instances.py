@@ -565,6 +565,19 @@ def parse_bwd_data_instances(instances, problem_name):
             print(f"Skipping instance {instance_id} with V6 since it's not supported yet.")
             continue
 
+        # Check vector sizes for A and B tensors - we cannot oversubscribe.
+        num_tile_elements_a = m_per_xdl * k_per_xdl
+        num_tile_elements_b = n_per_xdl * k_per_xdl
+        max_vector_size_a = num_tile_elements_a // block_size
+        max_vector_size_b = num_tile_elements_b // block_size
+
+        if max_vector_size_a < 1 or max_vector_size_b < 1:
+            raise RuntimeError(
+                f"Invalid configuration for instance {instance_id}: block size {block_size} is larger than the number of elements in the tile for A or B. num_tile_elements_a: {num_tile_elements_a}, num_tile_elements_b: {num_tile_elements_b}, block_size: {block_size} in instance: {instance}")
+
+        a_scalar_per_vector = min(a_scalar_per_vector, max_vector_size_a)
+        b_scalar_per_vector = min(b_scalar_per_vector, max_vector_size_b)
+
         conv = ConvInstanceTemplateParams(
             spec,
             [m_per_block, n_per_block, k_per_block],
