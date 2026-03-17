@@ -89,12 +89,6 @@ struct MmaPipelineBase
                   "Flag not yet implemented");
 
     private:
-    template <MmaPipelineOptionFlag Flag>
-    CK_TILE_DEVICE static bool hasFlag()
-    {
-        return Flags & Flag;
-    }
-
     template <typename DstT, typename SrcT>
     CK_TILE_DEVICE static auto formatBuffer(SrcT&& inputBuffer)
     {
@@ -111,6 +105,12 @@ struct MmaPipelineBase
     }
 
     protected:
+    template <MmaPipelineOptionFlag Flag>
+    CK_TILE_DEVICE static bool hasFlag()
+    {
+        return Flags & Flag;
+    }
+
     template <typename DstT, typename Transform, typename... Args>
     CK_TILE_DEVICE static auto preApplyTransform(Args&&... args)
     {
@@ -143,7 +143,7 @@ struct MmaPipelineBase
  * @concept MmaPipelineI
  * @brief  Expresses the meta-data interface required for a CRTP MmaPipeline.
  */
-template <typename Derived, MmaPipelineOptionFlags Flags>
+template <typename Derived, MmaPipelineOptionFlags::Type Flags>
 concept MmaPipelineInterface = std::derived_from<Derived, MmaPipelineBase<Flags, Derived>>;
 
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
