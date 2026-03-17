@@ -53,7 +53,7 @@ environmental variables to control logging. Both variables are disabled by defau
   The buffered logs will be dumped to a log file when MIOpen logs an error message,
   or an error is thrown by MIOpen.
   This log can be found in ``/tmp/miopen_error_<pid>``.
-  This feature can be disabled by setting this value to 0.
+  This feature is disabled by default and can be enabled by setting the value to greater than 0 bytes (e.g., 128).
 
 .. note::
 
