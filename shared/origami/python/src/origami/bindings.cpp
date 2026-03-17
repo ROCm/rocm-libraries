@@ -413,7 +413,9 @@ NB_MODULE(origami, m) {
           origami::context_t context(problem, hardware, config);
           return origami::estimate_cache_hit_rates(problem, hardware, config, context);
         },
-        "Estimate MALL and L2 hit rates using two-timestep analytical model (auto-creates context)");
+        "Estimate per-operand cache hit rates as "
+        "(H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B) "
+        "using the analytical model (auto-creates context)");
   m.def("compute_memory_latency",
         [](const origami::problem_t& problem,
            const origami::hardware_t& hardware,

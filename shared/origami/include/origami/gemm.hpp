@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <tuple>
 #include <utility>
 #include <vector>
 #include "origami/hardware.hpp"
@@ -10,6 +11,14 @@
 #include "origami/types.hpp"
 
 namespace origami {
+
+/**
+ * @brief Per-operand cache hit rates for L1, L2, and MALL.
+ *
+ * Tuple layout:
+ *   (H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B)
+ */
+using cache_hit_rates_t = std::tuple<double, double, double, double, double, double>;
 
 /**
  * @brief Context for kernel execution.
@@ -359,7 +368,7 @@ double estimate_mall_hit(const problem_t& problem,
                          const context_t& context);
 
 /**
- * @brief Estimate MALL and L2 hit rates using a two-timestep analytical model.
+ * @brief Estimate per-operand L1, L2, and MALL hit rates using the analytical model.
  *
  * Computes unique tiles counts for the first two timesteps using WGM, 
  * then estimates temporal reuse from T0->T1 overlap. Extrapolates to all timesteps.
@@ -368,12 +377,12 @@ double estimate_mall_hit(const problem_t& problem,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param context Execution context with derived parameters.
- * @return std::pair<double, double> (mall_hit_rate, l2_hit_rate).
+ * @return cache_hit_rates_t
  */
-std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
-                                                   const hardware_t& hardware,
-                                                   const config_t& config,
-                                                   const context_t& context);
+cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config,
+                                           const context_t& context);
 
 /**
  * @brief L2 hit rate from a global (problem-wide) perspective using the refactored API.

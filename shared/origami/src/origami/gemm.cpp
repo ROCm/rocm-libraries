@@ -1053,11 +1053,11 @@ double compute_l2_hit_rate_global(const problem_t& problem,
   return cached_reads / total_reads;
 }
 
-// Estimate cache hit rates for both MALL and L2 caches.
-std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
-                                                   const hardware_t& hardware,
-                                                   const config_t& config,
-                                                   const context_t& context) {
+// Estimate per-operand cache hit rates for L1, L2, and MALL.
+cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config,
+                                           const context_t& context) {
   // Extract parameters
   const size_t num_xcd     = hardware.NUM_XCD;
   const size_t N_CU        = hardware.N_CU;
@@ -1080,29 +1080,32 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   // Helper function to clamp values between 0 and 1
   auto clamp01 = [](double v) { return std::max(0.0, std::min(v, 1.0)); };
 
-  if (N_CU == 0 || total == 0 || grid.m == 0 || grid.n == 0) return {0.0, 0.0};
+  if (N_CU == 0 || total == 0 || grid.m == 0 || grid.n == 0)
+    return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
   // Per-tile data volumes (contiguous dimension rounded to 128B cache lines).
   constexpr double cl = 128.0;
-  const bool a_trans  = (problem.a_transpose == transpose_t::T);
-  const bool b_trans  = (problem.b_transpose == transpose_t::T);
+  const bool a_trans = (problem.a_transpose == transpose_t::T);
+  const bool b_trans = (problem.b_transpose == transpose_t::T);
+  const bool a_temporal = config.cache_hints_a <= 3;
+  const bool b_temporal = config.cache_hints_b <= 3;
 
   const double a_contig = a_trans ? config.mt.k * a_bytes : config.mt.m * a_bytes;
   const double a_outer  = a_trans ? config.mt.m : config.mt.k;
   const double b_contig = b_trans ? config.mt.n * b_bytes : config.mt.k * b_bytes;
   const double b_outer  = b_trans ? config.mt.k : config.mt.n;
 
-  const double a_iter     = a_outer * std::ceil(a_contig / cl) * cl;
-  const double b_iter     = b_outer * std::ceil(b_contig / cl) * cl;
-  const double a_row      = a_iter / static_cast<double>(config.mt.k);
-  const double b_row      = b_iter / static_cast<double>(config.mt.k);
-  const double a_tile     = a_row * k_per_split;
-  const double b_tile     = b_row * k_per_split;
-  const double total_tile = a_tile + b_tile;
+  const double a_iter = a_outer * std::ceil(a_contig / cl) * cl;
+  const double b_iter = b_outer * std::ceil(b_contig / cl) * cl;
+  const double a_row  = a_iter / static_cast<double>(config.mt.k);
+  const double b_row  = b_iter / static_cast<double>(config.mt.k);
+  const double a_tile = a_row * k_per_split;
+  const double b_tile = b_row * k_per_split;
 
   // ----
   // MALL
-  double mall_rate = 0.0;
+  double mall_rate_a = 0.0;
+  double mall_rate_b = 0.0;
   dim4_t mall_tiles;
   if (hardware.has_MALL()) {
     // Deep K-loops allow prefetch stagger. Shallow loops cause simultaneous loads with
@@ -1115,34 +1118,31 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     mall_tiles = count_unique_tiles_timestep(grid, wgm, N_CU, 0);
 
     // Calculate the unique bytes loaded
-    const double mall_unique = mall_tiles.m * a_tile + mall_tiles.n * b_tile;
-    const double mall_total  = std::min(N_CU, total) * total_tile;
-    // Per batch total bytes
-    const double mall_total_pb = static_cast<double>(mall_tiles.m) * mall_tiles.n * total_tile;
-    const double mall_reused   = mall_total_pb - mall_unique;
-    const double mall_cached =
-        (mall_total_pb > 0) ? (mall_reused / mall_total_pb) * mall_total : 0.0;
-    mall_rate = (mall_total > 0) ? clamp01((mall_cached / mall_total) * mall_warmup) : 0.0;
+    const double mall_total_a    = a_temporal ? std::min(N_CU, total) * a_tile : 0.0;
+    const double mall_total_b    = b_temporal ? std::min(N_CU, total) * b_tile : 0.0;
+    const double mall_total_pb_a = a_temporal ? static_cast<double>(mall_tiles.m) * mall_tiles.n * a_tile : 0.0;
+    const double mall_total_pb_b = b_temporal ? static_cast<double>(mall_tiles.m) * mall_tiles.n * b_tile : 0.0;
+    const double mall_unique_a   = a_temporal ? mall_tiles.m * a_tile : 0.0;
+    const double mall_unique_b   = b_temporal ? mall_tiles.n * b_tile : 0.0;
+    const double mall_reused_a   = mall_total_pb_a - mall_unique_a;
+    const double mall_reused_b   = mall_total_pb_b - mall_unique_b;
+    const double mall_cached_a   = (mall_total_pb_a > 0) ? (mall_reused_a / mall_total_pb_a) * mall_total_a : 0.0;
+    const double mall_cached_b   = (mall_total_pb_b > 0) ? (mall_reused_b / mall_total_pb_b) * mall_total_b : 0.0;
+    mall_rate_a = (mall_total_a > 0) ? clamp01((mall_cached_a / mall_total_a) * mall_warmup) : 0.0;
+    mall_rate_b = (mall_total_b > 0) ? clamp01((mall_cached_b / mall_total_b) * mall_warmup) : 0.0;
   }
 
   // ----
   // L2
-  // Non-temporal hints
-  const bool a_temporal = config.cache_hints_a <= 3;
-  const bool b_temporal = config.cache_hints_b <= 3;
   // Pick only one XCD. Herein, we pick the second to last XCD.
   // First and last XCDs are not used because they are bounded by the grid dimensions.
   const size_t xcd_id = (num_xcd > 2) ? num_xcd - 2 : 0;
   // Count the unique tiles on the XCD
   const dim4_t l2_tiles = count_unique_tiles(grid, wgm, N_CU, num_xcd, xcd_id, 0);
-  // Calculate the total bytes required on the XCD
-  const double l2_total_bytes =
-      ((a_temporal ? l2_tiles.m * a_tile : 0.0) + (b_temporal ? l2_tiles.n * b_tile : 0.0)) *
-      l2_tiles.k * l2_tiles.b;
   // Calculate the concurrent load on the XCD
-  const double a_conc          = static_cast<double>(l2_tiles.m) * a_iter;
-  const double b_conc          = static_cast<double>(l2_tiles.n) * b_iter;
-  const double total_conc      = a_conc + b_conc;
+  const double a_conc     = a_temporal ? static_cast<double>(l2_tiles.m) * a_iter : 0.0;
+  const double b_conc     = b_temporal ? static_cast<double>(l2_tiles.n) * b_iter : 0.0;
+  const double total_conc = a_conc + b_conc;
   const double concurrent_load = total_conc * l2_tiles.k * l2_tiles.b;
 
   // Cache-line sharing:
@@ -1157,9 +1157,14 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   const size_t kb              = std::max(l2_tiles.k * l2_tiles.b, static_cast<size_t>(1));
   const size_t actual_mn       = std::min(math::safe_ceil_div(tiles_on_xcd, kb), rectangular_mn);
 
-  double l2_unique    = l2_tiles.m * a_tile * a_cl_factor + l2_tiles.n * b_tile * b_cl_factor;
-  double l2_requested = static_cast<double>(actual_mn) * total_tile;
-  double spatial_reuse = (l2_requested > 0) ? std::max(1.0 - l2_unique / l2_requested, 0.0) : 0.0;
+  double l2_unique_a    = a_temporal ? l2_tiles.m * a_tile * a_cl_factor : 0.0;
+  double l2_unique_b    = b_temporal ? l2_tiles.n * b_tile * b_cl_factor : 0.0;
+  double l2_requested_a = a_temporal ? static_cast<double>(actual_mn) * a_tile : 0.0;
+  double l2_requested_b = b_temporal ? static_cast<double>(actual_mn) * b_tile : 0.0;
+  double spatial_reuse_a =
+      (l2_requested_a > 0) ? std::max(1.0 - l2_unique_a / l2_requested_a, 0.0) : 0.0;
+  double spatial_reuse_b =
+      (l2_requested_b > 0) ? std::max(1.0 - l2_unique_b / l2_requested_b, 0.0) : 0.0;
 
   // K-split alignment penalty for round-robin dispatch:
   // In round-robin, different MN tiles land on different K-split offsets when
@@ -1171,7 +1176,10 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     const size_t mn_on_xcd         = l2_tiles.m * l2_tiles.n;
     if (mn_sharing_period > 1 && mn_on_xcd > 1) {
       const size_t sharing_group = std::max(mn_on_xcd / mn_sharing_period, static_cast<size_t>(1));
-      spatial_reuse *= static_cast<double>(sharing_group - 1) / static_cast<double>(mn_on_xcd - 1);
+      const double align_factor =
+          static_cast<double>(sharing_group - 1) / static_cast<double>(mn_on_xcd - 1);
+      spatial_reuse_a *= align_factor;
+      spatial_reuse_b *= align_factor;
     }
   }
 
@@ -1183,18 +1191,39 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
                 (1.0 - heuristic.l2_cold_floor) * k_iters_sq / (k_iters_sq + heuristic.l2_depth_sq);
   }
 
-  // L2 capacity:
-  // If the concurrent load is greater than the L2 capacity, the hit rate is reduced.
-  double l2_residency = (concurrent_load > 0) ? std::min(l2_cap / concurrent_load, 1.0) : 1.0;
+  // L2 capacity / residency:
+  // Estimate per-operand effective working sets so a small reused operand is
+  // not penalized as strongly by a large competing stream. Each operand sees
+  // its own load plus a share-weighted portion of the other's pressure.
+  const double a_load = a_conc * static_cast<double>(l2_tiles.k * l2_tiles.b);
+  const double b_load = b_conc * static_cast<double>(l2_tiles.k * l2_tiles.b);
+  const double total_load = a_load + b_load;
+  const double a_share = (total_load > 0.0) ? a_load / total_load : 0.0;
+  const double b_share = (total_load > 0.0) ? b_load / total_load : 0.0;
+  const double a_interference = b_load * a_share;
+  const double b_interference = a_load * b_share;
+  const double effective_load_a = a_load + a_interference;
+  const double effective_load_b = b_load + b_interference;
+  const double l2_residency_a =
+      (a_load > 0.0) ? std::min(l2_cap / effective_load_a, 1.0) : 1.0;
+  const double l2_residency_b =
+      (b_load > 0.0) ? std::min(l2_cap / effective_load_b, 1.0) : 1.0;
 
   // Pollution penalty:
-  // Only applies when the concurrent working set exceeds L2 (residency < 1)
-  // AND both operands are temporal.
-  double pollution_rate = 1.0;
-  if (l2_residency < 1.0 && a_temporal && b_temporal) {
-    if (total_conc > 0) {
-      double imbalance = 1.0 - std::min(a_conc, b_conc) / std::max(a_conc, b_conc);
-      pollution_rate   = 1.0 - (1.0 - heuristic.l2_pollution_penalty) * imbalance;
+  // When both operands are temporal, a competing stream can evict lines even if
+  // the operand's own footprint would fit. Model that asymmetrically based on
+  // how much of each operand's effective working set comes from the other stream.
+  double pollution_rate_a = 1.0;
+  double pollution_rate_b = 1.0;
+  if (a_temporal && b_temporal) {
+    constexpr double pollution_penalty = 0.7;
+    if (l2_residency_a < 1.0 && effective_load_a > 0.0) {
+      const double interference_frac_a = a_interference / effective_load_a;
+      pollution_rate_a = 1.0 - (1.0 - pollution_penalty) * interference_frac_a;
+    }
+    if (l2_residency_b < 1.0 && effective_load_b > 0.0) {
+      const double interference_frac_b = b_interference / effective_load_b;
+      pollution_rate_b = 1.0 - (1.0 - pollution_penalty) * interference_frac_b;
     }
   }
 
@@ -1208,7 +1237,8 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   }
 
   // L2 hit rate
-  double l2_rate = pollution_rate * l2_warmup * l2_residency * spatial_reuse * depth_penalty;
+  double l2_rate_a = pollution_rate_a * l2_warmup * l2_residency_a * spatial_reuse_a * depth_penalty;
+  double l2_rate_b = pollution_rate_b * l2_warmup * l2_residency_b * spatial_reuse_b * depth_penalty;
 
   // Request amplification (batched GEMMs only):
   // When the per-iteration working set fits in L2, intra-tile multi-wavefront
@@ -1218,7 +1248,8 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   if (enable_batched_amp && concurrent_load < l2_cap) {
     const double headroom  = 1.0 - concurrent_load / l2_cap;
     const double amp_boost = headroom * headroom;
-    l2_rate += amp_boost * std::max(heuristic.l2_amp_ceiling_batched - l2_rate, 0.0);
+    l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
+    l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
 
   // Request amplification (small-tile split-K GEMMs only):
@@ -1229,60 +1260,101 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   if (enable_split_k_amp && concurrent_load < l2_cap) {
     const double headroom  = 1.0 - concurrent_load / l2_cap;
     const double amp_boost = headroom;
-    l2_rate += amp_boost * std::max(heuristic.l2_amp_ceiling_k_split - l2_rate, 0.0);
+    l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
+    l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
 
-  // Request amplification (skinny-dimension GEMMs):
-  // When one grid dimension is very small (less than 2 tiles), the shared operand's
-  // per-iteration working set is tiny and fits easily in L2. Multiple
-  // wavefronts per CU issue overlapping loads for this shared data, creating
-  // intra-CU L2 hits beyond what cross-CU spatial reuse captures.
-  bool enable_skinny_amp = (context.grid_m <= 2 && context.grid_n > context.grid_m * 8) || 
-                           (context.grid_n <= 2 && context.grid_m > context.grid_n * 8);
-  enable_skinny_amp &= (splitting_factor == 1) && (problem.batch == 1);
-  if (enable_skinny_amp && concurrent_load < l2_cap) {
-      constexpr double amp_ceiling = 0.6;
-      const double headroom = 1.0 - concurrent_load / l2_cap;
-      l2_rate += headroom * std::max(amp_ceiling - l2_rate, 0.0);
-  }
-
-  // Request amplification (skinny-dimension GEMMs):
-  // When one grid dimension is very small (less than 2 tiles), the shared operand's
-  // per-iteration working set fits in L2 but NOT in L1. Multiple wavefronts
-  // per CU issue overlapping loads that miss L1 and hit L2, creating intra-CU
-  // L2 hits beyond what cross-CU spatial reuse captures.
+  // Implicit L1 residency + request amplification (skinny-dimension GEMMs):
+  // When one output dimension is tiny and the shared temporal operand fits in L1,
+  // some of its traffic never reaches L2 at all. If it fits in L2 but not in L1,
+  // intra-CU request amplification lifts its L2 hit rate.
+  cache_hit_rates_t rates{};
+  auto& [H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B] = rates;
   {
     const bool skinny_m = (grid.m <= 2 && grid.n > grid.m * 8);
     const bool skinny_n = (grid.n <= 2 && grid.m > grid.n * 8);
-    const double shared_per_iter = skinny_m ? a_iter : b_iter;
-    constexpr double l1_capacity = 32 * 1024;
-    bool enable_skinny_amp = (skinny_m || skinny_n);
-    enable_skinny_amp &= (grid.k == 1) && (grid.b == 1);
-    enable_skinny_amp &= (a_temporal && b_temporal);
-    enable_skinny_amp &= (shared_per_iter > l1_capacity);
-    if (enable_skinny_amp && concurrent_load < l2_cap) {
-      constexpr double amp_ceiling = 0.6;
-      const double headroom = 1.0 - concurrent_load / l2_cap;
-      l2_rate += headroom * std::max(amp_ceiling - l2_rate, 0.0);
+    const bool single_stream = (grid.k == 1) && (grid.b == 1);
+    constexpr double l1_capacity = 32.0 * 1024.0;
+
+    if (single_stream && skinny_m && a_temporal && !b_temporal) {
+      if (a_iter <= l1_capacity) {
+        const double headroom = 1.0 - a_iter / l1_capacity;
+        H_mem_l1_A = 0.7 * clamp01(headroom);
+      } else if (concurrent_load < l2_cap) {
+        constexpr double amp_ceiling = 0.6;
+        const double headroom = 1.0 - concurrent_load / l2_cap;
+        l2_rate_a += headroom * std::max(amp_ceiling - l2_rate_a, 0.0);
+      }
+    }
+
+    if (single_stream && skinny_n && b_temporal && !a_temporal) {
+      if (b_iter <= l1_capacity) {
+        const double headroom = 1.0 - b_iter / l1_capacity;
+        H_mem_l1_B = 0.7 * clamp01(headroom);
+      } else if (concurrent_load < l2_cap) {
+        constexpr double amp_ceiling = 0.6;
+        const double headroom = 1.0 - concurrent_load / l2_cap;
+        l2_rate_b += headroom * std::max(amp_ceiling - l2_rate_b, 0.0);
+      }
     }
   }
 
-  l2_rate = clamp01(l2_rate);
+  H_mem_l2_A = a_temporal ? clamp01(l2_rate_a) : 0.0;
+  H_mem_l2_B = b_temporal ? clamp01(l2_rate_b) : 0.0;
+  H_mem_mall_A = a_temporal ? clamp01(mall_rate_a) : 0.0;
+  H_mem_mall_B = b_temporal ? clamp01(mall_rate_b) : 0.0;
 
   if (debug) {
-    OLOG_DEBUG("MallTiles: " << mall_tiles.k << " " << mall_tiles.m << " " << mall_tiles.n << " "
-                             << mall_tiles.b);
-    OLOG_DEBUG("MallHitRate: " << mall_rate);
-    OLOG_DEBUG("L2Tiles: " << l2_tiles.k << " " << l2_tiles.m << " " << l2_tiles.n << " "
-                           << l2_tiles.b);
-    OLOG_DEBUG("SpatialReuse: " << spatial_reuse);
+    OLOG_DEBUG("MallTiles: " << mall_tiles.k << " " << mall_tiles.m << " " << mall_tiles.n << " " << mall_tiles.b);
+    OLOG_DEBUG("L2Tiles: " << l2_tiles.k << " " << l2_tiles.m << " " << l2_tiles.n << " " << l2_tiles.b);
+    OLOG_DEBUG("SpatialReuseA: " << spatial_reuse_a);
+    OLOG_DEBUG("SpatialReuseB: " << spatial_reuse_b);
     OLOG_DEBUG("L2Warmup: " << l2_warmup);
-    OLOG_DEBUG("PollutionRate: " << pollution_rate);
-    OLOG_DEBUG("L2Residency: " << l2_residency);
-    OLOG_DEBUG("L2HitRate: " << l2_rate);
+    OLOG_DEBUG("PollutionRateA: " << pollution_rate_a);
+    OLOG_DEBUG("PollutionRateB: " << pollution_rate_b);
+    OLOG_DEBUG("L2ResidencyA: " << l2_residency_a);
+    OLOG_DEBUG("L2ResidencyB: " << l2_residency_b);
+    OLOG_DEBUG("H_mem_l1_A: " << H_mem_l1_A);
+    OLOG_DEBUG("H_mem_l1_B: " << H_mem_l1_B);
+    OLOG_DEBUG("H_mem_l2_A: " << H_mem_l2_A);
+    OLOG_DEBUG("H_mem_l2_B: " << H_mem_l2_B);
+    OLOG_DEBUG("H_mem_mall_A: " << H_mem_mall_A);
+    OLOG_DEBUG("H_mem_mall_B: " << H_mem_mall_B);
   }
 
-  return {mall_rate, l2_rate};
+  return rates;
+}
+
+// Utility function to aggregate cache hit rates for debugging.
+static std::tuple<double, double, double> aggregate_cache_hit_rates_for_debug(
+    double H_mem_l1_A, double H_mem_l1_B,
+    double H_mem_l2_A, double H_mem_l2_B,
+    double H_mem_mall_A, double H_mem_mall_B,
+    double Ld_A_total, double Ld_B_total,
+    bool a_temporal, bool b_temporal) {
+  const double temporal_total = (a_temporal ? Ld_A_total : 0.0) + (b_temporal ? Ld_B_total : 0.0);
+  const double Ld_A_to_l2 = a_temporal ? (1.0 - H_mem_l1_A) * Ld_A_total : 0.0;
+  const double Ld_B_to_l2 = b_temporal ? (1.0 - H_mem_l1_B) * Ld_B_total : 0.0;
+  const double l2_input_total = Ld_A_to_l2 + Ld_B_to_l2;
+  const double Ld_A_to_mall = a_temporal ? (1.0 - H_mem_l2_A) * Ld_A_to_l2 : 0.0;
+  const double Ld_B_to_mall = b_temporal ? (1.0 - H_mem_l2_B) * Ld_B_to_l2 : 0.0;
+  const double mall_input_total = Ld_A_to_mall + Ld_B_to_mall;
+
+  const double H_mem_l1 =
+      (temporal_total > 0.0)
+          ? ((H_mem_l1_A * (a_temporal ? Ld_A_total : 0.0))
+             + (H_mem_l1_B * (b_temporal ? Ld_B_total : 0.0))) / temporal_total
+          : 0.0;
+  const double H_mem_l2 =
+      (l2_input_total > 0.0)
+          ? ((H_mem_l2_A * Ld_A_to_l2) + (H_mem_l2_B * Ld_B_to_l2)) / l2_input_total
+          : 0.0;
+  const double H_mem_mall =
+      (mall_input_total > 0.0)
+          ? ((H_mem_mall_A * Ld_A_to_mall) + (H_mem_mall_B * Ld_B_to_mall)) / mall_input_total
+          : 0.0;
+
+  return {H_mem_l1, H_mem_l2, H_mem_mall};
 }
 
 // Determine the memory latency
@@ -1304,8 +1376,9 @@ double compute_memory_latency(const problem_t& problem,
   double bw_limited           = context.mem_bw_limited;
   auto heuristic              = context.heuristic;
 
-  // 1) Estimate MALL and L2 hit-rates using the two-timestep analytical model
-  auto [H_mem_mall, H_mem_l2] = estimate_cache_hit_rates(problem, hardware, config, context);
+  // 1) Estimate per-operand L1/MALL/L2 hit-rates using the analytical model
+  const auto [H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B] =
+      estimate_cache_hit_rates(problem, hardware, config, context);
 
   // 2) Total loads per CU (A + B, with 128B alignment and MX scales)
   size_t Ld_A      = a_trans ? config.mt.m * round_elements_to_128B(config.mt.k, a_bits)
@@ -1323,28 +1396,38 @@ double compute_memory_latency(const problem_t& problem,
   // 3) Total loads by all CUs, split by operand
   double Ld_A_total = static_cast<double>(Ld_A * a_bytes) * num_active_cus;
   double Ld_B_total = static_cast<double>(Ld_B * b_bytes) * num_active_cus;
-  double total_Ld   = Ld_CU_bytes * static_cast<double>(num_active_cus);
+  double total_Ld = Ld_CU_bytes * static_cast<double>(num_active_cus);
 
-  // 4) L2 latency (bandwidth-limited by CU occupancy ratio)
-  double l2_bw = hardware.mem1_perf_ratio * static_cast<double>(num_active_cus) /
-                 static_cast<double>(hardware.N_CU);
-  double L_mem_l2 = (l2_bw > 0) ? (total_Ld / l2_bw) : 0.0;
-
-  // Non-temporal operands are streamed from HBM; they transit L2/MALL
-  // but don't cache, so they always pay DRAM bandwidth.
   const bool a_nontemporal = config.cache_hints_a > 3;
   const bool b_nontemporal = config.cache_hints_b > 3;
+  const bool a_temporal = !a_nontemporal;
+  const bool b_temporal = !b_nontemporal;
 
-  double Ld_A_after_l2 = a_nontemporal ? Ld_A_total : (1.0 - H_mem_l2) * Ld_A_total;
-  double Ld_B_after_l2 = b_nontemporal ? Ld_B_total : (1.0 - H_mem_l2) * Ld_B_total;
+  // 4) L2 latency (bandwidth-limited by CU occupancy ratio)
+  double l2_bw = hardware.mem1_perf_ratio *
+                 static_cast<double>(num_active_cus) / static_cast<double>(hardware.N_CU);
+
+  // Temporal traffic first passes through an implicit L1 stage. Nontemporal
+  // traffic bypasses L1/L2/MALL caching and is charged directly to DRAM.
+  double Ld_A_to_l2 = a_temporal ? (1.0 - H_mem_l1_A) * Ld_A_total : 0.0;
+  double Ld_B_to_l2 = b_temporal ? (1.0 - H_mem_l1_B) * Ld_B_total : 0.0;
+  double Ld_l2 = Ld_A_to_l2 + Ld_B_to_l2;
+  double L_mem_l2 = (l2_bw > 0) ? (Ld_l2 / l2_bw) : 0.0;
+
+  double Ld_A_after_l2 = a_temporal ? (1.0 - H_mem_l2_A) * Ld_A_to_l2 : 0.0;
+  double Ld_B_after_l2 = b_temporal ? (1.0 - H_mem_l2_B) * Ld_B_to_l2 : 0.0;
 
   double Ld_A_mall = hardware.has_MALL() ? Ld_A_after_l2 : 0.0;
   double Ld_B_mall = hardware.has_MALL() ? Ld_B_after_l2 : 0.0;
   double Ld_mall   = Ld_A_mall + Ld_B_mall;
 
-  double Ld_A_dram = a_nontemporal ? Ld_A_total : (1.0 - H_mem_mall) * Ld_A_mall;
-  double Ld_B_dram = b_nontemporal ? Ld_B_total : (1.0 - H_mem_mall) * Ld_B_mall;
-  double Ld_dram   = Ld_A_dram + Ld_B_dram;
+  double Ld_A_dram = a_nontemporal ? Ld_A_total
+                                   : (hardware.has_MALL() ? (1.0 - H_mem_mall_A) * Ld_A_mall
+                                                          : Ld_A_after_l2);
+  double Ld_B_dram = b_nontemporal ? Ld_B_total
+                                   : (hardware.has_MALL() ? (1.0 - H_mem_mall_B) * Ld_B_mall
+                                                          : Ld_B_after_l2);
+  double Ld_dram = Ld_A_dram + Ld_B_dram;
 
   // 7) MALL latency
   double mall_bw    = hardware.mem2_perf_ratio * bw_limited;
@@ -1360,11 +1443,20 @@ double compute_memory_latency(const problem_t& problem,
                            L_mem_mall * heuristic.weight_mem_mall,
                            L_mem_dram * heuristic.weight_mem_dram});
 
-  if (debug) {
+  if(debug)
+  {
+    const auto [H_mem_l1, H_mem_l2, H_mem_mall] =
+        aggregate_cache_hit_rates_for_debug(H_mem_l1_A, H_mem_l1_B,
+                                            H_mem_l2_A, H_mem_l2_B,
+                                            H_mem_mall_A, H_mem_mall_B,
+                                            Ld_A_total, Ld_B_total,
+                                            a_temporal, b_temporal);
     OLOG_DEBUG("H_mem_mall: " << H_mem_mall);
     OLOG_DEBUG("H_mem_l2: " << H_mem_l2);
+    OLOG_DEBUG("H_mem_l1: " << H_mem_l1);
     OLOG_DEBUG("Ld_CU_bytes: " << Ld_CU_bytes);
     OLOG_DEBUG("total_Ld: " << total_Ld);
+    OLOG_DEBUG("Ld_l2: " << Ld_l2);
     OLOG_DEBUG("Ld_dram: " << Ld_dram);
     OLOG_DEBUG("Ld_mall: " << Ld_mall);
     OLOG_DEBUG("L_mem_l2: " << L_mem_l2);
