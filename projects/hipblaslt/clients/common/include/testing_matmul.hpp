@@ -903,6 +903,17 @@ void check(hipStream_t                   stream,
             }
             else
             {
+                if(arg.initialization == hipblaslt_initialization::integer_exact)
+                {
+                    unit_print_first_mismatch(M[gemmIdx],
+                                             N[gemmIdx],
+                                             ldd[gemmIdx],
+                                             stride_d[gemmIdx],
+                                             hD_gold[gemmIdx].buf(),
+                                             hD_1[gemmIdx].buf(),
+                                             num_batches[gemmIdx],
+                                             To);
+                }
                 unit_check_general(M[gemmIdx],
                                    N[gemmIdx],
                                    ldd[gemmIdx],
