@@ -36,8 +36,11 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
 
     // Set handle on graph
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(
-            graphDesc.get(), HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+        hipdnnBackend()->backendSetAttribute(graphDesc.get(),
+                                             HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                             HIPDNN_TYPE_HANDLE,
+                                             1,
+                                             static_cast<const void*>(&handle)),
         "Failed to set handle on GraphDescriptor");
 
     // Set operations on graph
@@ -52,7 +55,7 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                              HIPDNN_ATTR_OPERATIONGRAPH_OPS,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              static_cast<int64_t>(opDescPtrs.size()),
-                                             opDescPtrs.data()),
+                                             static_cast<const void*>(opDescPtrs.data())),
         "Failed to set operations on GraphDescriptor");
 
     // Set graph-level data types

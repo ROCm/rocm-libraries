@@ -137,8 +137,12 @@ template <typename T>
 {
     hipdnnBackendDescriptor_t rawDesc = nullptr;
     int64_t actualCount = 0;
-    auto status = hipdnnBackend()->backendGetAttribute(
-        sourceDescriptor, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &actualCount, &rawDesc);
+    auto status = hipdnnBackend()->backendGetAttribute(sourceDescriptor,
+                                                       attrName,
+                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                       1,
+                                                       &actualCount,
+                                                       static_cast<void*>(&rawDesc));
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
@@ -186,7 +190,7 @@ template <typename T>
                                                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                           count,
                                                           &actualCount,
-                                                          rawDescs.data());
+                                                          static_cast<void*>(rawDescs.data()));
     if(getStatus != HIPDNN_STATUS_SUCCESS)
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};

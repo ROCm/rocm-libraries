@@ -457,8 +457,8 @@ TEST_P(TestLayernormOperationDescriptorGetTensor, GetAttributeTensorDescriptorRe
     // Ownership is transferred to the caller — delete after use.
     HipdnnBackendDescriptor* retrieved = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        desc->getAttribute(tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &retrieved));
+    ASSERT_NO_THROW(desc->getAttribute(
+        tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, static_cast<void*>(&retrieved)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrieved, nullptr);
