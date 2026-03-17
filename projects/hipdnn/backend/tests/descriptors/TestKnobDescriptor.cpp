@@ -922,6 +922,52 @@ TEST_F(TestKnobDescriptor, GetValidValuesStringCopyWithoutSizeQueryFails)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+// W1: Default value type discriminator attribute
+TEST_F(TestKnobDescriptor, GetDefaultValueTypeInt64)
+{
+    setKnobId("test_knob");
+    setInt64Default(42);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    int64_t valueType = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
+                                                  HIPDNN_TYPE_INT64,
+                                                  1,
+                                                  nullptr,
+                                                  &valueType));
+    ASSERT_EQ(static_cast<hipdnnBackendAttributeType_t>(valueType), HIPDNN_TYPE_INT64);
+}
+
+TEST_F(TestKnobDescriptor, GetDefaultValueTypeDouble)
+{
+    setKnobId("test_knob");
+    setDoubleDefault(3.14);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    int64_t valueType = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
+                                                  HIPDNN_TYPE_INT64,
+                                                  1,
+                                                  nullptr,
+                                                  &valueType));
+    ASSERT_EQ(static_cast<hipdnnBackendAttributeType_t>(valueType), HIPDNN_TYPE_DOUBLE);
+}
+
+TEST_F(TestKnobDescriptor, GetDefaultValueTypeChar)
+{
+    setKnobId("test_knob");
+    setStringDefault("hello");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    int64_t valueType = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE,
+                                                  HIPDNN_TYPE_INT64,
+                                                  1,
+                                                  nullptr,
+                                                  &valueType));
+    ASSERT_EQ(static_cast<hipdnnBackendAttributeType_t>(valueType), HIPDNN_TYPE_CHAR);
+}
+
 // S2: DescriptorFactory wiring for HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR
 TEST(TestKnobDescriptorFactory, CreateKnobInfoDescriptorViaFactory)
 {

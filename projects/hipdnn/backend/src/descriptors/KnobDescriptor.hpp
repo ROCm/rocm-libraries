@@ -177,6 +177,11 @@ private:
                             int64_t requestedElementCount,
                             int64_t* elementCount,
                             void* arrayOfElements) const;
+
+    void getDefaultValueType(hipdnnBackendAttributeType_t attributeType,
+                             int64_t requestedElementCount,
+                             int64_t* elementCount,
+                             void* arrayOfElements) const;
 };
 
 } // namespace hipdnn_backend

@@ -453,6 +453,9 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH:
         getStringMaxLength(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE:
+        getDefaultValueType(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -901,6 +904,50 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
     if(elementCount != nullptr)
     {
         *elementCount = static_cast<int64_t>(std::min(str.size() + 1, maxSize));
+    }
+}
+
+void KnobDescriptor::getDefaultValueType(hipdnnBackendAttributeType_t attributeType,
+                                         int64_t requestedElementCount,
+                                         int64_t* elementCount,
+                                         void* arrayOfElements) const
+{
+    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "KnobDescriptor::getAttribute(): "
+                   "attributeType must be HIPDNN_TYPE_INT64 for DEFAULT_VALUE_TYPE");
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "KnobDescriptor::getAttribute(): arrayOfElements is null");
+    THROW_IF_NE(requestedElementCount,
+                1,
+                HIPDNN_STATUS_BAD_PARAM,
+                "KnobDescriptor::getAttribute(): requestedElementCount must be 1");
+
+    // Map the internal KnobValue discriminator to the corresponding attribute type
+    // that callers should use when reading HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE.
+    hipdnnBackendAttributeType_t valueType;
+    switch(_defaultValue.type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+        valueType = HIPDNN_TYPE_INT64;
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+        valueType = HIPDNN_TYPE_DOUBLE;
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+        valueType = HIPDNN_TYPE_CHAR;
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "KnobDescriptor::getAttribute(): unknown default value type ("
+                                  + std::to_string(static_cast<int>(_defaultValue.type)) + ")");
+    }
+
+    *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(valueType);
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
     }
 }
 

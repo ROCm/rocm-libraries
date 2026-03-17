@@ -265,6 +265,17 @@ typedef enum
     /** @brief Maximum string length for string knobs (INT64) */
     HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH = 909,
 
+    /**
+     * @brief Type discriminator for the default value attribute (read-only, INT64)
+     *
+     * Returns the hipdnnBackendAttributeType_t value that should be used when
+     * calling getAttribute() for HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE.
+     * Possible values: HIPDNN_TYPE_INT64, HIPDNN_TYPE_DOUBLE, HIPDNN_TYPE_CHAR.
+     * This eliminates the need to probe multiple types to discover the default
+     * value type after reading a KnobDescriptor.
+     */
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE = 910,
+
     /** @} */
 
     /**
