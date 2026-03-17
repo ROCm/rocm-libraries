@@ -1218,7 +1218,7 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases();
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, float, float>>()
 {
-    auto u = hipdnn_data_sdk::types::pow(2.0, -23);
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
 
     auto bRowValues100 = std::vector<double>(100, 1.0);
 
@@ -1251,7 +1251,7 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<floa
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, double, float>>()
 {
-    auto u = hipdnn_data_sdk::types::pow(2.0, -23);
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
 
     return {
         // K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,u)*4 + 2*4*u
@@ -1269,8 +1269,8 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<floa
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, float, float>>()
 {
-    auto uFloat = hipdnn_data_sdk::types::pow(2.0, -23);
-    auto uHalf = hipdnn_data_sdk::types::pow(2.0, -10);
+    auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {// K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,uFloat)*4 + 4*uHalf
             {{2, 1},
@@ -1291,7 +1291,7 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = hipdnn_data_sdk::types::pow(2.0, -10);
+    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     auto bRowValues100 = std::vector<double>(100, 1.0);
 
@@ -1313,8 +1313,8 @@ template <>
 std::vector<MatmulToleranceTestCase>
     getMatmulToleranceTestCases<TypeTriple<bfloat16, float, float>>()
 {
-    auto uFloat = hipdnn_data_sdk::types::pow(2.0, -23);
-    auto uBf16 = hipdnn_data_sdk::types::pow(2.0, -7);
+    auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
 
     return {// K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,uFloat)*4 + 4*uBf16
             {{2, 1},
@@ -1336,7 +1336,7 @@ template <>
 std::vector<MatmulToleranceTestCase>
     getMatmulToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
-    auto u = hipdnn_data_sdk::types::pow(2.0, -7);
+    auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
 
     auto bRowValues50 = std::vector<double>(50, 1.0);
 
