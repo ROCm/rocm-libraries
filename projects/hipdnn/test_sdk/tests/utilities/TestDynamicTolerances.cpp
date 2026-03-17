@@ -4,6 +4,7 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
@@ -1176,24 +1177,32 @@ struct MatmulToleranceTestCase
 // rowValues[i] specifies the constant value for all elements in row i.
 // This ensures different rows have different sums, exercising the max-row-sum logic
 // in computeMatrixInfNorm.
+// Supports batched (>2D) tensors via iterateAlongDimensions.
 template <typename T>
 hipdnn_data_sdk::utilities::Tensor<T>
     createTensorFromRowValues(const std::vector<int64_t>& dims,
                               const std::vector<double>& rowValues)
 {
+    using hipdnn_data_sdk::utilities::iterateAlongDimensions;
+
     hipdnn_data_sdk::utilities::Tensor<T> tensor(dims);
-    auto* data = static_cast<T*>(tensor.memory().hostData());
 
-    auto rows = dims[dims.size() - 2];
-    auto cols = dims[dims.size() - 1];
+    auto cols = dims.back();
 
-    for(int64_t i = 0; i < rows; ++i)
-    {
+    // outerDims = [batch..., rows] — everything except the last dim (cols)
+    auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
+
+    iterateAlongDimensions(outerDims, [&](const std::vector<int64_t>& outerIndices) {
+        auto row = outerIndices.back();
+        auto fullIndices = outerIndices;
+        fullIndices.push_back(0);
+
         for(int64_t j = 0; j < cols; ++j)
         {
-            data[i * cols + j] = static_cast<T>(rowValues[static_cast<size_t>(i)]);
+            fullIndices.back() = j;
+            tensor.setHostValue(static_cast<T>(rowValues[static_cast<size_t>(row)]), fullIndices);
         }
-    }
+    });
 
     return tensor;
 }
@@ -1224,7 +1233,17 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<floa
              {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
              computeGamma(10, u) * 20.0 * 10.0},
             // K=100: A=2x100, rows={1,2}. ||A||_inf=200, B=100x2, all 1.0. ||B||_inf=2
-            {{2, 100}, {100, 2}, {1.0, 2.0}, bRowValues100, computeGamma(100, u) * 200.0 * 2.0}};
+            {{2, 100}, {100, 2}, {1.0, 2.0}, bRowValues100, computeGamma(100, u) * 200.0 * 2.0},
+            // Batched K=3: A={2,2,3}, B={2,3,4}. Same row values as 2D K=3 case.
+            // Batch dim doesn't change max row sum: ||A||_inf=6, ||B||_inf=12
+            {{2, 2, 3}, {2, 3, 4}, {1.0, 2.0}, {1.0, 3.0, 0.5}, computeGamma(3, u) * 6.0 * 12.0},
+            // Batched K=10: A={3,2,10}, B={3,10,2}. 3 batches.
+            // ||A||_inf=20, ||B||_inf=10 (same as 2D K=10)
+            {{3, 2, 10},
+             {3, 10, 2},
+             {1.0, 2.0},
+             {1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0},
+             computeGamma(10, u) * 20.0 * 10.0}};
 }
 
 // Float / Double / Float (Input casting error)

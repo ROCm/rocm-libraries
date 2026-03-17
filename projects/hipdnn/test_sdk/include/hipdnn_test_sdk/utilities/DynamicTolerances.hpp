@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 
@@ -541,7 +542,11 @@ using hipdnn_data_sdk::utilities::TensorView;
  * This is the appropriate subordinate matrix norm for element-wise error bounds
  * via Higham's analysis: max_ij |error_ij| <= gamma_k * ||A||_inf * ||B||_inf.
  *
- * Uses strides to correctly handle both packed and non-packed tensor layouts.
+ * For batched tensors (>2D), the infinity-norm is computed across all batches,
+ * returning the maximum row sum over all rows in all batches.
+ *
+ * Uses iterateAlongDimensions + ConstTensorView to correctly handle padded
+ * and non-packed tensor layouts via stride-aware indexing.
  *
  * @tparam T The data type of the tensor elements.
  * @param tensor The input tensor (must have at least 2 dimensions).
@@ -550,37 +555,33 @@ using hipdnn_data_sdk::utilities::TensorView;
 template <typename T>
 double computeMatrixInfNorm(ITensor& tensor)
 {
+    using hipdnn_data_sdk::utilities::iterateAlongDimensions;
+
     const auto& dims = tensor.dims();
-    const auto& strides = tensor.strides();
+    TensorView<T> view(tensor);
 
-    auto rows = dims[dims.size() - 2];
-    auto cols = dims[dims.size() - 1];
+    auto cols = dims.back();
 
-    auto rowStride = strides[strides.size() - 2];
-    auto colStride = strides[strides.size() - 1];
-
-    const auto* data = static_cast<const T*>(tensor.rawHostData());
-
-    // For tensors with batch dimensions, compute across all batches
-    auto batchCount = static_cast<int64_t>(tensor.elementCount()) / (rows * cols);
+    // outerDims = [batch..., rows] — everything except the last dim (cols)
+    auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
 
     double maxRowSum = 0.0;
 
-    for(int64_t batch = 0; batch < batchCount; ++batch)
-    {
-        auto batchOffset = batch * rows * rowStride;
+    iterateAlongDimensions(outerDims, [&](const std::vector<int64_t>& outerIndices) {
+        double rowSum = 0.0;
 
-        for(int64_t i = 0; i < rows; ++i)
+        auto fullIndices = outerIndices;
+        fullIndices.push_back(0);
+
+        for(int64_t j = 0; j < cols; ++j)
         {
-            double rowSum = 0.0;
-            for(int64_t j = 0; j < cols; ++j)
-            {
-                auto idx = batchOffset + i * rowStride + j * colStride;
-                rowSum += static_cast<double>(hipdnn_data_sdk::types::fabs(data[idx]));
-            }
-            maxRowSum = std::max(maxRowSum, rowSum);
+            fullIndices.back() = j;
+            rowSum += static_cast<double>(
+                hipdnn_data_sdk::types::fabs(view.getHostValue(fullIndices)));
         }
-    }
+
+        maxRowSum = std::max(maxRowSum, rowSum);
+    });
 
     return maxRowSum;
 }
