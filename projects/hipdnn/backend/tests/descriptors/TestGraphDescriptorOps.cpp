@@ -1743,3 +1743,91 @@ TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForPreferredEngineId)
                            &wrongTypeBuffer),
         HIPDNN_STATUS_BAD_PARAM);
 }
+
+TEST_F(TestGraphDescriptorOps, GetAttributeReturnsName)
+{
+    auto conv = createDefaultConvOp();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+
+    const std::string graphName = "MyTestGraph";
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(graphName.size()),
+                       graphName.c_str());
+
+    desc->finalize();
+
+    // Query count (getString returns size+1 for null terminator)
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+    EXPECT_EQ(elementCount, static_cast<int64_t>(graphName.size() + 1));
+
+    // Query value
+    std::vector<char> nameBuffer(static_cast<size_t>(elementCount));
+    int64_t actualCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       elementCount,
+                                       &actualCount,
+                                       nameBuffer.data()));
+    EXPECT_STREQ(nameBuffer.data(), graphName.c_str());
+}
+
+TEST_F(TestGraphDescriptorOps, GetAttributeNameCountWhenUnset)
+{
+    auto conv = createDefaultConvOp();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+
+    // Do not set name
+    desc->finalize();
+
+    // Query count (empty string = just null terminator)
+    int64_t elementCount = 99;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+    EXPECT_EQ(elementCount, 1);
+}
+
+TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForName)
+{
+    auto conv = createDefaultConvOp();
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+
+    const std::string graphName = "MyTestGraph";
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(graphName.size()),
+                       graphName.c_str());
+
+    desc->finalize();
+
+    // Call getAttribute with HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT
+    // but pass HIPDNN_TYPE_INT64 instead of HIPDNN_TYPE_CHAR
+    int64_t elementCount = 0;
+    int64_t wrongTypeBuffer = 0;
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                                  HIPDNN_TYPE_INT64,
+                                                  1,
+                                                  &elementCount,
+                                                  &wrongTypeBuffer),
+                               HIPDNN_STATUS_BAD_PARAM);
+}

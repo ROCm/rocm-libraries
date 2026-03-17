@@ -469,4 +469,24 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughCApi)
     EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
 }
 
+// Exercises the deserialize_via_backend() path and verifies the graph name
+// is preserved through the FlatBuffer-direct deserialization path.
+TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto data = originalGraph->toBinary();
+    ASSERT_FALSE(data.empty());
+
+    // Create a new graph and use deserialize_via_backend without handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize_via_backend(nullptr, data);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    EXPECT_EQ(liftedGraph->get_name(), "LiftingTestGraph");
+}
+
 } // namespace
