@@ -64,7 +64,7 @@ const auto& GetTestParams()
         {
             supported_gpus = supported_gpus | Gpu::gfx120X;
         }
-        auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         p.Tunable(5);
         p.SetConvAttrFp16Alt(0);
         /// \todo 250.0f is too much. The solver needs to be checked.
