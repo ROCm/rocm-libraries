@@ -19,7 +19,7 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
                                              HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              1,
-                                             &graphDesc),
+                                             static_cast<const void*>(&graphDesc)),
         "Failed to set operation graph on the engine descriptor.");
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -45,7 +45,7 @@ inline Error
                                              HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              1,
-                                             &graphDesc),
+                                             static_cast<const void*>(&graphDesc)),
         "Failed to set operation graph on the engine heuristic descriptor.");
 
     // TODO

@@ -175,6 +175,8 @@ protected:
 template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
 class BaseNode : public INode
 {
+    friend DerivedT;
+
 private:
     DerivedT& self()
     {
@@ -260,6 +262,9 @@ public:
 
         return outputAttributes;
     }
+
+private:
+    BaseNode() = default;
 
 protected:
     using INode::INode;

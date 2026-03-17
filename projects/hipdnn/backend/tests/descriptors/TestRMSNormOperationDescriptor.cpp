@@ -385,7 +385,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawX));
+                                       static_cast<void*>(&rawX)));
     std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);

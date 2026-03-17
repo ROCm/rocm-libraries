@@ -160,11 +160,7 @@ public:
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        flatbuffers::Optional<int64_t> fbAxis = flatbuffers::nullopt;
-        if(axis.has_value())
-        {
-            fbAxis = axis.value();
-        }
+        flatbuffers::Optional<int64_t> fbAxis = axis;
 
         return hipdnn_data_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
             builder,

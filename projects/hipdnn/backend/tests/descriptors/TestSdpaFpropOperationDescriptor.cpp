@@ -775,7 +775,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawQ));
+                                       static_cast<void*>(&rawQ)));
     std::unique_ptr<HipdnnBackendDescriptor> retrievedQ(rawQ);
 
     ASSERT_EQ(elementCount, 1);

@@ -47,6 +47,7 @@ TEST(TestBatchnormNode, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    batchnormAttributes = BatchnormAttributes{};
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
     BatchnormNode nodeWithX(std::move(batchnormAttributesCopy), graphAttributes);

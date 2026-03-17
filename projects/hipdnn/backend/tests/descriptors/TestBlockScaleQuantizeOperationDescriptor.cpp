@@ -342,7 +342,8 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedX));
+                                       static_cast<void*>(&retrievedX)));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedX(retrievedX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);

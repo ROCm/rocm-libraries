@@ -25,7 +25,7 @@ namespace hipdnn_data_sdk::utilities
  * @param engineName The name of the engine to convert to an ID
  * @return int64_t The unique engine ID
  */
-inline int64_t engineNameToId(const char* engineName)
+inline int64_t engineNameToId(const char* engineName) noexcept
 {
     return static_cast<int64_t>(fnv1aHash(engineName));
 }
@@ -106,7 +106,7 @@ struct EngineRegistrar
     EngineRegistrar(std::string_view name)
     {
         detail::getMutableEngineNames().insert(name);
-        auto id = engineNameToId(name.data());
+        auto id = engineNameToId(name);
         detail::getMutableEngineIdToNameMap()[id] = name;
 
         // Check for collisions
@@ -132,12 +132,14 @@ struct EngineRegistrar
 // change the generated uint64_t ID.
 
 // Define all engines using the macro
+// NOLINTBEGIN(bugprone-throwing-static-initialization) collision detection requires throw
 HIPDNN_REGISTER_ENGINE(FUSILLI_ENGINE, "FUSILLI_ENGINE")
 
 HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE, "HIPBLASLT_ENGINE")
 
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC, "MIOPEN_ENGINE_DETERMINISTIC")
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE, "HIP_KERNEL_ENGINE")
 

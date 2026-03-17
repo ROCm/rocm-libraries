@@ -45,10 +45,12 @@ struct TensorLayout
     static const TensorLayout NDHWC; ///< 5D channel-last layout
 };
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) fixed-size layout constants
 inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
 inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
 {
@@ -341,8 +343,11 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return throwIfOutOfBounds(
-            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
+        return throwIfOutOfBounds(std::inner_product( // NOLINT(bugprone-fold-init-type)
+            indices.begin(),
+            indices.end(),
+            strides().begin(),
+            int64_t{0}));
     }
 
     virtual ITensorIterator<false> begin() = 0;

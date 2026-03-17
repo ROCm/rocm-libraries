@@ -35,7 +35,7 @@ namespace std
 
 namespace fs = std::filesystem;
 
-#ifdef WIN32
+#ifdef _WIN32
 static const char* HELPER_EXE = "rocfft_rtc_helper.exe";
 #else
 static const char* HELPER_EXE = "rocfft_rtc_helper";
