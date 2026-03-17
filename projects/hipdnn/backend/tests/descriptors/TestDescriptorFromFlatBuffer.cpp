@@ -542,11 +542,11 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
 
     // Wrap tensor descriptors into HipdnnBackendDescriptor for the C API boundary
-    std::unique_ptr<HipdnnBackendDescriptor> xPacked(
+    std::unique_ptr<HipdnnBackendDescriptor> const xPacked(
         HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_X_UID]));
-    std::unique_ptr<HipdnnBackendDescriptor> wPacked(
+    std::unique_ptr<HipdnnBackendDescriptor> const wPacked(
         HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_W_UID]));
-    std::unique_ptr<HipdnnBackendDescriptor> yPacked(
+    std::unique_ptr<HipdnnBackendDescriptor> const yPacked(
         HipdnnBackendDescriptor::packDescriptor(_tensorMap[K_TENSOR_Y_UID]));
 
     // setAttribute takes void* pointing to a HipdnnBackendDescriptor*, so use raw pointers
@@ -594,7 +594,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, NameSetViaAttributeRoundTrips)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType);
 
     // Set the name
-    std::string name = "my_conv_op";
+    std::string const name = "my_conv_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(name.size()),

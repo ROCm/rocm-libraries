@@ -38,8 +38,8 @@ protected:
 
 TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 {
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    std::vector<int64_t> const dims = {6, 3, 32, 32};
+    unsigned int const seed = getGlobalTestSeed();
     BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
     BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
         dims, seed, TensorLayout::NHWC);
@@ -80,7 +80,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
     bwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(
+    CpuFpReferenceValidation<float> const cpuRefOutputValidation(
         batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
 
     EXPECT_TRUE(
@@ -93,7 +93,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
 TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
@@ -111,11 +111,11 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT>
-        bwdPlanBuilder;
+        const bwdPlanBuilder;
 
     auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    bool const result
         = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -123,8 +123,8 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 
 TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 {
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    std::vector<int64_t> const dims = {6, 3, 32, 32};
+    unsigned int const seed = getGlobalTestSeed();
     BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
     BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
         dims, seed, TensorLayout::NHWC);
@@ -157,7 +157,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 
     bwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(
+    CpuFpReferenceValidation<float> const cpuRefOutputValidation(
         batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
 
     EXPECT_TRUE(
@@ -170,7 +170,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 
 TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
@@ -188,7 +188,7 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT>
-        floatPlanBuilder;
+        const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
@@ -198,7 +198,7 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT>
-        badTypesPlanBuilder;
+        const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();

@@ -15,8 +15,8 @@ namespace hipdnn_backend::test_utilities
 inline flatbuffers::FlatBufferBuilder createValidGraph()
 {
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     flatbuffers::FlatBufferBuilder builder;
     auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
         builder,

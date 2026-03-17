@@ -230,25 +230,25 @@ TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPowerOfTwo)
 
 TEST_F(TestUserDefinedLiterals, LiteralInAddition)
 {
-    bfloat16 sum = 1.0_bf + 2.0_bf;
+    bfloat16 const sum = 1.0_bf + 2.0_bf;
     EXPECT_TRUE(nearEqual(static_cast<float>(sum), 3.0f));
 }
 
 TEST_F(TestUserDefinedLiterals, LiteralInSubtraction)
 {
-    half diff = 5.0_h - 3.0_h;
+    half const diff = 5.0_h - 3.0_h;
     EXPECT_TRUE(nearEqual(static_cast<float>(diff), 2.0f));
 }
 
 TEST_F(TestUserDefinedLiterals, LiteralInMultiplication)
 {
-    bfloat16 product = 3.0_bf * 4.0_bf;
+    bfloat16 const product = 3.0_bf * 4.0_bf;
     EXPECT_TRUE(nearEqual(static_cast<float>(product), 12.0f));
 }
 
 TEST_F(TestUserDefinedLiterals, LiteralInDivision)
 {
-    half quotient = 10.0_h / 2.0_h;
+    half const quotient = 10.0_h / 2.0_h;
     EXPECT_TRUE(nearEqual(static_cast<float>(quotient), 5.0f));
 }
 
@@ -264,11 +264,11 @@ TEST_F(TestUserDefinedLiterals, LiteralInComparison)
 
 TEST_F(TestUserDefinedLiterals, LiteralAssignment)
 {
-    bfloat16 a = 1.5_bf;
-    half b = 2.5_h;
-    fp8_e4m3 c = 3.0_e4m3;
-    fp8_e5m2 d = 4.0_e5m2;
-    fp8_e8m0 e = 4.0_e8m0;
+    bfloat16 const a = 1.5_bf;
+    half const b = 2.5_h;
+    fp8_e4m3 const c = 3.0_e4m3;
+    fp8_e5m2 const d = 4.0_e5m2;
+    fp8_e8m0 const e = 4.0_e8m0;
 
     EXPECT_EQ(static_cast<float>(a), 1.5f);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
@@ -279,7 +279,7 @@ TEST_F(TestUserDefinedLiterals, LiteralAssignment)
 
 TEST_F(TestUserDefinedLiterals, LiteralCopyAssignment)
 {
-    bfloat16 a = 1.0_bf;
+    bfloat16 const a = 1.0_bf;
     bfloat16 b = 0.0_bf;
     b = a;
     EXPECT_EQ(a.data, b.data);

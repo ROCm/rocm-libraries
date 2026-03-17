@@ -104,7 +104,7 @@ TEST_F(TestGraphDescriptor, FinalizeFailInvalidGraph)
 
 TEST_F(TestGraphDescriptor, GetAttributeReturnsNotSupported)
 {
-    GraphDescriptor descriptor;
+    GraphDescriptor const descriptor;
     int64_t elementCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         descriptor.getAttribute(

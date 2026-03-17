@@ -369,7 +369,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawIn0)));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedIn0(rawIn0);
+    std::unique_ptr<HipdnnBackendDescriptor> const retrievedIn0(rawIn0);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedIn0, nullptr);
@@ -580,7 +580,7 @@ TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    std::string const str = desc->toString();
     ASSERT_NE(str.find("PointwiseOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("in_0_uid=40"), std::string::npos);
     ASSERT_NE(str.find("out_0_uid=41"), std::string::npos);

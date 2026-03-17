@@ -18,13 +18,13 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
 {
-    BatchnormBwdSignatureKey key1{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key1{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key2{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key2{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
@@ -32,13 +32,13 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    BatchnormBwdSignatureKey key3{DataType::HALF,
+    BatchnormBwdSignatureKey const key3{DataType::HALF,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key4{DataType::HALF,
+    BatchnormBwdSignatureKey const key4{DataType::HALF,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
@@ -46,13 +46,13 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    BatchnormBwdSignatureKey key5{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key5{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key6{DataType::HALF,
+    BatchnormBwdSignatureKey const key6{DataType::HALF,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
@@ -60,13 +60,13 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    BatchnormBwdSignatureKey key7{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key7{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key8{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key8{DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
@@ -74,13 +74,13 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    BatchnormBwdSignatureKey key9{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key9{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key10{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key10{DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::DOUBLE,
                                    DataType::FLOAT,
@@ -88,13 +88,13 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                    DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
 
-    BatchnormBwdSignatureKey key11{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key11{DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT};
-    BatchnormBwdSignatureKey key12{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key12{DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT,
@@ -105,13 +105,13 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
 
 TEST(TestBatchnormBwdSignatureKey, HashFunction)
 {
-    BatchnormBwdSignatureKey key1{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key1{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key2{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key2{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
@@ -120,37 +120,37 @@ TEST(TestBatchnormBwdSignatureKey, HashFunction)
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    BatchnormBwdSignatureKey key3{DataType::HALF,
+    BatchnormBwdSignatureKey const key3{DataType::HALF,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key4{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key4{DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key5{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key5{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key6{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key6{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key7{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key7{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT};
-    BatchnormBwdSignatureKey key8{DataType::FLOAT,
+    BatchnormBwdSignatureKey const key8{DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
@@ -172,13 +172,13 @@ TEST(TestBatchnormBwdSignatureKey, HashFunction)
 
 TEST(TestBatchnormBwdSignatureKey, Copy)
 {
-    BatchnormBwdSignatureKey original{DataType::BFLOAT16,
+    BatchnormBwdSignatureKey const original{DataType::BFLOAT16,
                                       DataType::FLOAT,
                                       DataType::HALF,
                                       DataType::DOUBLE,
                                       DataType::FLOAT,
                                       DataType::BFLOAT16};
-    BatchnormBwdSignatureKey copied{original};
+    BatchnormBwdSignatureKey const copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.dyDataType, DataType::BFLOAT16);
@@ -191,13 +191,13 @@ TEST(TestBatchnormBwdSignatureKey, Copy)
 
 TEST(TestBatchnormBwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    BatchnormBwdSignatureKey expectedKey{DataType::FLOAT,
+    BatchnormBwdSignatureKey const expectedKey{DataType::FLOAT,
                                          DataType::FLOAT,
                                          DataType::FLOAT,
                                          DataType::FLOAT,
                                          DataType::FLOAT,
                                          DataType::FLOAT};
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
@@ -209,7 +209,7 @@ TEST(TestBatchnormBwdSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    BatchnormBwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    BatchnormBwdSignatureKey const keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

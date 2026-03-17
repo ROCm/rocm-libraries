@@ -326,7 +326,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, AutoAssignedUidsPreserve
         << "Scale tensor UID " << bsq->scale_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    std::unordered_set<int64_t> const nodeUids
         = {bsq->x_tensor_uid, bsq->y_tensor_uid, bsq->scale_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Block scale quantize node tensor UIDs are not distinct";
 }
