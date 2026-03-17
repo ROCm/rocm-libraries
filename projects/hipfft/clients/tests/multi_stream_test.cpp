@@ -36,7 +36,7 @@
 #include <random> // ranlux24_base, uniform_int_distribution
 #include <sstream>
 #include <stdexcept>
-#ifdef WIN32
+#ifdef _WIN32
 #include <synchapi.h> // Sleep
 #else
 #include <unistd.h> // usleep
@@ -737,7 +737,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
                           [](const sub_dft_stream_t& stream) { return !stream.done(); })
               && time_waited_us <= failure_time_threshold_us)
         {
-#ifdef WIN32
+#ifdef _WIN32
             Sleep(sleep_time_us / 1000); // argument in ms
 #else
             usleep(sleep_time_us);

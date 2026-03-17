@@ -9,7 +9,8 @@
 # readability-math-missing-parentheses
 Checks: >
   -*,
-  bugprone-*
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
   misc-*,
   modernize-*,
   performance-*,

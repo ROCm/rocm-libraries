@@ -66,7 +66,10 @@ public:
         auto desc = getDescriptor();
         for(const auto& [attributeName, tensorDesc] : tensorMap)
         {
-            desc->setAttribute(attributeName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensorDesc);
+            desc->setAttribute(attributeName,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               static_cast<const void*>(&tensorDesc));
         }
     }
 
@@ -405,7 +408,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawX));
+                                       static_cast<void*>(&rawX)));
     std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
@@ -717,7 +720,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsValidGrap
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -729,6 +732,6 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsValidGrap
 TEST_F(TestBatchnormInferenceOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

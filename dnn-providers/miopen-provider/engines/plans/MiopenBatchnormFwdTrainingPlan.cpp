@@ -26,35 +26,35 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     _epsilonValue = miopen_utils::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
 
     // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
-    if(attributes.mean_tensor_uid().has_value())
+    auto optMeanUid = attributes.mean_tensor_uid();
+    if(optMeanUid.has_value())
     {
-        _mean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
+        _mean = miopen_utils::createTensor(tensorMap, *optMeanUid);
     }
 
-    if(attributes.inv_variance_tensor_uid().has_value())
+    auto optInvVarUid = attributes.inv_variance_tensor_uid();
+    if(optInvVarUid.has_value())
     {
-        _invVariance
-            = miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
+        _invVariance = miopen_utils::createTensor(tensorMap, *optInvVarUid);
     }
 
-    if(attributes.prev_running_mean_tensor_uid().has_value()
-       && attributes.prev_running_variance_tensor_uid().has_value()
-       && attributes.momentum_tensor_uid().has_value()
-       && attributes.next_running_mean_tensor_uid().has_value()
-       && attributes.next_running_variance_tensor_uid().has_value())
+    auto optPrevRunMeanUid = attributes.prev_running_mean_tensor_uid();
+    auto optPrevRunVarUid = attributes.prev_running_variance_tensor_uid();
+    auto optMomentumUid = attributes.momentum_tensor_uid();
+    auto optNextRunMeanUid = attributes.next_running_mean_tensor_uid();
+    auto optNextRunVarUid = attributes.next_running_variance_tensor_uid();
+
+    if(optPrevRunMeanUid.has_value() && optPrevRunVarUid.has_value() && optMomentumUid.has_value()
+       && optNextRunMeanUid.has_value() && optNextRunVarUid.has_value())
     {
         // Extract momentum value from pass-by-value tensor (cast to double for MIOpen compatibility)
-        auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
+        auto momentumTensorAttr = tensorMap.at(*optMomentumUid);
         _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = miopen_utils::createTensor(
-            tensorMap, attributes.prev_running_mean_tensor_uid().value());
-        _prevRunningVariance = miopen_utils::createTensor(
-            tensorMap, attributes.prev_running_variance_tensor_uid().value());
-        _nextRunningMean = miopen_utils::createTensor(
-            tensorMap, attributes.next_running_mean_tensor_uid().value());
-        _nextRunningVariance = miopen_utils::createTensor(
-            tensorMap, attributes.next_running_variance_tensor_uid().value());
+        _prevRunningMean = miopen_utils::createTensor(tensorMap, *optPrevRunMeanUid);
+        _prevRunningVariance = miopen_utils::createTensor(tensorMap, *optPrevRunVarUid);
+        _nextRunningMean = miopen_utils::createTensor(tensorMap, *optNextRunMeanUid);
+        _nextRunningVariance = miopen_utils::createTensor(tensorMap, *optNextRunVarUid);
         _hasRunningStats = true;
     }
 }
@@ -90,34 +90,35 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
                                     "BatchnormFwdTrainingParams: ");
 
     // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
-    if(attributes.mean_tensor_uid().has_value())
+    auto optMeanUid = attributes.mean_tensor_uid();
+    if(optMeanUid.has_value())
     {
-        _mean = createTensor(tensorMap, attributes.mean_tensor_uid().value());
+        _mean = createTensor(tensorMap, *optMeanUid);
     }
 
-    if(attributes.inv_variance_tensor_uid().has_value())
+    auto optInvVarUid = attributes.inv_variance_tensor_uid();
+    if(optInvVarUid.has_value())
     {
-        _invVariance = createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
+        _invVariance = createTensor(tensorMap, *optInvVarUid);
     }
 
-    if(attributes.prev_running_mean_tensor_uid().has_value()
-       && attributes.prev_running_variance_tensor_uid().has_value()
-       && attributes.momentum_tensor_uid().has_value()
-       && attributes.next_running_mean_tensor_uid().has_value()
-       && attributes.next_running_variance_tensor_uid().has_value())
+    auto optPrevRunMeanUid = attributes.prev_running_mean_tensor_uid();
+    auto optPrevRunVarUid = attributes.prev_running_variance_tensor_uid();
+    auto optMomentumUid = attributes.momentum_tensor_uid();
+    auto optNextRunMeanUid = attributes.next_running_mean_tensor_uid();
+    auto optNextRunVarUid = attributes.next_running_variance_tensor_uid();
+
+    if(optPrevRunMeanUid.has_value() && optPrevRunVarUid.has_value() && optMomentumUid.has_value()
+       && optNextRunMeanUid.has_value() && optNextRunVarUid.has_value())
     {
         // Extract momentum value from pass-by-value tensor (cast to double for MIOpen compatibility)
-        auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
+        auto momentumTensorAttr = tensorMap.at(*optMomentumUid);
         _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = miopen_utils::createTensor(
-            tensorMap, attributes.prev_running_mean_tensor_uid().value());
-        _prevRunningVariance = miopen_utils::createTensor(
-            tensorMap, attributes.prev_running_variance_tensor_uid().value());
-        _nextRunningMean = miopen_utils::createTensor(
-            tensorMap, attributes.next_running_mean_tensor_uid().value());
-        _nextRunningVariance = miopen_utils::createTensor(
-            tensorMap, attributes.next_running_variance_tensor_uid().value());
+        _prevRunningMean = miopen_utils::createTensor(tensorMap, *optPrevRunMeanUid);
+        _prevRunningVariance = miopen_utils::createTensor(tensorMap, *optPrevRunVarUid);
+        _nextRunningMean = miopen_utils::createTensor(tensorMap, *optNextRunMeanUid);
+        _nextRunningVariance = miopen_utils::createTensor(tensorMap, *optNextRunVarUid);
         _hasRunningStats = true;
     }
 }
@@ -154,12 +155,22 @@ bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
 
 const MiopenTensor& BatchnormFwdTrainingParams::mean() const
 {
-    return _mean.value();
+    if(!_mean.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "mean() called but mean tensor was not set");
+    }
+    return *_mean;
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::invVariance() const
 {
-    return _invVariance.value();
+    if(!_invVariance.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "invVariance() called but tensor was not set");
+    }
+    return *_invVariance;
 }
 
 bool BatchnormFwdTrainingParams::hasRunningStats() const
@@ -169,27 +180,54 @@ bool BatchnormFwdTrainingParams::hasRunningStats() const
 
 const MiopenTensor& BatchnormFwdTrainingParams::prevRunningMean() const
 {
-    return _prevRunningMean.value();
+    if(!_prevRunningMean.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "prevRunningMean() called but tensor was not set");
+    }
+    return *_prevRunningMean;
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::prevRunningVariance() const
 {
-    return _prevRunningVariance.value();
+    if(!_prevRunningVariance.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "prevRunningVariance() called but tensor was not set");
+    }
+    return *_prevRunningVariance;
 }
 
 double BatchnormFwdTrainingParams::momentumValue() const
 {
-    return _momentumValue.value();
+    if(!_momentumValue.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "momentumValue() called but momentum was not set");
+    }
+    return *_momentumValue;
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::nextRunningMean() const
 {
-    return _nextRunningMean.value();
+    if(!_nextRunningMean.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "nextRunningMean() called but tensor was not set");
+    }
+    return *_nextRunningMean;
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::nextRunningVariance() const
 {
-    return _nextRunningVariance.value();
+    if(!_nextRunningVariance.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "nextRunningVariance() called but tensor was not set");
+    }
+    return *_nextRunningVariance;
 }
 
 const std::optional<miopen_utils::ActivationParams>&
@@ -294,11 +332,15 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
     }
 
     // Check if activation fusion is enabled
-    if(_trainingParams.optActivation().has_value())
+    const auto& optActivation = _trainingParams.optActivation();
+    const auto& optActivationOut = _trainingParams.activationOut();
+    if(optActivation.has_value() && optActivationOut.has_value())
     {
+        const auto& activOutTensor = *optActivationOut;
+
         // Use activation fusion API
-        auto yBuffer = miopen_utils::findDeviceBuffer(
-            _trainingParams.activationOut().value().uid(), deviceBuffers, numDeviceBuffers);
+        auto yBuffer
+            = miopen_utils::findDeviceBuffer(activOutTensor.uid(), deviceBuffers, numDeviceBuffers);
 
         // Create activation descriptor
         miopenActivationDescriptor_t activationDesc;
@@ -314,7 +356,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                     }
                 });
 
-        const auto& activParams = _trainingParams.optActivation().value();
+        const auto& activParams = *optActivation;
         THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(activationDesc,
                                                               activParams.mode,
                                                               activParams.alpha,
@@ -330,7 +372,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                 &beta,
                 _trainingParams.x().tensorDescriptor(),
                 xBuffer.ptr,
-                _trainingParams.activationOut().value().tensorDescriptor(),
+                activOutTensor.tensorDescriptor(),
                 yBuffer.ptr,
                 _trainingParams.scale().tensorDescriptor(),
                 _trainingParams.bias().tensorDescriptor(),
@@ -357,7 +399,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                 &beta,
                 _trainingParams.x().tensorDescriptor(),
                 xBuffer.ptr,
-                _trainingParams.activationOut().value().tensorDescriptor(),
+                activOutTensor.tensorDescriptor(),
                 yBuffer.ptr,
                 _trainingParams.scale().tensorDescriptor(),
                 _trainingParams.bias().tensorDescriptor(),

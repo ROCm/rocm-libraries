@@ -19,6 +19,7 @@ add_library(
     hipdnn_backend_private
     descriptors/BatchnormBackwardOperationDescriptor.cpp
     descriptors/BatchnormInferenceOperationDescriptor.cpp
+    descriptors/BatchnormOperationDescriptor.cpp
     descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
     descriptors/BlockScaleQuantizeOperationDescriptor.cpp
@@ -61,7 +62,7 @@ target_include_directories(
                                   ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include/
 )
 
-target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
@@ -87,7 +88,7 @@ target_include_directories(
 # Use PUBLIC to ensure it's exported to consumers
 target_compile_definitions(hipdnn_backend PUBLIC __HIP_PLATFORM_AMD__)
 
-target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 # This definition is used to enable logging in the backend.  It is #ifdef'ed in the backend code.
 # This is to stop the frontend/plugin from having lazy log initialization which will end up with the
 # same logger name. Frontend/plugin code will need to init the logger themselves so they have a

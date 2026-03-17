@@ -342,7 +342,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedX));
+                                       static_cast<void*>(&retrievedX)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -727,7 +727,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGrap
     makeFinalized();
     auto desc = getDescriptor();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface exposes the same tensor shared_ptrs
@@ -741,6 +741,6 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGrap
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }

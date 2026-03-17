@@ -24,7 +24,7 @@ namespace hipdnn_data_sdk::utilities
  * @param str The string to hash
  * @return uint64_t The hash value
  */
-inline uint64_t fnv1aHash(const char* str)
+inline uint64_t fnv1aHash(const char* str) noexcept
 {
     if(str == nullptr || str[0] == '\0')
     {
