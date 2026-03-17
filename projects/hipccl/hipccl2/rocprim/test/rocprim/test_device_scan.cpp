@@ -101,7 +101,7 @@ struct DeviceScanParams
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_inclusive_scan(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_inclusive_scan<Config>(std::forward<Args>(args)...);
     }
@@ -114,7 +114,7 @@ constexpr hipError_t invoke_inclusive_scan(Args&&... args)
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_exclusive_scan(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_exclusive_scan<Config>(std::forward<Args>(args)...);
     }
