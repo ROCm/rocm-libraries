@@ -113,7 +113,7 @@ struct dispatch_binary_search_helper<rocprim::default_config>
 };
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
