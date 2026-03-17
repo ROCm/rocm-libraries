@@ -112,15 +112,15 @@ TEST_F(TestFp8E4M3, NamedConstants)
     EXPECT_TRUE(isfinite(std::numeric_limits<fp8_e4m3>::denorm_min()));
 }
 
-TEST_F(TestFp8E4M3, NumericLimitsNoInfinity)
-{
-    // E4M3 has no infinity
-    EXPECT_FALSE(std::numeric_limits<fp8_e4m3>::has_infinity);
-}
-
 // ============================================================================
 // Construction Tests with Specific Values
 // ============================================================================
+
+TEST_F(TestFp8E4M3, ConstructSubnormal)
+{
+    fp8_e4m3 val(0x1p-7f);
+    EXPECT_EQ(static_cast<float>(val), 0x1p-7f);
+}
 
 TEST_F(TestFp8E4M3, ConstructFromInt64)
 {

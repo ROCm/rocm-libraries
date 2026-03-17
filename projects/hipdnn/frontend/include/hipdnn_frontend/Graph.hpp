@@ -13,7 +13,9 @@
  *
  * The Graph class provides a fluent API for:
  * - Creating tensor descriptors (shape + dtype, no data yet)
- * - Adding operations (conv, batchnorm, layernorm, rmsnorm, pointwise, matmul)
+ * - Adding operations (convolution forward/dgrad/wgrad, batchnorm
+ *   forward/backward/inference, layernorm, rmsnorm, pointwise, matmul,
+ *   scaled dot-product attention, block-scale quantize/dequantize)
  * - Building (compiling) an execution plan for the GPU
  * - Executing the plan with real device pointers
  *

@@ -18,6 +18,7 @@ namespace hipdnn_data_sdk::types
 enum class Bfloat16RoundingMode;
 template <Bfloat16RoundingMode>
 struct bfloat16_t;
+struct fp4_e2m1;
 struct fp8_e4m3;
 struct fp8_e5m2;
 struct fp8_e8m0;
@@ -269,6 +270,7 @@ struct half
     // These are defined inline but require forward declarations above
     template <Bfloat16RoundingMode M>
     inline explicit half(bfloat16_t<M> b) noexcept;
+    inline explicit half(fp4_e2m1 f) noexcept;
     inline explicit half(fp8_e4m3 f) noexcept;
     inline explicit half(fp8_e5m2 f) noexcept;
     inline explicit half(fp8_e8m0 f) noexcept;

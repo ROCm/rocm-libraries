@@ -13,6 +13,11 @@
  * | PointwiseMode | Activation / element-wise op | relu, gelu, add, mul, etc. |
  * | ConvolutionMode | Filter application method | Cross-correlation vs mathematical convolution |
  * | NormFwdPhase | Training vs inference | Whether to save stats for backward pass |
+ * | DiagonalAlignment | SDPA causal mask alignment | Top-left vs bottom-right diagonal |
+ * | AttentionImplementation | SDPA execution strategy | Auto, composite, or unified kernel |
+ * | HeuristicMode | Engine discovery mode | How engines are ranked |
+ * | BuildPlanPolicy | Plan selection policy | Heuristic choice vs build all |
+ * | KnobValueType | Engine knob data type | int64, float64, or string |
  *
  * This file also contains conversion utilities between frontend types and
  * the internal SDK/backend types.
@@ -152,20 +157,45 @@ enum class DataType
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
+/**
+ * @enum DiagonalAlignment
+ * @brief Diagonal alignment mode for SDPA causal masking
+ *
+ * Controls which corner of the attention matrix the causal mask diagonal
+ * is anchored to. This affects how the triangular mask is positioned
+ * when query and key sequence lengths differ (S_q != S_kv).
+ *
+ * For equal-length sequences both modes produce the same mask. When
+ * S_q < S_kv, BOTTOM_RIGHT aligns the mask so that each query attends
+ * to the most recent keys rather than the earliest.
+ *
+ * @see SdpaAttributes::set_diagonal_alignment()
+ */
 enum class DiagonalAlignment
 {
-    TOP_LEFT = 0,
-    BOTTOM_RIGHT = 1,
+    TOP_LEFT = 0, ///< Anchor mask diagonal to the top-left corner of the attention matrix
+    BOTTOM_RIGHT = 1, ///< Anchor mask diagonal to the bottom-right corner of the attention matrix
 };
-typedef DiagonalAlignment DiagonalAlignment_t; // NOLINT(readability-identifier-naming)
+// NOLINTNEXTLINE(readability-identifier-naming)
+typedef DiagonalAlignment DiagonalAlignment_t; ///< @brief Type alias for DiagonalAlignment
 
+/**
+ * @enum AttentionImplementation
+ * @brief Execution strategy for scaled dot-product attention
+ *
+ * Selects how the SDPA computation is mapped to GPU kernels.
+ *
+ * @see SdpaAttributes::set_implementation()
+ */
 enum class AttentionImplementation
 {
-    AUTO = 0,
-    COMPOSITE = 1,
-    UNIFIED = 2,
+    AUTO = 0, ///< Let the backend choose the best strategy for the given configuration
+    COMPOSITE = 1, ///< Decompose attention into separate matmul, softmax, and matmul kernels
+    UNIFIED = 2, ///< Use a single fused kernel for the entire attention computation
 };
-typedef AttentionImplementation AttentionImplementation_t; // NOLINT(readability-identifier-naming)
+// NOLINTNEXTLINE(readability-identifier-naming)
+typedef AttentionImplementation
+    AttentionImplementation_t; ///< @brief Type alias for AttentionImplementation
 
 /**
  * @enum HeuristicMode
@@ -591,6 +621,7 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
     }
 }
 
+/// @brief Convert frontend DiagonalAlignment to SDK DiagonalAlignment
 inline hipdnn_data_sdk::data_objects::DiagonalAlignment toSdkType(const DiagonalAlignment& type)
 {
     switch(type)
@@ -604,6 +635,7 @@ inline hipdnn_data_sdk::data_objects::DiagonalAlignment toSdkType(const Diagonal
     }
 }
 
+/// @brief Convert SDK DiagonalAlignment to frontend DiagonalAlignment
 inline hipdnn_frontend::DiagonalAlignment
     fromSdkType(const hipdnn_data_sdk::data_objects::DiagonalAlignment& type)
 {
@@ -618,6 +650,7 @@ inline hipdnn_frontend::DiagonalAlignment
     }
 }
 
+/// @brief Convert frontend AttentionImplementation to SDK AttentionImplementation
 inline hipdnn_data_sdk::data_objects::AttentionImplementation
     toSdkType(const AttentionImplementation& type)
 {
@@ -634,6 +667,7 @@ inline hipdnn_data_sdk::data_objects::AttentionImplementation
     }
 }
 
+/// @brief Convert SDK AttentionImplementation to frontend AttentionImplementation
 inline hipdnn_frontend::AttentionImplementation
     fromSdkType(const hipdnn_data_sdk::data_objects::AttentionImplementation& type)
 {
