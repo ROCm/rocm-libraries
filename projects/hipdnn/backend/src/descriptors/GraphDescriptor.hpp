@@ -88,15 +88,6 @@ private:
                               int64_t* elementCount,
                               void* arrayOfElements) const;
 
-    void setName(hipdnnBackendAttributeType_t attributeType,
-                 int64_t elementCount,
-                 const void* arrayOfElements);
-
-    void getName(hipdnnBackendAttributeType_t attributeType,
-                 int64_t requestedElementCount,
-                 int64_t* elementCount,
-                 void* arrayOfElements) const;
-
     // Build GraphT from operation descriptors and return it (C-API flow)
     std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> buildGraphFromOperations();
 

@@ -202,7 +202,12 @@ void GraphDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         getPreferredEngineId(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
-        getName(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(
@@ -294,27 +299,6 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                          "GraphDescriptor::getAttribute()");
 }
 
-void GraphDescriptor::setName(hipdnnBackendAttributeType_t attributeType,
-                              int64_t elementCount,
-                              const void* arrayOfElements)
-{
-    setString(
-        _name, attributeType, elementCount, arrayOfElements, "GraphDescriptor::setAttribute()");
-}
-
-void GraphDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
-                              int64_t requestedElementCount,
-                              int64_t* elementCount,
-                              void* arrayOfElements) const
-{
-    getString(_name,
-              attributeType,
-              requestedElementCount,
-              elementCount,
-              arrayOfElements,
-              "GraphDescriptor::getAttribute()");
-}
-
 void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
                                     int64_t elementCount,
                                     const void* arrayOfElements)
@@ -394,7 +378,8 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         setPreferredEngineId(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
-        setName(attributeType, elementCount, arrayOfElements);
+        setString(
+            _name, attributeType, elementCount, arrayOfElements, "GraphDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(
