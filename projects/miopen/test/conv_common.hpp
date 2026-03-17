@@ -1804,7 +1804,8 @@ struct conv_driver : test_driver
     std::size_t batch_size{};
     std::size_t input_channels{};
     std::size_t output_channels{};
-    std::size_t vector_length{};
+    // Default to 1 for non-vectorized tensors (0 causes stride calculation to fail)
+    std::size_t vector_length{1};
     std::size_t tensor_vect{}; // 0: non vectorized, 1: C-vectorized, 2: N-vectorized. keep same
                                // as MIOpenDriver InputFlag "tensor_vect"
     std::string in_layout;
@@ -2256,7 +2257,10 @@ struct conv_driver : test_driver
                   (weights.desc.GetLengths().at(0) % filter.group_count == 0)))) ||
                ((filter.mode == miopenConvolution) &&
                 ((weights.desc.GetLayout_str() == "NCHW") ||
-                 (weights.desc.GetLayout_str() == "NCHWc")) &&
+                 (weights.desc.GetLayout_str() == "NCHWc") ||
+                 (weights.desc.GetLayout_str() == "NHWC") ||
+                 (weights.desc.GetLayout_str() == "NCDHW") ||
+                 (weights.desc.GetLayout_str() == "NDHWC")) &&
                 ((filter.group_count == 1 &&
                   (input.desc.GetLengths().at(1) == weights.desc.GetLengths().at(1))) ||
                  (filter.group_count > 1 &&
@@ -2447,6 +2451,9 @@ struct conv_driver : test_driver
                     {
                         verify(verify_forward_conv<api, T>{
                             input, weights, output, filter, stats, preallocate, 0, search, false});
+                        std::cout << "PASSED: Fwd " << input.desc.ToString() << " -> "
+                                  << output.desc.ToString() << " [" << stats.solver_name << "]"
+                                  << std::endl;
                     }
                 }
 
@@ -2454,6 +2461,9 @@ struct conv_driver : test_driver
                 {
                     verify(verify_backward_conv<api, T>{
                         input, weights, output, filter, stats, preallocate, 0, search});
+                    std::cout << "PASSED: Bwd " << output.desc.ToString() << " -> "
+                              << input.desc.ToString() << " [" << stats.solver_name << "]"
+                              << std::endl;
                 }
 
                 if(do_backward_weights && !skip_backward_weights)
@@ -2462,6 +2472,9 @@ struct conv_driver : test_driver
 
                     verify(verify_backward_weights_conv<api, T>{
                         input, weights, output, filter, stats, preallocate, 0, search});
+                    std::cout << "PASSED: WrW " << input.desc.ToString() << " + "
+                              << output.desc.ToString() << " -> " << weights.desc.ToString() << " ["
+                              << stats.solver_name << "]" << std::endl;
                 }
             }
         }
