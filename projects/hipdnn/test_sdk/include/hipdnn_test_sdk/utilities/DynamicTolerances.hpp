@@ -558,7 +558,7 @@ double computeMatrixInfNorm(ITensor& tensor)
     using hipdnn_data_sdk::utilities::iterateAlongDimensions;
 
     const auto& dims = tensor.dims();
-    TensorView<T> view(tensor);
+    const TensorView<T> view(tensor);
 
     auto cols = dims.back();
 
