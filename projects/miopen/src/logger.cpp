@@ -24,14 +24,12 @@
  *
  *******************************************************************************/
 #include <miopen/env.hpp>
-#include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/config.h>
 #include <miopen/sysinfo_utils.hpp>
 
 #include <cstdlib>
 #include <chrono>
-#include <fstream>
 #include <ios>
 #include <iomanip>
 #include <sstream>
@@ -70,47 +68,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_ROCTX)
 /// Disable logging quieting.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE)
 
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 128);
-
 namespace miopen {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static thread_local size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static thread_local size_t log_buffer_i = 0;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
-
-void ClearBufferLog()
-{
-    log_buffer_i = 0;
-    log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
-}
-
-void BufferLog(std::string line)
-{
-    log_buffer[log_buffer_i] = line;
-    log_buffer_i             = (log_buffer_i + 1) % log_buffer_size;
-}
-
-void OutputBufferedLogs()
-{
-    auto buffer_size = (log_buffer[log_buffer_size - 1] == "") ? log_buffer_i : log_buffer_size;
-    auto filename =
-        fs::temp_directory_path() / ("miopen_error_" + std::to_string(::getpid()) + ".log");
-    std::cerr << "Buffered " << buffer_size << " messages to file: " << sysinfo::GetSystemHostname()
-              << ":" << filename.string() << std::endl;
-    auto err_file = std::ofstream{filename};
-    size_t i      = log_buffer_i;
-    do
-    {
-        if(log_buffer[i] != "")
-        {
-            err_file << log_buffer[i];
-        }
-        i = (i + 1) % log_buffer_size;
-    } while(i != log_buffer_i);
-}
 
 namespace debug {
 

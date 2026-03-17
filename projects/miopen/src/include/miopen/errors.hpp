@@ -28,7 +28,6 @@
 
 #include <exception>
 #include <iostream>
-#include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/object.hpp>
 #include <miopen/returns.hpp>
@@ -64,9 +63,7 @@ MIOPEN_EXPORT std::string HIPErrorMessage(int error, const std::string& msg = ""
 template <class... Params>
 [[noreturn]] void MIOpenThrow(const std::string& file, int line, Params&&... args)
 {
-    auto exe = miopen::Exception(std::forward<Params>(args)...);
-    MIOPEN_LOG_E_FROM(file + ":" + std::to_string(line), exe.message);
-    throw exe.SetContext(file, line);
+    throw miopen::Exception(std::forward<Params>(args)...).SetContext(file, line);
 }
 
 #define MIOPEN_THROW(...)                                     \

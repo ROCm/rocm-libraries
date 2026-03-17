@@ -6,7 +6,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Added
 * [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 * [Conv] Added `ConvDepthwiseFwd2D` solver for optimizing specific depthwise convolutions.
-* Recent logs dumped to file (`/tmp/miopen_error_<pid>`) on error log or MIOpen throw.
 
 ## MIOpen 3.5.1 for ROCm 7.11.0
 ### Added
