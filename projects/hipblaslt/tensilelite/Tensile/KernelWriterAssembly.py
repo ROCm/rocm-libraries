@@ -565,6 +565,10 @@ class KernelWriterAssembly(KernelWriter):
 
     self.removeSgprVarFromPool("GlobalReadIncsA")
     self.removeSgprVarFromPool("GlobalReadIncsB")
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.removeSgprVarFromPool("GlobalReadIncsMXSA")
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.removeSgprVarFromPool("GlobalReadIncsMXSB")
 
     return module
 
@@ -622,16 +626,20 @@ class KernelWriterAssembly(KernelWriter):
       self.addSgprVarToPool("WrapUA")
       self.addSgprVarToPool("WrapUB")
 
-    module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
-    if kernel["ProblemType"]["MXBlockA"]:
+    if self.states.a.numSgprGlobalReadIncs > 0:
+      module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
+      self.addSgprVarToPool("GlobalReadIncsA")
+    if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
-    module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
-    if kernel["ProblemType"]["MXBlockB"]:
+      self.addSgprVarToPool("GlobalReadIncsMXSA")
+    if self.states.b.numSgprGlobalReadIncs > 0:
+      module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
+      self.addSgprVarToPool("GlobalReadIncsB")
+    if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
+      self.addSgprVarToPool("GlobalReadIncsMXSB")
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.defineSgpr("GlobalReadIncsMetadata", self.states.m.numSgprGlobalReadIncs))
-    self.addSgprVarToPool("GlobalReadIncsA")
-    self.addSgprVarToPool("GlobalReadIncsB")
     if self.states.IncLdsBufSwitch:
       module.add(self.defineSgpr("LDSBufferReadInc", 1))
       module.add(self.defineSgpr("LDSBufferWriteInc", 1))
@@ -8492,7 +8500,12 @@ class KernelWriterAssembly(KernelWriter):
             imod.add(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), sgpr(incUpper)))
         else:
           incUpper = 0 # GRO is positive for loop unroll
-          imod.add(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), hex(incUpper)))
+          srcGRInc = sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx))
+          if tc in ('A', 'B'):
+            useConstSgprGlobalReadIncs = self.states.a.useConstSgprGlobalReadIncs if tc == 'A' else self.states.b.useConstSgprGlobalReadIncs
+            if useConstSgprGlobalReadIncs:
+              srcGRInc = "GlobalReadIncs%s"%tc
+          imod.add(self.incrementSrd(tP, srcGRInc, hex(incUpper)))
 
         if "MX" in tP:
           tc = tP["MX"]["tensorChar"]
@@ -8505,7 +8518,11 @@ class KernelWriterAssembly(KernelWriter):
               imod.add(self.incrementSrd(tP["MX"], sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), sgpr(incUpper)))
           else:
             incUpper = 0 # GRO is positive for loop unroll
-            imod.add(self.incrementSrd(tP["MX"], sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), hex(incUpper)))
+            srcGRInc = sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx))
+            useConstSgprGlobalReadIncs = self.states.mxsa.useConstSgprGlobalReadIncs if tc == 'MXSA' else self.states.mxsb.useConstSgprGlobalReadIncs
+            if useConstSgprGlobalReadIncs:
+              srcGRInc = "GlobalReadIncs%s"%tc
+            imod.add(self.incrementSrd(tP["MX"], srcGRInc, hex(incUpper)))
 
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) :

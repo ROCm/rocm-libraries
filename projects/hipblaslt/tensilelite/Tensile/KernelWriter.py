@@ -103,6 +103,7 @@ class ABMatrixInfo(MatrixInfo):
   numVgprLocalWriteSwapAddr: int  = -1
   startVgprLocalWriteSwapAddr: int= -1
   numSgprGlobalReadIncs: int     = -1
+  useConstSgprGlobalReadIncs: bool = False
   numPackCvt: int                = 0
   useTransposeCodeThis: bool     = False
   useTransposeCodeNext: bool     = False
@@ -6519,6 +6520,37 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.mxsb.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
       self.states.m.numSgprGlobalReadIncs = kernel["ProblemType"]["NumIndicesSummation"] * self.states.rpgo
+      # check for constSgprGlobalReadInc
+      # use const version of GlobalReadInc for the following case
+      # - StreamK (not GSU)
+      # - no staggerUCode
+      # - TLUA false for A, TLUB false for B
+      # - numSgprGlobalReadIncs is 1
+      if kernel["StreamK"] and (not self.states.staggerUCode):
+        if kernel["ProblemType"]["TLUA"] == False:
+          if self.states.a.numSgprGlobalReadIncs == 1:
+            # use const GR Inc
+            self.states.a.useConstSgprGlobalReadIncs = True
+            # do not allocate GRInc sgpr
+            self.states.a.numSgprGlobalReadIncs = 0
+          if kernel["ProblemType"]["MXBlockA"]:
+            if self.states.mxsa.numSgprGlobalReadIncs == 1:
+              # use const GR Inc
+              self.states.mxsa.useConstSgprGlobalReadIncs = True
+              # do not allocate GRInc sgpr
+              self.states.mxsa.numSgprGlobalReadIncs = 0
+        if kernel["ProblemType"]["TLUB"] == False:
+          if self.states.b.numSgprGlobalReadIncs == 1:
+            # use const GR Inc
+            self.states.b.useConstSgprGlobalReadIncs = True
+            # do not allocate GRInc sgpr
+            self.states.b.numSgprGlobalReadIncs = 0
+          if kernel["ProblemType"]["MXBlockB"]:
+            if self.states.mxsb.numSgprGlobalReadIncs == 1:
+              # use const GR Inc
+              self.states.mxsb.useConstSgprGlobalReadIncs = True
+              # do not allocate GRInc sgpr
+              self.states.mxsb.numSgprGlobalReadIncs = 0
 
     ########################################
     # SGPR Assignment according to AMDGPU-ABI
