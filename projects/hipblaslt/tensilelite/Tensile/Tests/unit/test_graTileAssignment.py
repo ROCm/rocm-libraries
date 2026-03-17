@@ -6,6 +6,7 @@
 #   pytest test_graTileAssignment.py -v -s
 ################################################################################
 
+import math
 import os
 import struct
 import sys
@@ -94,10 +95,10 @@ def compute_expected_offset(thread_id, cfg, tileInfo):
     # --- colId computation (common for A and B) ---
     colId = thread_id & (blockSize - 1)
 
-    # Swizzling is always on in the kernel (line 857 hardcodes True)
+    # Swizzling is always on in the kernel (hardcodes True)
     # Step 1: DPP quad_perm[1,0,3,2] applied only when ldsRowId is even
-    # Note: kernel uses Serial (thread_id), not laneId, for ldsRowId
-    rowInWave = thread_id >> (blockSize.bit_length() - 1)
+    # Kernel uses laneId (not Serial) for ldsRowId computation
+    rowInWave = laneId >> (blockSize.bit_length() - 1)
     ldsRowId = rowInWave >> (numRowsPerLDSBanks.bit_length() - 1)
     if ldsRowId % 2 == 0:
         # quad_perm[1,0,3,2] swaps pairs within each quad
@@ -106,9 +107,16 @@ def compute_expected_offset(thread_id, cfg, tileInfo):
         else:
             colId = colId - 1
 
-    # Step 2: Rotation
+    # Step 2: Rotation with wave-specific component
     rotation = (ldsRowId // 2) * 2
-    colId = (colId + (blockSize - rotation)) % blockSize
+    rotationOffset = blockSize - rotation
+
+    if tileInfo.loadRatioGR != 0.5:
+        # Wave-specific rotation: subtract (waveId & 1) << log2(2*numRowsPerLDSBanks)
+        waveRotation = (waveId & 1) << ((2 * numRowsPerLDSBanks).bit_length() - 1)
+        colId = (colId + rotationOffset - waveRotation) & (blockSize - 1)
+    else:
+        colId = (colId + rotationOffset) & (blockSize - 1)
 
     # Scale colId by loadWidth
     colId_bytes = colId * LOAD_WIDTH
@@ -140,10 +148,16 @@ def compute_expected_offset(thread_id, cfg, tileInfo):
     base = totalRow * stride * bpe + colId_bytes
 
     # Second GR offset if numGRPerSubtile > 1
+    # Kernel advances row by ceil(subtileSize * loadRatioGR) and rotates colId by +4
     if tileInfo.numGRPerSubtile == 1:
         return [base]
-    offset2 = int(tileInfo.subtileSize * tileInfo.loadRatioGR) * stride
-    return [base, base + offset2]
+    subtileSize = tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0]
+    rowAdvance = math.ceil(subtileSize * tileInfo.loadRatioGR)
+    totalRow2 = totalRow + rowAdvance
+    colId2 = (colId + 4) & (blockSize - 1)
+    colId2_bytes = colId2 * LOAD_WIDTH
+    offset2 = totalRow2 * stride * bpe + colId2_bytes
+    return [base, offset2]
 
 def compute_expected_subtile(regId, stride, tileInfo):
     """Compute expected subtile register value: rowOffset * bpe * regId * stride.
@@ -163,12 +177,12 @@ TILE_CONFIGS = [
     TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=4096, stride_b=1024, use_swizzling=True),
     TileConfig(mt_a=96, mt_b=256, depth_u=64, stride_a=1024, stride_b=256, use_swizzling=True),
     # # 1x4 configs
-    # TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
-    # TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
+    TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
+    TileConfig(mt_a=80, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
     # # 4x1 configs
-    # TileConfig(mt_a=64, mt_b=80, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
+    TileConfig(mt_a=64, mt_b=48, depth_u=64, stride_a=64, stride_b=256, use_swizzling=True),
     # # mt0<32 (read size)
-    # TileConfig(mt_a=16, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
+    TileConfig(mt_a=16, mt_b=64, depth_u=64, stride_a=64, stride_b=64, use_swizzling=True),
 ]
 
 
