@@ -57,7 +57,7 @@ enum class select_probability
     tuning
 };
 
-inline float get_probability(select_probability probability)
+constexpr inline float get_probability(select_probability probability)
 {
     switch(probability)
     {
@@ -70,7 +70,7 @@ inline float get_probability(select_probability probability)
     return 0.0f;
 }
 
-inline const char* get_probability_name(select_probability probability)
+constexpr inline const char* get_probability_name(select_probability probability)
 {
     switch(probability)
     {
@@ -84,7 +84,7 @@ inline const char* get_probability_name(select_probability probability)
 }
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {

@@ -65,7 +65,7 @@ constexpr const char* radix_rank_algorithm_name(rocprim::block_radix_rank_algori
 }
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
