@@ -685,8 +685,9 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsWorkspaceSiz
     ctx.setExecutionSettings(executionSettings);
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
-    EXPECT_TRUE(executionSettings.workspaceSizeLimit().has_value());
-    EXPECT_EQ(executionSettings.workspaceSizeLimit().value(), testWorkspaceSize);
+    auto workspaceLimit = executionSettings.workspaceSizeLimit();
+    ASSERT_TRUE(workspaceLimit.has_value());
+    EXPECT_EQ(*workspaceLimit, testWorkspaceSize);
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder,

@@ -235,14 +235,14 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
             engine->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                  1,
-                                 graphDesc.getPtr());
+                                 static_cast<const void*>(graphDesc.getPtr()));
             engine->finalize();
 
             ScopedDescriptor engineDesc(HipdnnBackendDescriptor::packDescriptor(engine));
             config->setAttribute(HIPDNN_ATTR_ENGINECFG_ENGINE,
                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                  1,
-                                 engineDesc.getPtr());
+                                 static_cast<const void*>(engineDesc.getPtr()));
         }
 
         *elementCount = std::min(requestedElementCount, static_cast<int64_t>(_engineIds.size()));

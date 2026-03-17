@@ -78,7 +78,7 @@ void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        graph),
+                                        static_cast<const void*>(graph)),
               HIPDNN_STATUS_SUCCESS);
 
     auto backendModes = HIPDNN_HEUR_MODE_FALLBACK;

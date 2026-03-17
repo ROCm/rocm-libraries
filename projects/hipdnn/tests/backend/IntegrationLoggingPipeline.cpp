@@ -131,8 +131,11 @@ TEST_F(IntegrationGpuLoggingPipeline, EnumFormatting)
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    status = hipdnnBackendSetAttribute(
-        descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    status = hipdnnBackendSetAttribute(descriptor,
+                                       HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                       HIPDNN_TYPE_HANDLE,
+                                       1,
+                                       static_cast<const void*>(&handle));
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Note: GraphDescriptor::getAttribute is not supported - it returns NOT_SUPPORTED for all attributes.
@@ -198,7 +201,7 @@ TEST_F(IntegrationGpuLoggingPipeline, FullWorkflowLogging)
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &graph),
+                                        static_cast<const void*>(&graph)),
               HIPDNN_STATUS_SUCCESS);
 
     auto mode = HIPDNN_HEUR_MODE_FALLBACK;
