@@ -69,7 +69,7 @@ TEST(TestMigratableMemory, MoveConstructor)
 
     MigratableMemory<float> memory2(std::move(memory1));
 
-    EXPECT_TRUE(memory1.empty());
+    EXPECT_TRUE(memory1.empty()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(memory1.count(), 0);
     EXPECT_EQ(memory1.location(), MemoryLocation::NONE);
     EXPECT_EQ(memory1.hostData(), nullptr);
@@ -89,7 +89,7 @@ TEST(TestMigratableMemory, MoveAssignment)
     MigratableMemory<float> memory2;
     memory2 = std::move(memory1);
 
-    EXPECT_TRUE(memory1.empty());
+    EXPECT_TRUE(memory1.empty()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(memory1.count(), 0);
     EXPECT_EQ(memory1.location(), MemoryLocation::NONE);
     EXPECT_EQ(memory1.hostData(), nullptr);

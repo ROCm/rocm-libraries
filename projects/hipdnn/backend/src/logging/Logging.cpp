@@ -34,8 +34,8 @@ namespace
 // initialize() and backendLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
-const std::string S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
-const std::string S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
+constexpr const char* S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
+constexpr const char* S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
 
 // Pattern string for the backend logger.
 // Component name is already included in messages (e.g., "[hipdnn_backend] ..."),

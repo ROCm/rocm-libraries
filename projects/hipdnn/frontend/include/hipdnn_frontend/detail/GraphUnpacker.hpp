@@ -86,10 +86,7 @@ void unpackNodeFromFlatBuffer(
     outGraphAttrs.set_intermediate_data_type(fromSdkType(fbGraph->intermediate_data_type()));
     outGraphAttrs.set_io_data_type(fromSdkType(fbGraph->io_data_type()));
 
-    if(fbGraph->preferred_engine_id().has_value())
-    {
-        outPreferredEngineId = fbGraph->preferred_engine_id().value();
-    }
+    outPreferredEngineId = fbGraph->preferred_engine_id();
 
     // Build tensorMap from FlatBuffer tensors
     std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>> tensorMap;
@@ -412,8 +409,11 @@ void unpackNodeFromFlatBuffer(
 
     if(handle != nullptr)
     {
-        auto setStatus = hipdnnBackend()->backendSetAttribute(
-            graphDesc.get(), HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        auto setStatus = hipdnnBackend()->backendSetAttribute(graphDesc.get(),
+                                                              HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                                              HIPDNN_TYPE_HANDLE,
+                                                              1,
+                                                              static_cast<const void*>(&handle));
         if(setStatus != HIPDNN_STATUS_SUCCESS)
         {
             std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};

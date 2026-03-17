@@ -14,6 +14,7 @@ using namespace ::testing;
 
 namespace
 {
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization) test constant
 const std::string SUCCESS_VERSION = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR) + ".-1.0";
 }
 

@@ -49,12 +49,15 @@ public:
         auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
         hipdnnHandle_t handle = &_mockHandle;
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                HIPDNN_TYPE_HANDLE,
+                                1,
+                                static_cast<const void*>(&handle));
 
         graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                 static_cast<int64_t>(ops.size()),
-                                ops.data());
+                                static_cast<const void*>(ops.data()));
 
         graphDesc->setAttribute(
             HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeDt);
@@ -98,7 +101,10 @@ public:
         graphDesc->deserializeGraph(bytes.data(), bytes.size());
 
         hipdnnHandle_t handle = &_mockHandle;
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                HIPDNN_TYPE_HANDLE,
+                                1,
+                                static_cast<const void*>(&handle));
         graphDesc->finalize();
 
         return graphDesc;
@@ -335,12 +341,18 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
     HipdnnBackendDescriptor* w = wDesc.get();
     HipdnnBackendDescriptor* y = yDesc.get();
 
-    convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &x);
-    convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &w);
-    convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &y);
+    convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&x));
+    convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&w));
+    convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&y));
 
     const std::vector<int64_t> kCustomPrePadding = {2, 3};
     const std::vector<int64_t> kCustomPostPadding = {4, 5};
@@ -402,12 +414,18 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolutio
     HipdnnBackendDescriptor* w = wDesc.get();
     HipdnnBackendDescriptor* y = yDesc.get();
 
-    convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &x);
-    convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &w);
-    convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &y);
+    convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&x));
+    convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&w));
+    convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           static_cast<const void*>(&y));
 
     const std::vector<int64_t> kPadding = {1, 1};
     const std::vector<int64_t> kStride = {1, 1};
@@ -511,16 +529,19 @@ TEST_F(TestGraphDescriptorLifting, SetOperationsAfterDeserializeThrows)
     graphDesc->deserializeGraph(serializedBytes.data(), serializedBytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
-    ASSERT_NO_THROW(
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+    ASSERT_NO_THROW(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                            HIPDNN_TYPE_HANDLE,
+                                            1,
+                                            static_cast<const void*>(&handle)));
 
     // Attempting to add operations after deserialization should throw NOT_SUPPORTED
     auto conv2 = createDefaultConvOp();
     HipdnnBackendDescriptor* op2Ptr = conv2.convOp.get();
-    ASSERT_THROW_HIPDNN_STATUS(
-        graphDesc->setAttribute(
-            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &op2Ptr),
-        HIPDNN_STATUS_NOT_SUPPORTED);
+    ASSERT_THROW_HIPDNN_STATUS(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                       1,
+                                                       static_cast<const void*>(&op2Ptr)),
+                               HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
 TEST_F(TestGraphDescriptorLifting, GetAttributeOpsAfterDeserializeSucceeds)
@@ -554,8 +575,10 @@ TEST_F(TestGraphDescriptorLifting, DeserializeOnlyFinalize)
     graphDesc->deserializeGraph(originalBytes.data(), originalBytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
-    ASSERT_NO_THROW(
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+    ASSERT_NO_THROW(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                            HIPDNN_TYPE_HANDLE,
+                                            1,
+                                            static_cast<const void*>(&handle)));
     ASSERT_NO_THROW(graphDesc->finalize());
 
     // Get the re-serialized bytes
@@ -582,8 +605,10 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     graphDesc->deserializeGraph(originalBytes.data(), originalBytes.size());
 
     hipdnnHandle_t handle = &_mockHandle;
-    ASSERT_NO_THROW(
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+    ASSERT_NO_THROW(graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                            HIPDNN_TYPE_HANDLE,
+                                            1,
+                                            static_cast<const void*>(&handle)));
     ASSERT_NO_THROW(graphDesc->finalize());
 
     // Get serialized bytes — they should be identical to the original
@@ -653,7 +678,10 @@ TEST_F(TestGraphDescriptorLifting, DeserializeUnsupportedNodeTypeThrows)
     graphDesc->deserializeGraph(buffer.data(), buffer.size());
 
     hipdnnHandle_t handle = &_mockHandle;
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                            HIPDNN_TYPE_HANDLE,
+                            1,
+                            static_cast<const void*>(&handle));
     graphDesc->finalize();
 
     // Lazy unpack: NodeFactory throws NOT_SUPPORTED for the unsupported Pointwise node type
@@ -676,11 +704,16 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeWrongTypeForOpsOnCApiFlow)
     auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
     hipdnnHandle_t handle = &_mockHandle;
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                            HIPDNN_TYPE_HANDLE,
+                            1,
+                            static_cast<const void*>(&handle));
 
     HipdnnBackendDescriptor* opPtr = conv.convOp.get();
-    graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &opPtr);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                            1,
+                            static_cast<const void*>(&opPtr));
     graphDesc->finalize();
 
     // Call getAttribute with HIPDNN_ATTR_OPERATIONGRAPH_OPS but pass HIPDNN_TYPE_INT64
@@ -712,14 +745,21 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeRequestedCountTooSmallOnCApiFlow)
     auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
     hipdnnHandle_t handle = &_mockHandle;
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                            HIPDNN_TYPE_HANDLE,
+                            1,
+                            static_cast<const void*>(&handle));
 
     HipdnnBackendDescriptor* op1Ptr = conv1.convOp.get();
     HipdnnBackendDescriptor* op2Ptr = convOp2.get();
-    graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &op1Ptr);
-    graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &op2Ptr);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                            1,
+                            static_cast<const void*>(&op1Ptr));
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                            1,
+                            static_cast<const void*>(&op2Ptr));
     graphDesc->finalize();
 
     // Allocate a buffer for 2 ops, but pass requestedElementCount=1
