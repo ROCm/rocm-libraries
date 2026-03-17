@@ -205,6 +205,7 @@ struct Unsupported;
  * @concept MmaOpI
  * @brief  Expresses the meta-data interface required for each MmaOp policy.
  */
+// TODO: Make sure this actually matches amdgcn_mma.
 template <typename MmaOp>
 concept MmaOpI = requires(MmaOp op) {
     // Requires an op context
@@ -218,7 +219,6 @@ concept MmaOpI = requires(MmaOp op) {
     typename MmaOp::AVecType;
     typename MmaOp::BVecType;
     typename MmaOp::CVecType;
-
     // Captures CK-specific layout properties
     { MmaOp::kABKPerLane } -> std::convertible_to<unsigned int>;
     { MmaOp::kAKNumAccess } -> std::convertible_to<unsigned int>;
