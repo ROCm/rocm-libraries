@@ -82,6 +82,7 @@ Tests:
   c_equal_d: [false, true]
 
 # Integer-exact init (A in [0,1,2], B alternating ±[0,1,2]) with exact GPU vs CPU match. Same sizes/filters as normal matmul tests.
+# TF32x1 (f32 A+B, compute input bf16) runs only on gfx950 where solutions exist (see matmul_integer_exact_tf32x1_gfx950 below).
 - name: matmul_integer_exact_one
   category: quick
   function:
@@ -173,6 +174,19 @@ Tests:
   transA_transB: *deepbench_transA_transB_range
   initialization: integer_exact
   unit_check: 1
+
+# Integer-exact + TF32x1 (f32 A+B, compute input bf16). Only on gfx950 where solutions exist (cf. matmul_gemm_f32_fast_bf16).
+- name: matmul_integer_exact_tf32x1_gfx950
+  category: quick
+  function:
+    matmul: *real_precisions_tf32x1_only
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '950'
 
 - name: matmul_conj_small
   category: quick
