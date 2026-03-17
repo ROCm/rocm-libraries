@@ -466,3 +466,10 @@ TEST(TestBlockScaleDequantizeNode, GatherHipdnnTensors)
 
     EXPECT_EQ(allTensors.size(), 3);
 }
+
+TEST(TestBlockScaleDequantizeNode, GetNodeTypeReturnsBlockScaleDequantize)
+{
+    GraphAttributes graphAttrs;
+    BlockScaleDequantizeNode node(BlockScaleDequantizeAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BLOCK_SCALE_DEQUANTIZE);
+}
