@@ -162,17 +162,20 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-endforeach()
-
-# ScaleAB tests (slow path only — fast path does not yet support useScaleAB)
-foreach(MODE Scalar Vector)
-    foreach(TYPE f32 f16 bf16)
-        get_test_sizes(${TYPE} SIZES)
-        add_cpu_gemm_test(slow_${TYPE}_ScaleAB_${MODE}
-            ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE}
+    # ScaleAB tests
+    foreach(MODE Scalar Vector)
+        foreach(TYPE f32 f16 bf16)
+            get_test_sizes(${TYPE} SIZES)
+            add_cpu_gemm_test(${PATH}_${TYPE}_ScaleAB_${MODE}
+                ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_AllFeatures
+            ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        # ScaleAB with factorDim=1 (column-dimension ScaleAlphaVec)
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_ColN
+            ARGS ${F32_SIZES} --type f32 --validate --useScaleAB ${MODE} --scaleAlphaVec --factorDim 1 ${PATH_FLAGS}
         )
     endforeach()
-    add_cpu_gemm_test(slow_f32_ScaleAB_${MODE}_AllFeatures
-        ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec
-    )
 endforeach()
