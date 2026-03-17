@@ -68,8 +68,19 @@ rocblas_status rocsolver_getrs_npvt_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if((n && !A) || (nrhs && n && !B))
-        return rocblas_status_invalid_pointer;
+    {
+        bool const has_work = (n > 0) && (nrhs > 0) && (batch_count > 0);
+        if(has_work)
+        {
+            bool const is_valid_A = (A != nullptr);
+            bool const is_valid_B = (B != nullptr);
+            bool const is_valid_pointers = (is_valid_A && is_valid_B);
+            if(!is_valid_pointers)
+            {
+                return (rocblas_status_invalid_pointer);
+            }
+        }
+    }
 
     return rocblas_status_continue;
 }
