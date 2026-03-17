@@ -39,7 +39,6 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <optional>
 #include <random>
 #include <regex>
 #include <thread>
