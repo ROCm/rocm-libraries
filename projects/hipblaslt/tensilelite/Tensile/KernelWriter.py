@@ -3025,7 +3025,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
-        if (doReadA or doReadB or doReadM or doReadMXSA or doReadMXSB) and kernel["ForceUnrollSubIter"]:
+        if (doReadA or doReadB or doReadM or doReadMXSA or doReadMXSB) and kernel["ForceUnrollSubIter"] and not self.states.doFullPackCodePrefetch:
           pack[1] = Module()
         if doReadA:
           localReads.addComment1("local read a")
@@ -3048,7 +3048,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
           else:
             pack[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
-          if kernel["ForceUnrollSubIter"]:
+          if kernel["ForceUnrollSubIter"] and not self.states.doFullPackCodePrefetch:
             pack[1].add(packCodeA)
         if doReadMXSA:
           localReads.addComment1("local read mxsa")
@@ -3759,7 +3759,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             LRCodeAAllIters[uIdx].add(localReadCodeA)
             PackCodeAAllIters[uIdx].add(packPreA)
             PackCodeAAllIters[uIdx].add(packCodeA)
-          if kernel["ForceUnrollSubIter"]:
+          if kernel["ForceUnrollSubIter"] and not self.states.doFullPackCodePrefetch:
             pack[1].add(packCodeA)
         if doReadMXSA:
           localReads.addComment1("local read maxa")
