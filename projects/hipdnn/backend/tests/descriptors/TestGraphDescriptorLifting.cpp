@@ -42,7 +42,8 @@ public:
                                                 hipdnnDataType_t intermediateDt = HIPDNN_DATA_FLOAT,
                                                 hipdnnDataType_t ioDt = HIPDNN_DATA_FLOAT,
                                                 std::optional<int64_t> preferredEngineId
-                                                = std::nullopt)
+                                                = std::nullopt,
+                                                const std::string& name = "")
     {
         auto graphWrapper = createDescriptor<GraphDescriptor>();
         auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
@@ -71,6 +72,14 @@ public:
                                     HIPDNN_TYPE_INT64,
                                     1,
                                     &engineId);
+        }
+
+        if(!name.empty())
+        {
+            graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                    HIPDNN_TYPE_CHAR,
+                                    static_cast<int64_t>(name.size()),
+                                    name.c_str());
         }
 
         graphDesc->finalize();
@@ -804,44 +813,12 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeDataTypesWithoutFinalization)
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphName)
 {
     auto conv = createDefaultConvOp();
-
-    // Build graph with a name set via setAttribute
-    auto graphWrapper = createDescriptor<GraphDescriptor>();
-    auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
-
-    hipdnnHandle_t handle = &_mockHandle;
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
-
-    HipdnnBackendDescriptor* opPtr = conv.convOp.get();
-    graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &opPtr);
-
-    auto computeDt = HIPDNN_DATA_FLOAT;
-    graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeDt);
-    auto intermediateDt = HIPDNN_DATA_FLOAT;
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT,
-                            HIPDNN_TYPE_DATA_TYPE,
-                            1,
-                            &intermediateDt);
-    auto ioDt = HIPDNN_DATA_FLOAT;
-    graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &ioDt);
-
     const std::string graphName = "TestGraphName";
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
-                            HIPDNN_TYPE_CHAR,
-                            static_cast<int64_t>(graphName.size()),
-                            graphName.c_str());
 
-    graphDesc->finalize();
+    std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
+    auto bytes = buildAndSerializeGraph(
+        ops, HIPDNN_DATA_FLOAT, HIPDNN_DATA_FLOAT, HIPDNN_DATA_FLOAT, std::nullopt, graphName);
 
-    // Get the serialized bytes
-    auto serialized = graphDesc->getSerializedGraph();
-    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
-                               static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
-
-    // Deserialize into a new graph and verify the name is preserved
     auto liftedGraph = deserializeAndFinalize(bytes);
 
     // Verify via getAttribute (getString returns size+1 for null terminator)

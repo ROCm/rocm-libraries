@@ -56,6 +56,7 @@ private:
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
+    // Optional human-readable name for the graph, empty when unset.
     std::string _name;
 
     void setHandle(hipdnnBackendAttributeType_t attributeType,
