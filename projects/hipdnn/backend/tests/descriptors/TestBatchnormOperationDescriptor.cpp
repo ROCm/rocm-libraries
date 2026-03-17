@@ -582,8 +582,8 @@ TEST_P(TestBatchnormOperationDescriptorGetTensor, GetAttributeTensorDescriptorRe
     // Ownership is transferred to the caller - delete after use.
     HipdnnBackendDescriptor* retrieved = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(
-        desc->getAttribute(tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &retrieved));
+    ASSERT_NO_THROW(desc->getAttribute(
+        tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, static_cast<void*>(&retrieved)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrieved, nullptr);
@@ -915,7 +915,7 @@ TEST_F(TestBatchnormOperationDescriptor, SetPeerStatsTensorArray)
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        2,
-                                       descs.data()));
+                                       static_cast<const void*>(descs.data())));
 
     auto& data = desc->getData();
     ASSERT_EQ(data.peer_stats_tensor_uid.size(), 2u);
@@ -930,7 +930,7 @@ TEST_F(TestBatchnormOperationDescriptor, GetPeerStatsTensorArray)
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        2,
-                       descs.data());
+                       static_cast<const void*>(descs.data()));
     setAllAttributesExcept();
     desc->finalize();
 
@@ -940,7 +940,7 @@ TEST_F(TestBatchnormOperationDescriptor, GetPeerStatsTensorArray)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        2,
                                        &elementCount,
-                                       retrieved.data()));
+                                       static_cast<void*>(retrieved.data())));
 
     ASSERT_EQ(elementCount, 2);
     ASSERT_NE(retrieved[0], nullptr);
