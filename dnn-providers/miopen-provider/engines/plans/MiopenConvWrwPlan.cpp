@@ -92,6 +92,10 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     {
         _workspaceSize = _executionSettings.workspaceSizeLimit().value();
     }
+    else if(_executionSettings.defaultWorkspaceSize().has_value())
+    {
+        _workspaceSize = _executionSettings.defaultWorkspaceSize().value();
+    }
     else
     {
         THROW_ON_MIOPEN_FAILURE(

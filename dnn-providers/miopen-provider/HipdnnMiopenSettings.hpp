@@ -48,7 +48,30 @@ struct HipdnnMiopenSettings
         return _workspaceSizeLimit;
     }
 
+    /**
+     * @brief Sets the default workspace size queried from MIOpen.
+     *
+     * Cached during initializeExecutionSettings to avoid redundant MIOpen queries.
+     *
+     * @param size Default workspace size in bytes.
+     */
+    void setDefaultWorkspaceSize(size_t size)
+    {
+        _defaultWorkspaceSize = size;
+    }
+
+    /**
+     * @brief Gets the cached default workspace size.
+     *
+     * @return Default workspace size in bytes if cached, std::nullopt otherwise.
+     */
+    std::optional<size_t> defaultWorkspaceSize() const
+    {
+        return _defaultWorkspaceSize;
+    }
+
 private:
     bool _benchmarkingEnabled = false;
     std::optional<size_t> _workspaceSizeLimit;
+    std::optional<size_t> _defaultWorkspaceSize;
 };

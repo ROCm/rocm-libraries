@@ -318,6 +318,11 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
         return executionSettings.workspaceSizeLimit().value();
     }
 
+    if(executionSettings.defaultWorkspaceSize().has_value())
+    {
+        return executionSettings.defaultWorkspaceSize().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
@@ -340,6 +345,11 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
     if(executionSettings.workspaceSizeLimit().has_value())
     {
         return executionSettings.workspaceSizeLimit().value();
+    }
+
+    if(executionSettings.defaultWorkspaceSize().has_value())
+    {
+        return executionSettings.defaultWorkspaceSize().value();
     }
 
     const auto& attr = opGraph.getNodeWrapper(0)
@@ -366,6 +376,11 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
     if(executionSettings.workspaceSizeLimit().has_value())
     {
         return executionSettings.workspaceSizeLimit().value();
+    }
+
+    if(executionSettings.defaultWorkspaceSize().has_value())
+    {
+        return executionSettings.defaultWorkspaceSize().value();
     }
 
     const auto& attr = opGraph.getNodeWrapper(0)
@@ -574,6 +589,12 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
         }
 
         executionSettings.setWorkspaceSizeLimit(static_cast<size_t>(value));
+    }
+
+    if(!executionSettings.workspaceSizeLimit().has_value())
+    {
+        const auto maxWs = getMaxWorkspaceSize(handle, opGraph, executionSettings);
+        executionSettings.setDefaultWorkspaceSize(maxWs);
     }
 }
 
