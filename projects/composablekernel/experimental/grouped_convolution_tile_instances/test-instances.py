@@ -64,15 +64,14 @@ def compile_single_file(cpp_file: Path, project_root: Path, gpu_target: str, ver
                 timeout=300  # 5 minute timeout per file
             )
             
-            print(f"\n    Command: {' '.join(cmd)}") if verbose else None
+            print(f"\n\n    Command: {' '.join(cmd)}\n") if verbose else None
 
             if result.returncode == 0:
                 return True, ""
             else:
                 # Extract the key error message
-                if verbose:
-                    print(f"    Compilation failed with return code {result.returncode}")
-                    print(f"    Stderr: {result.stderr}")
+                if verbose and result.stderr:
+                    print(f"    {result.stderr}")
                     print()
                 error_output = result.stderr
                 return False, error_output
