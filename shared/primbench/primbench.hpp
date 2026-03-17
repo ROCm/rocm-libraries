@@ -20,8 +20,16 @@
 
 #pragma once
 
-#include <amd_smi/amdsmi.h>
-#include <hip/hip_runtime.h>
+#if defined(__HIP__)
+    #include <amd_smi/amdsmi.h>
+    #include <hip/hip_runtime.h>
+#elif defined(__CUDACC__)
+    #include <nvml.h>
+    #include <cuda/std/chrono>
+#else
+    #error "Unsupported GPU platform"
+#endif
+
 #include <unistd.h>
 
 #include <array>
@@ -63,37 +71,74 @@
     };                                         \
     }
 
-/**
- * \brief Exits the program with an error message if the given HIP API call returns a failure
- * status.
- */
-#define PRIMBENCH_HIP_CHECK(status)                                            \
-    {                                                                          \
-        if(status != hipSuccess)                                               \
-        {                                                                      \
-            std::cerr << __FILE__ << ":" << __LINE__                           \
-                      << ": HIP error: " << hipGetErrorString(status) << "\n"; \
-            exit(status);                                                      \
-        }                                                                      \
-    }
+#ifdef __HIP__
+    /**
+    * \brief Exits the program with an error message
+    * if the given API call returns a failure status.
+    */
+    #define PRIMBENCH_CHECK(status)                                                \
+        do {                                                                       \
+            if(status != hipSuccess)                                               \
+            {                                                                      \
+                std::cerr << __FILE__ << ":" << __LINE__                           \
+                        << ": HIP error: " << hipGetErrorString(status) << "\n"; \
+                exit(status);                                                      \
+            }                                                                      \
+        } while (0)
 
-/**
- * \brief Exits the program with an error message if the given AMD SMI API call returns a
- * failure status.
- */
-#define PRIMBENCH_AMDSMI_CHECK(status)                                                        \
-    {                                                                                         \
-        if(status != AMDSMI_STATUS_SUCCESS)                                                   \
-        {                                                                                     \
-            const char* errstr = "(unknown)";                                                 \
-            amdsmi_status_code_to_string(status, &errstr);                                    \
-            std::cerr << __FILE__ << ":" << __LINE__ << ": AMDSMI error: " << errstr << "\n"; \
-            std::exit(status);                                                                \
-        }                                                                                     \
-    }
+    /**
+    * \brief Exits the program with an error message if the given AMD SMI API call returns a
+    * failure status.
+    */
+    #define PRIMBENCH_AMDSMI_CHECK(status)                                                        \
+        do {                                                                                      \
+            if(status != AMDSMI_STATUS_SUCCESS)                                                   \
+            {                                                                                     \
+                const char* errstr = "(unknown)";                                                 \
+                amdsmi_status_code_to_string(status, &errstr);                                    \
+                std::cerr << __FILE__ << ":" << __LINE__ << ": AMDSMI error: " << errstr << "\n"; \
+                exit(status);                                                                \
+            }                                                                                     \
+        } while (0)
+#else
+    /**
+    * \brief Exits the program with an error message
+    * if the given API call returns a failure status.
+    */
+    #define PRIMBENCH_CHECK(status)                                                  \
+        do {                                                                         \
+            if(status != cudaSuccess)                                                \
+            {                                                                        \
+                std::cerr << __FILE__ << ":" << __LINE__                             \
+                        << ": CUDA error: " << cudaGetErrorString(status) << "\n"; \
+                exit(status);                                                        \
+            }                                                                        \
+        } while (0)
+
+    /**
+    * \brief Exits the program with an error message if the given NVML API call returns a
+    * failure status.
+    */
+    #define PRIMBENCH_NVML_CHECK(status)                                                                         \
+        do {                                                                                                     \
+            if (status != NVML_SUCCESS) {                                                                        \
+                std::cerr << __FILE__ << ":" << __LINE__ << ": NVML error: " << nvmlErrorString(status) << "\n"; \
+                exit(status);                                                                                    \
+            }                                                                                                    \
+        } while (0)
+#endif
 
 namespace primbench
 {
+
+// Backend-agnostic stream type and default stream constant.
+#ifdef __HIP__
+    using stream_t = hipStream_t;
+    constexpr stream_t default_stream = hipStreamDefault;
+#else
+    using stream_t = cudaStream_t;
+    constexpr stream_t default_stream = cudaStreamDefault;
+#endif
 
 // Forward declarations for the detail namespace.
 extern const size_t MiB;
@@ -101,7 +146,7 @@ template<typename... Args>
 void log(Args&&... args);
 
 /**
- * \brief Settings that the user can change by passing arguments via their CLI.
+ * \brief Settings that benchmarks and users can pass.
  */
 struct settings
 {
@@ -121,9 +166,6 @@ struct settings
     uint16_t    max_gpu_temp            = 60; /**< Maximum GPU temperature */
     double      max_warming_secs        = 60.0; /**< Max GPU warmup time */
     double      max_cooling_secs        = 60.0; /**< Max GPU cooldown time */
-    bool        output_hip_device_properties_context
-        = false; /**< Flag to output HIP device properties context */
-    bool     output_amdsmi_context = false; /**< Flag to output AMD SMI context */
     bool     output_batches        = false; /**< Flag to output batch details */
     uint32_t spaces_per_indent     = 4; /**< JSON indentation spaces */
     double   stream_blocking_timeout_secs
@@ -239,185 +281,260 @@ inline std::ostream& blue(std::ostream& os)
     return os;
 }
 
-/**
- * \brief Wrapper for AMD SMI (System Management Interface) GPU monitoring.
- *
- * Initializes AMD GPU metrics, clocks, and memory usage on construction,
- * and shuts down AMD SMI on destruction. Provides methods to:
- * - Retrieve current GPU statistics (`get_stats`)
- * - Serialize GPU statistics and device context to JSON (`serialize_stats`, `serialize_context`)
- * - Read GPU temperature (`get_temp`)
- *
- * Contains internal types for holding GPU stats and context information.
- */
-class amdsmi
+/// Backend-agnostic wrappers for HIP and CUDA.
+/// The functions in this namespace are sorted alphabetically.
+namespace gpu_backend
+{
+
+#ifdef __HIP__
+    using error_t = hipError_t;
+    using event_t = hipEvent_t;
+    constexpr unsigned host_register_mapped = hipHostRegisterMapped;
+#else
+    using error_t = cudaError_t;
+    using event_t = cudaEvent_t;
+    constexpr unsigned host_register_mapped = cudaHostRegisterMapped;
+#endif
+
+inline error_t event_create(event_t* event)
+{
+#ifdef __HIP__
+    return hipEventCreate(event);
+#else
+    return cudaEventCreate(event);
+#endif
+}
+
+inline error_t event_destroy(event_t event)
+{
+#ifdef __HIP__
+    return hipEventDestroy(event);
+#else
+    return cudaEventDestroy(event);
+#endif
+}
+
+inline error_t event_elapsed_time(float* ms, event_t start, event_t stop)
+{
+#ifdef __HIP__
+    return hipEventElapsedTime(ms, start, stop);
+#else
+    return cudaEventElapsedTime(ms, start, stop);
+#endif
+}
+
+inline error_t event_record(event_t event, stream_t stream)
+{
+#ifdef __HIP__
+    return hipEventRecord(event, stream);
+#else
+    return cudaEventRecord(event, stream);
+#endif
+}
+
+inline error_t get_last_error()
+{
+#ifdef __HIP__
+    return hipGetLastError();
+#else
+    return cudaGetLastError();
+#endif
+}
+
+inline error_t gpu_free(void *device)
+{
+#ifdef __HIP__
+    return hipFree(device);
+#else
+    return cudaFree(device);
+#endif
+}
+
+inline error_t gpu_malloc(void **device, size_t size)
+{
+#ifdef __HIP__
+    return hipMalloc(device, size);
+#else
+    return cudaMalloc(device, size);
+#endif
+}
+
+inline error_t host_get_device_pointer(void **device, void *host, unsigned flags)
+{
+#ifdef __HIP__
+    return hipHostGetDevicePointer(device, host, flags);
+#else
+    return cudaHostGetDevicePointer(device, host, flags);
+#endif
+}
+
+inline error_t host_register(void *ptr, size_t size, unsigned flags)
+{
+#ifdef __HIP__
+    return hipHostRegister(ptr, size, flags);
+#else
+    return cudaHostRegister(ptr, size, flags);
+#endif
+}
+
+inline error_t host_unregister(void *ptr)
+{
+#ifdef __HIP__
+    return hipHostUnregister(ptr);
+#else
+    return cudaHostUnregister(ptr);
+#endif
+}
+
+inline error_t memset_async(void *device, int value, size_t count, stream_t stream)
+{
+#ifdef __HIP__
+    return hipMemsetAsync(device, value, count, stream);
+#else
+    return cudaMemsetAsync(device, value, count, stream);
+#endif
+}
+
+inline error_t stream_create(stream_t* stream)
+{
+#ifdef __HIP__
+    return hipStreamCreate(stream);
+#else
+    return cudaStreamCreate(stream);
+#endif
+}
+
+inline error_t stream_destroy(stream_t stream)
+{
+#ifdef __HIP__
+    return hipStreamDestroy(stream);
+#else
+    return cudaStreamDestroy(stream);
+#endif
+}
+
+inline error_t stream_synchronize(stream_t stream)
+{
+#ifdef __HIP__
+    return hipStreamSynchronize(stream);
+#else
+    return cudaStreamSynchronize(stream);
+#endif
+}
+
+}
+
+// Bring GPU backend wrappers into this namespace so we can call
+// functions like gpu_malloc() without the gpu_backend:: prefix.
+using namespace gpu_backend;
+
+#ifdef __HIP__
+
+/// Wrapper for HIP and AMD SMI (System Management Interface) GPU monitoring.
+class monitor
 {
 public:
-    // Delete all copy/move constructors and assignment operators
-    amdsmi(const amdsmi&)            = delete;
-    amdsmi& operator=(const amdsmi&) = delete;
-    amdsmi(amdsmi&&)                 = delete;
-    amdsmi& operator=(amdsmi&&)      = delete;
+    // Delete all copy/move constructors and assignment operators.
+    monitor(const monitor&)            = delete;
+    monitor& operator=(const monitor&) = delete;
+    monitor(monitor&&)                 = delete;
+    monitor& operator=(monitor&&)      = delete;
 
-    // Singleton accessor
-    static amdsmi& instance()
+    /// Singleton accessor.
+    static monitor& instance()
     {
-        static amdsmi instance;
+        static monitor instance;
         return instance;
     }
 
-    /**
-     * \brief Represents GPU statistics including metrics, clocks, and VRAM usage.
-     */
-    struct stats
+    uint16_t get_temp() const
     {
-        amdsmi_gpu_metrics_t metrics;
+        int64_t t;
+        PRIMBENCH_AMDSMI_CHECK(
+            amdsmi_get_temp_metric(m_amdsmi_device, get_temperature_type(), AMDSMI_TEMP_CURRENT, &t));
+        return t;
+    }
 
-        // Clocks (current frequencies in MHz)
-        std::unordered_map<std::string, std::optional<uint32_t>> clocks;
-
-        std::optional<uint64_t> vram_used_bytes;
-    };
-
-    /**
-     * \brief Converts a stats object to a JSON string.
-     * \param stats The stats object to serialize.
-     * \return JSON string representing the stats.
-     */
-    std::string serialize_stats(const stats& stats) const
+    std::string serialize_gpu_info() const
     {
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"vram_used_bytes\":" << serialize_optional(stats.vram_used_bytes);
+        hipDeviceProp_t dev_prop;
+        PRIMBENCH_CHECK(hipGetDeviceProperties(&dev_prop, m_hip_device));
+        ss << "\"name\":\"" << dev_prop.name << "\"";
 
-        if(has_clock(stats.clocks))
-        {
-            ss << ",\"clocks_mhz\":{";
-            bool first = true;
-            for(const auto& kv : stats.clocks)
-            {
-                if(!first)
-                    ss << ",";
-                ss << "\"" << kv.first << "\":" << serialize_optional(kv.second);
-                first = false;
-            }
-            ss << "}";
-        }
+        ss << ",\"arch\":\"" << dev_prop.gcnArchName << "\"";
 
-        ss << ",\"metrics\":" << serialize_metrics(stats.metrics);
+        char pci_bus_id_arr[32];
+        PRIMBENCH_CHECK(
+            hipDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), m_hip_device));
+        ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
 
         ss << "}";
         return ss.str();
     }
 
-    /**
-     * \brief Converts the GPU context to a JSON string.
-     * \return JSON string representing the context and current GPU state.
-     */
-    std::string serialize_context() const
+    std::string serialize_backend_info() const
     {
-        const auto& ctx = m_context;
-
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"identity\":{";
+        // Backend name
+        ss << "\"name\":\"hip\"";
 
-        ss << "\"product_name\":" << serialize_optional(ctx.product_name);
+        // HIP version
+        ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR
+        << "." << HIP_VERSION_PATCH << "-" << HIP_VERSION_GITHASH << "\"";
 
-        ss << ",\"version\":" << serialize_optional(ctx.amdsmi_version);
+        // HIP runtime version (integer, e.g., 60443482 -> 6.4.43482)
+        int runtime_ver;
+        PRIMBENCH_CHECK(hipRuntimeGetVersion(&runtime_ver));
+        int major = runtime_ver / 10000000;
+        int minor = (runtime_ver / 100000) % 100;
+        int patch = runtime_ver % 100000;
+        ss << ",\"runtime_version\":\"" << major << "." << minor << "." << patch << "\"";
 
-        ss << ",\"metrics_version\":{";
-        ss << "\"format\":" << std::to_string(ctx.amdsmi_metrics_version.format_revision);
-        ss << ",\"content\":" << std::to_string(ctx.amdsmi_metrics_version.content_revision);
-        ss << "}";
+        // HIP driver version (integer, same format)
+        int driver_ver;
+        PRIMBENCH_CHECK(hipDriverGetVersion(&driver_ver));
+        major = driver_ver / 10000000;
+        minor = (driver_ver / 100000) % 100;
+        patch = driver_ver % 100000;
+        ss << ",\"driver_version\":\"" << major << "." << minor << "." << patch << "\"";
 
-        ss << "}"; // End of "identity" object.
+        // AMD SMI version
+        amdsmi_version_t amdsmi_version;
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_lib_version(&amdsmi_version));
+        ss << ",\"amdsmi_version\":\"" << amdsmi_version.build << "\"";
 
-        ss << ",\"power_cap\":{";
-        ss << "\"current_microwatts\":" << serialize_optional(ctx.power_cap);
-        ss << ",\"default_microwatts\":" << serialize_optional(ctx.power_cap_default);
-        ss << ",\"dpm_mhz\":" << serialize_optional(ctx.power_cap_dpm);
-        ss << "}";
-
-        ss << ",\"vram\":{";
-        ss << "\"vendor\":" << serialize_optional(ctx.vram_vendor);
-        ss << ",\"total_bytes\":" << serialize_optional(ctx.vram_total_bytes);
-        ss << "}";
-
-        if(has_clock(ctx.clocks))
-        {
-            ss << ",\"clocks\":{";
-            bool first = true;
-            for(const auto& kv : ctx.clocks)
-            {
-                if(!first)
-                    ss << ",";
-                ss << "\"" << kv.first << "\":";
-                if(kv.second)
-                    ss << "{" << "\"min_mhz\":" << kv.second->first
-                       << ",\"max_mhz\":" << kv.second->second << "}";
-                else
-                    ss << "null";
-                first = false;
-            }
-            ss << "}";
-        }
-
-        ss << ",\"stats\":" << serialize_stats(ctx.stats);
+        // Clang compiler version
+        ss << ",\"clang_version\":\"" << __clang_version__ << "\"";
 
         ss << "}";
         return ss.str();
     }
 
-    /**
-     * \brief Retrieve current GPU statistics.
-     * \return stats object containing current metrics, clocks, and memory usage.
-     */
-    stats get_stats() const
+    std::string get_used_temperature_type_name() const
     {
-        stats stats{};
-
-        // Copy all GPU metrics
-        amdsmi_gpu_metrics_t metrics{};
-        if(amdsmi_get_gpu_metrics_info(m_target, &metrics) == AMDSMI_STATUS_SUCCESS)
-            stats.metrics = metrics;
-
-        // Clocks
-        for(auto clk : clk_types)
-        {
-            amdsmi_clk_info_t clk_info{};
-            if(amdsmi_get_clock_info(m_target, clk, &clk_info) == AMDSMI_STATUS_SUCCESS)
-                stats.clocks[clk_type_to_string(clk)] = clk_info.clk;
-        }
-
-        // Memory usage
-        uint64_t vram_used;
-        if(amdsmi_get_gpu_memory_usage(m_target, AMDSMI_MEM_TYPE_VRAM, &vram_used)
-           == AMDSMI_STATUS_SUCCESS)
-            stats.vram_used_bytes = vram_used;
-
-        return stats;
+        return get_temperature_type_name(get_temperature_type());
     }
 
-    /**
-     * \brief Converts a temperature type enum to a string.
-     * \param type Temperature type enum value.
-     * \return String representation of the temperature type.
-     * \note Exits with failure if the temperature type is not recognized.
-     */
-    static const char* get_temp_type_name(amdsmi_temperature_type_t type)
+private:
+    monitor()
     {
-        switch(type)
-        {
-            case AMDSMI_TEMPERATURE_TYPE_EDGE: return "edge";
-            case AMDSMI_TEMPERATURE_TYPE_HOTSPOT: return "hotspot";
-            default:
-                std::cerr << "\nError: Failed to match temperature type " << type
-                          << " to a string\n";
-                exit(EXIT_FAILURE);
-        }
+        PRIMBENCH_CHECK(hipGetDevice(&m_hip_device));
+
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_init(AMDSMI_INIT_AMD_GPUS));
+
+        // This can't be run in a member initializer list,
+        // since the above amdsmi_init() call must be run first.
+        m_amdsmi_device = get_amdsmi_device();
+    }
+
+    ~monitor()
+    {
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_shut_down());
     }
 
     /**
@@ -430,9 +547,9 @@ public:
      * \note Exits with failure if no temperature sensors are accessible.
      *       The result is cached as a static variable.
      */
-    amdsmi_temperature_type_t get_temp_type() const
+    amdsmi_temperature_type_t get_temperature_type() const
     {
-        static const amdsmi_temperature_type_t temp_type = [&]
+        static const amdsmi_temperature_type_t temperature_type = [&]
         {
             const amdsmi_temperature_type_t types[] = {
                 AMDSMI_TEMPERATURE_TYPE_EDGE,
@@ -442,7 +559,7 @@ public:
             int64_t t;
             for(auto type : types)
             {
-                if(amdsmi_get_temp_metric(m_target, type, AMDSMI_TEMP_CURRENT, &t)
+                if(amdsmi_get_temp_metric(m_amdsmi_device, type, AMDSMI_TEMP_CURRENT, &t)
                    == AMDSMI_STATUS_SUCCESS)
                 {
                     return type;
@@ -456,99 +573,42 @@ public:
                 if(!first)
                     std::cerr << ", ";
                 first = false;
-                std::cerr << get_temp_type_name(type);
+                std::cerr << get_temperature_type_name(type);
             }
             std::cerr << "\n";
             exit(EXIT_FAILURE);
         }();
 
-        return temp_type;
+        return temperature_type;
     }
 
     /**
-     * \brief Reads the GPU temperature.
-     * \return Temperature in °C.
+     * \brief Converts a temperature type enum to a string.
+     * \param type Temperature type enum value.
+     * \return String representation of the temperature type.
+     * \note Exits with failure if the temperature type is not recognized.
      */
-    uint16_t get_temp() const
+    static const char* get_temperature_type_name(amdsmi_temperature_type_t type)
     {
-        int64_t t = 0;
-        PRIMBENCH_AMDSMI_CHECK(
-            amdsmi_get_temp_metric(m_target, get_temp_type(), AMDSMI_TEMP_CURRENT, &t));
-        return t;
-    }
-
-private:
-    amdsmi()
-    {
-        PRIMBENCH_AMDSMI_CHECK(amdsmi_init(AMDSMI_INIT_AMD_GPUS));
-
-        // These can't be turned into a member initializer list,
-        // because the above amdsmi_init() call must happen first.
-        m_target  = get_target();
-        m_context = get_context(m_target);
-    }
-
-    ~amdsmi()
-    {
-        PRIMBENCH_AMDSMI_CHECK(amdsmi_shut_down());
-    }
-
-    /**
-     * \brief Holds detailed information about the GPU and AMD SMI context.
-     */
-    struct context
-    {
-        std::optional<std::string> product_name;
-
-        std::string amdsmi_version;
-
-        struct
+        switch(type)
         {
-            uint8_t format_revision;
-            uint8_t content_revision;
-        } amdsmi_metrics_version;
-
-        // Clocks (min/max in MHz)
-        std::unordered_map<std::string, std::optional<std::pair<uint32_t, uint32_t>>> clocks;
-
-        std::optional<uint64_t> power_cap;
-        std::optional<uint64_t> power_cap_default;
-        std::optional<uint64_t> power_cap_dpm;
-
-        std::optional<std::string> vram_vendor;
-        std::optional<uint64_t>    vram_total_bytes;
-
-        stats stats;
-    };
-
-    /**
-     * \brief Clock types queried for the GPU.
-     * \note Used internally to query all supported GPU clock domains (sys, mem, soc, etc.).
-     */
-    const std::vector<amdsmi_clk_type_t> clk_types = {
-        AMDSMI_CLK_TYPE_SYS,
-        AMDSMI_CLK_TYPE_DF,
-        AMDSMI_CLK_TYPE_DCEF,
-        AMDSMI_CLK_TYPE_SOC,
-        AMDSMI_CLK_TYPE_MEM,
-        AMDSMI_CLK_TYPE_PCIE,
-        AMDSMI_CLK_TYPE_VCLK0,
-        AMDSMI_CLK_TYPE_VCLK1,
-        AMDSMI_CLK_TYPE_DCLK0,
-        AMDSMI_CLK_TYPE_DCLK1,
-    };
+            case AMDSMI_TEMPERATURE_TYPE_EDGE: return "edge";
+            case AMDSMI_TEMPERATURE_TYPE_HOTSPOT: return "hotspot";
+            default:
+                std::cerr << "\nError: Failed to match temperature type " << type
+                          << " to a string\n";
+                exit(EXIT_FAILURE);
+        }
+    }
 
     /**
      * \brief Finds the AMD SMI processor handle matching the current HIP device.
-     * \return AMD SMI processor handle of the target GPU.
+     * \return AMD SMI processor handle of the GPU.
      */
-    amdsmi_processor_handle get_target() const
+    amdsmi_processor_handle get_amdsmi_device() const
     {
-        int hip_dev;
-        PRIMBENCH_HIP_CHECK(hipGetDevice(&hip_dev));
-
         hipDeviceProp_t hip_props;
-        PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&hip_props, hip_dev));
+        PRIMBENCH_CHECK(hipGetDeviceProperties(&hip_props, m_hip_device));
 
         // Build the AMD SMI BDF struct from HIP device properties
         amdsmi_bdf_t addr{
@@ -558,341 +618,124 @@ private:
             .domain_number   = static_cast<uint16_t>(hip_props.pciDomainID),
         };
 
-        amdsmi_processor_handle target;
-        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_processor_handle_from_bdf(addr, &target));
+        amdsmi_processor_handle amdsmi_device;
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_processor_handle_from_bdf(addr, &amdsmi_device));
 
-        return target;
+        return amdsmi_device;
     }
 
-    /**
-     * \brief Builds a context object with GPU details and metrics.
-     * \param target AMD SMI processor handle of the target GPU.
-     * \return Context object with detailed GPU information.
-     */
-    context get_context(amdsmi_processor_handle target) const
+    int                     m_hip_device; /**< HIP device. */
+    amdsmi_processor_handle m_amdsmi_device; /**< AMD SMI device. */
+
+}; // class monitor
+
+#else // __HIP__
+
+/// Wrapper for CUDA and NVML (NVIDIA Management Library) GPU monitoring.
+class monitor
+{
+public:
+    // Delete all copy/move constructors and assignment operators.
+    monitor(const monitor&)            = delete;
+    monitor& operator=(const monitor&) = delete;
+    monitor(monitor&&)                 = delete;
+    monitor& operator=(monitor&&)      = delete;
+
+    /// Singleton accessor.
+    static monitor& instance()
     {
-        context ctx{};
-
-        amdsmi_board_info_t board_info;
-        if(amdsmi_get_gpu_board_info(target, &board_info) == AMDSMI_STATUS_SUCCESS)
-            ctx.product_name = board_info.product_name;
-
-        amdsmi_version_t amdsmi_version;
-        if(amdsmi_get_lib_version(&amdsmi_version) == AMDSMI_STATUS_SUCCESS)
-            ctx.amdsmi_version = amdsmi_version.build;
-
-        amdsmi_gpu_metrics_t metrics{};
-        if(amdsmi_get_gpu_metrics_info(target, &metrics) == AMDSMI_STATUS_SUCCESS)
-        {
-            ctx.amdsmi_metrics_version.format_revision  = metrics.common_header.format_revision;
-            ctx.amdsmi_metrics_version.content_revision = metrics.common_header.content_revision;
-        }
-
-        for(auto clk : clk_types)
-        {
-            amdsmi_clk_info_t clk_info{};
-            if(amdsmi_get_clock_info(target, clk, &clk_info) == AMDSMI_STATUS_SUCCESS)
-                ctx.clocks[clk_type_to_string(clk)]
-                    = std::make_pair(clk_info.min_clk, clk_info.max_clk);
-        }
-
-        amdsmi_power_cap_info_t pcap;
-        if(amdsmi_get_power_cap_info(target, 0, &pcap) == AMDSMI_STATUS_SUCCESS)
-        {
-            ctx.power_cap         = pcap.power_cap;
-            ctx.power_cap_default = pcap.default_power_cap;
-            ctx.power_cap_dpm     = pcap.dpm_cap;
-        }
-
-        char vram_vendor_buf[128];
-        if(amdsmi_get_gpu_vram_vendor(target, vram_vendor_buf, sizeof(vram_vendor_buf))
-           == AMDSMI_STATUS_SUCCESS)
-            ctx.vram_vendor = vram_vendor_buf;
-
-        uint64_t vram_total;
-        if(amdsmi_get_gpu_memory_total(target, AMDSMI_MEM_TYPE_VRAM, &vram_total)
-           == AMDSMI_STATUS_SUCCESS)
-            ctx.vram_total_bytes = vram_total;
-
-        ctx.stats = get_stats();
-
-        return ctx;
+        static monitor instance;
+        return instance;
     }
 
-    /**
-     * \brief Converts a clock type enum to a string.
-     * \param clk Clock type.
-     * \return Corresponding string representation of the clock type.
-     */
-    std::string clk_type_to_string(amdsmi_clk_type_t clk) const
+    uint16_t get_temp() const
     {
-        switch(clk)
-        {
-            case AMDSMI_CLK_TYPE_SYS: return "sys";
-            case AMDSMI_CLK_TYPE_DF: return "df";
-            case AMDSMI_CLK_TYPE_DCEF: return "dcef";
-            case AMDSMI_CLK_TYPE_SOC: return "soc";
-            case AMDSMI_CLK_TYPE_MEM: return "mem";
-            case AMDSMI_CLK_TYPE_PCIE: return "pcie";
-            case AMDSMI_CLK_TYPE_VCLK0: return "vclk0";
-            case AMDSMI_CLK_TYPE_VCLK1: return "vclk1";
-            case AMDSMI_CLK_TYPE_DCLK0: return "dclk0";
-            case AMDSMI_CLK_TYPE_DCLK1: return "dclk1";
-        }
-        std::cerr << "Error: Failed to match clock type " << clk << " to a string\n";
-        exit(EXIT_FAILURE);
+        unsigned int t;
+        PRIMBENCH_NVML_CHECK(nvmlDeviceGetTemperature(m_nvml_device, NVML_TEMPERATURE_GPU, &t));
+        return t;
     }
 
-    /**
-     * \brief Serializes an optional string to JSON format.
-     * \param opt Optional string to serialize.
-     * \return JSON string or "null" if empty.
-     */
-    std::string serialize_optional(const std::optional<std::string>& opt) const
-    {
-        return opt ? ("\"" + *opt + "\"") : "null";
-    }
-
-    /**
-     * \brief Serializes an optional numeric value to JSON format.
-     * \tparam T Numeric type.
-     * \param opt Optional value to serialize.
-     * \return JSON numeric string or "null" if empty.
-     */
-    template<typename T>
-    std::string serialize_optional(const std::optional<T>& opt) const
-    {
-        return opt ? std::to_string(*opt) : "null";
-    }
-
-    /**
-     * \brief Checks if any clock frequency is available in the provided clock map.
-     * \tparam T The value type of the optional (either uint32_t or std::pair<uint32_t, uint32_t>).
-     * \param clocks Map of clock names to optional frequency values.
-     * \return true if at least one clock has a value, false if all are std::nullopt.
-     */
-    template<typename T>
-    static bool has_clock(const std::unordered_map<std::string, std::optional<T>>& clocks)
-    {
-        return std::any_of(clocks.begin(),
-                           clocks.end(),
-                           [](const auto& kv) { return kv.second.has_value(); });
-    }
-
-    /**
-     * \brief Serializes the raw GPU metrics to a JSON string.
-     * \param metrics GPU metrics to serialize.
-     * \return JSON string representing all available metrics.
-     * \note Serialization includes fields conditionally depending on the metrics content revision.
-     */
-    std::string serialize_metrics(const amdsmi_gpu_metrics_t& metrics) const
+    std::string serialize_gpu_info() const
     {
         std::ostringstream ss;
         ss << "{";
 
-        bool first     = true;
-        auto add_comma = [&]()
-        {
-            if(!first)
-                ss << ",";
-            first = false;
-        };
+        cudaDeviceProp dev_prop;
+        PRIMBENCH_CHECK(cudaGetDeviceProperties(&dev_prop, m_cuda_device));
+        ss << "\"name\":\"" << dev_prop.name << "\"";
 
-        auto add_field = [&](const char* name, const auto& value)
-        {
-            add_comma();
-            ss << "\"" << name << "\":" << value;
-        };
+        ss << ",\"arch\":\""
+        << dev_prop.major << "."
+        << dev_prop.minor << "\"";
 
-        auto add_array = [&](const char* name, auto&& arr)
-        {
-            add_comma();
-            ss << "\"" << name << "\":[";
-            for(size_t i = 0; i < (sizeof(arr) / sizeof(*arr)); ++i)
-            {
-                if(i > 0)
-                    ss << ",";
-                ss << arr[i];
-            }
-            ss << "]";
-        };
-
-        struct revision_block
-        {
-            int                   min_content_revision;
-            std::function<void()> serialize;
-        };
-
-        std::vector<revision_block> blocks = {
-            {0,
-             [&]
-             {
-             add_field("average_socket_power_watts", metrics.average_socket_power);
-             add_field("energy_accumulator", metrics.energy_accumulator);
-             add_field("system_clock_counter_ns", metrics.system_clock_counter);
-             add_field("throttle_status", metrics.throttle_status);
-             add_field("current_fan_speed_rpm", metrics.current_fan_speed);
-
-             ss << ",\"average_activity_percent\":{";
-             first = true;
-             add_field("gfx", metrics.average_gfx_activity);
-             add_field("umc", metrics.average_umc_activity);
-             add_field("mm", metrics.average_mm_activity);
-             ss << "}";
-
-             ss << ",\"temp_celsius\":{";
-             first = true;
-             add_field("edge", metrics.temperature_edge);
-             add_field("hotspot", metrics.temperature_hotspot);
-             add_field("mem", metrics.temperature_mem);
-             add_field("vrgfx", metrics.temperature_vrgfx);
-             add_field("vrsoc", metrics.temperature_vrsoc);
-             add_field("vrmem", metrics.temperature_vrmem);
-             ss << "}";
-
-             ss << ",\"average_frequency_mhz\":{";
-             first = true;
-             add_field("gfxclk", metrics.average_gfxclk_frequency);
-             add_field("socclk", metrics.average_socclk_frequency);
-             add_field("uclk", metrics.average_uclk_frequency);
-             add_field("vclk0", metrics.average_vclk0_frequency);
-             add_field("dclk0", metrics.average_dclk0_frequency);
-             add_field("vclk1", metrics.average_vclk1_frequency);
-             add_field("dclk1", metrics.average_dclk1_frequency);
-             ss << "}";
-
-             ss << ",\"current_frequency_mhz\":{";
-             first = true;
-             add_field("gfxclk", metrics.current_gfxclk);
-             add_field("socclk", metrics.current_socclk);
-             add_field("uclk", metrics.current_uclk);
-             add_field("vclk0", metrics.current_vclk0);
-             add_field("dclk0", metrics.current_dclk0);
-             add_field("vclk1", metrics.current_vclk1);
-             add_field("dclk1", metrics.current_dclk1);
-             ss << "}";
-
-             ss << ",\"pcie_link\":{";
-             first = true;
-             add_field("pcie_link_width", metrics.pcie_link_width);
-             add_field("pcie_link_speed", metrics.pcie_link_speed);
-             ss << "}";
-             }                                                                      },
-            {1,
-             [&]
-             {
-             add_field("gfx_activity_acc", metrics.gfx_activity_acc);
-             add_field("mem_activity_acc", metrics.mem_activity_acc);
-             add_array("hbm_temp_celsius", metrics.temperature_hbm);
-             }                                                                      },
-            {2, [&] { add_field("firmware_timestamp", metrics.firmware_timestamp); }},
-            {3,
-             [&]
-             {
-             add_field("indep_throttle_status", metrics.indep_throttle_status);
-
-             ss << ",\"voltage_mv\":{";
-             first = true;
-             add_field("soc", metrics.voltage_soc);
-             add_field("gfx", metrics.voltage_gfx);
-             add_field("mem", metrics.voltage_mem);
-             ss << "}";
-             }                                                                      },
-            {4,
-             [&]
-             {
-             add_field("current_socket_power", metrics.current_socket_power);
-             add_field("gfxclk_lock_status", metrics.gfxclk_lock_status);
-
-             ss << ",\"xgmi_link\":{";
-             first = true;
-             add_field("width", metrics.xgmi_link_width);
-             add_field("speed", metrics.xgmi_link_speed);
-             ss << "}";
-
-             ss << ",\"pcie_bandwidth\":{";
-             first = true;
-             add_field("acc", metrics.pcie_bandwidth_acc);
-             add_field("inst", metrics.pcie_bandwidth_inst);
-             ss << "}";
-
-             ss << ",\"pcie_count_acc\":{";
-             first = true;
-             add_field("l0_to_recov", metrics.pcie_l0_to_recov_count_acc);
-             add_field("replay", metrics.pcie_replay_count_acc);
-             add_field("replay_rover", metrics.pcie_replay_rover_count_acc);
-             ss << "}";
-
-             ss << ",\"xgmi_data_acc\":{";
-             first = true;
-             add_array("read", metrics.xgmi_read_data_acc);
-             add_array("write", metrics.xgmi_write_data_acc);
-             ss << "}";
-
-             ss << ",\"current\":{";
-             first = true;
-             add_array("gfxclks", metrics.current_gfxclks);
-             add_array("socclks", metrics.current_socclks);
-             add_array("vclk0s", metrics.current_vclk0s);
-             add_array("dclk0s", metrics.current_dclk0s);
-             ss << "}";
-
-             add_array("vcn_activity", metrics.vcn_activity);
-             }                                                                      },
-            {5,
-             [&]
-             {
-             add_array("jpeg_activity_percent", metrics.jpeg_activity);
-
-             ss << ",\"pcie_nak_count_acc\":{";
-             first = true;
-             add_field("sent", metrics.pcie_nak_sent_count_acc);
-             add_field("rcvd", metrics.pcie_nak_rcvd_count_acc);
-             ss << "}";
-             }                                                                      },
-            {6,
-             [&]
-             {
-             add_field("accumulation_counter", metrics.accumulation_counter);
-             add_field("num_partition", metrics.num_partition);
-             add_field("pcie_lc_perf_other_end_recovery",
-             metrics.pcie_lc_perf_other_end_recovery);
-
-             ss << ",\"residency_acc\":{";
-             first = true;
-             add_field("prochot", metrics.prochot_residency_acc);
-             add_field("ppt", metrics.ppt_residency_acc);
-             add_field("socket_thm", metrics.socket_thm_residency_acc);
-             add_field("vr_thm", metrics.vr_thm_residency_acc);
-             add_field("hbm_thm", metrics.hbm_thm_residency_acc);
-             ss << "}";
-
-             // xcp_stats is too annoying and unimportant to serialize.
-             }                                                                      },
-            {7,
-             [&]
-             {
-             add_field("vram_max_bandwidth", metrics.vram_max_bandwidth);
-             add_array("xgmi_link_status", metrics.xgmi_link_status);
-             }                                                                      },
-        };
-
-        int current_revision = m_context.amdsmi_metrics_version.content_revision;
-        for(auto& block : blocks)
-        {
-            if(current_revision < block.min_content_revision)
-                break;
-            block.serialize();
-        }
+        char pci_bus_id_arr[32];
+        PRIMBENCH_CHECK(
+            cudaDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), m_cuda_device));
+        ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
 
         ss << "}";
         return ss.str();
     }
 
-    amdsmi_processor_handle m_target; /**< AMD SMI handle of the GPU. */
-    context                 m_context; /**< Cached GPU context and stats. */
+    std::string serialize_backend_info() const
+    {
+        std::ostringstream ss;
+        ss << "{";
 
-}; // class amdsmi
+        // Backend name
+        ss << "\"name\":\"cuda\"";
+
+        // CUDA runtime version
+        int major = CUDART_VERSION / 1000;
+        int minor = (CUDART_VERSION % 1000) / 10;
+        ss << ",\"runtime_version\":\"" << major << "." << minor << "\"";
+
+        // CUDA driver version (integer, e.g., 9020 -> 9.2)
+        int driver_ver;
+        PRIMBENCH_CHECK(cudaDriverGetVersion(&driver_ver));
+        major = driver_ver / 1000;
+        minor = (driver_ver % 1000) / 10;
+        ss << ",\"driver_version\":\"" << major << "." << minor << "\"";
+
+        // NVML version
+        char nvml_ver[NVML_SYSTEM_NVML_VERSION_BUFFER_SIZE];
+        PRIMBENCH_NVML_CHECK(nvmlSystemGetNVMLVersion(nvml_ver, sizeof(nvml_ver)));
+        ss << ",\"nvml_version\":\"" << nvml_ver << "\"";
+
+        // NVCC compiler version
+        ss << ",\"nvcc_version\":\""
+            << __CUDACC_VER_MAJOR__ << "."
+            << __CUDACC_VER_MINOR__ << "."
+            << __CUDACC_VER_BUILD__ << "\"";
+
+        ss << "}";
+        return ss.str();
+    }
+
+    std::string get_used_temperature_type_name() const
+    {
+        return "gpu";
+    }
+private:
+    monitor()
+    {
+        PRIMBENCH_CHECK(cudaGetDevice(&m_cuda_device));
+
+        PRIMBENCH_NVML_CHECK(nvmlInit());
+
+        PRIMBENCH_NVML_CHECK(nvmlDeviceGetHandleByIndex(0, &m_nvml_device));
+    }
+
+    ~monitor()
+    {
+        PRIMBENCH_NVML_CHECK(nvmlShutdown());
+    }
+
+    int          m_cuda_device; ///< CUDA device.
+    nvmlDevice_t m_nvml_device; ///< NVML device.
+}; // class monitor
+
+#endif // __HIP__
 
 /**
  * \brief Namespace for flag definitions and utilities.
@@ -975,7 +818,7 @@ public:
               size_t           specialization_count,
               const settings&  settings,
               flags::FlagTag   flags,
-              const amdsmi&    amdsmi)
+              const monitor&   monitor)
     {
         m_output_batches    = settings.output_batches;
         m_spaces_per_indent = settings.spaces_per_indent;
@@ -985,7 +828,7 @@ public:
         if(!m_json_out)
         {
             std::cerr << "Error: Failed to open " << settings.json_out << " for writing\n";
-            std::exit(EXIT_FAILURE);
+            exit(EXIT_FAILURE);
         }
 
         if(m_outputting_csv)
@@ -994,12 +837,12 @@ public:
             if(!m_csv_out)
             {
                 std::cerr << "Error: Failed to open " << settings.csv_out << " for writing\n";
-                std::exit(EXIT_FAILURE);
+                exit(EXIT_FAILURE);
             }
         }
 
         m_json_out << indent(
-            serialize_json_prologue(algorithm, specialization_count, settings, flags, amdsmi),
+            serialize_json_prologue(algorithm, specialization_count, settings, flags, monitor),
             0);
         m_json_out << "[";
         if(m_spaces_per_indent > 0)
@@ -1021,18 +864,15 @@ public:
      * \brief Stores a batch of benchmark results.
      * \param batch_ms Total time for the batch.
      * \param iterations_ms Times for individual iterations.
-     * \param amdsmi_stats AMD SMI stats after the batch.
+     * \param stats Monitor stats after the batch.
      */
-    void save(double                    batch_ms,
-              const std::vector<float>& iterations_ms,
-              const amdsmi::stats&      amdsmi_stats)
+    void save(double batch_ms, const std::vector<float>& iterations_ms)
     {
         struct batch batch
         {};
 
         batch.batch_ms      = batch_ms;
         batch.iterations_ms = iterations_ms;
-        batch.amdsmi_stats  = amdsmi_stats;
 
         m_batches.push_back(batch);
     }
@@ -1054,8 +894,7 @@ public:
                                uint16_t         end_temp,
                                double           elapsed_host_secs,
                                double           elapsed_gpu_secs,
-                               bool             noise_timeout,
-                               const amdsmi&    amdsmi)
+                               bool             noise_timeout)
     {
         output_json_specialization(index,
                                    name,
@@ -1071,8 +910,7 @@ public:
                                    end_temp,
                                    elapsed_host_secs,
                                    elapsed_gpu_secs,
-                                   noise_timeout,
-                                   amdsmi);
+                                   noise_timeout);
 
         if(m_outputting_csv)
         {
@@ -1129,9 +967,8 @@ private:
 
     struct batch
     {
-        double             batch_ms; ///< Total time for the batch
-        std::vector<float> iterations_ms; ///< Time per iteration
-        amdsmi::stats      amdsmi_stats; ///< AMD SMI stats after batch
+        double             batch_ms; ///< Total time for the batch.
+        std::vector<float> iterations_ms; ///< Time per iteration.
     };
 
     /**
@@ -1142,13 +979,13 @@ private:
                                         size_t           specialization_count,
                                         const settings&  settings,
                                         flags::FlagTag   flags,
-                                        const amdsmi&    amdsmi)
+                                        const monitor&   monitor)
     {
         std::ostringstream ss;
         ss << "{";
 
         ss << "\"context\":"
-           << serialize_context(algorithm, specialization_count, settings, flags, amdsmi);
+           << serialize_context(algorithm, specialization_count, settings, flags, monitor);
 
         ss << ",";
         if(m_spaces_per_indent > 0)
@@ -1166,13 +1003,13 @@ private:
                                   size_t           specialization_count,
                                   const settings&  settings,
                                   flags::FlagTag   flags,
-                                  const amdsmi&    amdsmi) const
+                                  const monitor&   monitor) const
     {
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"results_version\":\"2.0.0\"";
-        ss << ",\"general\":" << serialize_general(algorithm, specialization_count, amdsmi);
+        ss << "\"results_version\":\"3.0.0\"";
+        ss << ",\"general\":" << serialize_general(algorithm, specialization_count, monitor);
         ss << ",\"settings\":" << serialize_settings(settings);
 
         std::string custom_cli = serialize_custom_settings(settings);
@@ -1182,10 +1019,6 @@ private:
         }
 
         ss << ",\"flags\":" << serialize_flags(flags);
-        if(settings.output_hip_device_properties_context)
-            ss << ",\"hip_device_properties\":" << serialize_hip_device_properties();
-        if(settings.output_amdsmi_context)
-            ss << ",\"amdsmi\":" << amdsmi.serialize_context();
 
         ss << "}";
         return ss.str();
@@ -1199,27 +1032,13 @@ private:
      */
     std::string serialize_general(std::string_view algorithm,
                                   size_t           specialization_count,
-                                  const amdsmi&    amdsmi) const
+                                  const monitor&   monitor) const
     {
         std::ostringstream ss;
         ss << "{";
 
         ss << "\"algorithm\":\"" << algorithm << "\"";
         ss << ",\"specialization_count\":" << specialization_count;
-
-        int device_id;
-        PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
-
-        hipDeviceProp_t dev_prop;
-        PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
-
-        ss << ",\"gpu_name\":\"" << dev_prop.name << "\"";
-        ss << ",\"gpu_arch\":\"" << get_arch_name(dev_prop.gcnArchName) << "\"";
-
-        char pci_bus_id_str[32];
-        PRIMBENCH_HIP_CHECK(
-            hipDeviceGetPCIBusId(pci_bus_id_str, sizeof(pci_bus_id_str), device_id));
-        ss << ",\"gpu_pci_bus_id\":\"" << pci_bus_id_str << "\"";
 
 #if defined(NDEBUG)
         const char build_type[] = "release";
@@ -1228,7 +1047,11 @@ private:
 #endif
         ss << ",\"library_build_type\":\"" << build_type << "\"";
 
-        ss << ",\"temp_type\":\"" << amdsmi.get_temp_type_name(amdsmi.get_temp_type()) << "\"";
+        ss << ",\"gpu\":" << monitor.serialize_gpu_info();
+
+        ss << ",\"backend\":" << monitor.serialize_backend_info();
+
+        ss << ",\"temperature_type\":\"" << monitor.get_used_temperature_type_name() << "\"";
 
         char host_name[HOST_NAME_MAX + 1]; // +1 for null terminator
         if(gethostname(host_name, sizeof(host_name)) != 0)
@@ -1248,24 +1071,8 @@ private:
         ss << ",\"commit_hash\":\"" << COMMIT_HASH << "\"";
 #endif
 
-        ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR << "."
-           << HIP_VERSION_PATCH << "-" << HIP_VERSION_GITHASH << "\"";
-        ss << ",\"clang_version\":\"" << __clang_version__ << "\"";
-
         ss << "}";
         return ss.str();
-    }
-
-    /**
-     * \brief Extracts the GPU architecture name (gfx123) from a full gcnArchName string.
-     */
-    std::string_view get_arch_name(std::string_view gcn_arch_name) const
-    {
-        // Find the position of the first ':' (if any)
-        size_t pos = gcn_arch_name.find(':');
-        if(pos == std::string_view::npos)
-            return gcn_arch_name; // no colon, return the whole string
-        return gcn_arch_name.substr(0, pos); // return only the part before ':'
     }
 
     /**
@@ -1340,9 +1147,6 @@ private:
         ss << ",\"max_gpu_temp\":" << s.max_gpu_temp;
         ss << ",\"max_warming_secs\":" << s.max_warming_secs;
         ss << ",\"max_cooling_secs\":" << s.max_cooling_secs;
-        ss << ",\"output_hip_device_properties_context\":"
-           << s.output_hip_device_properties_context;
-        ss << ",\"output_amdsmi_context\":" << s.output_amdsmi_context;
         ss << ",\"output_batches\":" << s.output_batches;
         ss << ",\"spaces_per_indent\":" << s.spaces_per_indent;
         ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs;
@@ -1473,225 +1277,6 @@ private:
     }
 
     /**
-     * \brief Returns a JSON string describing the current HIP device's properties.
-     */
-    std::string serialize_hip_device_properties() const
-    {
-        std::ostringstream ss;
-        ss << "{";
-        ss << std::boolalpha;
-
-        bool first     = true;
-        auto add_comma = [&]()
-        {
-            if(!first)
-                ss << ",";
-            first = false;
-        };
-
-        auto add_field = [&](std::string_view name, const auto& value)
-        {
-            add_comma();
-            ss << "\"" << name << "\":" << value;
-        };
-
-        auto add_bool = [&](std::string_view name, const bool& value) { add_field(name, value); };
-
-        auto add_string = [&](std::string_view name, const std::string& string)
-        {
-            add_comma();
-            ss << "\"" << name << "\":\"" << string << "\"";
-        };
-
-        auto add_dim2 = [&](std::string_view name, auto&& arr)
-        {
-            add_comma();
-            ss << "\"" << name << "\":{\"x\":" << arr[0] << ",\"y\":" << arr[1] << "}";
-        };
-
-        auto add_dim3 = [&](std::string_view name, auto&& arr)
-        {
-            add_comma();
-            ss << "\"" << name << "\":{\"x\":" << arr[0] << ",\"y\":" << arr[1]
-               << ",\"z\":" << arr[2] << "}";
-        };
-
-        int device_id;
-        PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
-
-        hipDeviceProp_t dev_prop;
-        PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
-
-        ss << "\"identity\":{";
-        add_string("name", dev_prop.name);
-        add_string("gcn_arch_name", dev_prop.gcnArchName);
-        add_field("asic_revision", dev_prop.asicRevision);
-        ss << "}";
-
-        ss << ",\"clocks\":{";
-        first = true;
-        add_field("core_hz", dev_prop.clockRate);
-        add_field("instruction_hz", dev_prop.clockInstructionRate);
-        add_field("memory_hz", dev_prop.memoryClockRate);
-        ss << "}";
-
-        ss << ",\"compute\":{";
-
-        first = true;
-        add_field("mode", dev_prop.computeMode);
-
-        ss << ",\"capability\":{";
-        first = true;
-        add_field("major", dev_prop.major);
-        add_field("minor", dev_prop.minor);
-        ss << "}";
-
-        ss << ",\"execution\":{";
-        first = true;
-        add_field("max_threads_per_block", dev_prop.maxThreadsPerBlock);
-        add_field("max_threads_per_multiprocessor", dev_prop.maxThreadsPerMultiProcessor);
-        add_field("multi_processor_count", dev_prop.multiProcessorCount);
-        add_field("regs_per_block", dev_prop.regsPerBlock);
-        add_field("warp_size", dev_prop.warpSize);
-        ss << "}";
-
-        ss << ",\"limits\":{";
-        first = true;
-        add_dim3("grid_size", dev_prop.maxGridSize);
-        add_dim3("threads_dim", dev_prop.maxThreadsDim);
-        ss << "}";
-
-        ss << "}"; // End of "compute" object.
-
-        ss << ",\"memory\":{";
-
-        ss << "\"global\":{";
-        first = true;
-        add_field("total", dev_prop.totalGlobalMem);
-        add_field("pitch", dev_prop.memPitch);
-        add_field("bus_width", dev_prop.memoryBusWidth);
-        add_field("l2_cache_size", dev_prop.l2CacheSize);
-        ss << "}";
-
-        ss << ",\"shared\":{";
-        first = true;
-        add_field("per_block", dev_prop.sharedMemPerBlock);
-        add_field("per_multi_processor", dev_prop.maxSharedMemoryPerMultiProcessor);
-        ss << "}";
-
-        ss << ",\"const\":{";
-        first = true;
-        add_field("total", dev_prop.totalConstMem);
-        ss << "}";
-
-        ss << "}"; // End of "memory" object.
-
-        ss << ",\"pci\":{";
-        first = true;
-        add_field("bus_id", dev_prop.pciBusID);
-        add_field("device_id", dev_prop.pciDeviceID);
-        add_field("domain_id", dev_prop.pciDomainID);
-        ss << "}";
-
-        ss << ",\"texture\":{";
-        first = true;
-        add_field("alignment", dev_prop.textureAlignment);
-        add_field("pitch_alignment", dev_prop.texturePitchAlignment);
-        add_field("max_1d", dev_prop.maxTexture1D);
-        add_field("max_1d_linear", dev_prop.maxTexture1DLinear);
-        add_dim2("max_2d", dev_prop.maxTexture2D);
-        add_dim3("max_3d", dev_prop.maxTexture3D);
-        ss << "}";
-
-        ss << ",\"capabilities\":{";
-
-        ss << "\"architecture\":{";
-
-        const auto arch = dev_prop.arch;
-
-        ss << "\"atomics\":{";
-        first = true;
-        add_bool("float_atomic_add", arch.hasFloatAtomicAdd);
-        add_bool("global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
-        add_bool("global_int32_atomics", arch.hasGlobalInt32Atomics);
-        add_bool("global_int64_atomics", arch.hasGlobalInt64Atomics);
-        add_bool("shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
-        add_bool("shared_int32_atomics", arch.hasSharedInt32Atomics);
-        add_bool("shared_int64_atomics", arch.hasSharedInt64Atomics);
-        ss << "}";
-
-        ss << ",\"warp\":{";
-        first = true;
-        add_bool("warp_ballot", arch.hasWarpBallot);
-        add_bool("warp_shuffle", arch.hasWarpShuffle);
-        add_bool("warp_vote", arch.hasWarpVote);
-        ss << "}";
-
-        ss << ",\"misc\":{";
-        first = true;
-        add_bool("3d_grid", arch.has3dGrid);
-        add_bool("doubles", arch.hasDoubles);
-        add_bool("dynamic_parallelism", arch.hasDynamicParallelism);
-        add_bool("funnel_shift", arch.hasFunnelShift);
-        add_bool("surface_funcs", arch.hasSurfaceFuncs);
-        add_bool("sync_threads_ext", arch.hasSyncThreadsExt);
-        add_bool("thread_fence_system", arch.hasThreadFenceSystem);
-        ss << "}";
-
-        ss << "}"; // End of "architecture" object.
-
-        ss << ",\"cooperative_multi_device\":{";
-
-        ss << "\"launch\":" << static_cast<bool>(dev_prop.cooperativeMultiDeviceLaunch);
-
-        ss << ",\"unmatched\":{";
-        first = true;
-        add_bool("block_dim", dev_prop.cooperativeMultiDeviceUnmatchedBlockDim);
-        add_bool("func", dev_prop.cooperativeMultiDeviceUnmatchedFunc);
-        add_bool("grid_dim", dev_prop.cooperativeMultiDeviceUnmatchedGridDim);
-        add_bool("shared_mem", dev_prop.cooperativeMultiDeviceUnmatchedSharedMem);
-        ss << "}";
-
-        ss << "}"; // End of "cooperative_multi_device" object.
-
-        ss << ",\"device\":{";
-
-        ss << "\"compute\":{";
-        first = true;
-        add_bool("concurrent_kernels", dev_prop.concurrentKernels);
-        add_bool("cooperative_launch", dev_prop.cooperativeLaunch);
-        add_bool("is_large_bar", dev_prop.isLargeBar);
-        add_bool("kernel_exec_timeout_enabled", dev_prop.kernelExecTimeoutEnabled);
-        ss << "}";
-
-        ss << ",\"memory\":{";
-        first = true;
-        add_bool("can_map_host_memory", dev_prop.canMapHostMemory);
-        add_bool("concurrent_managed_access", dev_prop.concurrentManagedAccess);
-        add_bool("direct_managed_mem_access_from_host", dev_prop.directManagedMemAccessFromHost);
-        add_bool("managed_memory", dev_prop.managedMemory);
-        add_bool("pageable_memory_access", dev_prop.pageableMemoryAccess);
-        add_bool("pageable_memory_access_uses_host_page_tables",
-                 dev_prop.pageableMemoryAccessUsesHostPageTables);
-        ss << "}";
-
-        ss << ",\"misc\":{";
-        first = true;
-        add_bool("ecc_enabled", dev_prop.ECCEnabled);
-        add_bool("integrated", dev_prop.integrated);
-        add_bool("is_multi_gpu_board", dev_prop.isMultiGpuBoard);
-        add_bool("tcc_driver", dev_prop.tccDriver);
-        ss << "}";
-
-        ss << "}"; // End of "device" object.
-
-        ss << "}"; // End of "capabilities" object.
-
-        ss << "}";
-        return ss.str();
-    }
-
-    /**
      * \brief Outputs specialization information to JSON.
      */
     void output_json_specialization(size_t           index,
@@ -1708,8 +1293,7 @@ private:
                                     uint16_t         end_temp,
                                     double           elapsed_host_secs,
                                     double           elapsed_gpu_secs,
-                                    bool             noise_timeout,
-                                    const amdsmi&    amdsmi)
+                                    bool             noise_timeout)
     {
         // Specializations need a comma between them.
         if(!m_first_specialization)
@@ -1735,8 +1319,7 @@ private:
                                                       end_temp,
                                                       elapsed_host_secs,
                                                       elapsed_gpu_secs,
-                                                      noise_timeout,
-                                                      amdsmi),
+                                                      noise_timeout),
                              2);
 
         m_json_out.flush();
@@ -1775,8 +1358,7 @@ private:
                                          uint16_t         end_temp,
                                          double           elapsed_host_secs,
                                          double           elapsed_gpu_secs,
-                                         bool             noise_timeout,
-                                         const amdsmi&    amdsmi) const
+                                         bool             noise_timeout) const
     {
         std::ostringstream ss;
         ss << "{";
@@ -1823,8 +1405,6 @@ private:
                 ss << "{";
                 ss << "\"batch_ms\":" << batch.batch_ms;
                 ss << ",\"iterations_ms\":" << serialize_iterations_ms(batch.iterations_ms);
-                ss << ",\"amdsmi_stats_after_iterations\":"
-                   << amdsmi.serialize_stats(batch.amdsmi_stats);
                 ss << "}";
             }
             ss << "]";
@@ -2124,6 +1704,59 @@ inline void print_progress(uint64_t         iteration,
 }
 } // namespace progress
 
+#ifdef __HIP__
+/**
+    * \brief Kernel that blocks the GPU stream until unblocked or timeout occurs.
+    * \param is_blocked Pointer to blocking flag.
+    * \param timeout_flag Pointer to timeout flag.
+    * \param timeout_seconds Timeout duration in seconds.
+    * \param wall_clock_rate Wall clock rate in kHz.
+    */
+__global__ void block_stream_kernel(volatile int32_t* is_blocked,
+                            volatile int32_t* timeout_flag,
+                            double            timeout_seconds,
+                            long long int     wall_clock_rate)
+{
+    const long long int start_time = wall_clock64();
+    const long long int timeout_cycles
+        = static_cast<long long int>(timeout_seconds * wall_clock_rate * 1000.0);
+
+    while(*is_blocked == 1)
+    {
+        if(wall_clock64() - start_time > timeout_cycles)
+        {
+            *timeout_flag = 1; // Signal timeout to host
+            break; // Exit loop
+        }
+    }
+}
+#else
+/**
+    * \brief Kernel that blocks the GPU stream until unblocked or timeout occurs.
+    * \param is_blocked Pointer to blocking flag.
+    * \param timeout_flag Pointer to timeout flag.
+    * \param timeout_seconds Timeout duration in seconds.
+    */
+__global__ void block_stream_kernel(volatile int32_t* is_blocked,
+                                    volatile int32_t* timeout_flag,
+                                    double            timeout_seconds)
+{
+    using clock = cuda::std::chrono::high_resolution_clock;
+    auto start_time = clock::now();
+    cuda::std::chrono::duration<double> timeout_duration(timeout_seconds);
+
+    while (*is_blocked == 1)
+    {
+        auto elapsed = cuda::std::chrono::duration<double>(clock::now() - start_time);
+        if (elapsed >= timeout_duration)
+        {
+            *timeout_flag = 1; // Signal timeout to host.
+            break; // Exit loop.
+        }
+    }
+}
+#endif
+
 /**
  * \brief Manages synchronization between host and GPU streams by blocking execution
  *        until explicitly unblocked or a timeout occurs.
@@ -2134,42 +1767,35 @@ public:
     stream_blocker() = delete;
 
     /**
-     * \brief Constructs a stream_blocker for a given HIP stream.
+     * \brief Constructs a stream_blocker for a given stream.
      */
-    stream_blocker(hipStream_t stream, double stream_blocking_timeout_secs)
+    stream_blocker(stream_t stream, double stream_blocking_timeout_secs)
         : m_stream(stream), m_stream_blocking_timeout_secs(stream_blocking_timeout_secs)
     {
         // Register host memory for blocking flags
-        PRIMBENCH_HIP_CHECK(
-            hipHostRegister(&m_host_flag, sizeof(m_host_flag), hipHostRegisterMapped));
-        PRIMBENCH_HIP_CHECK(hipHostRegister(&m_host_timeout_flag,
-                                            sizeof(m_host_timeout_flag),
-                                            hipHostRegisterMapped));
+        PRIMBENCH_CHECK(host_register(&m_host_flag, sizeof(m_host_flag), host_register_mapped));
+        PRIMBENCH_CHECK(host_register(&m_host_timeout_flag, sizeof(m_host_timeout_flag), host_register_mapped));
 
-        // Get device pointers to mapped host memory using temporary non-volatile pointers
+        // Temporary non-volatile pointers
         int32_t* temp_device_flag         = nullptr;
         int32_t* temp_device_timeout_flag = nullptr;
 
-        PRIMBENCH_HIP_CHECK(
-            hipHostGetDevicePointer(reinterpret_cast<void**>(&temp_device_flag), &m_host_flag, 0));
-        PRIMBENCH_HIP_CHECK(
-            hipHostGetDevicePointer(reinterpret_cast<void**>(&temp_device_timeout_flag),
-                                    &m_host_timeout_flag,
-                                    0));
+        // Get device pointers to mapped host memory
+        PRIMBENCH_CHECK(host_get_device_pointer(reinterpret_cast<void**>(&temp_device_flag), &m_host_flag, 0));
+        PRIMBENCH_CHECK(host_get_device_pointer(reinterpret_cast<void**>(&temp_device_timeout_flag), &m_host_timeout_flag, 0));
 
-        // Assign to volatile members
+        // Assign temporary pointers to volatile members
         m_device_flag         = temp_device_flag;
         m_device_timeout_flag = temp_device_timeout_flag;
 
-        int device_id;
-        PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
-
+#ifdef __HIP__
         // Query wall clock rate once (constant per device)
+        int device_id;
+        PRIMBENCH_CHECK(hipGetDevice(&device_id));
         int wall_clk_rate_k_hz = 0;
-        PRIMBENCH_HIP_CHECK(
-            hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
-
-        m_wall_clock_rate = static_cast<long long int>(wall_clk_rate_k_hz);
+        PRIMBENCH_CHECK(hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
+        m_wall_clock_rate = wall_clk_rate_k_hz;
+#endif
     }
 
     /**
@@ -2177,8 +1803,8 @@ public:
      */
     ~stream_blocker()
     {
-        PRIMBENCH_HIP_CHECK(hipHostUnregister(&m_host_flag));
-        PRIMBENCH_HIP_CHECK(hipHostUnregister(&m_host_timeout_flag));
+        PRIMBENCH_CHECK(host_unregister(&m_host_flag));
+        PRIMBENCH_CHECK(host_unregister(&m_host_timeout_flag));
     }
 
     /**
@@ -2192,10 +1818,16 @@ public:
         volatile int32_t& timeout_flag = m_host_timeout_flag;
         timeout_flag                   = 0;
 
+#ifdef __HIP__
         block_stream_kernel<<<dim3(1), dim3(1), 0, m_stream>>>(m_device_flag,
                                                                m_device_timeout_flag,
-                                                               m_wall_clock_rate,
+                                                               m_stream_blocking_timeout_secs,
+                                                               m_wall_clock_rate);
+#else
+        block_stream_kernel<<<dim3(1), dim3(1), 0, m_stream>>>(m_device_flag,
+                                                               m_device_timeout_flag,
                                                                m_stream_blocking_timeout_secs);
+#endif
     }
 
     /**
@@ -2225,7 +1857,7 @@ public:
     }
 
 private:
-    hipStream_t   m_stream;
+    stream_t      m_stream;
     double        m_stream_blocking_timeout_secs;
     long long int m_wall_clock_rate;
 
@@ -2234,33 +1866,6 @@ private:
 
     volatile int32_t* m_device_flag         = nullptr;
     volatile int32_t* m_device_timeout_flag = nullptr;
-
-    /**
-     * \brief Kernel that blocks the GPU stream until unblocked or timeout occurs.
-     * \param is_blocked Pointer to blocking flag.
-     * \param timeout_flag Pointer to timeout flag.
-     * \param wall_clock_rate Wall clock rate in kHz.
-     * \param timeout_seconds Timeout duration in seconds.
-     */
-    static __global__
-    void block_stream_kernel(volatile int32_t* is_blocked,
-                             volatile int32_t* timeout_flag,
-                             long long int     wall_clock_rate,
-                             double            timeout_seconds)
-    {
-        const long long int start_time = wall_clock64();
-        const long long int timeout_cycles
-            = static_cast<long long int>(timeout_seconds * wall_clock_rate * 1000.0);
-
-        while(*is_blocked == 1)
-        {
-            if(wall_clock64() - start_time > timeout_cycles)
-            {
-                *timeout_flag = 1; // Signal timeout to host
-                break; // Exit loop
-            }
-        }
-    }
 }; // class stream_blocker
 
 /**
@@ -2450,17 +2055,13 @@ struct device_storage
     device_storage(size_t size) : m_size(size), m_device_ptr(nullptr)
     {
         if(size > 0)
-        {
-            PRIMBENCH_HIP_CHECK(hipMalloc(&m_device_ptr, size))
-        }
+            PRIMBENCH_CHECK(gpu_malloc(&m_device_ptr, size));
     }
 
     ~device_storage()
     {
         if(m_device_ptr != nullptr)
-        {
-            PRIMBENCH_HIP_CHECK(hipFree(m_device_ptr));
-        }
+            PRIMBENCH_CHECK(gpu_free(m_device_ptr));
     }
 
     size_t get_size() const
@@ -2505,10 +2106,9 @@ public:
      * Zeros a buffer of size `m_cache_size` to evict cached data. Should be called before
      * each kernel launch.
      */
-    void clear_cache(hipStream_t stream = hipStreamDefault)
+    void clear_cache(stream_t stream)
     {
-        PRIMBENCH_HIP_CHECK(
-            hipMemsetAsync(m_device_storage.get_ptr(), 0, m_device_storage.get_size(), stream));
+        PRIMBENCH_CHECK(memset_async(m_device_storage.get_ptr(), 0, m_device_storage.get_size(), stream));
     }
 
     // This type is not copy assignable.
@@ -2520,36 +2120,35 @@ private:
     const device_storage m_device_storage;
 }; // struct cache_thrasher
 
+__global__ void warmup_kernel(float* data, int n)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < n)
+    {
+        float x = 0.5f + idx * 0.0001f;
+
+        for(int i = 0; i < 10000; ++i)
+        {
+            x += sinf(x) * cosf(x);
+            x *= 1.0000001f;
+            x = sqrtf(x + 1.0f);
+            x = logf(x + 1.0f);
+        }
+
+        data[idx] = x;
+    }
+}
+
 struct gpu_warmer
 {
     static constexpr int threads_per_block = 256;
     static constexpr int num_items         = 1 << 20; // 1 million items.
 
-    gpu_warmer(settings& settings, amdsmi& amdsmi)
-        : m_settings(settings), m_amdsmi(amdsmi), m_device_storage(num_items * sizeof(float))
+    gpu_warmer(settings& settings, monitor& monitor)
+        : m_settings(settings), m_monitor(monitor), m_device_storage(num_items * sizeof(float))
     {}
 
-    static __global__
-    void warmup_kernel(float* data, int n)
-    {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if(idx < n)
-        {
-            float x = 0.5f + idx * 0.0001f;
-
-            for(int i = 0; i < 10000; ++i)
-            {
-                x += sinf(x) * cosf(x);
-                x *= 1.0000001f;
-                x = sqrtf(x + 1.0f);
-                x = logf(x + 1.0f);
-            }
-
-            data[idx] = x;
-        }
-    }
-
-    void warm_up(hipStream_t stream = hipStreamDefault) const
+    void warm_up(stream_t stream) const
     {
         auto ceil_div = [](int a, int b) -> int { return (a + b - 1) / b; };
 
@@ -2559,7 +2158,7 @@ struct gpu_warmer
 
         while(true)
         {
-            uint16_t gpu_temp = m_amdsmi.get_temp();
+            uint16_t gpu_temp = m_monitor.get_temp();
             if(gpu_temp >= s.min_gpu_temp)
                 break;
 
@@ -2571,7 +2170,7 @@ struct gpu_warmer
             warmup_kernel<<<blocks, threads, 0, stream>>>(m_device_storage.get_ptr<float>(),
                                                           num_items);
 
-            PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
+            PRIMBENCH_CHECK(stream_synchronize(stream));
 
             auto duration = std::chrono::steady_clock::now() - start;
             if(duration >= std::chrono::duration<double>(s.max_warming_secs))
@@ -2592,7 +2191,7 @@ struct gpu_warmer
 
 private:
     const settings&      m_settings;
-    const amdsmi&        m_amdsmi;
+    const monitor&       m_monitor;
     const device_storage m_device_storage;
 }; // struct gpu_warmer
 
@@ -2611,9 +2210,9 @@ public:
     state(std::string_view algo,
           json             meta,
           size_t           family_index,
-          hipStream_t      stream,
+          stream_t         stream,
           logger&          logger,
-          amdsmi&          amdsmi,
+          monitor&         monitor,
           stream_blocker&  stream_blocker,
           const settings&  settings,
           flags::FlagTag   flags,
@@ -2628,7 +2227,7 @@ public:
         , m_meta(std::move(meta))
         , m_family_index(family_index)
         , m_logger(logger)
-        , m_amdsmi(amdsmi)
+        , m_monitor(monitor)
         , m_stream_blocker(stream_blocker)
         , m_settings(settings)
         , m_flags(flags)
@@ -2743,8 +2342,6 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        const auto& s = m_settings;
-
         std::string name            = m_meta.serialize_name();
         std::string serialized_meta = m_meta.serialize();
 
@@ -2756,14 +2353,14 @@ public:
         init_kernels_per_batch(kernel);
 
         // Reserve space for start and stop events for each iteration.
-        std::vector<hipEvent_t> events(m_kernels_per_batch * 2);
+        std::vector<event_t> events(m_kernels_per_batch * 2);
         for(auto& event : events)
-            PRIMBENCH_HIP_CHECK(hipEventCreate(&event));
+            PRIMBENCH_CHECK(event_create(&event));
 
         uint64_t           iterations = 0;
         std::vector<float> iterations_ms(m_kernels_per_batch);
 
-        uint16_t start_temp = m_amdsmi.get_temp();
+        uint16_t start_temp = m_monitor.get_temp();
 
         double elapsed_gpu_secs = 0.0;
 
@@ -2780,9 +2377,7 @@ public:
             double batch_gpu_ms = std::accumulate(iterations_ms.begin(), iterations_ms.end(), 0.0);
             m_times.emplace_back(batch_gpu_ms);
 
-            amdsmi::stats amdsmi_stats = m_amdsmi.get_stats();
-
-            m_logger.save(batch_gpu_ms, iterations_ms, amdsmi_stats);
+            m_logger.save(batch_gpu_ms, iterations_ms);
 
             // Compute noise (CV) for recent window
             auto window_start = m_times.end() - std::min(iterations, s.batch_window_size);
@@ -2823,7 +2418,7 @@ public:
             else if(noise_timeout)
                 status = "Noisy timed out after " + std::to_string(secs) + "s";
 
-            uint16_t gpu_temp = m_amdsmi.get_temp();
+            uint16_t gpu_temp = m_monitor.get_temp();
 
             progress::print_progress(iterations,
                                      noise_percent,
@@ -2858,23 +2453,22 @@ public:
                                                gpu_temp,
                                                elapsed_host_secs,
                                                elapsed_gpu_secs,
-                                               noise_timeout,
-                                               m_amdsmi);
+                                               noise_timeout);
 
                 break;
             }
         }
 
         for(const auto& event : events)
-            PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
+            PRIMBENCH_CHECK(event_destroy(event));
     }
 
     /**
      * \brief Public fields accessed directly by benchmarks.
      */
-    const hipStream_t stream; ///< HIP stream used by benchmarks for kernel launches.
-    const size_t      size; ///< Input size processed per iteration.
-    const uint32_t    seed; ///< Random seed used for reproducible benchmark inputs.
+    const stream_t stream; ///< Stream used by benchmarks for kernel launches.
+    const size_t   size; ///< Input size processed per iteration.
+    const uint32_t seed; ///< Random seed used for reproducible benchmark inputs.
 
 private:
     /**
@@ -2896,7 +2490,7 @@ private:
 
         while(true)
         {
-            uint16_t gpu_temp = m_amdsmi.get_temp();
+            uint16_t gpu_temp = m_monitor.get_temp();
             if(gpu_temp <= s.max_gpu_temp)
                 break;
 
@@ -2919,17 +2513,17 @@ private:
      */
     void init_kernels_per_batch(std::function<void()> kernel)
     {
-        std::vector<hipEvent_t> events(2);
+        std::vector<event_t> events(2);
         std::vector<float>      iterations_ms;
         m_kernels_per_batch = 1;
 
         // Without this, the very first timed batch is very slow.
         log("Running warmup");
         for(auto& event : events)
-            PRIMBENCH_HIP_CHECK(hipEventCreate(&event));
+            PRIMBENCH_CHECK(event_create(&event));
         run_batch(events, kernel);
         for(const auto& event : events)
-            PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
+            PRIMBENCH_CHECK(event_destroy(event));
 
         while(true)
         {
@@ -2941,7 +2535,7 @@ private:
             iterations_ms.resize(m_kernels_per_batch);
 
             for(auto& event : events)
-                PRIMBENCH_HIP_CHECK(hipEventCreate(&event));
+                PRIMBENCH_CHECK(event_create(&event));
 
             run_batch(events, kernel);
 
@@ -2951,7 +2545,7 @@ private:
             std::chrono::duration<double> batch_ms(m_ms_per_batch);
 
             for(const auto& event : events)
-                PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
+                PRIMBENCH_CHECK(event_destroy(event));
 
             if(batch_ms > std::chrono::duration<double>(m_settings.min_gpu_ms_per_batch))
                 break;
@@ -2964,7 +2558,7 @@ private:
     /**
      * \brief Executes a batch of kernel iterations with event timing.
      */
-    void run_batch(const std::vector<hipEvent_t>& events, std::function<void()> kernel)
+    void run_batch(const std::vector<event_t>& events, std::function<void()> kernel)
     {
         for(size_t i = 0; i < m_kernels_per_batch; i++)
         {
@@ -2975,7 +2569,7 @@ private:
                 clear_gpu_cache(stream);
 
             // We block the stream to ensure the start event is recorded immediately before the
-            // kernel launch. Without this, hipEventRecord() might be queued much earlier, so the
+            // kernel launch. Without this, event_record() might be queued much earlier, so the
             // "start" event could capture a timestamp well before the kernel actually begins
             // executing. block_stream() guarantees there is no time gap between recording the start
             // event and queuing the kernel on the GPU.
@@ -2983,14 +2577,14 @@ private:
                 m_stream_blocker.block();
 
             // Even events record the start time.
-            PRIMBENCH_HIP_CHECK(hipEventRecord(events[i * 2], stream));
+            PRIMBENCH_CHECK(event_record(events[i * 2], stream));
 
             // In order for the event timing to be accurate, this kernel lambda
             // shouldn't do more than just calling the __global__ kernel function.
             kernel();
 
             // Odd events record the stop time.
-            PRIMBENCH_HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
+            PRIMBENCH_CHECK(event_record(events[i * 2 + 1], stream));
 
             // Allows the GPU to start running its queued events.
             if(!m_flags.has(flags::Flags::sync))
@@ -3000,8 +2594,8 @@ private:
             // We deliberately don't do this right after the kernel() call,
             // since that'd keep the GPU blocked for slightly longer.
             // The kernel lambda is still responsible for catching
-            // host-side algorithm errors using PRIMBENCH_HIP_CHECK().
-            PRIMBENCH_HIP_CHECK(hipGetLastError());
+            // host-side algorithm errors using PRIMBENCH_CHECK().
+            PRIMBENCH_CHECK(get_last_error());
 
             // Periodically sync to avoid overflowing the stream's command queue.
             // Without this, too many pending events can exhaust driver resources and cause a hang.
@@ -3009,9 +2603,9 @@ private:
             constexpr size_t n = 64;
             if(i % n == n - 1)
             {
-                PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
+                PRIMBENCH_CHECK(stream_synchronize(stream));
                 // Catch runtime/device execution errors.
-                PRIMBENCH_HIP_CHECK(hipGetLastError());
+                PRIMBENCH_CHECK(get_last_error());
 
                 // Check for blocking kernel timeout after sync.
                 if(!m_flags.has(flags::Flags::sync))
@@ -3020,9 +2614,9 @@ private:
         }
 
         // Final stream synchronization.
-        PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
+        PRIMBENCH_CHECK(stream_synchronize(stream));
         // Catch any runtime/device errors from the last kernels.
-        PRIMBENCH_HIP_CHECK(hipGetLastError());
+        PRIMBENCH_CHECK(get_last_error());
 
         // Final blocking kernel timeout check.
         if(!m_flags.has(flags::Flags::sync))
@@ -3033,15 +2627,14 @@ private:
      * \brief Fills iteration times (ms) using HIP event timing.
      */
     void fill_iterations_ms(std::vector<float>&            iterations_ms,
-                            const std::vector<hipEvent_t>& events) const
+                            const std::vector<event_t>& events) const
     {
         for(size_t i = 0; i < m_kernels_per_batch; i++)
         {
             float iteration_ms;
 
             // Gets the number of milliseconds between the start and stop event.
-            PRIMBENCH_HIP_CHECK(
-                hipEventElapsedTime(&iteration_ms, events[i * 2], events[i * 2 + 1]));
+            PRIMBENCH_CHECK(event_elapsed_time(&iteration_ms, events[i * 2], events[i * 2 + 1]));
 
             iterations_ms[i] = iteration_ms;
         }
@@ -3050,7 +2643,7 @@ private:
     /**
      * \brief Clears GPU caches.
      */
-    void clear_gpu_cache(hipStream_t stream) const
+    void clear_gpu_cache(stream_t stream) const
     {
         m_cache.clear_cache(stream);
     }
@@ -3093,7 +2686,7 @@ private:
     size_t      m_family_index;
 
     logger&         m_logger;
-    amdsmi&         m_amdsmi;
+    monitor&        m_monitor;
     stream_blocker& m_stream_blocker;
 
     const settings& m_settings;
@@ -3175,7 +2768,7 @@ public:
                 if(it != _parsed.end() && !it->second.empty())
                 {
                     std::cerr << "Error: Boolean flag --" << key << " does not take a value.\n";
-                    std::exit(EXIT_FAILURE);
+                    exit(EXIT_FAILURE);
                 }
             }
         }
@@ -3199,7 +2792,25 @@ public:
                     {
                         std::cerr << "Error: Failed to parse default for --" << key
                                   << ": invalid value \"" << default_it->second << "\"\n";
-                        std::exit(EXIT_FAILURE);
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                else if constexpr(is_vector<T>::value)
+                {
+                    using Elem = typename T::value_type;
+                    std::string token;
+                    while(ss >> token)
+                    {
+                        std::istringstream es(token);
+                        Elem               e{};
+                        es >> e;
+                        if(!es)
+                        {
+                            std::cerr << "Error: Failed to parse default vector for --" << key
+                                      << ": invalid value \"" << token << "\"\n";
+                            exit(EXIT_FAILURE);
+                        }
+                        out.push_back(e);
                     }
                 }
                 else
@@ -3209,7 +2820,7 @@ public:
                     {
                         std::cerr << "Error: Failed to parse default for --" << key
                                   << ": invalid value \"" << default_it->second << "\"\n";
-                        std::exit(EXIT_FAILURE);
+                        exit(EXIT_FAILURE);
                     }
                 }
             }
@@ -3220,6 +2831,34 @@ public:
         if constexpr(std::is_same_v<T, bool>)
         {
             return it->second.empty() ? true : false;
+        }
+        else if constexpr(is_vector<T>::value)
+        {
+            using Elem = typename T::value_type;
+            T                  out{};
+            std::istringstream ss(it->second);
+            std::string        token;
+            while(ss >> token)
+            {
+                std::istringstream es(token);
+                Elem               e{};
+                if constexpr(std::is_same_v<Elem, std::string>)
+                {
+                    e = token;
+                }
+                else
+                {
+                    es >> e;
+                    if(!es)
+                    {
+                        std::cerr << "Error: Failed to parse --" << key << ": invalid value \""
+                                  << token << "\"\n";
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                out.push_back(e);
+            }
+            return out;
         }
         else
         {
@@ -3239,7 +2878,7 @@ public:
             {
                 std::cerr << "Error: Failed to parse --" << key << ": invalid value \""
                           << it->second << "\"\n";
-                std::exit(EXIT_FAILURE);
+                exit(EXIT_FAILURE);
             }
             return out;
         }
@@ -3269,8 +2908,6 @@ public:
                "max-gpu-temp",
                "max-warming-secs",
                "max-cooling-secs",
-               "output-hip-device-properties-context",
-               "output-amdsmi-context",
                "output-batches",
                "spaces-per-indent",
                "stream-blocking-timeout-secs"};
@@ -3380,7 +3017,7 @@ private:
                 std::cout << "      " << desc << "\n";
             }
         }
-        std::exit(EXIT_SUCCESS);
+        exit(EXIT_SUCCESS);
     }
 
     /// \brief Validates that all parsed arguments were registered; exits if not.
@@ -3395,7 +3032,7 @@ private:
                     << "To register this argument, call .get() with a type and description:\n";
                 std::cerr << "  executor.get<std::string>(\"" << key
                           << "\", default_value, \"Description\");\n";
-                std::exit(EXIT_FAILURE);
+                exit(EXIT_FAILURE);
             }
         }
     }
@@ -3572,17 +3209,17 @@ public:
      * \param argv Argument values from main().
      * \param settings Optional benchmark-specific settings.
      * \param flags Optional flags controlling executor behavior.
-     * \param stream Optional HIP stream to run the benchmarks on.
+     * \param stream Optional stream to run the benchmarks on.
      */
     executor(int                    argc,
              char*                  argv[],
              primbench::settings    settings = {},
              detail::flags::FlagTag flags    = flags::none,
-             hipStream_t            stream   = hipStreamDefault)
+             stream_t               stream   = default_stream)
         : m_settings(settings)
         , m_flags(flags)
         , m_stream(stream)
-        , m_own_stream(stream == hipStreamDefault)
+        , m_own_stream(stream == default_stream)
         , m_cli(argc, argv)
     {
         get_logger().save_program_start_time();
@@ -3590,9 +3227,9 @@ public:
         parse();
 
         // If user did not provide a stream, create a fast private one.
-        // We can't use hipStreamDefault, as it synchronizes with the host.
+        // We can't use default_stream, as it synchronizes with the host.
         if(m_own_stream)
-            PRIMBENCH_HIP_CHECK(hipStreamCreate(&m_stream));
+            PRIMBENCH_CHECK(detail::stream_create(&m_stream));
 
         m_stream_blocker
             = std::make_unique<detail::stream_blocker>(m_stream,
@@ -3602,7 +3239,7 @@ public:
     ~executor()
     {
         if(m_own_stream && m_stream != nullptr)
-            PRIMBENCH_HIP_CHECK(hipStreamDestroy(m_stream));
+            PRIMBENCH_CHECK(detail::stream_destroy(m_stream));
     }
 
     /**
@@ -3718,7 +3355,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        get_logger().init(algorithm, specialization_count, m_settings, m_flags, get_amdsmi());
+        get_logger().init(algorithm, specialization_count, m_settings, m_flags, get_monitor());
 
         // Determine max specialization width, and validate that every name is unique.
         m_spec_col_width = 0;
@@ -3922,17 +3559,6 @@ private:
             exit(EXIT_FAILURE);
         }
 
-        s.output_hip_device_properties_context
-            = cli.get<bool>("output-hip-device-properties-context",
-                            s.output_hip_device_properties_context,
-                            "Output a `hip_device_properties` object in the context object, "
-                            "containing details about the GPU.");
-
-        s.output_amdsmi_context = cli.get<bool>(
-            "output-amdsmi-context",
-            s.output_amdsmi_context,
-            "Output an `amdsmi` object in the context object, containing details about the GPU.");
-
         s.output_batches = cli.get<bool>(
             "output-batches",
             s.output_batches,
@@ -3974,7 +3600,7 @@ private:
                      family_index,
                      m_stream,
                      get_logger(),
-                     get_amdsmi(),
+                     get_monitor(),
                      *m_stream_blocker,
                      m_settings,
                      m_flags,
@@ -4026,8 +3652,7 @@ private:
                                            end_temp,
                                            elapsed_host_secs,
                                            elapsed_gpu_secs,
-                                           noise_timeout,
-                                           get_amdsmi());
+                                           noise_timeout);
     }
 
     /**
@@ -4039,11 +3664,11 @@ private:
     }
 
     /**
-     * \brief Returns the amdsmi singleton.
+     * \brief Returns the monitor singleton.
      */
-    detail::amdsmi& get_amdsmi()
+    detail::monitor& get_monitor()
     {
-        return detail::amdsmi::instance();
+        return detail::monitor::instance();
     }
 
     /**
@@ -4056,8 +3681,8 @@ private:
 
     detail::flags::FlagTag m_flags; /**< Executor flags */
 
-    hipStream_t m_stream; /**< HIP stream used for execution */
-    bool        m_own_stream; /** Whether primbench should create its own stream */
+    stream_t m_stream; /**< Stream used for execution */
+    bool     m_own_stream; /** Whether primbench should create its own stream */
 
     detail::cli m_cli; /**< Command-line argument parser */
 
@@ -4069,7 +3694,7 @@ private:
 
     detail::cache_thrasher m_cache = detail::cache_thrasher(); /**< Cache clearing utility */
     detail::gpu_warmer     m_warmer
-        = detail::gpu_warmer(m_settings, get_amdsmi()); /**< GPU warm-up utility */
+        = detail::gpu_warmer(m_settings, get_monitor()); /**< GPU warm-up utility */
 }; // class executor
 
 } // namespace primbench
