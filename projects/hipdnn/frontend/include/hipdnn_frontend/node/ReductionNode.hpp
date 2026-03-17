@@ -55,24 +55,23 @@ public:
             {
                 if(yDims[i] < xDims[i])
                 {
-                    HIPDNN_RETURN_IF_NE(
-                        yDims[i],
-                        static_cast<int64_t>(1),
-                        ErrorCode::INVALID_VALUE,
-                        "ReductionNode: Y dim[" + std::to_string(i) + "]="
-                            + std::to_string(yDims[i])
-                            + " is less than X dim[" + std::to_string(i) + "]="
-                            + std::to_string(xDims[i]) + " but is not 1");
+                    HIPDNN_RETURN_IF_NE(yDims[i],
+                                        static_cast<int64_t>(1),
+                                        ErrorCode::INVALID_VALUE,
+                                        "ReductionNode: Y dim[" + std::to_string(i)
+                                            + "]=" + std::to_string(yDims[i])
+                                            + " is less than X dim[" + std::to_string(i)
+                                            + "]=" + std::to_string(xDims[i]) + " but is not 1");
                     hasReduction = true;
                 }
                 else
                 {
-                    HIPDNN_RETURN_IF_TRUE(
-                        yDims[i] > xDims[i],
-                        ErrorCode::INVALID_VALUE,
-                        "ReductionNode: Y dim[" + std::to_string(i) + "]="
-                            + std::to_string(yDims[i]) + " exceeds X dim[" + std::to_string(i)
-                            + "]=" + std::to_string(xDims[i]));
+                    HIPDNN_RETURN_IF_TRUE(yDims[i] > xDims[i],
+                                          ErrorCode::INVALID_VALUE,
+                                          "ReductionNode: Y dim[" + std::to_string(i)
+                                              + "]=" + std::to_string(yDims[i]) + " exceeds X dim["
+                                              + std::to_string(i)
+                                              + "]=" + std::to_string(xDims[i]));
                 }
             }
 

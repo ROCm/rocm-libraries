@@ -144,8 +144,7 @@ TEST_P(TestReductionNodeAllModes, ValidNodePreValidates)
     ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::OK)
-        << "Mode " << static_cast<int>(mode) << " should be valid";
+    EXPECT_EQ(error.code, ErrorCode::OK) << "Mode " << static_cast<int>(mode) << " should be valid";
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -238,10 +237,7 @@ TEST(TestReductionNode, PartialReductionValid)
 
     // Reduce last two dims to 1
     auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(2)
-        .set_data_type(DataType::FLOAT)
-        .set_dim({2, 8, 1, 1})
-        .set_stride({8, 1, 1, 1});
+    y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1});
 
     attrs.set_x(x);
     attrs.set_y(y);

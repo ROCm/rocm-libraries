@@ -117,7 +117,7 @@ struct ReductionAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   bool is_deterministic() const {
     return GetField<uint8_t>(VT_IS_DETERMINISTIC, 0) != 0;
   }
-  bool mutate_is_deterministic(bool _is_deterministic = false) {
+  bool mutate_is_deterministic(bool _is_deterministic = 0) {
     return SetField<uint8_t>(VT_IS_DETERMINISTIC, static_cast<uint8_t>(_is_deterministic), 0);
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {

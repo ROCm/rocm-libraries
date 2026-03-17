@@ -46,8 +46,11 @@ TEST(TestReductionAttributes, SetGetXTensor)
     EXPECT_EQ(attrs.get_x(), nullptr);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1).set_name("InputTensor").set_data_type(DataType::FLOAT).set_dim({2, 4}).set_stride(
-        {4, 1});
+    x->set_uid(1)
+        .set_name("InputTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 4})
+        .set_stride({4, 1});
 
     attrs.set_x(x);
 
@@ -63,8 +66,11 @@ TEST(TestReductionAttributes, SetGetYTensor)
     EXPECT_EQ(attrs.get_y(), nullptr);
 
     auto y = std::make_shared<TensorAttributes>();
-    y->set_uid(2).set_name("OutputTensor").set_data_type(DataType::FLOAT).set_dim({1, 4}).set_stride(
-        {4, 1});
+    y->set_uid(2)
+        .set_name("OutputTensor")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 4})
+        .set_stride({4, 1});
 
     attrs.set_y(y);
 

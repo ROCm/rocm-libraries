@@ -64,7 +64,7 @@ public:
 
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<ReductionMode> mode = std::nullopt; ///< The reduction mode
-    bool is_deterministic              = false;        ///< Whether to use deterministic algorithms
+    bool is_deterministic = false; ///< Whether to use deterministic algorithms
     // NOLINTEND(readability-identifier-naming)
 
     /// @brief Get the reduction mode
