@@ -213,29 +213,30 @@ protected:
         }
         else
         {
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
-            input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 1); // e²
-            input1.setHostValue(static_cast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
+            input1.setHostValue(safeTestTypeCast<Input1Type>(E * E), 0, 0, 0, 1); // e²
+            input1.setHostValue(safeTestTypeCast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
             input1.setHostValue(
-                static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
+                safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
 
-            input2.setHostValue(static_cast<Input2Type>(PI / TEST_VALUE_2), 0, 0, 0, 0); // π/2
-            input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 1); // e
-            input2.setHostValue(static_cast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
+            input2.setHostValue(safeTestTypeCast<Input2Type>(PI / TEST_VALUE_2), 0, 0, 0, 0); // π/2
+            input2.setHostValue(safeTestTypeCast<Input2Type>(E), 0, 0, 0, 1); // e
+            input2.setHostValue(safeTestTypeCast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
             input2.setHostValue(
-                static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
+                safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
 
             expected.setHostValue(
-                static_cast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
+                safeTestTypeCast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
                 0,
                 0,
                 0,
                 0); // 2π - π/2 = 3π/2
-            expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
+            expected.setHostValue(safeTestTypeCast<OutputType>((E * E) - E), 0, 0, 0,
                                   1); // e² - e
-            expected.setHostValue(static_cast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
             expected.setHostValue(
-                static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
+                safeTestTypeCast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
+            expected.setHostValue(
+                safeTestTypeCast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -276,17 +277,18 @@ protected:
 
         if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
         {
-            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 0);
-            input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_5), 0, 0, 0, 0);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 0);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_5), 0, 0, 0, 0);
 
-            expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_5), 0, 0, 0, 0);
+            expected.setHostValue(
+                safeTestTypeCast<OutputType>(TEST_VALUE_2 - TEST_VALUE_5), 0, 0, 0, 0);
         }
         else
         {
-            input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 0); // e²
-            input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 0); // e
+            input1.setHostValue(safeTestTypeCast<Input1Type>(E * E), 0, 0, 0, 0); // e²
+            input2.setHostValue(safeTestTypeCast<Input2Type>(E), 0, 0, 0, 0); // e
 
-            expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
+            expected.setHostValue(safeTestTypeCast<OutputType>((E * E) - E), 0, 0, 0,
                                   0); // e² - e
         }
 
@@ -414,7 +416,8 @@ protected:
                 {
                     float input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
-                    expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(input1Val - input2Val), n, c, h);
                 }
             }
         }
@@ -450,7 +453,8 @@ protected:
                 {
                     float input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
-                    expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(input1Val - input2Val), n, c, h);
                 }
             }
         }
@@ -788,19 +792,23 @@ protected:
         // For lower_clip <= x <= upper_clip: output = x
         // For x > upper_clip: output = upper_clip
         expected.setHostValue(
-            static_cast<OutputType>(lowerClip + (lowerSlope * (-TEST_VALUE_5 - lowerClip))),
+            safeTestTypeCast<OutputType>(lowerClip + (lowerSlope * (-TEST_VALUE_5 - lowerClip))),
             0,
             0,
             0,
             0); // -2 + 0.1*(-5-(-2)) = -2.3
         expected.setHostValue(
-            static_cast<OutputType>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (in range)
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (in range)
-        expected.setHostValue(static_cast<OutputType>(upperClip), 0, 0, 1, 1); // 4.0 (clamped)
-        expected.setHostValue(static_cast<OutputType>(lowerClip), 0, 1, 0, 0); // -2.0 (at boundary)
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 1, 0, 1); // 0.0 (in range)
-        expected.setHostValue(static_cast<OutputType>(upperClip), 0, 1, 1, 0); // 4.0 (at boundary)
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
+            safeTestTypeCast<OutputType>(-TEST_VALUE_1), 0, 0, 0, 1); // -1.0 (in range)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_2), 0, 0, 1, 0); // 2.0 (in range)
+        expected.setHostValue(safeTestTypeCast<OutputType>(upperClip), 0, 0, 1, 1); // 4.0 (clamped)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(lowerClip), 0, 1, 0, 0); // -2.0 (at boundary)
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0, 1, 0, 1); // 0.0 (in range)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(upperClip), 0, 1, 1, 0); // 4.0 (at boundary)
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1381,7 +1389,7 @@ protected:
         // Fill with simple values for 1D testing
         for(int i = 0; i < 5; ++i)
         {
-            input.setHostValue(static_cast<Input1Type>(static_cast<float>(i - 2)),
+            input.setHostValue(safeTestTypeCast<Input1Type>(static_cast<float>(i - 2)),
                                i); // [-2, -1, 0, 1, 2]
         }
 
@@ -1390,11 +1398,11 @@ protected:
 
         // Create expected tensor: ReLU applied to [-2, -1, 0, 1, 2] = [0, 0, 0, 1, 2]
         Tensor<OutputType> expected({5});
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0); // max(0, -2) = 0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 1); // max(0, -1) = 0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 2); // max(0, 0) = 0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 3); // max(0, 1) = 1
-        expected.setHostValue(static_cast<OutputType>(2.0f), 4); // max(0, 2) = 2
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 0); // max(0, -2) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 1); // max(0, -1) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(0.0f), 2); // max(0, 0) = 0
+        expected.setHostValue(safeTestTypeCast<OutputType>(1.0f), 3); // max(0, 1) = 1
+        expected.setHostValue(safeTestTypeCast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
         auto tolerance = getMixedTypeTolerance();
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
@@ -1412,7 +1420,7 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 input.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((m - 1) + (n - 2))), m, n);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m - 1) + (n - 2))), m, n);
             }
         }
 
@@ -1427,7 +1435,7 @@ protected:
             {
                 auto val = static_cast<float>((m - 1) + (n - 2));
                 expected.setHostValue(
-                    static_cast<OutputType>(hipdnn_data_sdk::types::abs(val)), m, n);
+                    safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(val)), m, n);
             }
         }
 
