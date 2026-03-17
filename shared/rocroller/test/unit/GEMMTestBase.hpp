@@ -291,6 +291,8 @@ namespace GEMMTests
                     sizes[1] /= packing;
                     preTileSize[1] /= packing;
                 }
+
+                // The preSwizzle helper assumes column-major; so we swap sizes here.
                 std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
                 std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
                 hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
@@ -418,7 +420,11 @@ namespace GEMMTests
                                                   ? std::vector<size_t>({(size_t)0, (size_t)1})
                                                   : std::vector<size_t>({});
 
-            bool pretileA   = !gemm.pretileA.empty();
+            bool pretileA = !gemm.pretileA.empty();
+            if(pretileA)
+                AssertFatal(gemm.pretileA.size() == 2,
+                            "pretileA must have size 2 (MxK tile dimensions).",
+                            ShowValue(gemm.pretileA.size()));
             auto stridesA   = pretileA ? std::vector<size_t>{}
                                        : (gemm.transA == "N" ? oneStridesN : oneStridesT);
             auto tagTensorA = command->addOperation(
@@ -429,7 +435,11 @@ namespace GEMMTests
                     rocRoller::Operations::SubTileTranspose(loadInputA, gemm.pretileA, true));
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
 
-            bool pretileB   = !gemm.pretileB.empty();
+            bool pretileB = !gemm.pretileB.empty();
+            if(pretileB)
+                AssertFatal(gemm.pretileB.size() == 2,
+                            "pretileB must have size 2 (KxN tile dimensions).",
+                            ShowValue(gemm.pretileB.size()));
             auto stridesB   = pretileB ? std::vector<size_t>{}
                                        : (gemm.transB == "N" ? oneStridesN : oneStridesT);
             auto tagTensorB = command->addOperation(

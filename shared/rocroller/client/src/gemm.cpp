@@ -255,9 +255,9 @@ namespace rocRoller::Client::GEMMClient
                 preTileSize[1] /= packing;
             }
 
+            // The preSwizzle helper assumes column-major; so we swap sizes here.
             std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
             std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-
             hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
         }
 

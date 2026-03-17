@@ -69,6 +69,15 @@ namespace rocRoller
                     auto pretileA = not solutionParams.types.pretileA.empty();
                     auto pretileB = not solutionParams.types.pretileB.empty();
 
+                    if(pretileA)
+                        AssertFatal(solutionParams.types.pretileA.size() == 2,
+                                    "pretileA must have size 2 (MxK tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileA.size()));
+                    if(pretileB)
+                        AssertFatal(solutionParams.types.pretileB.size() == 2,
+                                    "pretileB must have size 2 (KxN tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileB.size()));
+
                     auto stridesA = pretileA ? std::vector<size_t>{}
                                              : unitStrides(solutionParams.types.transA);
                     m_tagTensorA
@@ -663,8 +672,7 @@ namespace rocRoller
                                            problemParams.types.transB == TransposeType::T ? "T"
                                                                                           : "N");
 
-                    if(not problemParams.types.pretileA.empty()
-                       && problemParams.types.pretileA.size() == 2)
+                    if(problemParams.types.pretileA.size() == 2)
                     {
                         AssertFatal(problemParams.types.transA == TransposeType::T,
                                     "Pre-tiling A only supported for TransposeType::T");
@@ -691,8 +699,7 @@ namespace rocRoller
                                                   static_cast<size_t>(tileM * tileK)});
                     }
 
-                    if(not problemParams.types.pretileB.empty()
-                       && problemParams.types.pretileB.size() == 2)
+                    if(problemParams.types.pretileB.size() == 2)
                     {
                         AssertFatal(problemParams.types.transB == TransposeType::N,
                                     "Pre-tiling B only supported for TransposeType::N");
