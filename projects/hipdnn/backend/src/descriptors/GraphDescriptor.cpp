@@ -9,10 +9,6 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
-
-using hipdnn_data_sdk::utilities::toFlatbufferOptional;
-using hipdnn_data_sdk::utilities::toStdOptional;
 
 namespace hipdnn_backend
 {
@@ -59,7 +55,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGra
     graph->compute_data_type = _computeDataType;
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
-    graph->preferred_engine_id = toFlatbufferOptional(_preferredEngineId);
+    graph->preferred_engine_id = _preferredEngineId;
     graph->name = _name;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
@@ -135,7 +131,7 @@ void GraphDescriptor::setPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                          elementCount,
                                          arrayOfElements,
                                          "GraphDescriptor::setPreferredEngineId");
-    _preferredEngineId = toStdOptional(flatbufferOptional);
+    _preferredEngineId = flatbufferOptional;
 }
 
 void GraphDescriptor::setHandle(hipdnnBackendAttributeType_t attributeType,
@@ -290,7 +286,7 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            int64_t* elementCount,
                                            void* arrayOfElements) const
 {
-    auto flatbufferOptional = toFlatbufferOptional(_preferredEngineId);
+    auto flatbufferOptional = _preferredEngineId;
     getOptionalScalar<HIPDNN_TYPE_INT64>(flatbufferOptional,
                                          attributeType,
                                          requestedElementCount,
@@ -418,7 +414,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _computeDataType = graph->compute_data_type;
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
-    _preferredEngineId = toStdOptional(graph->preferred_engine_id);
+    _preferredEngineId = graph->preferred_engine_id;
     _name = graph->name;
 
     // Cache the serialized bytes for getSerializedGraph() by re-serializing from the parsed GraphT
