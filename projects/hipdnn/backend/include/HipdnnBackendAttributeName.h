@@ -247,6 +247,24 @@ typedef enum
     /** @brief Step size for valid knob values */
     HIPDNN_ATTR_KNOB_INFO_STRIDE = 903,
 
+    /** @brief Human-readable description of the knob */
+    HIPDNN_ATTR_KNOB_INFO_DESCRIPTION = 904,
+
+    /** @brief Default value for the knob (INT64, DOUBLE, or CHAR) */
+    HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE = 905,
+
+    /** @brief Whether this knob is deprecated */
+    HIPDNN_ATTR_KNOB_INFO_DEPRECATED = 906,
+
+    /** @brief Explicit list of valid integer values (INT64 array) */
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT = 907,
+
+    /** @brief Explicit list of valid string values (CHAR, multi-call append) */
+    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING = 908,
+
+    /** @brief Maximum string length for string knobs (INT64) */
+    HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH = 909,
+
     /** @} */
 
     /**

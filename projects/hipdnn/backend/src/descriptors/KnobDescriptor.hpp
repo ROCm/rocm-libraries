@@ -1,0 +1,179 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "BackendDescriptor.hpp"
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace hipdnn_backend
+{
+
+/**
+ * @brief Backend descriptor for knob metadata
+ *
+ * Wraps knob metadata (identifier, description, default value, constraints,
+ * deprecation flag) as a standard backend descriptor, allowing knob info to
+ * be passed through the C-API setAttribute/getAttribute pattern instead of
+ * manual FlatBuffer serialization.
+ *
+ * Validation limits:
+ * - Knob ID string: up to @ref MAX_KNOB_ID_LENGTH characters (must be non-empty)
+ * - Description string: up to @ref MAX_DESCRIPTION_LENGTH characters
+ * - String default value: up to @ref MAX_STRING_VALUE_LENGTH characters
+ */
+class KnobDescriptor : public HipdnnBackendDescriptorImpl<KnobDescriptor>
+{
+public:
+    /// Maximum length of a knob ID string (characters, excluding null terminator).
+    static constexpr int64_t MAX_KNOB_ID_LENGTH = 4096;
+
+    /// Maximum length of a description string (characters, excluding null terminator).
+    static constexpr int64_t MAX_DESCRIPTION_LENGTH = 65536;
+
+    /// Maximum length of a string default value (characters, excluding null terminator).
+    static constexpr int64_t MAX_STRING_VALUE_LENGTH = 65536;
+
+    void finalize() override;
+
+    void getAttribute(hipdnnBackendAttributeName_t attributeName,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements) const override;
+
+    void setAttribute(hipdnnBackendAttributeName_t attributeName,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements) override;
+
+    /// Convert to a KnobT for consumption by other components
+    std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> toKnobT() const;
+
+    static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
+
+private:
+    // Core knob ID and metadata
+    std::string _knobId;
+    std::string _description;
+
+    // Default value (polymorphic: int64, double, or string)
+    hipdnn_data_sdk::data_objects::KnobValueUnion _defaultValue;
+    bool _defaultValueSet = false;
+
+    // Deprecation flag
+    bool _deprecated          = false;
+    bool _deprecatedSet       = false;
+
+    // Numeric constraint fields
+    std::optional<int64_t> _maxValueInt;
+    std::optional<int64_t> _minValueInt;
+    std::optional<double> _maxValueDouble;
+    std::optional<double> _minValueDouble;
+    std::optional<int64_t> _stride;
+
+    // Array/enum constraint fields
+    std::vector<int64_t> _validValuesInt;
+    std::vector<std::string> _validValuesString;
+    std::optional<int64_t> _stringMaxLength;
+
+    // Private helpers — set
+    void setKnobId(hipdnnBackendAttributeType_t attributeType,
+                   int64_t elementCount,
+                   const void* arrayOfElements);
+
+    void setDescription(hipdnnBackendAttributeType_t attributeType,
+                        int64_t elementCount,
+                        const void* arrayOfElements);
+
+    void setDefaultValue(hipdnnBackendAttributeType_t attributeType,
+                         int64_t elementCount,
+                         const void* arrayOfElements);
+
+    void setMaximumValue(hipdnnBackendAttributeType_t attributeType,
+                         int64_t elementCount,
+                         const void* arrayOfElements);
+
+    void setMinimumValue(hipdnnBackendAttributeType_t attributeType,
+                         int64_t elementCount,
+                         const void* arrayOfElements);
+
+    void setStride(hipdnnBackendAttributeType_t attributeType,
+                   int64_t elementCount,
+                   const void* arrayOfElements);
+
+    void setDeprecated(hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements);
+
+    void setValidValuesInt(hipdnnBackendAttributeType_t attributeType,
+                           int64_t elementCount,
+                           const void* arrayOfElements);
+
+    void setValidValuesString(hipdnnBackendAttributeType_t attributeType,
+                              int64_t elementCount,
+                              const void* arrayOfElements);
+
+    void setStringMaxLength(hipdnnBackendAttributeType_t attributeType,
+                            int64_t elementCount,
+                            const void* arrayOfElements);
+
+    // Private helpers — get
+    void getKnobId(hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements) const;
+
+    void getDescription(hipdnnBackendAttributeType_t attributeType,
+                        int64_t requestedElementCount,
+                        int64_t* elementCount,
+                        void* arrayOfElements) const;
+
+    void getDefaultValue(hipdnnBackendAttributeType_t attributeType,
+                         int64_t requestedElementCount,
+                         int64_t* elementCount,
+                         void* arrayOfElements) const;
+
+    void getMaximumValue(hipdnnBackendAttributeType_t attributeType,
+                         int64_t requestedElementCount,
+                         int64_t* elementCount,
+                         void* arrayOfElements) const;
+
+    void getMinimumValue(hipdnnBackendAttributeType_t attributeType,
+                         int64_t requestedElementCount,
+                         int64_t* elementCount,
+                         void* arrayOfElements) const;
+
+    void getStride(hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements) const;
+
+    void getDeprecated(hipdnnBackendAttributeType_t attributeType,
+                       int64_t requestedElementCount,
+                       int64_t* elementCount,
+                       void* arrayOfElements) const;
+
+    void getValidValuesInt(hipdnnBackendAttributeType_t attributeType,
+                           int64_t requestedElementCount,
+                           int64_t* elementCount,
+                           void* arrayOfElements) const;
+
+    void getValidValuesString(hipdnnBackendAttributeType_t attributeType,
+                              int64_t requestedElementCount,
+                              int64_t* elementCount,
+                              void* arrayOfElements) const;
+
+    void getStringMaxLength(hipdnnBackendAttributeType_t attributeType,
+                            int64_t requestedElementCount,
+                            int64_t* elementCount,
+                            void* arrayOfElements) const;
+};
+
+} // namespace hipdnn_backend
