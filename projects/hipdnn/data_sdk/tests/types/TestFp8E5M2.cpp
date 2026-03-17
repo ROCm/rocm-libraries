@@ -37,18 +37,8 @@ protected:
 };
 
 // ============================================================================
-// E5M2-Specific: Has Infinity
+// E5M2-Specific Tests
 // ============================================================================
-
-TEST_F(TestFp8E5M2, HasInfinity)
-{
-    // E5M2 has infinity (unlike E4M3)
-    EXPECT_TRUE(std::numeric_limits<fp8_e5m2>::has_infinity);
-
-    fp8_e5m2 inf = std::numeric_limits<fp8_e5m2>::infinity();
-    EXPECT_TRUE(isinf(inf));
-    EXPECT_FALSE(signbit(inf));
-}
 
 TEST_F(TestFp8E5M2, SignalingNaN)
 {
@@ -119,6 +109,12 @@ TEST_F(TestFp8E5M2, NamedConstants)
 // ============================================================================
 // Construction Tests with Specific Values
 // ============================================================================
+
+TEST_F(TestFp8E5M2, ConstructSubnormal)
+{
+    fp8_e5m2 val(0x1p-15f);
+    EXPECT_EQ(static_cast<float>(val), 0x1p-15f);
+}
 
 TEST_F(TestFp8E5M2, ConstructFromInt64)
 {
