@@ -135,7 +135,7 @@ public:
         }
         if(static_cast<int32_t>(block_size.size()) < idx + 1)
         {
-            block_size.resize(static_cast<size_t>(idx + 1), 1);
+            block_size.resize(static_cast<size_t>(idx) + 1, 1);
         }
         block_size[static_cast<size_t>(idx)] = value;
         return *this;

@@ -14,7 +14,7 @@
 namespace hipdnn_frontend::graph
 {
 
-class BatchnormBackwardNode : public BaseNode<BatchnormBackwardNode>
+class BatchnormBackwardNode : public BaseNode<BatchnormBackwardNode, NodeType::BATCHNORM_BACKWARD>
 {
 public:
     BatchnormBackwardAttributes attributes;
@@ -220,7 +220,8 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensors(allTensors);
+        BaseNode<BatchnormBackwardNode, NodeType::BATCHNORM_BACKWARD>::gather_hipdnn_tensors(
+            allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {

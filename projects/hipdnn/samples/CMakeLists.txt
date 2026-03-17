@@ -12,6 +12,11 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 
+set(HIPDNN_SAMPLE_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
+
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -33,6 +38,7 @@ function(add_hipdnn_sample NAME SOURCE)
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
     # (brings in hipdnn_data_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
+    target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
 endfunction()
 
 add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)

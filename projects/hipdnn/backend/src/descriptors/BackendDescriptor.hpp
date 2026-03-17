@@ -8,8 +8,14 @@
 #include "hipdnn_backend.h"
 #include <memory>
 #include <spdlog/fmt/fmt.h>
+#include <type_traits>
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
+
+namespace hipdnn_backend
+{
+class IGraphOperation;
+}
 
 struct IBackendDescriptor
 {
@@ -31,6 +37,11 @@ struct IBackendDescriptor
 
     virtual hipdnnBackendDescriptorType_t getType() const = 0;
     virtual std::string toString() const = 0;
+
+    virtual hipdnn_backend::IGraphOperation* asGraphOperation()
+    {
+        return nullptr;
+    }
 };
 
 // NOLINTEND(portability-template-virtual-member-function)
@@ -50,12 +61,14 @@ private:
     bool _finalized = false;
     hipdnnBackendDescriptorType_t _type = HIPDNN_INVALID_TYPE;
 
-public:
+    friend T;
+
     HipdnnBackendDescriptorImpl()
         : _type(getStaticType())
     {
     }
 
+public:
     void finalize() override
     {
         _finalized = true;
@@ -78,6 +91,18 @@ public:
     static hipdnnBackendDescriptorType_t getStaticType()
     {
         return T::getStaticType();
+    }
+
+    IGraphOperation* asGraphOperation() override
+    {
+        if constexpr(std::is_base_of_v<IGraphOperation, T>)
+        {
+            return static_cast<T*>(this);
+        }
+        else
+        {
+            return nullptr;
+        }
     }
 };
 
@@ -126,13 +151,20 @@ struct HipdnnBackendDescriptor : public IBackendDescriptor
 
     bool operator==(const HipdnnBackendDescriptor& other) const;
 
-    // Attempts to cast the wrapped impl to interface T via dynamic_pointer_cast.
-    // Returns nullptr if the impl does not implement T.
-    // Enables type-agnostic extraction (e.g., tryAsInterface<IGraphOperation>()).
-    template <typename T>
-    std::shared_ptr<T> tryAsInterface() const
+    // Returns a shared_ptr to the IGraphOperation interface if the wrapped impl
+    // implements it, or nullptr otherwise. Uses the virtual asGraphOperation()
+    // method instead of dynamic_cast, so it works with -fno-rtti.
+    std::shared_ptr<hipdnn_backend::IGraphOperation> tryAsGraphOperation() const
     {
-        return std::dynamic_pointer_cast<T>(_impl);
+        auto* graphOp = _impl->asGraphOperation();
+        if(graphOp == nullptr)
+        {
+            return nullptr;
+        }
+        // The aliasing shared_ptr constructor shares ownership with _impl
+        // (increments its ref count) while pointing to the IGraphOperation
+        // subobject. This ensures proper lifetime management without dynamic_cast.
+        return {_impl, graphOp};
     }
 
     // Unpacks a HipdnnBackendDescriptor into a shared_ptr of the specified type.

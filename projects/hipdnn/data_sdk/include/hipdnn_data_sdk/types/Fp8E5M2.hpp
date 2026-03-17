@@ -122,7 +122,8 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     std::memcpy(&bits, &f, sizeof(float));
 
     uint32_t sign = (bits >> 24) & 0x80; // Extract sign to bit 7
-    int32_t exp = ((bits >> 23) & 0xFF) - 127 + 15; // Rebias from float (127) to E5M2 (15)
+    uint32_t fp32Exp = (bits >> 23) & 0xFF;
+    int32_t exp = static_cast<int32_t>(fp32Exp) - 127 + 15; // Rebias from float (127) to E5M2 (15)
     uint32_t mant = bits & 0x007FFFFF;
 
     // Handle overflow
@@ -136,7 +137,7 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     }
 
     // Handle zero
-    if(exp <= 0 && mant == 0)
+    if(fp32Exp == 0 && mant == 0)
     {
         return static_cast<uint8_t>(sign); // Signed zero
     }
@@ -394,7 +395,7 @@ public:
     static constexpr bool is_signed = true;
     static constexpr bool is_integer = false;
     static constexpr bool is_exact = false;
-    static constexpr bool has_infinity = true; // E5M2 has infinity
+    static constexpr bool has_infinity = true;
     static constexpr bool has_quiet_NaN = true;
     static constexpr bool has_signaling_NaN = true;
     static constexpr std::float_denorm_style has_denorm = std::denorm_present;

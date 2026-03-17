@@ -29,7 +29,7 @@
 #include <iostream>
 #include <new>
 
-#ifndef WIN32
+#ifndef _WIN32
 #include <stdlib.h>
 #include <sys/mman.h>
 #endif
@@ -119,7 +119,7 @@ public:
             // FFTW requires aligned allocations to use faster SIMD instructions.
             // If enabling hugepages, align to 2 MiB. Otherwise, aligning to
             // 64 bytes is enough for AVX instructions up to AVX512.
-#ifdef WIN32
+#ifdef _WIN32
             buf = _aligned_malloc(size, 64);
 #else
             // On Linux, ask for hugepages to reduce TLB pressure and
@@ -168,7 +168,7 @@ public:
                 }
                 else
                 {
-#ifdef WIN32
+#ifdef _WIN32
                     _aligned_free(buf);
 #else
                     std::free(buf);

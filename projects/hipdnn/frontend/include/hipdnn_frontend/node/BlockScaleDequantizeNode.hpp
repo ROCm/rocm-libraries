@@ -13,7 +13,8 @@
 
 namespace hipdnn_frontend::graph
 {
-class BlockScaleDequantizeNode : public BaseNode<BlockScaleDequantizeNode>
+class BlockScaleDequantizeNode
+    : public BaseNode<BlockScaleDequantizeNode, NodeType::BLOCK_SCALE_DEQUANTIZE>
 {
 public:
     BlockScaleDequantizeAttributes attributes;

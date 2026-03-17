@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,8 @@ Definitions:
     - { M:   1, N:   1 }
 
   - &M_N_range_checkin
-    - { M:   0, N:   0 }
+    - { M:   4, N:   4 }
+    - { M:   1024, N:  1024}
 
   - &M_N_range_nightly
     - { M:   9381, N:   9381 }
