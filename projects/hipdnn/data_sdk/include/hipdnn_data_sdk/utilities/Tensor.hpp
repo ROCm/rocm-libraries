@@ -331,11 +331,8 @@ public:
         return getIndex(indexVector);
     }
 
-    template <typename IndexType>
-    int64_t getIndex(const std::vector<IndexType>& indices) const
+    int64_t getIndex(const std::vector<int64_t>& indices) const
     {
-        static_assert(std::is_integral_v<IndexType>, "Index type must be integral!");
-
         if(indices.size() > strides().size())
         {
             throw std::invalid_argument("Number of indices (" + std::to_string(indices.size())
@@ -343,11 +340,8 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return throwIfOutOfBounds(std::inner_product( // NOLINT(bugprone-fold-init-type)
-            indices.begin(),
-            indices.end(),
-            strides().begin(),
-            int64_t{0}));
+        return throwIfOutOfBounds(
+            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
     virtual ITensorIterator<false> begin() = 0;
@@ -421,8 +415,7 @@ public:
         return (*this)(indices...);
     }
 
-    template <typename IndexType>
-    T getHostValue(const std::vector<IndexType>& indices) const
+    T getHostValue(const std::vector<int64_t>& indices) const
     {
         return (*this)(indices);
     }
@@ -433,8 +426,7 @@ public:
         (*this)(indices...) = value;
     }
 
-    template <typename IndexType>
-    void setHostValue(T value, const std::vector<IndexType>& indices)
+    void setHostValue(T value, const std::vector<int64_t>& indices)
     {
         (*this)(indices) = value;
     }
@@ -455,16 +447,14 @@ public:
         return data[index];
     }
 
-    template <typename IndexType>
-    T& operator()(const std::vector<IndexType>& indices)
+    T& operator()(const std::vector<int64_t>& indices)
     {
         int64_t const index = getIndex(indices);
         auto* data = memory().hostData();
         return data[index];
     }
 
-    template <typename IndexType>
-    const T& operator()(const std::vector<IndexType>& indices) const
+    const T& operator()(const std::vector<int64_t>& indices) const
     {
         int64_t const index = getIndex(indices);
         const auto* data = memory().hostData();

@@ -146,16 +146,16 @@ TEST(TestTensor, GetIndex)
 
     // Test first element
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 0), 0);
-    std::vector<int> const indices2 = {0, 0, 0, 0};
+    std::vector<int64_t> const indices2 = {0, 0, 0, 0};
     EXPECT_EQ(tensor.getIndex(indices2), 0);
 
     // Test partial indices
     EXPECT_EQ(tensor.getIndex(1, 0), 60);
-    std::vector<size_t> const indices3 = {1, 0};
+    std::vector<int64_t> const indices3 = {1, 0};
     EXPECT_EQ(tensor.getIndex(indices3), 60);
 
     EXPECT_EQ(tensor.getIndex(0, 1), 20);
-    std::vector<size_t> const indices4 = {0, 1};
+    std::vector<int64_t> const indices4 = {0, 1};
     EXPECT_EQ(tensor.getIndex(indices4), 20);
 }
 
@@ -206,7 +206,7 @@ TEST(TestTensor, GetHostValueWithVector)
     tensor.fillWithValue(0.0f);
 
     tensor.setHostValue(42.0f, 1, 2, 3);
-    std::vector<size_t> const indices2 = {1, 2, 3};
+    std::vector<int64_t> const indices2 = {1, 2, 3};
     EXPECT_FLOAT_EQ(tensor.getHostValue(indices2), 42.0f);
 }
 
@@ -218,10 +218,10 @@ TEST(TestTensor, SetHostValueWithVector)
     std::vector<int64_t> const indices1 = {0, 1, 2};
     tensor.setHostValue(10.0f, indices1);
 
-    std::vector<size_t> const indices2 = {1, 0, 3};
+    std::vector<int64_t> const indices2 = {1, 0, 3};
     tensor.setHostValue(20.0f, indices2);
 
-    std::vector<int> const indices3 = {1, 2, 1};
+    std::vector<int64_t> const indices3 = {1, 2, 1};
     tensor.setHostValue(30.0f, indices3);
 
     EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2), 10.0f);
@@ -476,16 +476,16 @@ TEST(TestTensor, GetIndex5D)
 
     // Test first element
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 0, 0), 0);
-    std::vector<int> const indices2 = {0, 0, 0, 0, 0};
+    std::vector<int64_t> const indices2 = {0, 0, 0, 0, 0};
     EXPECT_EQ(tensor.getIndex(indices2), 0);
 
     // Test partial indices
     EXPECT_EQ(tensor.getIndex(1, 0), 120);
-    std::vector<size_t> const indices3 = {1, 0};
+    std::vector<int64_t> const indices3 = {1, 0};
     EXPECT_EQ(tensor.getIndex(indices3), 120);
 
     EXPECT_EQ(tensor.getIndex(0, 1), 60);
-    std::vector<size_t> const indices4 = {0, 1};
+    std::vector<int64_t> const indices4 = {0, 1};
     EXPECT_EQ(tensor.getIndex(indices4), 60);
 }
 
