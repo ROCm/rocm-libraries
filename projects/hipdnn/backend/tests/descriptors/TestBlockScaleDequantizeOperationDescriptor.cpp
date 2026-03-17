@@ -684,6 +684,25 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeProducesCorrectNode
     EXPECT_FALSE(attrs->is_negative_scale);
 }
 
+TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeWithIsNegativeScaleTrue)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+    bool isNegativeScale = true;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &isNegativeScale);
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+
+    auto* attrs = node->attributes.AsBlockScaleDequantizeAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_TRUE(attrs->is_negative_scale);
+}
+
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeWithHalfComputeType)
 {
     setAllAttributesExcept({HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT});
