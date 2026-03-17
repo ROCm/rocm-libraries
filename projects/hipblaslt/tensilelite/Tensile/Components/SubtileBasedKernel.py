@@ -598,6 +598,7 @@ def lraTileAssignment(writer, kernel):
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
     # Calculate rotation
     module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
+    # module.add(VMovB32(dst=vgpr(rotation), src=0, comment=""))
     # Apply rotation on Col
     module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
     module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset % blockSize"))
@@ -712,44 +713,38 @@ def graInitPointer(writer, kernel):
 ##################################################
 # Compute GR offset for a single matrix (A or B)
 #
-def _grComputeOffset(module, writer, tileInfo, col_id_bytes, row_id, rowOffset):
+def _grComputeOffset(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
   bpe = tileInfo.bpe
 
-  module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(row_id), src1=vgpr(rowOffset), comment="%s: row offset"%tc))
-  rowId = rowOffset # re-use rowOffset
-  assert len(tileInfo.sharedVgprGROffset)<=2, "Only support 2 GR offset vgpr for now, found %u"%(len(tileInfo.sharedVgprGROffset))
+  tmpVgpr = writer.vgprPool.checkOut(2)
+  colBytes = tmpVgpr + 1 
+  loadWidth = 16
+
+  module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
+  
+  # rowId = rowOffset # re-use rowOffset
+  # assert len(tileInfo.sharedVgprGROffset)<=2, "Only support 2 GR offset vgpr for now, found %u"%(len(tileInfo.sharedVgprGROffset))
 
   MT0 = tileInfo.globalMMATileGrid[0] * tileInfo.mmaTileShape[0]
   subtileSize = tileInfo.subtileShape[0]*tileInfo.mmaTileShape[0]
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
 
-  tmpVgpr = writer.vgprPool.checkOut(2)
-  sHalfOffset = writer.sgprPool.checkOut(1, preventOverflow=False)
+  # sHalfOffset = writer.sgprPool.checkOut(1, preventOverflow=False)
 
   module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
   # TODO : handle FP4 (sub byte type once available)
   module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpe.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
-  module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(col_id_bytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
+  module.add(VAddU32(dst=vgpr(output), src0=vgpr(colBytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
 
-  # # # apply top-half / bottom half offset according to wave split id
-  # if tileInfo.loadRatioGR == 2.0:
-  #   module.add(SMovB32(dst=sgpr(sHalfOffset), src=(subtile_size * bpe), comment="%s: subtile row offset x bytes"%tc))
-  # else:
-  #   module.add(SMovB32(dst=sgpr(sHalfOffset), src=(MT0 * bpe) // 2, comment="%s: Half Tile row offset x bytes"%tc))
-  # module.add(VMulLOU32(dst=vgpr(tmpVgpr+1), src0=sgpr(sHalfOffset), src1=vgpr(split_id), comment="%s: Apply offset for 2nd half wave"%tc))
-  # module.add(VMulLOU32(dst=vgpr(tmpVgpr+1), src0=sgpr(strideRef), src1=vgpr(tmpVgpr+1), comment="%s: Multiply by stride"%tc))
+  # if len(tileInfo.sharedVgprGROffset)>1:
+  #   offset = math.ceil(subtileSize*tileInfo.loadRatioGR)
+  #   module.add(SMulI32(dst=sgpr(sHalfOffset), src0=sgpr(strideRef), src1=offset*bpe, comment="%s: 2nd GR offset calc : + %u rows"%(tc,offset)))
 
-  # module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(tmpVgpr), src1=vgpr(tmpVgpr+1), comment="%s: GR offset = row_offset + split_wave_offset"%tc))
+  #   module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[1]), src0=vgpr(tileInfo.sharedVgprGROffset[0]), src1=sgpr(sHalfOffset), comment="%s: GR offset for 2nd subtile = GR offset + subtile row offset"%tc))
+  #   module.add(Label("seb", comment=""))
 
-  if len(tileInfo.sharedVgprGROffset)>1:
-    offset = math.ceil(subtileSize*tileInfo.loadRatioGR)
-    module.add(SMulI32(dst=sgpr(sHalfOffset), src0=sgpr(strideRef), src1=offset*bpe, comment="%s: 2nd GR offset calc : + %u rows"%(tc,offset)))
-    module.add(SNop(waitState=10, comment="%s: wait for sgpr before 2nd GR offset calc"%tc))
-    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[1]), src0=vgpr(tileInfo.sharedVgprGROffset[0]), src1=sgpr(sHalfOffset), comment="%s: GR offset for 2nd subtile = GR offset + subtile row offset"%tc))
-    module.add(Label("seb", comment=""))
-
-  writer.sgprPool.checkIn(sHalfOffset)
+  # writer.sgprPool.checkIn(sHalfOffset)
   writer.vgprPool.checkIn(tmpVgpr)
 
 ##################################################
@@ -817,6 +812,18 @@ def _grComputeRowOffset(module, kernel, writer, tileInfo, waveId, rowOffset):
   writer.sgprPool.checkIn(tmpSgpr)
 
 ##################################################
+# Compute GR offsets for all subtiles of a single matrix (A or B)
+#
+def _grComputeAllOffsets(module, writer, tileInfo, colId, rowId, rowOffset):
+  module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(rowId), src1=vgpr(rowOffset), comment="%s: row offset"%tileInfo.tc))
+  _grComputeOffset(module, writer, tileInfo, colId, rowOffset, tileInfo.sharedVgprGROffset[0])
+  for i in range(1, len(tileInfo.sharedVgprGROffset)):
+    subtileSize = tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0]
+    offset = math.ceil(subtileSize * tileInfo.loadRatioGR)
+    module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
+    _grComputeOffset(module, writer, tileInfo, colId, rowOffset, tileInfo.sharedVgprGROffset[i])
+
+##################################################
 # Subroutine to generate GR offset calculation code
 #
 def graTileAssignment(writer, kernel, useSwizzling=True):
@@ -873,21 +880,23 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
     module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
     module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
     module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
+    
     module.add(VAddU32(dst=vgpr(colId), src0=vgpr(tmp), src1=vgpr(colId), comment=""))
     module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+    # module.add(VMovB32(dst=vgpr(tileInfoA.sharedVgprGROffset[0]), src=vgpr(colId), comment=""))
+    # return module 
 
 
-  module.add(VLShiftLeftB32(dst=vgpr(colId), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
 
   # Apply row offset based on wave partitioning (e.g. 2x2, 4x1/1x4)
   _grComputeRowOffset(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
   _grComputeRowOffset(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
-  
+
   module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
-  # Compute GR offset for A
-  _grComputeOffset(module, writer, tileInfoA, colId, rowId, rowOffsetA)
-  # Compute GR offset for B
-  _grComputeOffset(module, writer, tileInfoB, colId, rowId, rowOffsetB)
+
+  # Compute GR offset for A and B
+  _grComputeAllOffsets(module, writer, tileInfoA, colId, rowId, rowOffsetA)
+  _grComputeAllOffsets(module, writer, tileInfoB, colId, rowId, rowOffsetB)
 
   writer.vgprPool.checkIn(tmpVgpr)
 
