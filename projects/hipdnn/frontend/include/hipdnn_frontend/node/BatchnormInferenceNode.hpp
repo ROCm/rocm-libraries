@@ -12,7 +12,8 @@
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormInferenceNode : public BaseNode<BatchnormInferenceNode>
+class BatchnormInferenceNode
+    : public BaseNode<BatchnormInferenceNode, NodeType::BATCHNORM_INFERENCE>
 {
 public:
     BatchnormInferenceAttributes attributes;

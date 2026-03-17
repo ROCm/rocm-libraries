@@ -97,6 +97,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    batchnormAttributes = BatchnormInferenceAttributesVarianceExt{};
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
     BatchnormInferenceNodeVarianceExt nodeWithX(std::move(batchnormAttributesCopy),
@@ -771,4 +772,11 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNodeMissingY)
 
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestBatchnormInferenceNodeVarianceExt, GetNodeTypeReturnsBatchnormInferenceVarianceExt)
+{
+    GraphAttributes graphAttrs;
+    BatchnormInferenceNodeVarianceExt node(BatchnormInferenceAttributesVarianceExt{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT);
 }

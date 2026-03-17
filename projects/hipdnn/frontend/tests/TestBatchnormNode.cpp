@@ -47,6 +47,7 @@ TEST(TestBatchnormNode, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    batchnormAttributes = BatchnormAttributes{};
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
     BatchnormNode nodeWithX(std::move(batchnormAttributesCopy), graphAttributes);
@@ -802,4 +803,11 @@ TEST(TestBatchnormNode, PreValidateRejectsEpsilonWithNoDimensions)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(error.get_message().find("Epsilon") != std::string::npos);
     EXPECT_TRUE(error.get_message().find("dimensions are not set") != std::string::npos);
+}
+
+TEST(TestBatchnormNode, GetNodeTypeReturnsBatchnorm)
+{
+    GraphAttributes graphAttrs;
+    BatchnormNode node(BatchnormAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM);
 }

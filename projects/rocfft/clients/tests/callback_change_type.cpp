@@ -71,7 +71,7 @@ std::vector<std::vector<size_t>> callback_type_sizes = {{4}, {60}, {122}, {220},
 // because the overwrite will fail.
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
 INSTANTIATE_TEST_SUITE_P(
-#ifdef WIN32
+#ifdef _WIN32
     DISABLED_callback,
 #else
     callback,

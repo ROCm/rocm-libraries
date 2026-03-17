@@ -168,7 +168,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, MoveConstructorTransfersOwnership)
     auto desc2 = ScopedHipdnnBackendDescriptor(std::move(desc1));
     EXPECT_TRUE(desc2.valid());
     EXPECT_EQ(desc2.get(), raw);
-    EXPECT_FALSE(desc1.valid());
+    EXPECT_FALSE(desc1.valid()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(desc1.get(), nullptr);
 }
 
@@ -199,7 +199,7 @@ TEST_F(TestScopedHipdnnBackendDescriptor, MoveAssignmentTransfersOwnership)
 
     EXPECT_TRUE(desc2.valid());
     EXPECT_EQ(desc2.get(), fakeDesc1);
-    EXPECT_FALSE(desc1.valid());
+    EXPECT_FALSE(desc1.valid()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(desc1.get(), nullptr);
 }
 

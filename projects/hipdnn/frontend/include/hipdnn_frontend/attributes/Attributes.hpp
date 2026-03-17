@@ -51,6 +51,8 @@ namespace hipdnn_frontend::graph
 template <typename DerivedT>
 class Attributes
 {
+    friend DerivedT;
+
 private:
     /**
      * @brief Get mutable reference to derived class
@@ -151,6 +153,9 @@ public:
 
         return {};
     }
+
+private:
+    Attributes() = default;
 
 protected:
     /**
