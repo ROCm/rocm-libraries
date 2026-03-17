@@ -365,8 +365,11 @@ TEST_P(TestBlockScaleDequantizeOperationDescriptorGetTensor,
 
     HipdnnBackendDescriptor* rawRetrieved = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        tc.attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &elementCount, &rawRetrieved));
+    ASSERT_NO_THROW(desc->getAttribute(tc.attr,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       static_cast<void*>(&rawRetrieved)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(rawRetrieved, nullptr);
@@ -574,7 +577,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeFailsBeforeFinal
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            nullptr,
-                           &dummy),
+                           static_cast<void*>(&dummy)),
         HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -727,7 +730,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, TryAsInterfaceReturnsValidGr
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     auto desc = getDescriptor();
@@ -741,6 +744,6 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, TryAsInterfaceReturnsValidGr
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
