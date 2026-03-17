@@ -807,7 +807,7 @@ TEST(TestSdpaBpropNode, InferPropertiesPreservesExplicitShape)
 
 TEST(TestSdpaBpropNode, GetNodeTypeReturnsSdpaBprop)
 {
-    GraphAttributes graphAttrs;
-    SdpaBpropNode node(SdpaBackwardAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    SdpaBpropNode const node(SdpaBackwardAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::SDPA_BPROP);
 }

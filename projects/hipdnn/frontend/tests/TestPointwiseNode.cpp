@@ -791,7 +791,7 @@ TEST(TestPointwiseNode, NullSecondInputInferProperties)
 
 TEST(TestPointwiseNode, GetNodeTypeReturnsPointwise)
 {
-    GraphAttributes graphAttrs;
-    PointwiseNode node(PointwiseAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    PointwiseNode const node(PointwiseAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::POINTWISE);
 }

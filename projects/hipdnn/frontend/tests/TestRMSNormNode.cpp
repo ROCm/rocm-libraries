@@ -622,7 +622,7 @@ TEST(TestRMSNormNode, PreValidateAcceptsSingleElementSpatialDimensions)
 
 TEST(TestRMSNormNode, GetNodeTypeReturnsRmsNorm)
 {
-    GraphAttributes graphAttrs;
-    RMSNormNode node(RMSNormAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    RMSNormNode const node(RMSNormAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::RMS_NORM);
 }

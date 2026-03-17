@@ -968,7 +968,7 @@ TEST_F(TestBatchnormOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     setOptionalMeanInvVariance();
     auto desc = getDescriptor();
-    std::string str = desc->toString();
+    std::string const str = desc->toString();
     ASSERT_NE(str.find("BatchnormOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_BATCHNORM_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BATCHNORM_TENSOR_SCALE_UID)),

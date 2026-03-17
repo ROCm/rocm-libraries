@@ -223,6 +223,6 @@ TEST(TestINode, CreateOperationDefaultReturnsError)
 
 TEST(TestINode, GetNodeTypeDefaultReturnsUnknown)
 {
-    FakeNode node(0);
+    FakeNode const node(0);
     EXPECT_EQ(node.getNodeType(), NodeType::UNKNOWN);
 }

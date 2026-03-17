@@ -807,7 +807,7 @@ TEST(TestBatchnormNode, PreValidateRejectsEpsilonWithNoDimensions)
 
 TEST(TestBatchnormNode, GetNodeTypeReturnsBatchnorm)
 {
-    GraphAttributes graphAttrs;
-    BatchnormNode node(BatchnormAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    BatchnormNode const node(BatchnormAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM);
 }

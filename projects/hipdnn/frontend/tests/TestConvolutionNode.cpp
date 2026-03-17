@@ -2181,7 +2181,7 @@ TEST_F(TestConvolutionNodeCreateOperation, SuccessCreatesThreeTensorsAndOneOpera
 
 TEST(TestConvolutionNode, GetNodeTypeReturnsConvolutionFprop)
 {
-    GraphAttributes graphAttrs;
-    ConvolutionFpropNode node(ConvFpropAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    ConvolutionFpropNode const node(ConvFpropAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_FPROP);
 }

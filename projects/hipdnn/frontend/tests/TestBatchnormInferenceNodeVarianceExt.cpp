@@ -776,7 +776,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNodeMissingY)
 
 TEST(TestBatchnormInferenceNodeVarianceExt, GetNodeTypeReturnsBatchnormInferenceVarianceExt)
 {
-    GraphAttributes graphAttrs;
-    BatchnormInferenceNodeVarianceExt node(BatchnormInferenceAttributesVarianceExt{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    BatchnormInferenceNodeVarianceExt const node(BatchnormInferenceAttributesVarianceExt{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT);
 }

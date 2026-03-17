@@ -243,7 +243,7 @@ TEST(TestMatmulNode, InferPropertiesNodeInferBatchedDimsAndStrides)
 
 TEST(TestMatmulNode, GetNodeTypeReturnsMatmul)
 {
-    GraphAttributes graphAttrs;
-    MatmulNode node(MatmulAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    MatmulNode const node(MatmulAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::MATMUL);
 }

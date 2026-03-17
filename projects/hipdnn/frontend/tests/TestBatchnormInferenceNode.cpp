@@ -676,7 +676,7 @@ TEST(TestBatchnormInferenceNode, PreValidateAccepts5DSpatialDimensionEqualsOne)
 
 TEST(TestBatchnormInferenceNode, GetNodeTypeReturnsBatchnormInference)
 {
-    GraphAttributes graphAttrs;
-    BatchnormInferenceNode node(BatchnormInferenceAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    BatchnormInferenceNode const node(BatchnormInferenceAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE);
 }

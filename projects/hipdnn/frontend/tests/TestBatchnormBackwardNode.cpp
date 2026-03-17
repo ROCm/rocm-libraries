@@ -822,7 +822,7 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
 
 TEST(TestBatchnormBackwardNode, GetNodeTypeReturnsBatchnormBackward)
 {
-    GraphAttributes graphAttrs;
-    BatchnormBackwardNode node(BatchnormBackwardAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    BatchnormBackwardNode const node(BatchnormBackwardAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_BACKWARD);
 }

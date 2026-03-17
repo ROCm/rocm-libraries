@@ -902,7 +902,7 @@ TEST(TestLayerNormNode, GatherHipdnnTensorsRequired)
 
 TEST(TestLayerNormNode, GetNodeTypeReturnsLayerNorm)
 {
-    GraphAttributes graphAttrs;
-    LayerNormNode node(LayernormAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    LayerNormNode const node(LayernormAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::LAYER_NORM);
 }

@@ -448,7 +448,7 @@ TEST(TestSdpaFpropNode, PreValidateFailsBatchMismatchQV)
 
 TEST(TestSdpaFpropNode, GetNodeTypeReturnsSdpaFprop)
 {
-    GraphAttributes graphAttrs;
-    SdpaFpropNode node(SdpaAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    SdpaFpropNode const node(SdpaAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::SDPA_FPROP);
 }

@@ -109,8 +109,8 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    uint32_t sign = (bits >> 28) & FP4_E2M1_SIGN_MASK; // Extract sign to bit 3
-    uint32_t fp32Exp = (bits >> 23) & 0xFF;
+    uint32_t const sign = (bits >> 28) & FP4_E2M1_SIGN_MASK; // Extract sign to bit 3
+    uint32_t const fp32Exp = (bits >> 23) & 0xFF;
     // Rebias from float (127) to E2M1 (1)
     int32_t exp = static_cast<int32_t>(fp32Exp) - 127 + FP4_E2M1_EXP_BIAS;
     uint32_t mant = bits & 0x007FFFFF;
@@ -131,15 +131,15 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
     if(exp <= 0)
     {
         mant |= 0x00800000; // Add implicit 1
-        uint32_t shift = static_cast<uint32_t>(1 - exp + 22); // 23 - 1 = 22 bits to shift
+        uint32_t const shift = static_cast<uint32_t>(1 - exp + 22); // 23 - 1 = 22 bits to shift
         if(shift > 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero
         }
 
         // Apply round-to-nearest-even for subnormal results
-        uint32_t halfPoint = 1u << (shift - 1);
-        uint32_t remainder = mant & ((1u << shift) - 1);
+        uint32_t const halfPoint = 1u << (shift - 1);
+        uint32_t const remainder = mant & ((1u << shift) - 1);
         mant >>= shift;
 
         // Round to nearest even: round up if above midpoint, or at midpoint with odd result
@@ -159,7 +159,7 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
 
     // Normal case: shift mantissa from 23 bits to 1 bit with rounding
     uint32_t fp4Mant = (mant >> 22) & FP4_E2M1_MANT_MASK;
-    uint32_t remainder = mant & 0x003FFFFF;
+    uint32_t const remainder = mant & 0x003FFFFF;
 
     // Round to nearest even
     if(remainder > FP4_E2M1_ROUND_THRESHOLD

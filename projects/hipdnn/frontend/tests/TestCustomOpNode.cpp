@@ -367,7 +367,7 @@ TEST(TestCustomOpNode, PackNodeWithMultipleOutputs)
 
 TEST(TestCustomOpNode, GetNodeTypeReturnsCustomOp)
 {
-    GraphAttributes graphAttrs;
-    CustomOpNode node(CustomOpAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    CustomOpNode const node(CustomOpAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::CUSTOM_OP);
 }

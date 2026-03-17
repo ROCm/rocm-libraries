@@ -2050,7 +2050,7 @@ TEST_F(TestConvolutionWgradNodeCreateOperation, SuccessCreatesThreeTensorsAndOne
 
 TEST(TestConvolutionWgradNode, GetNodeTypeReturnsConvolutionWgrad)
 {
-    GraphAttributes graphAttrs;
-    ConvolutionWgradNode node(ConvWgradAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    ConvolutionWgradNode const node(ConvWgradAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_WGRAD);
 }

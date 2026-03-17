@@ -112,7 +112,7 @@ TEST_F(TestFp8E5M2, NamedConstants)
 
 TEST_F(TestFp8E5M2, ConstructSubnormal)
 {
-    fp8_e5m2 val(0x1p-15f);
+    fp8_e5m2 const val(0x1p-15f);
     EXPECT_EQ(static_cast<float>(val), 0x1p-15f);
 }
 

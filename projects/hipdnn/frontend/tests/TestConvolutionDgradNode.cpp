@@ -1374,7 +1374,7 @@ TEST(TestConvolutionDgradNode, PreValidateNodeInputTooSmall)
 
 TEST(TestConvolutionDgradNode, GetNodeTypeReturnsConvolutionDgrad)
 {
-    GraphAttributes graphAttrs;
-    ConvolutionDgradNode node(ConvDgradAttributes{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    ConvolutionDgradNode const node(ConvDgradAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_DGRAD);
 }
