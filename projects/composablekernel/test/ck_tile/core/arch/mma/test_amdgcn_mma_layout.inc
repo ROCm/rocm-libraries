@@ -9,29 +9,25 @@
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/utility/env.hpp"
 
-#include "test/ck_tile/core/arch/mma/test_amdgcn_mma_layout_util.hpp"
-
-#include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstdio>
-#include <cstdint>
-#include <cstdlib>
 #include <vector>
-#include <cstddef>
-#include <string>
-#include <tuple>
 
-namespace ck  = ck_tile;
-namespace mma = ck_tile::core::arch::mma;
+using namespace ck_tile;
+using namespace ck_tile::core::arch;
+using namespace mma;
+
+using F16       = fp16_t;
+using F32       = fp32_t;
+using Target90a = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
+using Target11  = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
+using Target12  = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
 
 // MMA register layout validation test for amdgcn_mma structs.
 //
-// Strategy: for every (m, k, n) triple in the tile, the test constructs a pair of input tensors
-// A and B that contain exactly one non-zero element each, placed so that their product
-// contributes to a single output element C(m, n):
+// Strategy: for every (m, k, n) triple in the tile, the test constructs a pair of input tensors A
+// and B that contain exactly one non-zero element each, placed so that their product contributes to
+// a single output element C(m, n):
 //
 //         A  (M x K)                B  (K x N)              C = A * B  (M x N)
 //      . . . . . . . .           . . . . . . . .           . . . . . . . .
@@ -41,107 +37,81 @@ namespace mma = ck_tile::core::arch::mma;
 //      . . . . . . . .           . . . . . . . .           . . . . . . . .
 //         A(m,k) = 1                B(k,n) = 1                C(m,n) = 1
 //
-// The kernel uses RegisterMap to scatter A and B into the correct (lane, vecIdx) positions
-// of the MMA fragment registers, executes the intrinsic, then uses RegisterMap again to
+// The kernel uses TileDistrEncRegMap to scatter A and B into the correct (lane, vecIdx) positions
+// of the MMA fragment registers, executes the intrinsic, then uses TileDistrEncRegMap again to
 // gather back into C matrix. The position of "1" in C is checked against the expected (m, n)
 // location.
-
-namespace {
 
 /**
  * @class MmaLayoutTestKernel
  * @brief Device kernel that performs C = AB using a given Mma op
- *
- * @tparam ADataType     Data type of tensor A elements
- * @tparam BDataType     Data type of tensor B elements
- * @tparam CDataType     Data type of tensor C elements
- * @tparam FragM         M-dimension of the MMA tile
- * @tparam FragN         N-dimension of the MMA tile
- * @tparam FragK         K-dimension of the MMA tile
- * @tparam BlockSize     HIP block size
+ * @tparam MmaOp Intrinsic (amdgcn_mma) to be tested
  */
-template <typename ADataType,
-          typename BDataType,
-          typename CDataType,
-          uint32_t FragM,
-          uint32_t FragN,
-          uint32_t FragK,
-          uint32_t BlockSize>
+template <typename MmaOp> // TODO: C++20 concept for MmaOp
 struct MmaLayoutTestKernel
 {
-    static constexpr int kBlockSize = BlockSize;
+    static constexpr int kBlockSize = MmaOp::WaveSize;
 
     __device__ void operator()(uint32_t* error_flags) const
     {
-        using Selector =
-            mma::MmaDefaultSelector<ADataType,
-                                    BDataType,
-                                    CDataType,
-                                    FragM,
-                                    FragN,
-                                    FragK,
-                                    decltype(ck_tile::core::arch::get_compiler_target()),
-                                    mma::MmaOpFamily::DENSE>;
-        using MmaOp = typename Selector::SelectedOp;
+        using ARegMap = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::AWarpDstrEncoding>;
+        using BRegMap = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::BWarpDstrEncoding>;
+        using CRegMap = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::CWarpDstrEncoding>;
 
-        if constexpr(mma::MmaOpTraits<MmaOp>::IsSupported)
+        if constexpr(MmaOpTraits<MmaOp>::IsSupported)
         {
-            using AVecType                = typename MmaOp::AVecType;
-            using BVecType                = typename MmaOp::BVecType;
-            using CVecType                = typename MmaOp::CVecType;
-            constexpr uint32_t a_vec_size = vector_traits<AVecType>::vector_size;
-            constexpr uint32_t b_vec_size = vector_traits<BVecType>::vector_size;
-            constexpr uint32_t c_vec_size = vector_traits<CVecType>::vector_size;
+            using AVecType               = typename MmaOp::AVecType;
+            using BVecType               = typename MmaOp::BVecType;
+            using CVecType               = typename MmaOp::CVecType;
+            constexpr index_t a_vec_size = vector_traits<AVecType>::vector_size;
+            constexpr index_t b_vec_size = vector_traits<BVecType>::vector_size;
+            constexpr index_t c_vec_size = vector_traits<CVecType>::vector_size;
 
-            const uint32_t lane = threadIdx.x;
+            const index_t lane = threadIdx.x;
 
             AVecType a_frag{};
             BVecType b_frag{};
             CVecType c_frag{};
 
             // get (m, k, n), where "1" should be placed for this block
-            const uint32_t case_idx = static_cast<uint32_t>(blockIdx.x);
-            const uint32_t m        = case_idx / (MmaOp::kK * MmaOp::kN);
-            const uint32_t k        = (case_idx / MmaOp::kN) % MmaOp::kK;
-            const uint32_t n        = case_idx % MmaOp::kN;
+            const index_t case_idx = blockIdx.x;
+            const index_t m        = case_idx / (MmaOp::kK * MmaOp::kN);
+            const index_t k        = (case_idx / MmaOp::kN) % MmaOp::kK;
+            const index_t n        = case_idx % MmaOp::kN;
 
             // place a single "1" in A/B fragments using (lane, vecIdx) -> (row, col) mapping
-            for(uint32_t v = 0; v < a_vec_size; ++v)
+            for(index_t v = 0; v < a_vec_size; ++v)
             {
-                auto a_coords = RegisterMap<MmaOp>::Register2AMap(lane, v);
-                if(static_cast<uint32_t>(a_coords[0]) == m &&
-                   static_cast<uint32_t>(a_coords[1]) == k)
+                auto a_coords = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
+                if(a_coords[0] == m && a_coords[1] == k)
                 {
-                    a_frag[v] = static_cast<ADataType>(1);
+                    a_frag[v] = 1;
                 }
             }
 
-            for(uint32_t v = 0; v < b_vec_size; ++v)
+            for(index_t v = 0; v < b_vec_size; ++v)
             {
-                auto b_coords = RegisterMap<MmaOp>::Register2BMap(lane, v);
-                if(static_cast<uint32_t>(b_coords[0]) == n &&
-                   static_cast<uint32_t>(b_coords[1]) == k)
+                auto b_coords = BRegMap::calc_matrix_indices_from_lane_vector(lane, v);
+                if(b_coords[0] == n && b_coords[1] == k)
                 {
-                    b_frag[v] = static_cast<BDataType>(1);
+                    b_frag[v] = 1;
                 }
             }
 
             c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
 
-            uint32_t err        = 0;
-            const CDataType tol = static_cast<CDataType>(
-                1.0e-1f); // TODO: this tolerance might not be suitable for all data types and
-                          // should be revisited if we add more configurations
-            for(uint32_t v = 0; v < c_vec_size; ++v)
-            {
-                auto c_coords    = RegisterMap<MmaOp>::Register2CMap(lane, v);
-                const uint32_t i = static_cast<uint32_t>(c_coords[0]);
-                const uint32_t j = static_cast<uint32_t>(c_coords[1]);
+            // TODO: this tolerance might not be suitable for all data types and
+            // should be revisited if we add more configurations
+            const float tol = 1.0e-1f;
+            index_t err     = 0;
 
-                const CDataType expected =
-                    (i == m && j == n) ? static_cast<CDataType>(1) : static_cast<CDataType>(0);
-                const CDataType value = static_cast<CDataType>(c_frag[v]);
-                if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
+            for(index_t v = 0; v < c_vec_size; ++v)
+            {
+                auto c_coords = CRegMap::calc_matrix_indices_from_lane_vector(lane, v);
+
+                const float expected = (c_coords[0] == m && c_coords[1] == n) ? 1 : 0;
+                const float value    = static_cast<float>(c_frag[v]);
+                if(fabsf(value - expected) > tol)
                 {
                     err = 1;
                 }
@@ -165,43 +135,25 @@ struct MmaLayoutTestKernel
  *   2. Executes MMA intrinsic to compute C tensor.
  *   3. Checks if C has the 1 in the expected position.
  *
- * @tparam Selector  Selector for the Mma operation
- * @return true if the test ran on hardware; false if skipped (no device or unsupported)
+ * @tparam MmaOp Intrinsic (amdgcn_mma) to be tested
  */
-template <typename Selector>
-bool run_mma_layout_test()
+template <typename MmaOp> // TODO: C++20 concept for MmaOp
+void run_mma_layout_test()
 {
-    using MmaOp                       = typename Selector::SelectedOp;
-    using MmaTraits                   = mma::MmaOpTraits<MmaOp>;
-    using ADataType                   = typename MmaOp::ADataType;
-    using BDataType                   = typename MmaOp::BDataType;
-    using CDataType                   = typename MmaOp::CDataType;
-    constexpr uint32_t FragM          = MmaOp::kM;
-    constexpr uint32_t FragN          = MmaOp::kN;
-    constexpr uint32_t FragK          = MmaOp::kK;
-    constexpr auto selector_target_id = MmaTraits::CompilerTarget::TARGET_ID;
-    constexpr auto selector_wave_size = MmaTraits::CompilerTarget::WAVE_SIZE_ID;
+    EXPECT_TRUE(MmaOpTraits<MmaOp>::IsSupported) << "Unsupported MmaOp! Bad MmaOp in list!\n";
 
     int device_count = 0;
     hipDevice_t device{};
     HIP_CHECK_ERROR(hipGetDevice(&device));
     HIP_CHECK_ERROR(hipGetDeviceCount(&device_count));
-
     hipDeviceProp_t props{};
     HIP_CHECK_ERROR(hipGetDeviceProperties(&props, device));
+    EXPECT_EQ(props.warpSize, static_cast<int>(MmaOp::WaveSize))
+        << "Device wavesize " << props.warpSize << " != Mma wavesize " << MmaOp::WaveSize;
 
-    const auto runtime_target =
-        ck_tile::core::arch::hip_device_prop_gcn_arch_name_to_amdgcn_target_id(props.gcnArchName);
-    const bool has_device = device_count > 0;
+    EXPECT_TRUE(device_count > 0) << "No device found!";
 
-    if(!has_device || runtime_target == ck_tile::core::arch::amdgcn_target_id::HOST ||
-       runtime_target != selector_target_id ||
-       props.warpSize != static_cast<int>(selector_wave_size))
-    {
-        return false;
-    }
-
-    constexpr uint32_t total_cases = FragM * FragK * FragN;
+    constexpr uint32_t total_cases = MmaOp::kM * MmaOp::kN * MmaOp::kK;
     ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
     std::vector<uint32_t> h_errors(total_cases, 0u);
 
@@ -209,21 +161,11 @@ bool run_mma_layout_test()
 
     std::ignore = hipGetLastError();
 
-    using Kernel = MmaLayoutTestKernel<ADataType,
-                                       BDataType,
-                                       CDataType,
-                                       FragM,
-                                       FragN,
-                                       FragK,
-                                       static_cast<int>(selector_wave_size)>;
+    using Kernel = MmaLayoutTestKernel<MmaOp>;
 
-    std::ignore =
-        ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
-                               ck_tile::make_kernel(Kernel{},
-                                                    dim3(total_cases),
-                                                    dim3(static_cast<int>(selector_wave_size)),
-                                                    0,
-                                                    d_error_ptr));
+    std::ignore = ck_tile::launch_kernel(
+        ck_tile::stream_config{nullptr, false, 0, 0, 1},
+        ck_tile::make_kernel(Kernel{}, dim3(total_cases), dim3(MmaOp::WaveSize), 0, d_error_ptr));
 
     HIP_CHECK_ERROR(hipMemcpyAsync(
         h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
@@ -231,74 +173,28 @@ bool run_mma_layout_test()
 
     for(uint32_t case_idx = 0; case_idx < total_cases; ++case_idx)
     {
-        const uint32_t m = case_idx / (FragK * FragN);
-        const uint32_t k = (case_idx / FragN) % FragK;
-        const uint32_t n = case_idx % FragN;
+        const uint32_t m = case_idx / (MmaOp::kK * MmaOp::kN);
+        const uint32_t k = (case_idx / MmaOp::kN) % MmaOp::kK;
+        const uint32_t n = case_idx % MmaOp::kN;
 
         EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
     }
-
-    return true;
 }
 
-} // namespace
-
-// ==================== Test configurations per target ====================
-// TODO: currently we have only 1 specific target per test. This should be revisited to enable all
-// the targets within the family (gfx12, gfx11, gfx9)
-using MmaGfx1201CompilerTarget = decltype(ck_tile::core::arch::make_amdgcn_gfx12_target<
-                                          ck_tile::core::arch::amdgcn_target_id::GFX1201>());
-using MmaGfx90aCompilerTarget  = decltype(ck_tile::core::arch::make_amdgcn_gfx9_target<
-                                          ck_tile::core::arch::amdgcn_target_id::GFX90A>());
-using MmaGfx1100CompilerTarget = decltype(ck_tile::core::arch::make_amdgcn_gfx11_target<
-                                          ck_tile::core::arch::amdgcn_target_id::GFX1100>());
-
-using MmaGfx1201Selector = mma::MmaDefaultSelector<ck::fp16_t,
-                                                   ck::fp16_t,
-                                                   ck::fp32_t,
-                                                   16u,
-                                                   16u,
-                                                   16u,
-                                                   MmaGfx1201CompilerTarget,
-                                                   mma::MmaOpFamily::DENSE>;
-using MmaGfx90aSelector  = mma::MmaDefaultSelector<ck::fp16_t,
-                                                   ck::fp16_t,
-                                                   ck::fp32_t,
-                                                   16u,
-                                                   16u,
-                                                   16u,
-                                                   MmaGfx90aCompilerTarget,
-                                                   mma::MmaOpFamily::DENSE>;
-using MmaGfx1100Selector = mma::MmaDefaultSelector<ck::fp16_t,
-                                                   ck::fp16_t,
-                                                   ck::fp32_t,
-                                                   16u,
-                                                   16u,
-                                                   16u,
-                                                   MmaGfx1100CompilerTarget,
-                                                   mma::MmaOpFamily::DENSE>;
-
+// List of intrinsics to test.
 // clang-format off
-using KernelTypes = ::testing::Types<
-    MmaGfx1201Selector,
-    MmaGfx90aSelector,
-    MmaGfx1100Selector
-    >;
+using Gfx9Intrinsics = ::testing::Types<
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target90a, MmaOpFamily::DENSE> // mfma_f32_16x16x16f16
+>;
+using Gfx11Intrinsics = ::testing::Types<
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target11,  MmaOpFamily::DENSE> // wmma_f32_16x16x16_f16_w32
+>;
+using Gfx12Intrinsics = ::testing::Types<
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target12,  MmaOpFamily::DENSE>  // wmma_f32_16x16x16_f16_w32_gfx12
+>;
 // clang-format on
 
-template <typename Selector>
+template <typename MmaOp>
 class TestMmaLayout : public ::testing::Test
 {
 };
-
-TYPED_TEST_SUITE(TestMmaLayout, KernelTypes);
-
-TYPED_TEST(TestMmaLayout, Mma_16x16x16_F16_F16_F32)
-{
-    bool executed = run_mma_layout_test<TypeParam>();
-
-    if(!executed)
-    {
-        GTEST_SKIP() << "No supported HIP device found. Skipping test.";
-    }
-}
