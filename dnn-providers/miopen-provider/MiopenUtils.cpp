@@ -90,33 +90,33 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     case PM::RELU_FWD:
     case PM::RELU_BWD:
     {
-        if(attrs.relu_lower_clip() && attrs.relu_upper_clip())
+        auto lowerClip = attrs.relu_lower_clip();
+        auto upperClip = attrs.relu_upper_clip();
+        auto lowerClipSlope = attrs.relu_lower_clip_slope();
+
+        if(lowerClip && upperClip)
         {
             // CLAMP
             // act(x) = max(\alpha, min(\beta, x))
             return ActivationParams{miopenActivationCLAMP,
-                                    static_cast<double>(*attrs.relu_lower_clip()),
-                                    static_cast<double>(*attrs.relu_upper_clip()),
+                                    static_cast<double>(*lowerClip),
+                                    static_cast<double>(*upperClip),
                                     0.0};
         }
-        if(attrs.relu_upper_clip())
+        if(upperClip)
         {
             // Clipped ReLU
             // act(x) = max(0, min(\alpha, x))
-            return ActivationParams{miopenActivationCLIPPEDRELU,
-                                    static_cast<double>(*attrs.relu_upper_clip()),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                miopenActivationCLIPPEDRELU, static_cast<double>(*upperClip), 0.0, 0.0};
         }
-        if(attrs.relu_lower_clip_slope())
+        if(lowerClipSlope)
         {
             // Leaky ReLU
-            return ActivationParams{miopenActivationLEAKYRELU,
-                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                miopenActivationLEAKYRELU, static_cast<double>(*lowerClipSlope), 0.0, 0.0};
         }
-        if(attrs.relu_lower_clip().has_value() && attrs.relu_lower_clip().value() != 0.f)
+        if(lowerClip && *lowerClip != 0.f)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,

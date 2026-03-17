@@ -201,7 +201,7 @@ public:
         std::optional<float> attnScaleValue;
         if(nodeAttributes->attn_scale_value().has_value())
         {
-            attnScaleValue = nodeAttributes->attn_scale_value().value();
+            attnScaleValue = nodeAttributes->attn_scale_value();
         }
 
         const auto* attnMaskPtr = nodeAttributes->attn_mask_tensor_uid().has_value()

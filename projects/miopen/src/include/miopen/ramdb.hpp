@@ -157,14 +157,17 @@ class DbTimer<RamDb>
     template <class TFunc>
     static auto Measure(const std::string& funcName, TFunc&& func)
     {
-        if(!miopen::IsLogging(LoggingLevel::Info2))
-            return func();
-
-        const auto start = std::chrono::high_resolution_clock::now();
-        auto ret         = func();
-        const auto end   = std::chrono::high_resolution_clock::now();
-        MIOPEN_LOG_I2("Db::" << funcName << " time: " << (end - start).count() * .000001f << " ms");
-        return ret;
+        const bool logging = miopen::IsLogging(LoggingLevel::Info2);
+        const auto start   = logging ? std::chrono::high_resolution_clock::now()
+                                     : std::chrono::high_resolution_clock::time_point{};
+        auto ret           = func();
+        if(logging)
+        {
+            const auto end = std::chrono::high_resolution_clock::now();
+            MIOPEN_LOG_I2("Db::" << funcName << " time: " << (end - start).count() * .000001f
+                                 << " ms");
+        }
+        return std::move(ret); // NOLINT(clang-analyzer-cplusplus.Move)
     }
 
 public:

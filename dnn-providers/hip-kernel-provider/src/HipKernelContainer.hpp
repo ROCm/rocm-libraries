@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "HipKernelHandle.hpp"
+#include "IDevicePropertyProvider.hpp"
+#include "hip/IKernelCompiler.hpp"
 
 namespace hip_kernel_provider
 {
@@ -41,12 +43,15 @@ private:
     {
         int64_t id;
         std::function<std::unique_ptr<
-            hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>>()>
+            hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>>(
+            const IKernelCompiler&, const IDevicePropertyProvider&)>
             createEngine;
     };
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
 
+    std::unique_ptr<IDevicePropertyProvider> _devicePropertyProvider;
+    std::unique_ptr<IKernelCompiler> _kernelCompiler;
     std::unique_ptr<
         hipdnn_plugin_sdk::EngineManager<HipKernelHandle, HipKernelSettings, HipKernelContext>>
         _engineManager;
