@@ -1325,7 +1325,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -1337,7 +1337,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _qDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _qDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 
