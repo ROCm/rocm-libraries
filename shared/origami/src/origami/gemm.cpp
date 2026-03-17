@@ -1251,6 +1251,7 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   // toward ~0.9 regardless of spatial sharing.
   bool enable_batched_amp = (problem.batch > 1);
   if (enable_batched_amp && concurrent_load < l2_cap) {
+    const double amp_ceiling = heuristic.l2_amp_ceiling_batched;
     const double headroom  = 1.0 - concurrent_load / l2_cap;
     const double amp_boost = headroom * headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
@@ -1263,6 +1264,7 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   // toward ~0.4 regardless of spatial sharing.
   bool enable_split_k_amp = (l2_tiles.k > 1 && l2_tiles.m * l2_tiles.n < 5);
   if (enable_split_k_amp && concurrent_load < l2_cap) {
+    const double amp_ceiling = heuristic.l2_amp_ceiling_k_split;
     const double headroom  = 1.0 - concurrent_load / l2_cap;
     const double amp_boost = headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
