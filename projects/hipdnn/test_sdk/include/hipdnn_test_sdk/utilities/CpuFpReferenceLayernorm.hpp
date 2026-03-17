@@ -65,6 +65,11 @@ public:
                 "normalizedDimCount must be between 1 and the number of tensor dimensions.");
         }
 
+        if(scale != nullptr && bias != nullptr && scale->dims().size() != bias->dims().size())
+        {
+            throw std::runtime_error("Scale and bias tensors must have the same rank.");
+        }
+
         // Split dimensions into batch dims and normalized dims
         std::vector<int64_t> batchDims;
         std::vector<int64_t> normalizedDims;
