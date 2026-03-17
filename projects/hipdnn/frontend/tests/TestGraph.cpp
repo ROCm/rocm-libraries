@@ -6253,7 +6253,7 @@ TEST_F(TestGraph, MoveConstruction)
     EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
     EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(originalGraph.get_name(), "");
+    EXPECT_EQ(originalGraph.get_name(), ""); // NOLINT(bugprone-use-after-move)
     EXPECT_TRUE(originalGraph.getTensorsByName().empty());
 }
 

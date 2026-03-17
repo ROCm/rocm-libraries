@@ -68,8 +68,11 @@ TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
     status = hipdnnCreate(&handle);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
-    status = hipdnnBackendSetAttribute(
-        descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    status = hipdnnBackendSetAttribute(descriptor,
+                                       HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                       HIPDNN_TYPE_HANDLE,
+                                       1,
+                                       static_cast<const void*>(&handle));
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     status = hipdnnBackendFinalize(descriptor);
@@ -150,8 +153,11 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  desc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
 
@@ -203,8 +209,11 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  desc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
 
@@ -259,8 +268,11 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuf
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  desc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
 
@@ -304,8 +316,11 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  desc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
 

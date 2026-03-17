@@ -42,14 +42,22 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<PointwiseOperationDescriptor>();
     auto desc = wrapper->asDescriptor<PointwiseOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &in0Desc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &out0Desc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &in1Desc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &in2Desc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&in0Desc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&out0Desc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&in1Desc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&in2Desc));
 
     auto operation = HIPDNN_POINTWISE_ADD;
     desc->setAttribute(HIPDNN_ATTR_POINTWISE_MODE, HIPDNN_TYPE_POINTWISE_MODE, 1, &operation);
@@ -71,7 +79,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -102,8 +113,10 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -146,8 +159,10 @@ TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();

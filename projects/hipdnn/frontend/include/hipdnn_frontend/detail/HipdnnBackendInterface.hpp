@@ -58,6 +58,12 @@ public:
                                                    hipdnnPluginLoadingMode_ext_t mode)
         = 0;
 
+    virtual hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
+                                                         size_t* numPluginPaths,
+                                                         char** pluginPaths,
+                                                         size_t* maxStringLen)
+        = 0;
+
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     static inline std::shared_ptr<IHipdnnBackend> backendInstance;
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()

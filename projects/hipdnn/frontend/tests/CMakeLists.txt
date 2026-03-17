@@ -67,6 +67,7 @@ add_executable(
     TestRMSNormAttributes.cpp
     TestRMSNormNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
+    TestSetEnginePluginPaths.cpp
     TestTensorAttributes.cpp
     TestTensorValueAttributes.cpp
     TestTypes.cpp

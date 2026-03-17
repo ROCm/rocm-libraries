@@ -503,7 +503,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawX));
+                                       static_cast<void*>(&rawX)));
     std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
@@ -870,7 +870,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -882,6 +882,6 @@ TEST_F(TestConvolutionWrwOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestConvolutionWrwOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _xDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _xDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
