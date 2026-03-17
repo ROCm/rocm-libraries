@@ -1065,7 +1065,8 @@ struct ConvEquivalenceParams
     hipdnnDataType_t computeDataType;
 };
 
-inline std::ostream& operator<<(std::ostream& os, const ConvEquivalenceParams& p)
+// Outside anonymous namespace so ADL finds it for gtest printing
+std::ostream& operator<<(std::ostream& os, const ConvEquivalenceParams& p) // NOLINT(misc-use-internal-linkage)
 {
     return os << p.name;
 }
@@ -1306,10 +1307,15 @@ TEST_P(TestGraphDescriptorEquivalence, ConvOpEquivalence)
     verifyEquivalence(GetParam());
 }
 
+namespace
+{
+
 std::string convEquivalenceParamName(const ::testing::TestParamInfo<ConvEquivalenceParams>& info)
 {
     return info.param.name;
 }
+
+} // namespace
 
 INSTANTIATE_TEST_SUITE_P(ConvOps,
                          TestGraphDescriptorEquivalence,
