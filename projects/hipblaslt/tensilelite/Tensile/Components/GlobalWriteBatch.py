@@ -1707,6 +1707,8 @@ class GlobalWriteBatchWriter:
 
       elif kernel["ProblemType"]["DestDataType"].isInt8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          # 32bit vgpr can hold 4 bfloat8 values, divide by 4 to get the correct vgpr index
+          dataV = ss.elementData[elementIdx] + int((vi/4)*ss.cfg.numVgprsPerDataPerVI)
           if (vi%4) != 3:
             module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=hex(vi * 8), comment="value = %u"%(vi * 8)))
             module.add(VBfeI32(dst=vgpr(tmpVgpr), src0=vgpr(dataV+0), src1=vgpr(tmpVgpr+1), src2=8, comment="int8 to int32"))
@@ -1781,6 +1783,8 @@ class GlobalWriteBatchWriter:
             if self.parentWriter.states.archCaps["NoSDWA"]:
               # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
               sb = 0 if vi%4 == 0 else 1
+              # 32bit vgpr can hold 4 bfloat8 values, divide by 4 to get the correct vgpr index
+              dataV = ss.elementData[elementIdx] + int((vi/4)*ss.cfg.numVgprsPerDataPerVI)
               module.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[sb])))
             else:
               # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
@@ -1815,6 +1819,8 @@ class GlobalWriteBatchWriter:
             if self.parentWriter.states.archCaps["NoSDWA"]:
               # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
               sb = 0 if vi%4 == 0 else 1
+              # 32bit vgpr can hold 4 bfloat8 values, divide by 4 to get the correct vgpr index
+              dataV = ss.elementData[elementIdx] + int((vi/4)*ss.cfg.numVgprsPerDataPerVI)
               module.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[sb])))
             else:
               # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
