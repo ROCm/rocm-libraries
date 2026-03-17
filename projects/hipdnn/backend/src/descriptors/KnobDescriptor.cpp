@@ -28,6 +28,27 @@ void KnobDescriptor::finalize()
                    HIPDNN_STATUS_BAD_PARAM,
                    "KnobDescriptor::finalize() failed: Default value is not set.");
 
+    if(_minValueInt.has_value() && _maxValueInt.has_value())
+    {
+        THROW_IF_TRUE(*_minValueInt > *_maxValueInt,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "KnobDescriptor::finalize() failed: "
+                      "MINIMUM_VALUE (INT64) > MAXIMUM_VALUE (INT64).");
+    }
+    if(_minValueDouble.has_value() && _maxValueDouble.has_value())
+    {
+        THROW_IF_TRUE(*_minValueDouble > *_maxValueDouble,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "KnobDescriptor::finalize() failed: "
+                      "MINIMUM_VALUE (DOUBLE) > MAXIMUM_VALUE (DOUBLE).");
+    }
+    if(_stride.has_value())
+    {
+        THROW_IF_TRUE(*_stride <= 0,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "KnobDescriptor::finalize() failed: STRIDE must be positive (> 0).");
+    }
+
     HipdnnBackendDescriptorImpl<KnobDescriptor>::finalize();
 }
 
@@ -126,11 +147,15 @@ void KnobDescriptor::setDescription(hipdnnBackendAttributeType_t attributeType,
                   "elementCount exceeds MAX_DESCRIPTION_LENGTH ("
                       + std::to_string(MAX_DESCRIPTION_LENGTH) + ")");
 
-    if(elementCount == 0 || arrayOfElements == nullptr)
+    if(elementCount == 0)
     {
         _description.clear();
         return;
     }
+
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "KnobDescriptor::setAttribute(): arrayOfElements is null");
 
     _description = std::string(static_cast<const char*>(arrayOfElements),
                                static_cast<size_t>(elementCount));
@@ -309,8 +334,7 @@ void KnobDescriptor::setDeprecated(hipdnnBackendAttributeType_t attributeType,
 
     bool tmp;
     std::memcpy(&tmp, arrayOfElements, sizeof(bool));
-    _deprecated    = tmp;
-    _deprecatedSet = true;
+    _deprecated = tmp;
 }
 
 void KnobDescriptor::setValidValuesInt(hipdnnBackendAttributeType_t attributeType,
@@ -325,11 +349,15 @@ void KnobDescriptor::setValidValuesInt(hipdnnBackendAttributeType_t attributeTyp
                 HIPDNN_STATUS_BAD_PARAM,
                 "KnobDescriptor::setAttribute(): elementCount is negative");
 
-    if(elementCount == 0 || arrayOfElements == nullptr)
+    if(elementCount == 0)
     {
         _validValuesInt.clear();
         return;
     }
+
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "KnobDescriptor::setAttribute(): arrayOfElements is null");
 
     auto* values = static_cast<const int64_t*>(arrayOfElements);
     _validValuesInt.assign(values, values + static_cast<size_t>(elementCount));
@@ -808,19 +836,18 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
                                           int64_t* elementCount,
                                           void* arrayOfElements) const
 {
-    // Two-call pattern:
-    //   First call: requestedElementCount=0, arrayOfElements=nullptr → returns count of strings
-    //   Subsequent: requestedElementCount=index+1 (1-based), arrayOfElements=nullptr → returns
-    //               byte length of string at [index]
-    //   Final: requestedElementCount=len, arrayOfElements!=nullptr → copies string at [index]
+    // Three-step retrieval protocol:
+    //   Step 1 (total count):  requestedElementCount=0, arrayOfElements=nullptr
+    //                          → returns total number of strings in elementCount
+    //   Step 2 (size query):   requestedElementCount=N (1-based index, N>0), arrayOfElements=nullptr
+    //                          → returns byte length of string[N-1] (incl. null) in elementCount
+    //                            stores N-1 as the pending copy index
+    //   Step 3 (copy):         requestedElementCount=bufferSize, arrayOfElements=buffer
+    //                          → copies string from pending index into buffer;
+    //                            requestedElementCount is now the caller's buffer capacity,
+    //                            enabling safe bounded copy via copyMaxSizeWithNullTerminator.
     //
-    // Encoding: use requestedElementCount as the 1-based string index when arrayOfElements is
-    // null, and as the buffer size when arrayOfElements is non-null (with index stored
-    // implicitly as the position of the last getValidValuesString call).
-    //
-    // Simpler design: use requestedElementCount=0 → return total count,
-    //                 requestedElementCount=N (N>0) with null buffer → return length of string[N-1]
-    //                 requestedElementCount=N (N>0) with non-null buffer → copy string[N-1]
+    // Callers MUST perform step 2 immediately before step 3 for each string.
 
     THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
                    HIPDNN_STATUS_BAD_PARAM,
@@ -833,42 +860,47 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
 
     const auto totalCount = static_cast<int64_t>(_validValuesString.size());
 
-    // requestedElementCount == 0 → return total number of strings
+    // Step 1: requestedElementCount == 0 → return total number of strings
     if(requestedElementCount == 0)
     {
         THROW_IF_NULL(elementCount,
                       HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                       "KnobDescriptor::getAttribute(): elementCount is null");
-        *elementCount = totalCount;
+        *elementCount             = totalCount;
+        _pendingStringCopyIndex   = -1;
         return;
     }
-
-    // requestedElementCount > 0: treat as 1-based index into valid string list
-    const int64_t index = requestedElementCount - 1;
-    THROW_IF_TRUE(index >= totalCount,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "KnobDescriptor::getAttribute(): index out of range for VALID_VALUES_STRING");
-
-    const auto& str = _validValuesString[static_cast<size_t>(index)];
 
     if(arrayOfElements == nullptr)
     {
-        // Return byte count needed (size + null terminator)
+        // Step 2: requestedElementCount is 1-based index; return byte size and store index
+        const int64_t index = requestedElementCount - 1;
+        THROW_IF_TRUE(index >= totalCount,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "KnobDescriptor::getAttribute(): index out of range for VALID_VALUES_STRING");
         THROW_IF_NULL(elementCount,
                       HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                       "KnobDescriptor::getAttribute(): elementCount is null");
-        *elementCount = static_cast<int64_t>(str.size() + 1);
+        const auto& str    = _validValuesString[static_cast<size_t>(index)];
+        *elementCount          = static_cast<int64_t>(str.size() + 1);
+        _pendingStringCopyIndex = index;
         return;
     }
 
-    // Copy into provided buffer — requestedElementCount is the buffer size
-    // (but we already used it as an index above; re-read the string size for copy)
-    // Note: we can't know the buffer size separately here, so copy the full string + NUL
-    const auto strLen = str.size() + 1;
-    std::memcpy(arrayOfElements, str.c_str(), strLen);
+    // Step 3: requestedElementCount is the caller's buffer capacity; copy pending string
+    THROW_IF_TRUE(_pendingStringCopyIndex < 0 || _pendingStringCopyIndex >= totalCount,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "KnobDescriptor::getAttribute(): "
+                  "must query string size (null buffer) before copying VALID_VALUES_STRING");
+
+    const auto& str = _validValuesString[static_cast<size_t>(_pendingStringCopyIndex)];
+    auto maxSize    = static_cast<size_t>(requestedElementCount);
+    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+        static_cast<char*>(arrayOfElements), str.c_str(), maxSize);
+
     if(elementCount != nullptr)
     {
-        *elementCount = static_cast<int64_t>(strLen);
+        *elementCount = static_cast<int64_t>(std::min(str.size() + 1, maxSize));
     }
 }
 
@@ -1003,6 +1035,49 @@ std::string KnobDescriptor::toString() const
     std::string str = "KnobDescriptor: {knobId=" + _knobId;
     str += ", defaultValueType=" + std::to_string(static_cast<int>(_defaultValue.type));
     str += ", deprecated=" + std::string(_deprecated ? "true" : "false");
+
+    if(_minValueInt.has_value() || _maxValueInt.has_value() || _stride.has_value()
+       || !_validValuesInt.empty())
+    {
+        str += ", intConstraint:{";
+        if(_minValueInt.has_value())
+        {
+            str += "min=" + std::to_string(*_minValueInt) + " ";
+        }
+        if(_maxValueInt.has_value())
+        {
+            str += "max=" + std::to_string(*_maxValueInt) + " ";
+        }
+        if(_stride.has_value())
+        {
+            str += "step=" + std::to_string(*_stride) + " ";
+        }
+        str += "validValues[" + std::to_string(_validValuesInt.size()) + "]}";
+    }
+    if(_minValueDouble.has_value() || _maxValueDouble.has_value())
+    {
+        str += ", floatConstraint:{";
+        if(_minValueDouble.has_value())
+        {
+            str += "min=" + std::to_string(*_minValueDouble) + " ";
+        }
+        if(_maxValueDouble.has_value())
+        {
+            str += "max=" + std::to_string(*_maxValueDouble);
+        }
+        str += "}";
+    }
+    if(!_validValuesString.empty() || _stringMaxLength.has_value())
+    {
+        str += ", stringConstraint:{validValues["
+               + std::to_string(_validValuesString.size()) + "]";
+        if(_stringMaxLength.has_value())
+        {
+            str += " maxLen=" + std::to_string(*_stringMaxLength);
+        }
+        str += "}";
+    }
+
     str += "}";
     return str;
 }

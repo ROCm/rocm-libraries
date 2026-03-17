@@ -68,8 +68,7 @@ private:
     bool _defaultValueSet = false;
 
     // Deprecation flag
-    bool _deprecated          = false;
-    bool _deprecatedSet       = false;
+    bool _deprecated = false;
 
     // Numeric constraint fields
     std::optional<int64_t> _maxValueInt;
@@ -82,6 +81,10 @@ private:
     std::vector<int64_t> _validValuesInt;
     std::vector<std::string> _validValuesString;
     std::optional<int64_t> _stringMaxLength;
+
+    // State for getValidValuesString: tracks the last string index queried for size,
+    // so the subsequent copy call can use requestedElementCount as the buffer size.
+    mutable int64_t _pendingStringCopyIndex = -1;
 
     // Private helpers — set
     void setKnobId(hipdnnBackendAttributeType_t attributeType,
