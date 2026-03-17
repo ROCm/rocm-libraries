@@ -3,18 +3,16 @@
 #pragma once
 
 #include "Node.hpp"
-#include <algorithm>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionWgradPacker.hpp>
-#include <numeric>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode>
+class ConvolutionWgradNode : public BaseNode<ConvolutionWgradNode, NodeType::CONVOLUTION_WGRAD>
 {
 public:
     ConvWgradAttributes attributes;

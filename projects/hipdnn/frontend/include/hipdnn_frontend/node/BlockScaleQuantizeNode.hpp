@@ -13,7 +13,8 @@
 
 namespace hipdnn_frontend::graph
 {
-class BlockScaleQuantizeNode : public BaseNode<BlockScaleQuantizeNode>
+class BlockScaleQuantizeNode
+    : public BaseNode<BlockScaleQuantizeNode, NodeType::BLOCK_SCALE_QUANTIZE>
 {
 public:
     BlockScaleQuantizeAttributes attributes;
