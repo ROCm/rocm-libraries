@@ -374,13 +374,13 @@ bwd_result fmha_bwd_run(mode_enum mode,
     ck_tile::DeviceMem bias_buf(bias_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem o_buf(o_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem lse_buf(lse_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem sink_buf(sink_host.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem sink_buf(sink_grad ? sink_host.get_element_space_size_in_bytes() : 0);
     ck_tile::DeviceMem d_buf(d_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem randval_buf(randval_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem dq_buf(dq_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem dk_buf(dk_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem dv_buf(dv_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem d_sink_buf(d_sink_host.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem d_sink_buf(sink_grad ? d_sink_host.get_element_space_size_in_bytes() : 0);
     ck_tile::DeviceMem do_buf(do_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem dbias_buf(dbias_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem seqstart_q(seqstart_q_host.size() * sizeof(int32_t));
@@ -412,9 +412,10 @@ bwd_result fmha_bwd_run(mode_enum mode,
     drop_offset_buf.ToDevice(drop_prefs ? &drop_offset : nullptr);
     alibi_slope_buf.ToDevice(alibi_slope_host.data());
     if(sink_grad)
+    {
+        sink_buf.ToDevice(sink_host.data());
         d_sink_buf.ToDevice(d_sink_host.data());
-
-    sink_buf.ToDevice(sink_host.data());
+    }
 
     // clang-format off
     auto layout_str = [&](bool permute){
@@ -499,9 +500,6 @@ bwd_result fmha_bwd_run(mode_enum mode,
 
         const void* seqlen_q_ptr_dev = use_qpadding ? seqlen_q_dev.GetDeviceBuffer() : nullptr;
         const void* seqlen_k_ptr_dev = use_kpadding ? seqlen_k_dev.GetDeviceBuffer() : nullptr;
-        void* d_sink_ptr_dev         = sink_grad ? d_sink_buf.GetDeviceBuffer() : nullptr;
-        void* sink_buf_dev           = sink_grad ? sink_buf.GetDeviceBuffer() : nullptr;
-
         return fmha_bwd_args{q_buf.GetDeviceBuffer(),
                              k_buf.GetDeviceBuffer(),
                              v_buf.GetDeviceBuffer(),
@@ -517,8 +515,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
                              dv_buf.GetDeviceBuffer(),
                              dbias_buf.GetDeviceBuffer(),
                              dq_acc_buf.GetDeviceBuffer(),
-                             sink_buf_dev,
-                             d_sink_ptr_dev,
+                             sink_buf.GetDeviceBuffer(),
+                             d_sink_buf.GetDeviceBuffer(),
                              seqstart_q.GetDeviceBuffer(),
                              seqstart_k.GetDeviceBuffer(),
                              seqlen_q_ptr_dev,

@@ -44,7 +44,7 @@ struct BlockFmhaBwdOGradDotO
                                         DDramBlockWindowTmp& d_dram_block_window_tmp,
                                         const float sink_value,
                                         float p_undrop,
-                                        DDataType* atomic_sink_grad_ptr = nullptr) const
+                                        float* atomic_sink_grad_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<ODataType, remove_cvref_t<typename ODramBlockWindowTmp::DataType>> &&
@@ -115,27 +115,36 @@ struct BlockFmhaBwdOGradDotO
 
             // Compute per-query contribution: -P_sink[q] * D[q]
             // where P_sink[q] = exp(sink_value - lse[q])
-            auto sink_val_tensor = make_static_distributed_tensor<DDataType>(d_dstr);
+            // Always accumulate in float regardless of DDataType to avoid precision loss
+            // and to ensure atomicAdd works correctly on all architectures.
+            auto sink_val_tensor = make_static_distributed_tensor<float>(d_dstr);
             tile_elementwise_inout(
                 [&](auto& s_out, const auto& l_in, const auto& d_in) {
                     float p_sink = ck_tile::exp(sink_value - type_convert<float>(l_in));
-                    s_out        = type_convert<DDataType>(-p_sink * type_convert<float>(d_in));
+                    s_out        = -p_sink * type_convert<float>(d_in);
                 },
                 sink_val_tensor,
                 lse_,
                 d);
 
             // Reduce contributions held by this thread
-            DDataType thread_sum   = 0;
+            float thread_sum       = 0.f;
             constexpr auto s_spans = decltype(sink_val_tensor)::get_distributed_spans();
             sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 thread_sum += sink_val_tensor(i_idx);
             });
 
-            // Accumulate into the per-head sink gradient (multiple blocks write the same element)
+            // Warp-level reduction: fold thread_sum across lanes so only one
+            // atomicAdd per warp is issued instead of one per thread.
 #if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
-            atomicAdd(atomic_sink_grad_ptr, thread_sum);
+            const index_t warp_sz = get_warp_size();
+            for(index_t offset = warp_sz >> 1; offset > 0; offset >>= 1)
+                thread_sum += warp_shuffle_down(thread_sum, offset);
+
+            // Only lane 0 of each warp writes to global memory
+            if(get_lane_id() == 0)
+                atomicAdd(atomic_sink_grad_ptr, thread_sum);
 #endif
         }
     }

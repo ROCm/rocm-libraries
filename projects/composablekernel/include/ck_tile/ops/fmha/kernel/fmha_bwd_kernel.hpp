@@ -1615,9 +1615,9 @@ struct FmhaBwdOGradDotOKernel
         auto d_dram_window = make_tile_window(d_dram, make_tuple(number<kM0>{}), {i_m0});
 
         // nullptr when sink grad is disabled; the pipeline checks this to skip the sink path
-        DDataType* atomic_sink_grad_ptr =
+        float* atomic_sink_grad_ptr =
             kargs.d_sink_ptr == nullptr ? nullptr
-                                        : reinterpret_cast<DDataType*>(kargs.d_sink_ptr) + i_nhead;
+                                        : reinterpret_cast<float*>(kargs.d_sink_ptr) + i_nhead;
 
         // lse_ptr is always valid (also needed by the main bwd kernel).
         // The actual load happens inside the pipeline only when atomic_sink_grad_ptr != nullptr.
