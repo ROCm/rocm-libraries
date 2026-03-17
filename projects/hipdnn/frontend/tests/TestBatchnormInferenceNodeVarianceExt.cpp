@@ -772,3 +772,10 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNodeMissingY)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
+
+TEST(TestBatchnormInferenceNodeVarianceExt, GetNodeTypeReturnsBatchnormInferenceVarianceExt)
+{
+    GraphAttributes graphAttrs;
+    BatchnormInferenceNodeVarianceExt node(BatchnormInferenceAttributesVarianceExt{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT);
+}

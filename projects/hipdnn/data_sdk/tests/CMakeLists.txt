@@ -51,7 +51,7 @@ add_executable(
     utilities/TestVisitor.cpp
 )
 
-target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
 target_link_libraries(
     hipdnn_data_sdk_tests

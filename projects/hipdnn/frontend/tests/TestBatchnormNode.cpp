@@ -803,3 +803,10 @@ TEST(TestBatchnormNode, PreValidateRejectsEpsilonWithNoDimensions)
     EXPECT_TRUE(error.get_message().find("Epsilon") != std::string::npos);
     EXPECT_TRUE(error.get_message().find("dimensions are not set") != std::string::npos);
 }
+
+TEST(TestBatchnormNode, GetNodeTypeReturnsBatchnorm)
+{
+    GraphAttributes graphAttrs;
+    BatchnormNode node(BatchnormAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM);
+}
