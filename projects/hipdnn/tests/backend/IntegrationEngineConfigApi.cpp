@@ -57,7 +57,7 @@ TEST_F(IntegrationEngineConfigApi, SetEngineConfigEngine)
                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_engine),
+                                        static_cast<const void*>(&_engine)),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     test_util::createTestEngine(&_engine, &_graph, _handle, gidx, true);
@@ -65,7 +65,7 @@ TEST_F(IntegrationEngineConfigApi, SetEngineConfigEngine)
                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_engine),
+                                        static_cast<const void*>(&_engine)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -179,7 +179,7 @@ TEST_F(IntegrationEngineConfigApi, SetAttributeAfterFinalization)
                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &newEngine),
+                                        static_cast<const void*>(&newEngine)),
               HIPDNN_STATUS_NOT_INITIALIZED);
 
     if(newEngine != nullptr)

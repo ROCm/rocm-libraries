@@ -699,8 +699,121 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormBackward().SolverDbId());
 
     RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
-    // IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
-    // space between this comment and the newly registered solver(s)!
+
+    // Transposed Winograd solvers for NHWC layout support
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
+    MIOPEN_LOG_I("Registering TransposedConvBinWinograd3x3U with id=" << id);
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
+    MIOPEN_LOG_I("Registering TransposedConvBinWinogradRxS with id=" << id);
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvBinWinogradRxSf2x3g1{}, miopenConvolutionAlgoWinograd);
+    MIOPEN_LOG_I("Registering TransposedConvBinWinogradRxSf2x3g1 with id=" << id);
+    // Transposed non-tunable Winograd solvers
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd<2, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd<3, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd<4, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd<5, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd<6, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<3, 2>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<3, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<3, 4>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<3, 5>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<3, 6>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<7, 2>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<7, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<7, 2, 1, 1>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<7, 3, 1, 1>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<5, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvWinograd3x3MultipassWrW<5, 4>{},
+                       miopenConvolutionAlgoWinograd);
+    // Transposed tunable Winograd solvers
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvBinWinoRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvBinWinoRxS<3, 2>{}, miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd_xdlops<2, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd_xdlops<3, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd_xdlops<4, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd_xdlops<5, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::TransposedConvMPBidirectWinograd_xdlops<6, 3>{},
+                       miopenConvolutionAlgoWinograd);
+    //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
+    //  space between this comment and the newly registered solver(s)!
 }
 
 } // namespace solver

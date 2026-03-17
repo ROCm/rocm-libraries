@@ -185,7 +185,7 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
                        HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
                        "GraphDescriptor::setOperations: Operation descriptor not finalized");
 
-        auto graphOp = descriptors[i]->tryAsInterface<IGraphOperation>();
+        auto graphOp = descriptors[i]->tryAsGraphOperation();
         THROW_IF_NULL(graphOp,
                       HIPDNN_STATUS_NOT_SUPPORTED,
                       "GraphDescriptor::setOperations: Descriptor does not implement "
