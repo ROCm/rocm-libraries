@@ -512,17 +512,24 @@ def parse_bwd_data_instances(instances, problem_name):
         
         k1 = min(ak1, bk1)
 
+        # TODO: Do we need split image for 3D bwd data convs?
+        split_image = False
+
         # Default optimization parameters
         num_groups_to_merge = 1
         is_two_stage_instance = False
         is_explicit_gemm = False
         num_wave_groups = 1
-        split_image = False
         direct_load = False
 
         # Block GEMM pipeline parameters
-        block_gemm_pipeline_scheduler = "Intrawave"
+        block_gemm_pipeline_scheduler = args[46]
+        if block_gemm_pipeline_scheduler == "Default":
+            block_gemm_pipeline_scheduler = "Intrawave"
+
         blk_gemm_pipeline_version = "v3"
+        if block_gemm_pipeline_scheduler == "Interwave":
+            blk_gemm_pipeline_version = "v1"
 
         # Sanity check for Block GEMM pipeline parameters
         # Scheduler must be either Intrawave or Interwave.
