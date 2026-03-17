@@ -32,7 +32,7 @@
 #include <tensor_util.hpp>
 #include <miopen/reducetensor.hpp>
 #include "cpu_reduce_util.hpp"
-#include "device_prng.hpp"
+#include "device_generators/reduce_generator.hpp"
 
 #include "global_test_memory.hpp"
 #include "miopen/miopen.h"
@@ -990,6 +990,7 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
                                         prng::details::get_default_seed(),
                                         reduceOp,
                                         max_value,
+                                        inputDesc,
                                         get_handle().GetStream());
 
         in_buf.HostMirrorAsync();

@@ -50,6 +50,28 @@ struct ToDeviceType<bfloat16>
     using type = hip_bfloat16;
 };
 
+template <typename T>
+inline int ComputeNumBlocks(size_t work_items)
+{
+    int deviceId = 0;
+    MIOPEN_GTEST_HIP_ERROR(hipGetDevice(&deviceId), "Failed to get device ID");
+
+    hipDeviceProp_t props{};
+    MIOPEN_GTEST_HIP_ERROR(hipGetDeviceProperties(&props, deviceId),
+                           "Failed to get device properties");
+
+    constexpr int threadsPerBlock = 256;
+    int numBlocks                 = props.multiProcessorCount * 4;
+
+    if(work_items == 0)
+        return 0;
+
+    if(static_cast<size_t>(numBlocks) * threadsPerBlock > work_items)
+        numBlocks = static_cast<int>((work_items + threadsPerBlock - 1) / threadsPerBlock);
+
+    return (numBlocks > 0) ? numBlocks : 1;
+}
+
 template <typename DeviceT>
 __global__ void FillKernel(DeviceT* __restrict__ buffer, DeviceT value, size_t n)
 {

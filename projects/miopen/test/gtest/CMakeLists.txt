@@ -18,6 +18,7 @@ set(SOURCES
     unit_conv_solver.cpp
     global_test_memory.cpp
     device_prng.cpp
+    device_generators/reduce_generator.cpp
     )
 
 
@@ -311,4 +312,3 @@ if( NOT ENABLE_ASAN_PACKAGING )
       RENAME "CTestTestfile.cmake"
   )
 endif()
-
