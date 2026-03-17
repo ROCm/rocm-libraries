@@ -4957,7 +4957,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       sizeA = ((numASubtiles * aTileInfo.subtileSize + readSize-1) // readSize) * readSize
       sizeB = ((numBSubtiles * bTileInfo.subtileSize + readSize-1) // readSize) * readSize
       self.ldsStartOffsetB = sizeA
-      kernel["LdsNumBytes"] = (sizeA + sizeB) * kernel["NumLdsBlk"]
+      kernel["LdsNumBytes"] = int((sizeA + sizeB) * kernel["NumLdsBlk"])
       
 
     #print(self.states.a.tileInfo.getLocalSubtileId(1,0))
