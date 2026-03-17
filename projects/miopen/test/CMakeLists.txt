@@ -398,6 +398,7 @@ function(add_test_executable TEST_NAME)
     endif()
 
     add_test_command(${TEST_NAME} ${TEST_COMMAND})
+    rate_added_test(${TEST_NAME})
     add_dependencies(tests ${TEST_NAME})
     add_dependencies(check ${TEST_NAME})
     set_tests_properties(${TEST_NAME} PROPERTIES FAIL_REGULAR_EXPRESSION "FAILED")
@@ -446,6 +447,28 @@ function(add_sanitize_test TEST_SOURCE)
 endfunction()
 
 file(GLOB TEST_SOURCES *.cpp)
+
+set(LONG_TESTS
+    test_conv2d
+    test_conv2d_find2
+    test_conv3d
+    test_conv3d_find2
+    test_conv_group
+    test_soft_max
+    test_conv_for_implicit_gemm
+    test_immed_conv3d
+    test_conv3d_extra
+    test_conv_3d
+    test_conv_ck_igemm_fwd_v6r1_dlops_nchw
+    )
+
+function(rate_added_test NAME)
+    if(${NAME} IN_LIST LONG_TESTS)
+        set_tests_properties(${NAME} PROPERTIES COST 800)
+    else()
+        set_tests_properties(${NAME} PROPERTIES COST 600)
+    endif()
+endfunction()
 
 set(EXCLUDE_TESTS)
 if(NOT MIOPEN_ENABLE_SQLITE)
@@ -694,6 +717,8 @@ function(add_custom_test NAME)
         else()
             set_tests_properties(${NAME} PROPERTIES FAIL_REGULAR_EXPRESSION "FAILED")
         endif()
+
+        rate_added_test(${NAME})
     else()
         set_tests_properties(${NAME} PROPERTIES DISABLED On)
     endif()
