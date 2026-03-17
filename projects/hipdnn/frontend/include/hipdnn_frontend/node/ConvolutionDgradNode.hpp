@@ -3,17 +3,16 @@
 #pragma once
 
 #include "Node.hpp"
-#include <algorithm>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <numeric>
+#include <hipdnn_frontend/detail/ConvolutionDgradPacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionDgradNode : public BaseNode<ConvolutionDgradNode>
+class ConvolutionDgradNode : public BaseNode<ConvolutionDgradNode, NodeType::CONVOLUTION_DGRAD>
 {
 public:
     ConvDgradAttributes attributes;
@@ -350,6 +349,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createConvDgradOperation(attributes, tensorDescs, operations);
     }
 };
 

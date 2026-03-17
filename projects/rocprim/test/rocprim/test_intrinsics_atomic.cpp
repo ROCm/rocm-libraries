@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,9 @@
 #include "test_utils.hpp"
 
 #include <cstdint>
+
+// The 128-bit atomic store and atomic load are disabled for these targets.
+#if !defined(ROCPRIM_TARGET_UNKNOWN) && !defined(ROCPRIM_TARGET_SPIRV)
 
 template<typename GetPtr>
 ROCPRIM_INLINE ROCPRIM_DEVICE
@@ -183,3 +186,4 @@ TEST(RocprimAtomicTests, Flat128Bits)
             HIP_CHECK(hipGetLastError());
         });
 }
+#endif

@@ -788,32 +788,61 @@ namespace origami
         }
 
 
-        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall)
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset)
         {
-            int finalCycle = currentCycle;
-            int grStallLatencyBuffer;
-
-            if (!isStall) {
-                grStallLatencyBuffer = 1; //no stall
-            } else if (bpRead == 16) {
-                grStallLatencyBuffer = 160;
-            } else if (bpRead == 8) {
-                grStallLatencyBuffer = 80;
-            } else {
-                grStallLatencyBuffer = 40;
+            int extraIssueCycles = 0;
+            if (isSgprOffset) {
+                extraIssueCycles = 1;
             }
-
-            if (fifo.size() < (16 / numWaves)) {
-                fifo.push(currentCycle);
+            if (!isStall) {
+                return currentCycle + extraIssueCycles;
+            }
+            int finalCycle = currentCycle;
+            // GR FIFO length is 16, stall cycles is 16 cycles.
+            const int grFIFOLength = 16;
+            int grStallCycles = 4;
+            if (bpRead <= 4) {
+                grStallCycles = 1;
+            }
+            // Theoretically, the maximum number of entries that can be retained is max of readStalledLength.
+            const int maxRetainedEntries = (grFIFOLength - 4) * numWaves;
+            while (fifo.size() > maxRetainedEntries) {
+                fifo.pop_front();
+            }
+            // pop finished GRs
+            if (fifo.size() < grFIFOLength) {
+                // if FIFO is not empty, set finalCycle to the last cycle + 1. Only 1 GR can be issued in each cycle.
+                if (fifo.size() > 0) {
+                    finalCycle = std::max(finalCycle + extraIssueCycles, fifo.back() + extraIssueCycles + 1);
+                }
+                // push all GRs of all waves
+                for(auto wave = 0; wave < numWaves; wave += 1) {
+                    fifo.push_back(finalCycle + wave * (1 + extraIssueCycles));
+                }
             } else {
-                int oldCycle = fifo.front();
-                if ((currentCycle - oldCycle) >= grStallLatencyBuffer) {
-                    fifo.pop();
-                    fifo.push(currentCycle);
-                } else {
-                    finalCycle = oldCycle + grStallLatencyBuffer;
-                    fifo.pop();
-                    fifo.push(finalCycle);
+                // FIFO is full
+                // the index of GR which stall happens is relative with the interval of each GRs.
+                int intervalOfGRs = (currentCycle - fifo[fifo.size() - numWaves]);
+                int readStalledLength = grFIFOLength;
+                if (intervalOfGRs > 4)
+                {
+                    readStalledLength += (intervalOfGRs - 4) * numWaves;
+                }
+                if(fifo.size() < readStalledLength)
+                {
+                    // stall is delayed
+                    finalCycle = std::max(finalCycle + extraIssueCycles, fifo.back() + extraIssueCycles + 1);
+                    // push all GRs of all waves
+                    for(auto wave = 0; wave < numWaves; wave += 1) {
+                        fifo.push_back(finalCycle + wave * (1 + extraIssueCycles));
+                    }
+                }
+                else{
+                    // push all GRs of all waves
+                    finalCycle = std::max(finalCycle + extraIssueCycles, fifo.back() + grStallCycles);
+                    for(auto wave = 0; wave < numWaves; wave++) {
+                        fifo.push_back(finalCycle + wave * grStallCycles);
+                    }
                 }
             }
             return finalCycle;

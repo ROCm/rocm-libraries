@@ -220,18 +220,21 @@ public:
             if(fft_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(fft_status);
 
-            fft_status
-                = rocfft.plan_description_set_data_layout(desc,
-                                                          rocfft_array_type_from_fftparams(itype),
-                                                          rocfft_array_type_from_fftparams(otype),
-                                                          ioffset.data(),
-                                                          ooffset.data(),
-                                                          istride_cm().size(),
-                                                          istride_cm().data(),
-                                                          idist,
-                                                          ostride_cm().size(),
-                                                          ostride_cm().data(),
-                                                          odist);
+            const bool test_default_strides_and_dist
+                = is_using_default_layout() && std::hash<std::string>()(token()) % 2 == 1;
+
+            fft_status = rocfft.plan_description_set_data_layout(
+                desc,
+                rocfft_array_type_from_fftparams(itype),
+                rocfft_array_type_from_fftparams(otype),
+                test_default_strides_and_dist ? nullptr : ioffset.data(),
+                test_default_strides_and_dist ? nullptr : ooffset.data(),
+                test_default_strides_and_dist ? 0 : istride_cm().size(),
+                test_default_strides_and_dist ? nullptr : istride_cm().data(),
+                test_default_strides_and_dist ? 0 : idist,
+                test_default_strides_and_dist ? 0 : ostride_cm().size(),
+                test_default_strides_and_dist ? nullptr : ostride_cm().data(),
+                test_default_strides_and_dist ? 0 : odist);
             if(fft_status != rocfft_status_success)
             {
                 throw std::runtime_error("rocfft_plan_description_set_data_layout failed");

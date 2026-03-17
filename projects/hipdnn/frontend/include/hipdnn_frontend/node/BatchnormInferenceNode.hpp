@@ -7,11 +7,13 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormInferencePacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormInferenceNode : public BaseNode<BatchnormInferenceNode>
+class BatchnormInferenceNode
+    : public BaseNode<BatchnormInferenceNode, NodeType::BATCHNORM_INFERENCE>
 {
 public:
     BatchnormInferenceAttributes attributes;
@@ -162,6 +164,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBatchnormInferenceOperation(attributes, tensorDescs, operations);
     }
 };
 }
