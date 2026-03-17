@@ -37,6 +37,51 @@ public:
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET, "ReductionNode missing mode for pre-validation"};
         }
+
+        const auto& xDims = attributes.get_x()->get_dim();
+        const auto& yDims = attributes.get_y()->get_dim();
+
+        if(!xDims.empty() && !yDims.empty())
+        {
+            HIPDNN_RETURN_IF_NE(xDims.size(),
+                                yDims.size(),
+                                ErrorCode::INVALID_VALUE,
+                                "ReductionNode: X and Y must have the same rank. X rank="
+                                    + std::to_string(xDims.size())
+                                    + ", Y rank=" + std::to_string(yDims.size()));
+
+            bool hasReduction = false;
+            for(size_t i = 0; i < xDims.size(); ++i)
+            {
+                if(yDims[i] < xDims[i])
+                {
+                    HIPDNN_RETURN_IF_NE(
+                        yDims[i],
+                        static_cast<int64_t>(1),
+                        ErrorCode::INVALID_VALUE,
+                        "ReductionNode: Y dim[" + std::to_string(i) + "]="
+                            + std::to_string(yDims[i])
+                            + " is less than X dim[" + std::to_string(i) + "]="
+                            + std::to_string(xDims[i]) + " but is not 1");
+                    hasReduction = true;
+                }
+                else
+                {
+                    HIPDNN_RETURN_IF_TRUE(
+                        yDims[i] > xDims[i],
+                        ErrorCode::INVALID_VALUE,
+                        "ReductionNode: Y dim[" + std::to_string(i) + "]="
+                            + std::to_string(yDims[i]) + " exceeds X dim[" + std::to_string(i)
+                            + "]=" + std::to_string(xDims[i]));
+                }
+            }
+
+            HIPDNN_RETURN_IF_FALSE(hasReduction,
+                                   ErrorCode::INVALID_VALUE,
+                                   "ReductionNode: Y dims must be strictly smaller than X dims in "
+                                   "at least one dimension");
+        }
+
         return {};
     }
 

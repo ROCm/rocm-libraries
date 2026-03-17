@@ -2144,13 +2144,20 @@ inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> dims = {4, 8};
-    std::vector<int64_t> strides = {8, 1};
+    std::vector<int64_t> inDims = {4, 8};
+    std::vector<int64_t> inStrides = {8, 1};
+    std::vector<int64_t> outDims = {1, 8};
+    std::vector<int64_t> outStrides = {8, 1};
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "input", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+        builder, 1, "input", hipdnn_data_sdk::data_objects::DataType::FLOAT, &inStrides, &inDims));
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "output", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+        builder,
+        2,
+        "output",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &outStrides,
+        &outDims));
 
     auto reductionAttr = hipdnn_data_sdk::data_objects::CreateReductionAttributes(
         builder, hipdnn_data_sdk::data_objects::ReductionMode::ADD, 1, 2);

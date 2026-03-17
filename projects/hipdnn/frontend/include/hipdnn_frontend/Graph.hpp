@@ -2299,13 +2299,12 @@ public:
 
     /** @brief Reduction operation
      *
-     * Reduces an input tensor to a scalar output using the specified reduction
-     * mode. The output tensor must have the same rank as the input tensor, with
-     * all dimensions set to 1.
+     * Reduces an input tensor along one or more dimensions using the specified
+     * reduction mode. Creates a new output tensor managed by the graph.
      *
      * @param x Input tensor (arbitrary shape)
      * @param attributes Configuration specifying the reduction mode
-     * @return y: Output tensor (all dimensions reduced to 1)
+     * @return y: Output tensor (graph-managed, shape inferred during build)
      *
      * @see ReductionAttributes, ReductionMode
      */
@@ -2321,6 +2320,45 @@ public:
             x->set_name(attributes.get_name() + "::X");
         }
         auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ReductionNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    /** @brief Reduction operation with explicit output tensor
+     *
+     * Reduces an input tensor along one or more dimensions using the specified
+     * reduction mode. The caller provides the output tensor, allowing explicit
+     * control over output shape for partial reductions.
+     *
+     * @param x Input tensor (arbitrary shape)
+     * @param y Output tensor (caller-provided, reduced shape)
+     * @param attributes Configuration specifying the reduction mode
+     * @return y: The provided output tensor
+     *
+     * @see ReductionAttributes, ReductionMode
+     */
+    std::shared_ptr<TensorAttributes> reduction(std::shared_ptr<TensorAttributes> x,
+                                                std::shared_ptr<TensorAttributes> y,
+                                                ReductionAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(y->get_name().empty())
+        {
+            y->set_name(attributes.get_name() + "::Y");
+        }
 
         attributes.set_x(std::move(x));
         attributes.set_y(y);

@@ -84,6 +84,7 @@ struct ReductionAttributesT : public ::flatbuffers::NativeTable {
   hipdnn_data_sdk::data_objects::ReductionMode mode = hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET;
   int64_t in_tensor_uid = 0;
   int64_t out_tensor_uid = 0;
+  bool is_deterministic = false;
 };
 
 struct ReductionAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -92,7 +93,8 @@ struct ReductionAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_MODE = 4,
     VT_IN_TENSOR_UID = 6,
-    VT_OUT_TENSOR_UID = 8
+    VT_OUT_TENSOR_UID = 8,
+    VT_IS_DETERMINISTIC = 10
   };
   hipdnn_data_sdk::data_objects::ReductionMode mode() const {
     return static_cast<hipdnn_data_sdk::data_objects::ReductionMode>(GetField<int8_t>(VT_MODE, 0));
@@ -112,11 +114,18 @@ struct ReductionAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   bool mutate_out_tensor_uid(int64_t _out_tensor_uid = 0) {
     return SetField<int64_t>(VT_OUT_TENSOR_UID, _out_tensor_uid, 0);
   }
+  bool is_deterministic() const {
+    return GetField<uint8_t>(VT_IS_DETERMINISTIC, 0) != 0;
+  }
+  bool mutate_is_deterministic(bool _is_deterministic = false) {
+    return SetField<uint8_t>(VT_IS_DETERMINISTIC, static_cast<uint8_t>(_is_deterministic), 0);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int8_t>(verifier, VT_MODE, 1) &&
            VerifyField<int64_t>(verifier, VT_IN_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_OUT_TENSOR_UID, 8) &&
+           VerifyField<uint8_t>(verifier, VT_IS_DETERMINISTIC, 1) &&
            verifier.EndTable();
   }
   ReductionAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -137,6 +146,9 @@ struct ReductionAttributesBuilder {
   void add_out_tensor_uid(int64_t out_tensor_uid) {
     fbb_.AddElement<int64_t>(ReductionAttributes::VT_OUT_TENSOR_UID, out_tensor_uid, 0);
   }
+  void add_is_deterministic(bool is_deterministic) {
+    fbb_.AddElement<uint8_t>(ReductionAttributes::VT_IS_DETERMINISTIC, static_cast<uint8_t>(is_deterministic), 0);
+  }
   explicit ReductionAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -152,10 +164,12 @@ inline ::flatbuffers::Offset<ReductionAttributes> CreateReductionAttributes(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     hipdnn_data_sdk::data_objects::ReductionMode mode = hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET,
     int64_t in_tensor_uid = 0,
-    int64_t out_tensor_uid = 0) {
+    int64_t out_tensor_uid = 0,
+    bool is_deterministic = false) {
   ReductionAttributesBuilder builder_(_fbb);
   builder_.add_out_tensor_uid(out_tensor_uid);
   builder_.add_in_tensor_uid(in_tensor_uid);
+  builder_.add_is_deterministic(is_deterministic);
   builder_.add_mode(mode);
   return builder_.Finish();
 }
@@ -167,7 +181,8 @@ inline bool operator==(const ReductionAttributesT &lhs, const ReductionAttribute
   return
       (lhs.mode == rhs.mode) &&
       (lhs.in_tensor_uid == rhs.in_tensor_uid) &&
-      (lhs.out_tensor_uid == rhs.out_tensor_uid);
+      (lhs.out_tensor_uid == rhs.out_tensor_uid) &&
+      (lhs.is_deterministic == rhs.is_deterministic);
 }
 
 inline bool operator!=(const ReductionAttributesT &lhs, const ReductionAttributesT &rhs) {
@@ -187,6 +202,7 @@ inline void ReductionAttributes::UnPackTo(ReductionAttributesT *_o, const ::flat
   { auto _e = mode(); _o->mode = _e; }
   { auto _e = in_tensor_uid(); _o->in_tensor_uid = _e; }
   { auto _e = out_tensor_uid(); _o->out_tensor_uid = _e; }
+  { auto _e = is_deterministic(); _o->is_deterministic = _e; }
 }
 
 inline ::flatbuffers::Offset<ReductionAttributes> ReductionAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ReductionAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -200,11 +216,13 @@ inline ::flatbuffers::Offset<ReductionAttributes> CreateReductionAttributes(::fl
   auto _mode = _o->mode;
   auto _in_tensor_uid = _o->in_tensor_uid;
   auto _out_tensor_uid = _o->out_tensor_uid;
+  auto _is_deterministic = _o->is_deterministic;
   return hipdnn_data_sdk::data_objects::CreateReductionAttributes(
       _fbb,
       _mode,
       _in_tensor_uid,
-      _out_tensor_uid);
+      _out_tensor_uid,
+      _is_deterministic);
 }
 
 }  // namespace data_objects

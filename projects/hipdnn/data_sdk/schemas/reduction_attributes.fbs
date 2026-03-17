@@ -22,4 +22,5 @@ table ReductionAttributes {
     mode: ReductionMode;
     in_tensor_uid: long;
     out_tensor_uid: long;
+    is_deterministic: bool = false;
 }

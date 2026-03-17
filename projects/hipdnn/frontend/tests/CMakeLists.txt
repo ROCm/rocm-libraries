@@ -62,6 +62,8 @@ add_executable(
     TestSdpaFpropNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
+    TestReductionAttributes.cpp
+    TestReductionNode.cpp
     TestRMSNormAttributes.cpp
     TestRMSNormNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp

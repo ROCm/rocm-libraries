@@ -11,16 +11,16 @@ namespace hipdnn_data_sdk::data_objects
 {
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ReductionMode,
-                             {{ReductionMode::NOT_SET, "NOT_SET"},
-                              {ReductionMode::ADD, "ADD"},
-                              {ReductionMode::MUL, "MUL"},
-                              {ReductionMode::MIN_OP, "MIN"},
-                              {ReductionMode::MAX_OP, "MAX"},
-                              {ReductionMode::AMAX, "AMAX"},
-                              {ReductionMode::AVG, "AVG"},
-                              {ReductionMode::NORM1, "NORM1"},
-                              {ReductionMode::NORM2, "NORM2"},
-                              {ReductionMode::MUL_NO_ZEROS, "MUL_NO_ZEROS"}})
+                             {{ReductionMode::NOT_SET, "not_set"},
+                              {ReductionMode::ADD, "add"},
+                              {ReductionMode::MUL, "mul"},
+                              {ReductionMode::MIN_OP, "min"},
+                              {ReductionMode::MAX_OP, "max"},
+                              {ReductionMode::AMAX, "amax"},
+                              {ReductionMode::AVG, "avg"},
+                              {ReductionMode::NORM1, "norm1"},
+                              {ReductionMode::NORM2, "norm2"},
+                              {ReductionMode::MUL_NO_ZEROS, "mul_no_zeros"}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& j, const ReductionAttributes& attr)
@@ -28,6 +28,7 @@ inline void to_json(nlohmann::json& j, const ReductionAttributes& attr)
     j["mode"] = attr.mode();
     j["in_tensor_uid"] = attr.in_tensor_uid();
     j["out_tensor_uid"] = attr.out_tensor_uid();
+    j["is_deterministic"] = attr.is_deterministic();
 }
 
 }
@@ -40,8 +41,9 @@ inline auto to<data_objects::ReductionAttributes>(flatbuffers::FlatBufferBuilder
     auto mode = entry.at("mode").get<data_objects::ReductionMode>();
     auto inUid = entry.at("in_tensor_uid").get<int64_t>();
     auto outUid = entry.at("out_tensor_uid").get<int64_t>();
+    auto isDeterministic = entry.value("is_deterministic", false);
 
-    return data_objects::CreateReductionAttributes(builder, mode, inUid, outUid);
+    return data_objects::CreateReductionAttributes(builder, mode, inUid, outUid, isDeterministic);
 }
 
 }

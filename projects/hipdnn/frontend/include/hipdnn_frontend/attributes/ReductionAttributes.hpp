@@ -64,6 +64,7 @@ public:
 
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<ReductionMode> mode = std::nullopt; ///< The reduction mode
+    bool is_deterministic              = false;        ///< Whether to use deterministic algorithms
     // NOLINTEND(readability-identifier-naming)
 
     /// @brief Get the reduction mode
@@ -82,6 +83,25 @@ public:
     ReductionAttributes& set_mode(ReductionMode value)
     {
         mode = value;
+        return *this;
+    }
+
+    /// @brief Get whether deterministic algorithms are requested
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    bool get_is_deterministic() const
+    {
+        return is_deterministic;
+    }
+
+    /**
+     * @brief Request deterministic reduction algorithms
+     * @param value True to require deterministic behavior
+     * @return Reference to this for method chaining
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    ReductionAttributes& set_is_deterministic(bool value)
+    {
+        is_deterministic = value;
         return *this;
     }
 
@@ -133,7 +153,8 @@ public:
             builder,
             mode ? toSdkType(*mode) : hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET,
             x->get_uid(),
-            y->get_uid());
+            y->get_uid(),
+            is_deterministic);
     }
 
     static ReductionAttributes fromFlatBuffer(
@@ -145,6 +166,7 @@ public:
         attr.set_mode(fromSdkType(fb->mode()));
         attr.set_x(tensorMap.at(fb->in_tensor_uid()));
         attr.set_y(tensorMap.at(fb->out_tensor_uid()));
+        attr.set_is_deterministic(fb->is_deterministic());
 
         return attr;
     }
