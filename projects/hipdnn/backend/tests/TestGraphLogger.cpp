@@ -21,6 +21,8 @@ class TestGraphLogger : public ::testing::Test
 {
 protected:
     std::filesystem::path _tempDir;
+    std::string _tempDirStr;
+
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logGraphDirGuard;
 
     void SetUp() override
@@ -38,6 +40,7 @@ protected:
                  + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + "_"
                  + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(_tempDir);
+        _tempDirStr = _tempDir.string();
 
         testing::internal::CaptureStderr();
     }
@@ -101,7 +104,7 @@ TEST_F(TestGraphLogger, GraphNotLoggedWhenDisabled)
 
 TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
     auto descriptor = createAndFinalizeGraph();
@@ -126,7 +129,7 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
 
 TEST_F(TestGraphLogger, DuplicateGraphNotLoggedTwice)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
     // Finalize the same graph twice
@@ -139,7 +142,7 @@ TEST_F(TestGraphLogger, DuplicateGraphNotLoggedTwice)
 
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
 {
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
     // Create first graph with default data types
@@ -177,8 +180,9 @@ TEST_F(TestGraphLogger, OutputDirectoryUsesEnvVar)
 {
     // Create a subdirectory and point HIPDNN_LOG_GRAPH_DIR there
     auto subDir = _tempDir / "graphs";
+    std::string subDirStr = subDir.string();
     std::filesystem::create_directories(subDir);
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", subDir.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", subDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
     auto descriptor = createAndFinalizeGraph();
@@ -195,9 +199,11 @@ TEST_F(TestGraphLogger, OutputDirectoryUsesEnvVar)
 TEST_F(TestGraphLogger, OutputDirectoryCreatedIfMissing)
 {
     auto newDir = _tempDir / "new_subdir" / "graphs";
+    std::string newDirStr = newDir.string();
+
     ASSERT_FALSE(std::filesystem::exists(newDir));
 
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", newDir.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", newDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
     auto descriptor = createAndFinalizeGraph();
@@ -235,7 +241,7 @@ TEST_F(TestGraphLogger, RelativePathResolvedFromCurrentDirectory)
 TEST_F(TestGraphLogger, CacheResetOnShutdown)
 {
     // Enable graph logging
-    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDir.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
     EXPECT_TRUE(logging::GraphLogger::isEnabled());
