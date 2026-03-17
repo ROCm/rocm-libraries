@@ -14,7 +14,6 @@
 
 using namespace backend_test;
 using namespace hipdnn_tests::constants;
-using hipdnn_data_sdk::data_objects::ConvMode;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 
 class IntegrationGraphDescriptorApi : public ::testing::Test
@@ -45,8 +44,8 @@ TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
     SKIP_IF_NO_DEVICES();
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "Test GRAPH!",
                                                                   DataTypeSdk::FLOAT,
@@ -133,8 +132,8 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
     // Build a graph via FlatBuffer deserialization
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "SizeTestGraph",
                                                                   DataTypeSdk::FLOAT,
@@ -188,8 +187,8 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
     // Build a graph via FlatBuffer with known properties
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "TestGraph",
                                                                   DataTypeSdk::FLOAT,
@@ -248,8 +247,8 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuf
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "BufferSizeTest",
                                                                   DataTypeSdk::FLOAT,
@@ -296,8 +295,8 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "OversizedBufferTest",
                                                                   DataTypeSdk::FLOAT,

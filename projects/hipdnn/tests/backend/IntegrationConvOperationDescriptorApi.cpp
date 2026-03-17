@@ -12,8 +12,6 @@
 
 using namespace backend_test;
 using namespace hipdnn_tests::constants;
-using hipdnn_data_sdk::data_objects::ConvMode;
-
 class IntegrationConvOperationDescriptorApi : public ::testing::Test
 {
 protected:
