@@ -54,7 +54,7 @@ public:
                      HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT)
            == skip.end())
         {
-            std::vector<int32_t> blockSize = {K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE};
+            std::vector<int32_t> blockSize = {K_BSD_BLOCK_SIZE};
             desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
                                HIPDNN_TYPE_INT32,
                                1,
@@ -87,15 +87,13 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<BlockScaleDequantizeOperationDescriptor>();
-        _xDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID,
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_DIMS),
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_STRIDES));
-        _scaleDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID,
-                                           toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_DIMS),
-                                           toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
-        _yDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID,
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_DIMS),
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_STRIDES));
+        _xDesc = createFinalizedTensor(
+            K_BSD_TENSOR_X_UID, toVec(K_BSD_TENSOR_X_DIMS), toVec(K_BSD_TENSOR_X_STRIDES));
+        _scaleDesc = createFinalizedTensor(K_BSD_TENSOR_SCALE_UID,
+                                           toVec(K_BSD_TENSOR_SCALE_DIMS),
+                                           toVec(K_BSD_TENSOR_SCALE_STRIDES));
+        _yDesc = createFinalizedTensor(
+            K_BSD_TENSOR_Y_UID, toVec(K_BSD_TENSOR_Y_DIMS), toVec(K_BSD_TENSOR_Y_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -165,7 +163,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetTensorDescriptorX)
                                        1,
                                        &_xDesc));
 
-    ASSERT_EQ(desc->getData().x_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
+    ASSERT_EQ(desc->getData().x_tensor_uid, K_BSD_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
 }
 
@@ -177,7 +175,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetTensorDescriptorScale)
                                        1,
                                        &_scaleDesc));
 
-    ASSERT_EQ(desc->getData().scale_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getData().scale_tensor_uid, K_BSD_TENSOR_SCALE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 }
 
@@ -189,7 +187,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetTensorDescriptorY)
                                        1,
                                        &_yDesc));
 
-    ASSERT_EQ(desc->getData().y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
+    ASSERT_EQ(desc->getData().y_tensor_uid, K_BSD_TENSOR_Y_UID);
     ASSERT_NE(desc->getYDesc(), nullptr);
 }
 
@@ -242,7 +240,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, SetBlockSize)
 {
     auto desc = getDescriptor();
-    std::vector<int32_t> blockSize = {K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE};
+    std::vector<int32_t> blockSize = {K_BSD_BLOCK_SIZE};
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
                                        HIPDNN_TYPE_INT32,
@@ -398,15 +396,13 @@ TEST_P(TestBlockScaleDequantizeOperationDescriptorGetTensor, QueryModeReturnsOne
 INSTANTIATE_TEST_SUITE_P(
     AllTensors,
     TestBlockScaleDequantizeOperationDescriptorGetTensor,
-    ::testing::Values(TensorAttrCase{HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT,
-                                     "X",
-                                     K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID},
-                      TensorAttrCase{HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
-                                     "Scale",
-                                     K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID},
-                      TensorAttrCase{HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT,
-                                     "Y",
-                                     K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID}),
+    ::testing::Values(
+        TensorAttrCase{HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT, "X", K_BSD_TENSOR_X_UID},
+        TensorAttrCase{HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT,
+                       "Scale",
+                       K_BSD_TENSOR_SCALE_UID},
+        TensorAttrCase{
+            HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT, "Y", K_BSD_TENSOR_Y_UID}),
     [](const ::testing::TestParamInfo<TensorAttrCase>& info) { return info.param.name; });
 
 // =============================================================================
@@ -427,7 +423,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeBlockSize)
                                        blockSize.data()));
 
     ASSERT_EQ(blockSizeCount, 1);
-    EXPECT_EQ(blockSize, (std::vector<int32_t>{K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE}));
+    EXPECT_EQ(blockSize, (std::vector<int32_t>{K_BSD_BLOCK_SIZE}));
 }
 
 TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeIsNegativeScaleDefaultFalse)
@@ -560,7 +556,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, GetAttributeBlockSizeQueryTh
                                        &retrievedCount,
                                        blockSize.data()));
     ASSERT_EQ(retrievedCount, 1);
-    EXPECT_EQ(blockSize, (std::vector<int32_t>{K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE}));
+    EXPECT_EQ(blockSize, (std::vector<int32_t>{K_BSD_BLOCK_SIZE}));
 }
 
 // =============================================================================
@@ -634,9 +630,9 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, FinalizePreservesTensorRefer
     ASSERT_NE(desc->getScaleDesc(), nullptr);
     ASSERT_NE(desc->getYDesc(), nullptr);
 
-    ASSERT_EQ(desc->getXDesc()->getData().uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
-    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID);
-    ASSERT_EQ(desc->getYDesc()->getData().uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
+    ASSERT_EQ(desc->getXDesc()->getData().uid, K_BSD_TENSOR_X_UID);
+    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_BSD_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getYDesc()->getData().uid, K_BSD_TENSOR_Y_UID);
 }
 
 // =============================================================================
@@ -650,12 +646,9 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, ToStringContainsExpectedInfo
 
     std::string str = desc->toString();
     ASSERT_NE(str.find("BlockScaleDequantizeOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID)),
-              std::string::npos);
-    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID)),
-              std::string::npos);
-    ASSERT_NE(str.find("y_uid=" + std::to_string(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID)),
-              std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BSD_TENSOR_X_UID)), std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BSD_TENSOR_SCALE_UID)), std::string::npos);
+    ASSERT_NE(str.find("y_uid=" + std::to_string(K_BSD_TENSOR_Y_UID)), std::string::npos);
     ASSERT_NE(str.find("is_negative_scale=0"), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
@@ -676,11 +669,11 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeProducesCorrectNode
 
     auto* attrs = node->attributes.AsBlockScaleDequantizeAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->x_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
-    ASSERT_EQ(attrs->scale_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID);
-    ASSERT_EQ(attrs->y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
+    ASSERT_EQ(attrs->x_tensor_uid, K_BSD_TENSOR_X_UID);
+    ASSERT_EQ(attrs->scale_tensor_uid, K_BSD_TENSOR_SCALE_UID);
+    ASSERT_EQ(attrs->y_tensor_uid, K_BSD_TENSOR_Y_UID);
     ASSERT_EQ(attrs->block_size.size(), 1);
-    ASSERT_EQ(attrs->block_size[0], K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE);
+    ASSERT_EQ(attrs->block_size[0], K_BSD_BLOCK_SIZE);
     EXPECT_FALSE(attrs->is_negative_scale);
 }
 

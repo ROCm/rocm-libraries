@@ -56,7 +56,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        1,
                        &yDesc);
 
-    std::vector<int32_t> blockSize = {K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE};
+    std::vector<int32_t> blockSize = {K_BSD_BLOCK_SIZE};
     desc->setAttribute(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
                        HIPDNN_TYPE_INT32,
                        1,
@@ -100,15 +100,12 @@ protected:
 
 TEST_F(TestGraphDescriptorBlockScaleDequantize, BuildFromSingleOperation)
 {
-    auto xDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID,
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_DIMS),
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID,
-                                           toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_DIMS),
-                                           toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
-    auto yDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID,
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_DIMS),
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BSD_TENSOR_X_UID, toVec(K_BSD_TENSOR_X_DIMS), toVec(K_BSD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(
+        K_BSD_TENSOR_SCALE_UID, toVec(K_BSD_TENSOR_SCALE_DIMS), toVec(K_BSD_TENSOR_SCALE_STRIDES));
+    auto yDesc = createFinalizedTensor(
+        K_BSD_TENSOR_Y_UID, toVec(K_BSD_TENSOR_Y_DIMS), toVec(K_BSD_TENSOR_Y_STRIDES));
     auto opDesc = createFinalizedBlockScaleDequantizeOp(xDesc.get(), scaleDesc.get(), yDesc.get());
 
     auto desc = getDescriptor();
@@ -140,27 +137,24 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, BuildFromSingleOperation)
     ASSERT_NE(attrs, nullptr);
 
     // Verify tensor UID references
-    EXPECT_EQ(attrs->x_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
-    EXPECT_EQ(attrs->scale_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID);
-    EXPECT_EQ(attrs->y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
+    EXPECT_EQ(attrs->x_tensor_uid, K_BSD_TENSOR_X_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BSD_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->y_tensor_uid, K_BSD_TENSOR_Y_UID);
 
     // Verify operation data fields survive serialization
     ASSERT_EQ(attrs->block_size.size(), 1);
-    EXPECT_EQ(attrs->block_size[0], K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE);
+    EXPECT_EQ(attrs->block_size[0], K_BSD_BLOCK_SIZE);
     EXPECT_FALSE(attrs->is_negative_scale);
 }
 
 TEST_F(TestGraphDescriptorBlockScaleDequantize, ComputeDataTypePreserved)
 {
-    auto xDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID,
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_DIMS),
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_STRIDES));
-    auto scaleDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID,
-                                           toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_DIMS),
-                                           toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
-    auto yDesc = createFinalizedTensor(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID,
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_DIMS),
-                                       toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_STRIDES));
+    auto xDesc = createFinalizedTensor(
+        K_BSD_TENSOR_X_UID, toVec(K_BSD_TENSOR_X_DIMS), toVec(K_BSD_TENSOR_X_STRIDES));
+    auto scaleDesc = createFinalizedTensor(
+        K_BSD_TENSOR_SCALE_UID, toVec(K_BSD_TENSOR_SCALE_DIMS), toVec(K_BSD_TENSOR_SCALE_STRIDES));
+    auto yDesc = createFinalizedTensor(
+        K_BSD_TENSOR_Y_UID, toVec(K_BSD_TENSOR_Y_DIMS), toVec(K_BSD_TENSOR_Y_STRIDES));
     auto opDesc = createFinalizedBlockScaleDequantizeOp(
         xDesc.get(), scaleDesc.get(), yDesc.get(), HIPDNN_DATA_HALF);
 

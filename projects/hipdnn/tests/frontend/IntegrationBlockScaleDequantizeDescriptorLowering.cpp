@@ -79,26 +79,20 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
         .set_compute_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID)
-        .set_name("X")
-        .set_data_type(DataType::FP8_E4M3);
-    x->set_dim(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_DIMS))
-        .set_stride(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_STRIDES));
+    x->set_uid(K_BSD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FP8_E4M3);
+    x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID)
-        .set_name("Scale")
-        .set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_DIMS))
-        .set_stride(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
+    scale->set_uid(K_BSD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS)).set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
     BlockScaleDequantizeAttributes attrs;
     attrs.set_name("dequantize_op")
-        .set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE))
+        .set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE))
         .set_is_negative_scale(true);
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
-    y->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID).set_name("Y");
+    y->set_uid(K_BSD_TENSOR_Y_UID).set_name("Y");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -142,29 +136,29 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
     }
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID), 0u);
-    auto* xT = tensorMap[K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID];
+    ASSERT_NE(tensorMap.count(K_BSD_TENSOR_X_UID), 0u);
+    auto* xT = tensorMap[K_BSD_TENSOR_X_UID];
     EXPECT_EQ(xT->name, "X");
     EXPECT_EQ(xT->data_type, DataTypeSdk::FP8_E4M3);
-    EXPECT_EQ(xT->dims, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_DIMS));
-    EXPECT_EQ(xT->strides, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_STRIDES));
+    EXPECT_EQ(xT->dims, toVec(K_BSD_TENSOR_X_DIMS));
+    EXPECT_EQ(xT->strides, toVec(K_BSD_TENSOR_X_STRIDES));
     EXPECT_FALSE(xT->virtual_);
 
     // Verify Scale tensor
-    ASSERT_NE(tensorMap.count(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID), 0u);
-    auto* scaleT = tensorMap[K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID];
+    ASSERT_NE(tensorMap.count(K_BSD_TENSOR_SCALE_UID), 0u);
+    auto* scaleT = tensorMap[K_BSD_TENSOR_SCALE_UID];
     EXPECT_EQ(scaleT->name, "Scale");
     EXPECT_EQ(scaleT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(scaleT->dims, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_DIMS));
-    EXPECT_EQ(scaleT->strides, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
+    EXPECT_EQ(scaleT->dims, toVec(K_BSD_TENSOR_SCALE_DIMS));
+    EXPECT_EQ(scaleT->strides, toVec(K_BSD_TENSOR_SCALE_STRIDES));
     EXPECT_FALSE(scaleT->virtual_);
 
     // Verify Y tensor (dims/strides inferred by frontend to match input)
-    ASSERT_NE(tensorMap.count(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID), 0u);
-    auto* yT = tensorMap[K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID];
+    ASSERT_NE(tensorMap.count(K_BSD_TENSOR_Y_UID), 0u);
+    auto* yT = tensorMap[K_BSD_TENSOR_Y_UID];
     EXPECT_EQ(yT->name, "Y");
-    EXPECT_EQ(yT->dims, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_DIMS));
-    EXPECT_EQ(yT->strides, toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_STRIDES));
+    EXPECT_EQ(yT->dims, toVec(K_BSD_TENSOR_Y_DIMS));
+    EXPECT_EQ(yT->strides, toVec(K_BSD_TENSOR_Y_STRIDES));
     EXPECT_EQ(yT->data_type, DataTypeSdk::FLOAT);
     EXPECT_TRUE(yT->virtual_);
 
@@ -177,11 +171,11 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
     auto* dequant = node->attributes.AsBlockScaleDequantizeAttributes();
     ASSERT_NE(dequant, nullptr);
 
-    EXPECT_EQ(dequant->x_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_UID);
-    EXPECT_EQ(dequant->scale_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_UID);
-    EXPECT_EQ(dequant->y_tensor_uid, K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID);
+    EXPECT_EQ(dequant->x_tensor_uid, K_BSD_TENSOR_X_UID);
+    EXPECT_EQ(dequant->scale_tensor_uid, K_BSD_TENSOR_SCALE_UID);
+    EXPECT_EQ(dequant->y_tensor_uid, K_BSD_TENSOR_Y_UID);
     ASSERT_EQ(dequant->block_size.size(), 1u);
-    EXPECT_EQ(dequant->block_size[0], K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE);
+    EXPECT_EQ(dequant->block_size[0], K_BSD_BLOCK_SIZE);
     EXPECT_TRUE(dequant->is_negative_scale);
 }
 
@@ -197,16 +191,14 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, AutoAssignedUidsPreser
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FP8_E4M3);
-    x->set_dim(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_DIMS))
-        .set_stride(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_X_STRIDES));
+    x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_DIMS))
-        .set_stride(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
+    scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS)).set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
     BlockScaleDequantizeAttributes attrs;
-    attrs.set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE));
+    attrs.set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE));
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
 
