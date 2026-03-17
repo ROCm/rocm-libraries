@@ -117,7 +117,7 @@ struct adjacent_find_impl_kernels
                 ROCPRIM_UNROLL
                 for(unsigned int i = 1; i < items_per_thread; i++)
                 {
-                    if(thread_id + i * block_size < valid_in_last_iteration)
+                    if((i * block_size) + thread_id < valid_in_last_iteration)
                     {
                         output_value = op(output_value, transformed_input_values[i]);
                     }
