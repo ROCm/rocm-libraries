@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,7 +88,7 @@ FUNCTION_CONVERT(coo, coo_aos)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -125,7 +125,7 @@ FUNCTION_CONVERT(coo, csr)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -212,7 +212,7 @@ FUNCTION_CONVERT(coo_aos, coo)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     }
@@ -251,7 +251,7 @@ FUNCTION_CONVERT(coo_aos, csr)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     }
@@ -289,7 +289,7 @@ FUNCTION_CONVERT(csr, coo_aos)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     }
@@ -328,7 +328,7 @@ FUNCTION_CONVERT(csr, coo)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     }
@@ -353,7 +353,7 @@ FUNCTION_CONVERT(csr, csc)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -398,8 +398,8 @@ FUNCTION_CONVERT(csr, ell)
         //
         // Update target.
         //
-        target_->ell_width = ell_width;
-        target_->nnz       = ell_width * source_->rows;
+        target_->set_ell_width(ell_width);
+        target_->set_nnz(ell_width * source_->get_rows());
         return rocsparse_status_success;
     }
 
@@ -440,7 +440,7 @@ FUNCTION_CONVERT(csr, bsr)
     {
         int64_t nnzb;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_csr2bsr_nnz(handle, source_, target_, &nnzb));
-        target_->nnz = nnzb;
+        target_->set_nnz(nnzb);
         return rocsparse_status_success;
     }
 
@@ -478,7 +478,7 @@ FUNCTION_CONVERT(csc, csr)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
 
@@ -519,7 +519,7 @@ FUNCTION_CONVERT(ell, csr)
     {
         int64_t csr_nnz;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_ell2csr_nnz(handle, source_, target_, &csr_nnz));
-        target_->nnz = csr_nnz;
+        target_->set_nnz(csr_nnz);
         return rocsparse_status_success;
     }
 
@@ -557,7 +557,7 @@ FUNCTION_CONVERT(bsr, csr)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz * source_->block_dim * source_->block_dim;
+        target_->set_nnz(source_->get_nnz() * source_->get_block_dim() * source_->get_block_dim());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -727,7 +727,7 @@ FUNCTION_CONVERT(coo, coo)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_compute:
@@ -758,7 +758,7 @@ FUNCTION_CONVERT(coo_aos, coo_aos)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_compute:
@@ -789,7 +789,7 @@ FUNCTION_CONVERT(csr, csr)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
 
         return rocsparse_status_success;
     }
@@ -821,7 +821,7 @@ FUNCTION_CONVERT(csc, csc)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_compute:
@@ -855,8 +855,8 @@ FUNCTION_CONVERT(ell, ell)
         //
         // Update target.
         //
-        target_->ell_width = source_->ell_width;
-        target_->nnz       = source_->nnz;
+        target_->set_ell_width(source_->get_ell_width());
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_compute:
@@ -887,7 +887,7 @@ FUNCTION_CONVERT(bsr, bsr)
     }
     case _rocsparse_sparse_to_sparse_descr::stage_analysis:
     {
-        target_->nnz = source_->nnz;
+        target_->set_nnz(source_->get_nnz());
         return rocsparse_status_success;
     }
     case _rocsparse_sparse_to_sparse_descr::stage_compute:
@@ -1082,7 +1082,7 @@ rocsparse_status rocsparse::internal_sparse_to_sparse(rocsparse_handle          
     //
     // Batched not yet supported.
     //
-    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size, source->batch_count > 1);
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size, source->get_batch_count() > 1);
 
     //
     // 1/ Determine internal stage
@@ -1110,7 +1110,8 @@ rocsparse_status rocsparse::internal_sparse_to_sparse(rocsparse_handle          
     //
     // Descriptor must be the same.
     //
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_mat_descr_are_same(source->descr, target->descr));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse_mat_descr_are_same(source->get_descr(), target->get_descr()));
 
     //
     // Get formats.

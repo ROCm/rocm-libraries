@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,22 +25,121 @@
 #pragma once
 
 #include "rocsparse-types.h"
-
 struct _rocsparse_dnmat_descr
 {
-    bool init{};
+protected:
+    bool                   m_init{};
+    int64_t                m_rows{};
+    int64_t                m_cols{};
+    int64_t                m_ld{};
+    void*                  m_values{};
+    const void*            m_const_values{};
+    rocsparse_datatype     m_data_type{};
+    rocsparse_order        m_order{};
+    int64_t                m_batch_count{};
+    int64_t                m_batch_stride{};
+    rocsparse_batchtype    m_batch_type{};
+    rocsparse_batchstorage m_batch_storage{};
 
-    int64_t rows{};
-    int64_t cols{};
-    int64_t ld{};
+public:
+    template <typename T>
+    inline operator T*()
+    {
+        return reinterpret_cast<T*>(this->m_values);
+    }
 
-    void* values{};
+    template <typename T>
+    inline operator T**()
+    {
+        return reinterpret_cast<T**>(this->m_values);
+    }
 
-    const void* const_values{};
+    template <typename T>
+    inline operator const T*() const
+    {
+        return reinterpret_cast<const T*>(this->m_const_values);
+    }
 
-    rocsparse_datatype data_type{};
-    rocsparse_order    order{};
+    template <typename T>
+    inline operator const T* const *() const
+    {
+        return reinterpret_cast<const T* const*>(this->m_const_values);
+    }
 
-    int64_t batch_count{};
-    int64_t batch_stride{};
+    rocsparse_status destroy(rocsparse_handle handle);
+
+    _rocsparse_dnmat_descr() = delete;
+
+    _rocsparse_dnmat_descr(rocsparse_datatype datatype,
+                           rocsparse_order    order,
+                           int64_t            rows,
+                           int64_t            cols,
+                           int64_t            ld,
+                           const void*        const_values,
+                           void*              values);
+
+    _rocsparse_dnmat_descr(rocsparse_datatype     datatype,
+                           rocsparse_order        order,
+                           int64_t                rows,
+                           int64_t                cols,
+                           int64_t                ld,
+                           rocsparse_batchtype    batchtype,
+                           rocsparse_batchstorage batchstorage,
+                           int64_t                batch_count,
+                           int64_t                batch_dist,
+                           const void*            const_values,
+                           void*                  values);
+
+    ~_rocsparse_dnmat_descr() = default;
+
+    bool get_init() const;
+    void set_init(bool value);
+    //
+    rocsparse_datatype get_datatype() const;
+    void               set_datatype(rocsparse_datatype value);
+    //
+    rocsparse_datatype get_data_type() const;
+    void               set_data_type(rocsparse_datatype value);
+    //
+    rocsparse_order get_order() const;
+    void            set_order(rocsparse_order value);
+    //
+    int64_t get_rows() const;
+    void    set_rows(int64_t value);
+    //
+    int64_t get_cols() const;
+    void    set_cols(int64_t value);
+    //
+    int64_t get_ld() const;
+    void    set_ld(int64_t value);
+    //
+    rocsparse_batchtype get_batch_type() const;
+    void                set_batch_type(rocsparse_batchtype value);
+    //
+    rocsparse_batchstorage get_batch_storage() const;
+    void                   set_batch_storage(rocsparse_batchstorage value);
+    //
+    int64_t get_batch_count() const;
+    void    set_batch_count(int64_t value);
+    //
+    int64_t get_batch_dist() const;
+    void    set_batch_dist(int64_t value);
+    //
+    int64_t get_batch_stride() const;
+    void    set_batch_stride(int64_t value);
+    //
+    const void* get_const_values() const;
+    void        set_const_values(const void* value);
+    //
+    void* get_values();
+    void  set_values(void* value);
+    //
+    const void* const_data() const;
+    const void* const_data();
+    //
+    void        set_const_data(const void* value);
+    const void* data() const;
+    //
+    void* data();
+    void  set_data(void* value);
 };

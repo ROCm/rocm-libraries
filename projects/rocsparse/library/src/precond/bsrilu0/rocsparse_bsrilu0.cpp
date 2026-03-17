@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle       handle,
                                     size_t                 buffer_size,
                                     void*                  buffer)
 {
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->get_rows() == 0 || A->get_batch_count() == 0)
     {
         return rocsparse_status_success;
     }
@@ -42,7 +42,7 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle       handle,
 
     ROCSPARSE_CHECKARG(1,
                        bsrilu0_info,
-                       ((A->rows > 0) && (trm_info == nullptr)),
+                       ((A->get_rows() > 0) && (trm_info == nullptr)),
                        rocsparse_status_invalid_pointer);
 
     RETURN_IF_ROCSPARSE_ERROR(

@@ -29,166 +29,123 @@
 struct _rocsparse_idvec_descr
 {
 protected:
-    rocsparse_indextype  indextype{};
-    rocsparse_index_base base{};
-    int64_t              size{};
-    int64_t              inc{};
+    rocsparse_indextype  m_indextype{};
+    rocsparse_index_base m_base{};
+    int64_t              m_size{};
+    int64_t              m_inc{};
 
-    rocsparse_batchtype    batch_type{};
-    rocsparse_batchstorage batch_storage{};
-    int64_t                batch_count{};
-    int64_t                batch_dist{};
+    rocsparse_batchtype    m_batch_type{};
+    rocsparse_batchstorage m_batch_storage{};
+    int64_t                m_batch_count{};
+    int64_t                m_batch_dist{};
 
-    const void*            const_values{};
-    void*                  values{};
-    rocsparse_pointer_mode pointer_mode{};
+    const void*            m_const_values{};
+    void*                  m_values{};
+    rocsparse_pointer_mode m_pointer_mode{};
+    bool                   m_own_values{};
 
 public:
+    rocsparse_status validate();
+    rocsparse_status destroy(hipStream_t stream);
+    void             set_own_values(bool value);
+    bool             get_own_values() const;
     //
     //
     //
-    rocsparse_indextype get_indextype() const
-    {
-        return this->indextype;
-    };
-
-    void set_indextype(rocsparse_indextype value)
-    {
-        this->indextype = value;
-    };
+    rocsparse_indextype get_indextype() const;
+    void                set_indextype(rocsparse_indextype value);
 
     //
     //
     //
-    rocsparse_index_base get_base() const
-    {
-        return this->base;
-    };
-    void set_base(rocsparse_index_base value)
-    {
-        this->base = value;
-    };
+    rocsparse_index_base get_base() const;
+    void                 set_base(rocsparse_index_base value);
 
     //
     //
     //
-    int64_t get_size() const
-    {
-        return this->size;
-    };
-    void set_size(int64_t value)
-    {
-        this->size = value;
-    };
+    int64_t get_size() const;
+    void    set_size(int64_t value);
 
     //
     //
     //
-    int64_t get_inc() const
-    {
-        return this->inc;
-    };
-    void set_inc(int64_t value)
-    {
-        this->inc = value;
-    };
+    int64_t get_inc() const;
+    void    set_inc(int64_t value);
 
     //
     //
     //
-    rocsparse_batchtype get_batch_type() const
-    {
-        return this->batch_type;
-    };
-    void set_batch_type(rocsparse_batchtype value)
-    {
-        this->batch_type = value;
-    };
+    rocsparse_batchtype get_batch_type() const;
+    void                set_batch_type(rocsparse_batchtype value);
 
     //
     //
     //
-    rocsparse_batchstorage get_batch_storage() const
-    {
-        return this->batch_storage;
-    };
-    void set_batch_storage(rocsparse_batchstorage value)
-    {
-        this->batch_storage = value;
-    };
+    rocsparse_batchstorage get_batch_storage() const;
+    void                   set_batch_storage(rocsparse_batchstorage value);
 
     //
     //
     //
-    int64_t get_batch_count() const
-    {
-        return this->batch_count;
-    };
-    void set_batch_count(int64_t value)
-    {
-        this->batch_count = value;
-    };
+    int64_t get_batch_count() const;
+    void    set_batch_count(int64_t value);
 
     //
     //
     //
-    int64_t get_batch_dist() const
-    {
-        return this->batch_dist;
-    };
-    void set_batch_dist(int64_t value)
-    {
-        this->batch_dist = value;
-    };
+    int64_t get_batch_dist() const;
+    void    set_batch_dist(int64_t value);
 
     //
     //
     //
-    rocsparse_pointer_mode get_pointer_mode() const
-    {
-        return this->pointer_mode;
-    };
-    void set_pointer_mode(rocsparse_pointer_mode value)
-    {
-        this->pointer_mode = value;
-    };
+    rocsparse_pointer_mode get_pointer_mode() const;
+    void                   set_pointer_mode(rocsparse_pointer_mode value);
 
     //
     //
     //
-    const void* const_data() const
-    {
-        return this->const_values;
-    }
-    const void* const_data()
-    {
-        return this->const_values;
-    }
-    void set_const_data(const void* value)
-    {
-        this->const_values = value;
-    }
+    const void* const_data() const;
+    const void* const_data();
+    void        set_const_data(const void* value);
 
     //
     //
     //
-    const void* data() const
-    {
-        return this->values;
-    }
-    void* data()
-    {
-        return this->values;
-    }
-    void set_data(void* value)
-    {
-        this->values = value;
-    }
+    const void* data() const;
+    void*       data();
+    void        set_data(void* value);
+
+    _rocsparse_idvec_descr() = default;
+    //
+    //
+    //
+    ~_rocsparse_idvec_descr() = default;
 
     //
     //
     //
-    _rocsparse_idvec_descr() = delete;
+    void define(rocsparse_indextype  indextype,
+                rocsparse_index_base base,
+                int64_t              size,
+                int64_t              inc,
+                const void*          const_values,
+                void*                values);
+
+    //
+    //
+    //
+    void define(rocsparse_indextype    indextype,
+                rocsparse_index_base   base,
+                int64_t                size,
+                int64_t                inc,
+                rocsparse_batchtype    batch_type,
+                rocsparse_batchstorage batch_storage,
+                int64_t                batch_count,
+                int64_t                batch_dist,
+                const void*            const_values,
+                void*                  values);
 
     //
     //
@@ -215,39 +172,29 @@ public:
                            void*                  values);
 
     //
-    //
-    //
-    ~_rocsparse_idvec_descr() = default;
-
-    //
-    //
-    //
-    rocsparse_status destroy(rocsparse_handle handle);
-
-    //
     // Implicit casts.
     //
     template <typename T>
     inline operator T*()
     {
-        return reinterpret_cast<T*>(this->values);
+        return reinterpret_cast<T*>(this->m_values);
     }
 
     template <typename T>
     inline operator T**()
     {
-        return reinterpret_cast<T**>(this->values);
+        return reinterpret_cast<T**>(this->m_values);
     }
 
     template <typename T>
     inline operator const T*() const
     {
-        return reinterpret_cast<const T*>(this->const_values);
+        return reinterpret_cast<const T*>(this->m_const_values);
     }
 
     template <typename T>
     inline operator const T* const *() const
     {
-        return reinterpret_cast<const T* const*>(this->const_values);
+        return reinterpret_cast<const T* const*>(this->m_const_values);
     }
 };

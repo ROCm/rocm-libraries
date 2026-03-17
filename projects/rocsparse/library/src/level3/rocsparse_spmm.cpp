@@ -279,16 +279,16 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(mat_A->format)
+        switch(mat_A->get_format())
         {
         case rocsparse_format_csr:
         {
             rocsparse_csrmm_alg csrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2csrmm_alg(alg, csrmm_alg)));
 
-            const int64_t m = mat_A->rows;
-            const int64_t n = mat_C->cols;
-            const int64_t k = mat_A->cols;
+            const int64_t m = mat_A->get_rows();
+            const int64_t n = mat_C->get_cols();
+            const int64_t k = mat_A->get_cols();
 
             switch(stage)
             {
@@ -300,15 +300,15 @@ namespace rocsparse
                                                                        m,
                                                                        n,
                                                                        k,
-                                                                       mat_A->nnz,
-                                                                       mat_A->descr,
+                                                                       mat_A->get_nnz(),
+                                                                       mat_A->get_descr(),
                                                                        alpha_type,
-                                                                       mat_A->data_type,
-                                                                       mat_A->const_val_data,
-                                                                       mat_A->row_type,
-                                                                       mat_A->const_row_data,
-                                                                       mat_A->col_type,
-                                                                       mat_A->const_col_data,
+                                                                       mat_A->get_data_type(),
+                                                                       mat_A->get_const_val_data(),
+                                                                       mat_A->get_row_type(),
+                                                                       mat_A->get_const_row_data(),
+                                                                       mat_A->get_col_type(),
+                                                                       mat_A->get_const_col_data(),
                                                                        buffer_size));
                 return rocsparse_status_success;
             }
@@ -320,14 +320,14 @@ namespace rocsparse
                                                                     m,
                                                                     n,
                                                                     k,
-                                                                    mat_A->nnz,
-                                                                    mat_A->descr,
-                                                                    mat_A->data_type,
-                                                                    mat_A->const_val_data,
-                                                                    mat_A->row_type,
-                                                                    mat_A->const_row_data,
-                                                                    mat_A->col_type,
-                                                                    mat_A->const_col_data,
+                                                                    mat_A->get_nnz(),
+                                                                    mat_A->get_descr(),
+                                                                    mat_A->get_data_type(),
+                                                                    mat_A->get_const_val_data(),
+                                                                    mat_A->get_row_type(),
+                                                                    mat_A->get_const_row_data(),
+                                                                    mat_A->get_col_type(),
+                                                                    mat_A->get_const_col_data(),
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
@@ -340,33 +340,33 @@ namespace rocsparse
                                                            m,
                                                            n,
                                                            k,
-                                                           mat_A->nnz,
-                                                           mat_A->batch_count,
-                                                           mat_A->offsets_batch_stride,
-                                                           mat_A->columns_values_batch_stride,
+                                                           mat_A->get_nnz(),
+                                                           mat_A->get_batch_count(),
+                                                           mat_A->get_offsets_batch_stride(),
+                                                           mat_A->get_columns_values_batch_stride(),
                                                            alpha_type,
                                                            alpha,
-                                                           mat_A->descr,
-                                                           mat_A->data_type,
-                                                           mat_A->const_val_data,
-                                                           mat_A->row_type,
-                                                           mat_A->const_row_data,
-                                                           mat_A->col_type,
-                                                           mat_A->const_col_data,
-                                                           mat_B->data_type,
-                                                           mat_B->const_values,
-                                                           mat_B->ld,
-                                                           mat_B->batch_count,
-                                                           mat_B->batch_stride,
-                                                           mat_B->order,
+                                                           mat_A->get_descr(),
+                                                           mat_A->get_data_type(),
+                                                           mat_A->get_const_val_data(),
+                                                           mat_A->get_row_type(),
+                                                           mat_A->get_const_row_data(),
+                                                           mat_A->get_col_type(),
+                                                           mat_A->get_const_col_data(),
+                                                           mat_B->get_datatype(),
+                                                           mat_B->get_const_values(),
+                                                           mat_B->get_ld(),
+                                                           mat_B->get_batch_count(),
+                                                           mat_B->get_batch_stride(),
+                                                           mat_B->get_order(),
                                                            beta_type,
                                                            beta,
-                                                           mat_C->data_type,
-                                                           mat_C->values,
-                                                           mat_C->ld,
-                                                           mat_C->batch_count,
-                                                           mat_C->batch_stride,
-                                                           mat_C->order,
+                                                           mat_C->get_datatype(),
+                                                           mat_C->get_values(),
+                                                           mat_C->get_ld(),
+                                                           mat_C->get_batch_count(),
+                                                           mat_C->get_batch_stride(),
+                                                           mat_C->get_order(),
                                                            temp_buffer,
                                                            false));
                 return rocsparse_status_success;
@@ -379,9 +379,9 @@ namespace rocsparse
             rocsparse_csrmm_alg csrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2csrmm_alg(alg, csrmm_alg)));
 
-            const int64_t m = mat_A->rows;
-            const int64_t n = mat_C->cols;
-            const int64_t k = mat_A->cols;
+            const int64_t m = mat_A->get_rows();
+            const int64_t n = mat_C->get_cols();
+            const int64_t k = mat_A->get_cols();
 
             switch(stage)
             {
@@ -393,15 +393,15 @@ namespace rocsparse
                                                                        m,
                                                                        n,
                                                                        k,
-                                                                       mat_A->nnz,
-                                                                       mat_A->descr,
+                                                                       mat_A->get_nnz(),
+                                                                       mat_A->get_descr(),
                                                                        alpha_type,
-                                                                       mat_A->data_type,
-                                                                       mat_A->const_val_data,
-                                                                       mat_A->col_type,
-                                                                       mat_A->const_col_data,
-                                                                       mat_A->row_type,
-                                                                       mat_A->const_row_data,
+                                                                       mat_A->get_data_type(),
+                                                                       mat_A->get_const_val_data(),
+                                                                       mat_A->get_col_type(),
+                                                                       mat_A->get_const_col_data(),
+                                                                       mat_A->get_row_type(),
+                                                                       mat_A->get_const_row_data(),
                                                                        buffer_size));
                 return rocsparse_status_success;
             }
@@ -413,14 +413,14 @@ namespace rocsparse
                                                                     m,
                                                                     n,
                                                                     k,
-                                                                    mat_A->nnz,
-                                                                    mat_A->descr,
-                                                                    mat_A->data_type,
-                                                                    mat_A->const_val_data,
-                                                                    mat_A->col_type,
-                                                                    mat_A->const_col_data,
-                                                                    mat_A->row_type,
-                                                                    mat_A->const_row_data,
+                                                                    mat_A->get_nnz(),
+                                                                    mat_A->get_descr(),
+                                                                    mat_A->get_data_type(),
+                                                                    mat_A->get_const_val_data(),
+                                                                    mat_A->get_col_type(),
+                                                                    mat_A->get_const_col_data(),
+                                                                    mat_A->get_row_type(),
+                                                                    mat_A->get_const_row_data(),
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
@@ -433,33 +433,33 @@ namespace rocsparse
                                                            m,
                                                            n,
                                                            k,
-                                                           mat_A->nnz,
-                                                           mat_A->batch_count,
-                                                           mat_A->offsets_batch_stride,
-                                                           mat_A->columns_values_batch_stride,
+                                                           mat_A->get_nnz(),
+                                                           mat_A->get_batch_count(),
+                                                           mat_A->get_offsets_batch_stride(),
+                                                           mat_A->get_columns_values_batch_stride(),
                                                            alpha_type,
                                                            alpha,
-                                                           mat_A->descr,
-                                                           mat_A->data_type,
-                                                           mat_A->const_val_data,
-                                                           mat_A->col_type,
-                                                           mat_A->const_col_data,
-                                                           mat_A->row_type,
-                                                           mat_A->const_row_data,
-                                                           mat_B->data_type,
-                                                           mat_B->const_values,
-                                                           mat_B->ld,
-                                                           mat_B->batch_count,
-                                                           mat_B->batch_stride,
-                                                           mat_B->order,
+                                                           mat_A->get_descr(),
+                                                           mat_A->get_data_type(),
+                                                           mat_A->get_const_val_data(),
+                                                           mat_A->get_col_type(),
+                                                           mat_A->get_const_col_data(),
+                                                           mat_A->get_row_type(),
+                                                           mat_A->get_const_row_data(),
+                                                           mat_B->get_datatype(),
+                                                           mat_B->get_const_values(),
+                                                           mat_B->get_ld(),
+                                                           mat_B->get_batch_count(),
+                                                           mat_B->get_batch_stride(),
+                                                           mat_B->get_order(),
                                                            beta_type,
                                                            beta,
-                                                           mat_C->data_type,
-                                                           mat_C->values,
-                                                           mat_C->ld,
-                                                           mat_C->batch_count,
-                                                           mat_C->batch_stride,
-                                                           mat_C->order,
+                                                           mat_C->get_datatype(),
+                                                           mat_C->get_values(),
+                                                           mat_C->get_ld(),
+                                                           mat_C->get_batch_count(),
+                                                           mat_C->get_batch_stride(),
+                                                           mat_C->get_order(),
                                                            temp_buffer));
                 return rocsparse_status_success;
             }
@@ -471,9 +471,9 @@ namespace rocsparse
             rocsparse_coomm_alg coomm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2coomm_alg(alg, coomm_alg)));
 
-            const int64_t m = mat_A->rows;
-            const int64_t n = mat_C->cols;
-            const int64_t k = mat_A->cols;
+            const int64_t m = mat_A->get_rows();
+            const int64_t n = mat_C->get_cols();
+            const int64_t k = mat_A->get_cols();
 
             switch(stage)
             {
@@ -485,16 +485,16 @@ namespace rocsparse
                                                                        m,
                                                                        n,
                                                                        k,
-                                                                       mat_A->nnz,
-                                                                       mat_C->batch_count,
-                                                                       mat_A->descr,
+                                                                       mat_A->get_nnz(),
+                                                                       mat_C->get_batch_count(),
+                                                                       mat_A->get_descr(),
                                                                        alpha_type,
-                                                                       mat_A->data_type,
-                                                                       mat_A->const_val_data,
-                                                                       mat_A->row_type,
-                                                                       mat_A->const_row_data,
-                                                                       mat_A->col_type,
-                                                                       mat_A->const_col_data,
+                                                                       mat_A->get_data_type(),
+                                                                       mat_A->get_const_val_data(),
+                                                                       mat_A->get_row_type(),
+                                                                       mat_A->get_const_row_data(),
+                                                                       mat_A->get_col_type(),
+                                                                       mat_A->get_const_col_data(),
                                                                        buffer_size));
                 return rocsparse_status_success;
             }
@@ -507,14 +507,14 @@ namespace rocsparse
                                                                     m,
                                                                     n,
                                                                     k,
-                                                                    mat_A->nnz,
-                                                                    mat_A->descr,
-                                                                    mat_A->data_type,
-                                                                    mat_A->const_val_data,
-                                                                    mat_A->row_type,
-                                                                    mat_A->const_row_data,
-                                                                    mat_A->col_type,
-                                                                    mat_A->const_col_data,
+                                                                    mat_A->get_nnz(),
+                                                                    mat_A->get_descr(),
+                                                                    mat_A->get_data_type(),
+                                                                    mat_A->get_const_val_data(),
+                                                                    mat_A->get_row_type(),
+                                                                    mat_A->get_const_row_data(),
+                                                                    mat_A->get_col_type(),
+                                                                    mat_A->get_const_col_data(),
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
@@ -528,32 +528,32 @@ namespace rocsparse
                                                            m,
                                                            n,
                                                            k,
-                                                           mat_A->nnz,
-                                                           mat_A->batch_count,
-                                                           mat_A->batch_stride,
+                                                           mat_A->get_nnz(),
+                                                           mat_A->get_batch_count(),
+                                                           mat_A->get_batch_stride(),
                                                            alpha_type,
                                                            alpha,
-                                                           mat_A->descr,
-                                                           mat_A->data_type,
-                                                           mat_A->const_val_data,
-                                                           mat_A->row_type,
-                                                           mat_A->const_row_data,
-                                                           mat_A->col_type,
-                                                           mat_A->const_col_data,
-                                                           mat_B->data_type,
-                                                           mat_B->const_values,
-                                                           mat_B->ld,
-                                                           mat_B->batch_count,
-                                                           mat_B->batch_stride,
-                                                           mat_B->order,
+                                                           mat_A->get_descr(),
+                                                           mat_A->get_data_type(),
+                                                           mat_A->get_const_val_data(),
+                                                           mat_A->get_row_type(),
+                                                           mat_A->get_const_row_data(),
+                                                           mat_A->get_col_type(),
+                                                           mat_A->get_const_col_data(),
+                                                           mat_B->get_datatype(),
+                                                           mat_B->get_const_values(),
+                                                           mat_B->get_ld(),
+                                                           mat_B->get_batch_count(),
+                                                           mat_B->get_batch_stride(),
+                                                           mat_B->get_order(),
                                                            beta_type,
                                                            beta,
-                                                           mat_C->data_type,
-                                                           mat_C->values,
-                                                           mat_C->ld,
-                                                           mat_C->batch_count,
-                                                           mat_C->batch_stride,
-                                                           mat_C->order,
+                                                           mat_C->get_datatype(),
+                                                           mat_C->get_values(),
+                                                           mat_C->get_ld(),
+                                                           mat_C->get_batch_count(),
+                                                           mat_C->get_batch_stride(),
+                                                           mat_C->get_order(),
                                                            temp_buffer));
                 return rocsparse_status_success;
             }
@@ -573,111 +573,114 @@ namespace rocsparse
                     handle,
                     trans_A,
                     trans_B,
-                    mat_A->block_dir,
-                    (mat_C->rows / mat_A->block_dim),
-                    mat_C->cols,
+                    mat_A->get_block_dir(),
+                    (mat_C->get_rows() / mat_A->get_block_dim()),
+                    mat_C->get_cols(),
 
-                    (trans_A == rocsparse_operation_none) ? (mat_A->cols / mat_A->block_dim)
-                                                          : (mat_A->rows / mat_A->block_dim),
+                    (trans_A == rocsparse_operation_none)
+                        ? (mat_A->get_cols() / mat_A->get_block_dim())
+                        : (mat_A->get_rows() / mat_A->get_block_dim()),
 
-                    mat_A->ell_cols,
-                    mat_A->block_dim,
+                    mat_A->get_ell_cols(),
+                    mat_A->get_block_dim(),
                     alpha_type,
                     alpha,
-                    mat_A->descr,
-                    mat_A->col_type,
-                    mat_A->const_col_data,
-                    mat_A->data_type,
-                    mat_A->const_val_data,
-                    mat_B->data_type,
-                    mat_B->const_values,
-                    mat_B->ld,
-                    mat_B->order,
+                    mat_A->get_descr(),
+                    mat_A->get_col_type(),
+                    mat_A->get_const_col_data(),
+                    mat_A->get_data_type(),
+                    mat_A->get_const_val_data(),
+                    mat_B->get_datatype(),
+                    mat_B->get_const_values(),
+                    mat_B->get_ld(),
+                    mat_B->get_order(),
                     beta_type,
                     beta,
-                    mat_C->data_type,
-                    mat_C->values,
-                    mat_C->ld,
-                    mat_C->order,
+                    mat_C->get_datatype(),
+                    mat_C->get_values(),
+                    mat_C->get_ld(),
+                    mat_C->get_order(),
                     buffer_size)));
                 return rocsparse_status_success;
             }
 
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_preprocess(
-                    handle,
-                    trans_A,
-                    trans_B,
-                    mat_A->block_dir,
-                    (mat_C->rows / mat_A->block_dim),
-                    mat_C->cols,
+                RETURN_IF_ROCSPARSE_ERROR((
+                    rocsparse::bellmm_preprocess(handle,
+                                                 trans_A,
+                                                 trans_B,
+                                                 mat_A->get_block_dir(),
+                                                 (mat_C->get_rows() / mat_A->get_block_dim()),
+                                                 mat_C->get_cols(),
 
-                    (trans_A == rocsparse_operation_none) ? (mat_A->cols / mat_A->block_dim)
-                                                          : (mat_A->rows / mat_A->block_dim),
+                                                 (trans_A == rocsparse_operation_none)
+                                                     ? (mat_A->get_cols() / mat_A->get_block_dim())
+                                                     : (mat_A->get_rows() / mat_A->get_block_dim()),
 
-                    mat_A->ell_cols,
-                    mat_A->block_dim,
-                    alpha_type,
-                    alpha,
-                    mat_A->descr,
-                    mat_A->col_type,
-                    mat_A->const_col_data,
-                    mat_A->data_type,
-                    mat_A->const_val_data,
-                    mat_B->data_type,
-                    mat_B->const_values,
-                    mat_B->ld,
-                    mat_B->order,
-                    beta_type,
-                    beta,
-                    mat_C->data_type,
-                    mat_C->values,
-                    mat_C->ld,
-                    mat_C->order,
-                    temp_buffer)));
+                                                 mat_A->get_ell_cols(),
+                                                 mat_A->get_block_dim(),
+                                                 alpha_type,
+                                                 alpha,
+                                                 mat_A->get_descr(),
+                                                 mat_A->get_col_type(),
+                                                 mat_A->get_const_col_data(),
+                                                 mat_A->get_data_type(),
+                                                 mat_A->get_const_val_data(),
+                                                 mat_B->get_datatype(),
+                                                 mat_B->get_const_values(),
+                                                 mat_B->get_ld(),
+                                                 mat_B->get_order(),
+                                                 beta_type,
+                                                 beta,
+                                                 mat_C->get_datatype(),
+                                                 mat_C->get_values(),
+                                                 mat_C->get_ld(),
+                                                 mat_C->get_order(),
+                                                 temp_buffer)));
                 return rocsparse_status_success;
             }
 
             case rocsparse_spmm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm(handle,
-                                                             trans_A,
-                                                             trans_B,
-                                                             mat_A->block_dir,
-                                                             (mat_C->rows / mat_A->block_dim),
-                                                             mat_C->cols,
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::bellmm(handle,
+                                       trans_A,
+                                       trans_B,
+                                       mat_A->get_block_dir(),
+                                       (mat_C->get_rows() / mat_A->get_block_dim()),
+                                       mat_C->get_cols(),
 
-                                                             (trans_A == rocsparse_operation_none)
-                                                                 ? (mat_A->cols / mat_A->block_dim)
-                                                                 : (mat_A->rows / mat_A->block_dim),
+                                       (trans_A == rocsparse_operation_none)
+                                           ? (mat_A->get_cols() / mat_A->get_block_dim())
+                                           : (mat_A->get_rows() / mat_A->get_block_dim()),
 
-                                                             mat_A->ell_cols,
-                                                             mat_A->block_dim,
-                                                             mat_A->batch_count,
-                                                             mat_A->batch_stride,
-                                                             alpha_type,
-                                                             alpha,
-                                                             mat_A->descr,
-                                                             mat_A->col_type,
-                                                             mat_A->const_col_data,
-                                                             mat_A->data_type,
-                                                             mat_A->const_val_data,
-                                                             mat_B->data_type,
-                                                             mat_B->const_values,
-                                                             mat_B->ld,
-                                                             mat_B->batch_count,
-                                                             mat_B->batch_stride,
-                                                             mat_B->order,
-                                                             beta_type,
-                                                             beta,
-                                                             mat_C->data_type,
-                                                             mat_C->values,
-                                                             mat_C->ld,
-                                                             mat_C->batch_count,
-                                                             mat_C->batch_stride,
-                                                             mat_C->order,
-                                                             temp_buffer)));
+                                       mat_A->get_ell_cols(),
+                                       mat_A->get_block_dim(),
+                                       mat_A->get_batch_count(),
+                                       mat_A->get_batch_stride(),
+                                       alpha_type,
+                                       alpha,
+                                       mat_A->get_descr(),
+                                       mat_A->get_col_type(),
+                                       mat_A->get_const_col_data(),
+                                       mat_A->get_data_type(),
+                                       mat_A->get_const_val_data(),
+                                       mat_B->get_datatype(),
+                                       mat_B->get_const_values(),
+                                       mat_B->get_ld(),
+                                       mat_B->get_batch_count(),
+                                       mat_B->get_batch_stride(),
+                                       mat_B->get_order(),
+                                       beta_type,
+                                       beta,
+                                       mat_C->get_datatype(),
+                                       mat_C->get_values(),
+                                       mat_C->get_ld(),
+                                       mat_C->get_batch_count(),
+                                       mat_C->get_batch_stride(),
+                                       mat_C->get_order(),
+                                       temp_buffer)));
                 return rocsparse_status_success;
             }
             }
@@ -690,9 +693,9 @@ namespace rocsparse
             rocsparse_bsrmm_alg bsrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2bsrmm_alg(alg, bsrmm_alg)));
 
-            const int64_t mb = mat_A->rows;
-            const int64_t n  = mat_C->cols;
-            const int64_t kb = mat_A->cols;
+            const int64_t mb = mat_A->get_rows();
+            const int64_t n  = mat_C->get_cols();
+            const int64_t kb = mat_A->get_cols();
 
             switch(stage)
             {
@@ -704,15 +707,15 @@ namespace rocsparse
                                                                        mb,
                                                                        n,
                                                                        kb,
-                                                                       mat_A->nnz,
-                                                                       mat_A->descr,
-                                                                       mat_A->data_type,
-                                                                       mat_A->const_val_data,
-                                                                       mat_A->row_type,
-                                                                       mat_A->const_row_data,
-                                                                       mat_A->col_type,
-                                                                       mat_A->const_col_data,
-                                                                       mat_A->block_dim,
+                                                                       mat_A->get_nnz(),
+                                                                       mat_A->get_descr(),
+                                                                       mat_A->get_data_type(),
+                                                                       mat_A->get_const_val_data(),
+                                                                       mat_A->get_row_type(),
+                                                                       mat_A->get_const_row_data(),
+                                                                       mat_A->get_col_type(),
+                                                                       mat_A->get_const_col_data(),
+                                                                       mat_A->get_block_dim(),
                                                                        buffer_size));
                 return rocsparse_status_success;
             }
@@ -724,56 +727,56 @@ namespace rocsparse
                                                                     mb,
                                                                     n,
                                                                     kb,
-                                                                    mat_A->nnz,
-                                                                    mat_A->descr,
-                                                                    mat_A->data_type,
-                                                                    mat_A->const_val_data,
-                                                                    mat_A->row_type,
-                                                                    mat_A->const_row_data,
-                                                                    mat_A->col_type,
-                                                                    mat_A->const_col_data,
-                                                                    mat_A->block_dim,
+                                                                    mat_A->get_nnz(),
+                                                                    mat_A->get_descr(),
+                                                                    mat_A->get_data_type(),
+                                                                    mat_A->get_const_val_data(),
+                                                                    mat_A->get_row_type(),
+                                                                    mat_A->get_const_row_data(),
+                                                                    mat_A->get_col_type(),
+                                                                    mat_A->get_const_col_data(),
+                                                                    mat_A->get_block_dim(),
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmm(handle,
-                                                           mat_A->block_dir,
+                                                           mat_A->get_block_dir(),
                                                            trans_A,
                                                            trans_B,
                                                            bsrmm_alg,
                                                            mb,
                                                            n,
                                                            kb,
-                                                           mat_A->nnz,
-                                                           mat_A->batch_count,
-                                                           mat_A->offsets_batch_stride,
-                                                           mat_A->columns_values_batch_stride,
+                                                           mat_A->get_nnz(),
+                                                           mat_A->get_batch_count(),
+                                                           mat_A->get_offsets_batch_stride(),
+                                                           mat_A->get_columns_values_batch_stride(),
                                                            alpha_type,
                                                            alpha,
-                                                           mat_A->descr,
-                                                           mat_A->data_type,
-                                                           mat_A->const_val_data,
-                                                           mat_A->row_type,
-                                                           mat_A->const_row_data,
-                                                           mat_A->col_type,
-                                                           mat_A->const_col_data,
-                                                           mat_A->block_dim,
-                                                           mat_B->data_type,
-                                                           mat_B->const_values,
-                                                           mat_B->ld,
-                                                           mat_B->batch_count,
-                                                           mat_B->batch_stride,
-                                                           mat_B->order,
+                                                           mat_A->get_descr(),
+                                                           mat_A->get_data_type(),
+                                                           mat_A->get_const_val_data(),
+                                                           mat_A->get_row_type(),
+                                                           mat_A->get_const_row_data(),
+                                                           mat_A->get_col_type(),
+                                                           mat_A->get_const_col_data(),
+                                                           mat_A->get_block_dim(),
+                                                           mat_B->get_datatype(),
+                                                           mat_B->get_const_values(),
+                                                           mat_B->get_ld(),
+                                                           mat_B->get_batch_count(),
+                                                           mat_B->get_batch_stride(),
+                                                           mat_B->get_order(),
                                                            beta_type,
                                                            beta,
-                                                           mat_C->data_type,
-                                                           mat_C->values,
-                                                           mat_C->ld,
-                                                           mat_C->batch_count,
-                                                           mat_C->batch_stride,
-                                                           mat_C->order));
+                                                           mat_C->get_datatype(),
+                                                           mat_C->get_values(),
+                                                           mat_C->get_ld(),
+                                                           mat_C->get_batch_count(),
+                                                           mat_C->get_batch_stride(),
+                                                           mat_C->get_order()));
                 return rocsparse_status_success;
             }
             }
@@ -834,12 +837,12 @@ try
     ROCSPARSE_CHECKARG_ENUM(2, trans_B);
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, mat_A);
-    ROCSPARSE_CHECKARG(4, mat_A, mat_A->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, mat_A, mat_A->get_init() == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(5, mat_B);
     ROCSPARSE_CHECKARG_POINTER(6, beta);
-    ROCSPARSE_CHECKARG(5, mat_B, mat_B->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, mat_B, mat_B->get_init() == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(7, mat_C);
-    ROCSPARSE_CHECKARG(7, mat_C, mat_C->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(7, mat_C, mat_C->get_init() == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_ENUM(8, compute_type);
 
     ROCSPARSE_CHECKARG_ENUM(9, alg);

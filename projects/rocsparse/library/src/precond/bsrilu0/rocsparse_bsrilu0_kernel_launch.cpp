@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,10 +40,10 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
     const std::string                  gcn_arch_name = rocsparse::handle_get_arch_name(handle);
 
     const bool sleep     = (gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
-    const auto block_dim = A->block_dim;
+    const auto block_dim = A->get_block_dim();
 
     if(sleep || (handle->wavefront_size == 32) || (block_dim > 64)
-       || ((block_dim > 32) && (A->data_type == rocsparse_datatype_f64_c)))
+       || ((block_dim > 32) && (A->get_data_type() == rocsparse_datatype_f64_c)))
     {
         launch = find_bsrilu0_kernel_general_launch(handle, bsrilu0_info, A);
     }
@@ -62,7 +62,7 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
 
     RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                        0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
+                                       sizeof(int32_t) * A->get_rows() * A->get_batch_count(),
                                        handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsrilu0_info, A, buffer_size, buffer));

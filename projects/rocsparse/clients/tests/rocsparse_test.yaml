@@ -101,6 +101,7 @@ include: test_spvec_descr.yaml
 include: test_spmat_descr.yaml
 include: test_dnvec_descr.yaml
 include: test_idvec_descr.yaml
+include: test_spattern_descr.yaml
 include: test_dnmat_descr.yaml
 include: test_const_spvec_descr.yaml
 include: test_const_spmat_descr.yaml

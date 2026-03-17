@@ -42,22 +42,22 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
         // Quick return
-        if(y->size == 0)
+        if(y->get_size() == 0)
         {
             return rocsparse_status_success;
         }
 
         RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::scale_array(handle, (I)y->size, (const T*)beta, (Y*)y->values));
+            rocsparse::scale_array(handle, (I)y->get_size(), (const T*)beta, (Y*)y->get_values()));
 
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::axpyi_template<T, I, X, Y>)(handle,
-                                                    (I)x->nnz,
+                                                    (I)x->get_nnz(),
                                                     (const T*)alpha,
-                                                    (const X*)x->const_val_data,
-                                                    (const I*)x->const_idx_data,
-                                                    (Y*)y->values,
-                                                    x->idx_base));
+                                                    (const X*)x->get_const_val_data(),
+                                                    (const I*)x->get_const_idx_data(),
+                                                    (Y*)y->get_values(),
+                                                    x->get_idx_base()));
         return rocsparse_status_success;
     }
 
@@ -220,25 +220,30 @@ try
     ROCSPARSE_CHECKARG_POINTER(4, y);
 
     // Check if descriptors are initialized
-    ROCSPARSE_CHECKARG(2, x, (x->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, y, (y->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, x, (x->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, y, (y->get_init() == false), rocsparse_status_not_initialized);
 
     // Check for matching types while we do not support mixed precision computation
-    ROCSPARSE_CHECKARG(4, y, (y->data_type != x->data_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(
+        4, y, (y->get_data_type() != x->get_data_type()), rocsparse_status_not_implemented);
 
-    ROCSPARSE_CHECKARG(2, x, (x->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     rocsparse::axpby_t f;
-    if(x->data_type == rocsparse_datatype_f16_r || x->data_type == rocsparse_datatype_bf16_r)
+    if(x->get_data_type() == rocsparse_datatype_f16_r
+       || x->get_data_type() == rocsparse_datatype_bf16_r)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_find(
-            &f, rocsparse_datatype_f32_r, x->idx_type, x->data_type, y->data_type));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_find(&f,
+                                                        rocsparse_datatype_f32_r,
+                                                        x->get_idx_type(),
+                                                        x->get_data_type(),
+                                                        y->get_data_type()));
     }
     else
     {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::axpby_find(&f, x->data_type, x->idx_type, x->data_type, y->data_type));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_find(
+            &f, x->get_data_type(), x->get_idx_type(), x->get_data_type(), y->get_data_type()));
     }
 
     RETURN_IF_ROCSPARSE_ERROR(f(handle, alpha, x, beta, y));

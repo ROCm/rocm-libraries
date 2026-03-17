@@ -899,8 +899,9 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
 
     ROCSPARSE_CHECKARG_POINTER(0, target);
     ROCSPARSE_CHECKARG_POINTER(1, source);
-    ROCSPARSE_CHECKARG(0, target, (target->size != source->size), rocsparse_status_invalid_size);
-    switch(target->data_type)
+    ROCSPARSE_CHECKARG(
+        0, target, (target->get_size() != source->get_size()), rocsparse_status_invalid_size);
+    switch(target->get_data_type())
     {
     case rocsparse_datatype_f32_c:
     case rocsparse_datatype_f64_c:
@@ -916,7 +917,7 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
     case rocsparse_datatype_f64_r:
     case rocsparse_datatype_bf16_r:
     {
-        switch(source->data_type)
+        switch(source->get_data_type())
         {
         case rocsparse_datatype_f32_c:
         case rocsparse_datatype_f64_c:
@@ -944,10 +945,10 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
     }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
-                                                       target->size,
-                                                       target->data_type,
-                                                       target->values,
-                                                       source->data_type,
-                                                       source->values));
+                                                       target->get_size(),
+                                                       target->get_data_type(),
+                                                       target->get_values(),
+                                                       source->get_data_type(),
+                                                       source->get_const_values()));
     return rocsparse_status_success;
 }

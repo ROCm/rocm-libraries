@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -134,6 +134,7 @@ public:
     const void* boost_val{};
 
     ~_rocsparse_mat_info();
+    rocsparse_status destroy(hipStream_t);
 
     void                 set_csrmv_info(rocsparse_csrmv_info value);
     rocsparse_csrmv_info get_csrmv_info();

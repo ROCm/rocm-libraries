@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,51 +24,138 @@
 
 #pragma once
 
-#include "rocsparse-types.h"
+#include "rocsparse_dnvec_descr.hpp"
+#include "rocsparse_mat_info.hpp"
+#include "rocsparse_spattern_descr.hpp"
 
 struct _rocsparse_spmat_descr
 {
-    bool init{};
+private:
+    _rocsparse_spattern_descr m_spattern{};
+    _rocsparse_dnvec_descr    m_values{};
+    _rocsparse_mat_info       m_mat_info{};
+    rocsparse_spattern_descr  m_p_spattern{&m_spattern};
+    rocsparse_dnvec_descr     m_p_values{&m_values};
+    rocsparse_mat_info        m_p_mat_info{&m_mat_info};
 
+protected:
+    bool         m_own_spattern{};
+    bool         init{};
     mutable bool analysed{};
 
-    int64_t rows{};
-    int64_t cols{};
-    int64_t nnz{};
+public:
+    ~_rocsparse_spmat_descr();
+    rocsparse_status destroy(hipStream_t stream);
+    void             set_own_spattern(bool value);
+    rocsparse_status validate();
 
-    void* row_data{};
-    void* col_data{};
-    void* ind_data{};
-    void* val_data{};
+    void define(_rocsparse_spattern_descr* spattern,
+                rocsparse_dnvec_descr      values,
+                rocsparse_mat_info         info = nullptr);
 
-    const void* const_row_data{};
-    const void* const_col_data{};
-    const void* const_ind_data{};
-    const void* const_val_data{};
+    rocsparse_index_base get_idx_base() const;
+    int64_t              get_batch_dist() const;
+    rocsparse_indextype  get_row_type() const;
+    rocsparse_indextype  get_col_type() const;
+    rocsparse_datatype   get_data_type() const;
+    int64_t              get_ell_cols() const;
+    //
+    rocsparse_format get_format() const;
+    void             set_format(rocsparse_format);
+    //
+    int64_t get_rows() const;
+    void    set_rows(int64_t);
+    //
+    int64_t get_cols() const;
+    void    set_cols(int64_t);
+    //
+    const _rocsparse_spattern_descr* get_spattern() const;
+    rocsparse_spattern_descr         get_spattern();
+    void                             set_spattern(rocsparse_spattern_descr value);
+    //
+    rocsparse_dnvec_descr         get_values();
+    void                          set_values(rocsparse_dnvec_descr value);
+    const _rocsparse_dnvec_descr* get_values() const;
+    //
+    rocsparse_mat_info  get_info() const;
+    rocsparse_mat_descr get_descr() const;
+    rocsparse_mat_descr get_descr();
+    //
+    bool get_analysed() const;
+    void set_analysed(bool value) const;
+    //
+    bool get_init() const;
+    void set_init(bool value);
+    //
+    rocsparse_direction get_block_dir() const;
+    void                set_block_dir(rocsparse_direction);
+    //
+    int64_t get_block_dim() const;
+    void    set_block_dim(int64_t);
+    //
+    int64_t  get_nnz() const;
+    int64_t* get_pnnz();
+    void     set_nnz(const int64_t value);
+    //
+    const void* get_row_data() const;
+    void*       get_row_data();
+    void        set_row_data(void* value);
+    //
+    const void* get_col_data() const;
+    void*       get_col_data();
+    void        set_col_data(void* value);
+    //
+    const void* get_ind_data() const;
+    void*       get_ind_data();
+    void        set_ind_data(void* value);
+    //
+    const void* get_val_data() const;
+    void*       get_val_data();
+    void        set_val_data(void* value);
+    //
+    const void* get_const_row_data() const;
+    void        set_const_row_data(const void* value);
+    const void* get_const_col_data() const;
+    void        set_const_col_data(const void* value);
+    const void* get_const_ind_data() const;
+    void        set_const_ind_data(const void* value);
+    const void* get_const_val_data() const;
+    void        set_const_val_data(const void* value);
+    //
+    int64_t get_ell_width() const;
+    void    set_ell_width(int64_t value);
+    //
+    int64_t get_batch_count() const;
+    void    set_batch_count(int64_t value);
+    //
+    int64_t get_batch_stride() const;
+    void    set_batch_stride(int64_t value);
+    //
+    int64_t get_columns_values_batch_stride() const;
+    void    set_columns_values_batch_stride(int64_t value);
+    //
+    void    set_offsets_batch_stride(int64_t value);
+    int64_t get_offsets_batch_stride() const;
+    //
+    int64_t get_row_batch_dist() const;
+    void    set_row_batch_dist(int64_t value);
+    //
+    int64_t get_col_batch_dist() const;
+    void    set_col_batch_dist(int64_t value);
+    //
+    int64_t get_val_batch_dist() const;
+    void    set_val_batch_dist(int64_t value);
+    //
+    int64_t get_sell_slice_size() const;
+    void    set_sell_slice_size(int64_t value);
+    //
+    int64_t get_sell_colval_size() const;
+    void    set_sell_colval_size(int64_t value);
+    //
 
-    rocsparse_indextype row_type{};
-    rocsparse_indextype col_type{};
-    rocsparse_datatype  data_type{};
-
-    rocsparse_index_base idx_base{};
-    rocsparse_format     format{};
-
-    rocsparse_mat_descr descr{};
-    rocsparse_mat_info  info{};
-
-    rocsparse_direction block_dir{};
-    int64_t             block_dim{};
-    int64_t             ell_cols{};
-    int64_t             ell_width{};
-    int64_t             sell_slice_size{};
-    int64_t             sell_colval_size{};
-
-    int64_t batch_count{};
-    int64_t batch_stride{};
-    int64_t offsets_batch_stride{};
-    int64_t columns_values_batch_stride{};
-
+public:
     _rocsparse_spmat_descr() = default;
+
     _rocsparse_spmat_descr(rocsparse_format     format,
                            bool                 analysed,
                            int64_t              batch_count,

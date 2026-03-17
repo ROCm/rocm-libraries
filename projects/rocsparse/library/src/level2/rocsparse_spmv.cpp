@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -406,9 +406,9 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         static constexpr bool fallback_algorithm = true;
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(mat->format, alg)));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(mat->get_format(), alg)));
 
-        switch(mat->format)
+        switch(mat->get_format())
         {
         case rocsparse_format_coo:
         {
@@ -424,22 +424,23 @@ namespace rocsparse
             }
             case rocsparse_spmv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_analysis(handle,
-                                                                         trans,
-                                                                         coomv_alg,
-                                                                         mat->rows,
-                                                                         mat->cols,
-                                                                         mat->nnz,
-                                                                         mat->descr,
-                                                                         mat->data_type,
-                                                                         mat->const_val_data,
-                                                                         mat->row_type,
-                                                                         mat->const_row_data,
-                                                                         mat->col_type,
-                                                                         mat->const_col_data)));
-                    mat->analysed = true;
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::coomv_analysis(handle,
+                                                   trans,
+                                                   coomv_alg,
+                                                   mat->get_rows(),
+                                                   mat->get_cols(),
+                                                   mat->get_nnz(),
+                                                   mat->get_descr(),
+                                                   mat->get_data_type(),
+                                                   mat->get_const_val_data(),
+                                                   mat->get_row_type(),
+                                                   mat->get_const_row_data(),
+                                                   mat->get_col_type(),
+                                                   mat->get_const_col_data())));
+                    mat->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
@@ -448,24 +449,24 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv(handle,
                                                             trans,
                                                             coomv_alg,
-                                                            mat->rows,
-                                                            mat->cols,
-                                                            mat->nnz,
+                                                            mat->get_rows(),
+                                                            mat->get_cols(),
+                                                            mat->get_nnz(),
                                                             alpha_type,
                                                             alpha,
-                                                            mat->descr,
-                                                            mat->data_type,
-                                                            mat->const_val_data,
-                                                            mat->row_type,
-                                                            mat->const_row_data,
-                                                            mat->col_type,
-                                                            mat->const_col_data,
-                                                            x->data_type,
-                                                            x->const_values,
+                                                            mat->get_descr(),
+                                                            mat->get_data_type(),
+                                                            mat->get_const_val_data(),
+                                                            mat->get_row_type(),
+                                                            mat->get_const_row_data(),
+                                                            mat->get_col_type(),
+                                                            mat->get_const_col_data(),
+                                                            x->get_datatype(),
+                                                            x->get_const_values(),
                                                             beta_type,
                                                             beta,
-                                                            y->data_type,
-                                                            y->values,
+                                                            y->get_datatype(),
+                                                            y->get_values(),
                                                             fallback_algorithm)));
                 return rocsparse_status_success;
             }
@@ -493,22 +494,22 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_aos(handle,
                                                                 trans,
                                                                 coomv_aos_alg,
-                                                                mat->rows,
-                                                                mat->cols,
-                                                                mat->nnz,
+                                                                mat->get_rows(),
+                                                                mat->get_cols(),
+                                                                mat->get_nnz(),
                                                                 alpha_type,
                                                                 alpha,
-                                                                mat->descr,
-                                                                mat->data_type,
-                                                                mat->const_val_data,
-                                                                mat->row_type,
-                                                                mat->const_ind_data,
-                                                                x->data_type,
-                                                                x->const_values,
+                                                                mat->get_descr(),
+                                                                mat->get_data_type(),
+                                                                mat->get_const_val_data(),
+                                                                mat->get_row_type(),
+                                                                mat->get_const_ind_data(),
+                                                                x->get_datatype(),
+                                                                x->get_const_values(),
                                                                 beta_type,
                                                                 beta,
-                                                                y->data_type,
-                                                                y->values,
+                                                                y->get_datatype(),
+                                                                y->get_values(),
                                                                 fallback_algorithm)));
                 return rocsparse_status_success;
             }
@@ -527,26 +528,26 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
                     rocsparse_bsrmv_info bsrmv_info;
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv_analysis(handle,
-                                                                         mat->block_dir,
+                                                                         mat->get_block_dir(),
                                                                          trans,
-                                                                         mat->rows,
-                                                                         mat->cols,
-                                                                         mat->nnz,
-                                                                         mat->descr,
-                                                                         mat->data_type,
-                                                                         mat->const_val_data,
-                                                                         mat->row_type,
-                                                                         mat->const_row_data,
-                                                                         mat->col_type,
-                                                                         mat->const_col_data,
-                                                                         mat->block_dim,
+                                                                         mat->get_rows(),
+                                                                         mat->get_cols(),
+                                                                         mat->get_nnz(),
+                                                                         mat->get_descr(),
+                                                                         mat->get_data_type(),
+                                                                         mat->get_const_val_data(),
+                                                                         mat->get_row_type(),
+                                                                         mat->get_const_row_data(),
+                                                                         mat->get_col_type(),
+                                                                         mat->get_const_col_data(),
+                                                                         mat->get_block_dim(),
                                                                          &bsrmv_info)));
-                    mat->info->set_bsrmv_info(bsrmv_info);
-                    mat->analysed = true;
+                    mat->get_info()->set_bsrmv_info(bsrmv_info);
+                    mat->set_analysed(true);
                 }
 
                 return rocsparse_status_success;
@@ -555,28 +556,28 @@ namespace rocsparse
             case rocsparse_spmv_stage_compute:
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv(handle,
-                                                            mat->block_dir,
+                                                            mat->get_block_dir(),
                                                             trans,
-                                                            mat->rows,
-                                                            mat->cols,
-                                                            mat->nnz,
+                                                            mat->get_rows(),
+                                                            mat->get_cols(),
+                                                            mat->get_nnz(),
                                                             alpha_type,
                                                             alpha,
-                                                            mat->descr,
-                                                            mat->data_type,
-                                                            mat->const_val_data,
-                                                            mat->row_type,
-                                                            mat->const_row_data,
-                                                            mat->col_type,
-                                                            mat->const_col_data,
-                                                            mat->block_dim,
-                                                            mat->info->get_bsrmv_info(),
-                                                            x->data_type,
-                                                            x->const_values,
+                                                            mat->get_descr(),
+                                                            mat->get_data_type(),
+                                                            mat->get_const_val_data(),
+                                                            mat->get_row_type(),
+                                                            mat->get_const_row_data(),
+                                                            mat->get_col_type(),
+                                                            mat->get_const_col_data(),
+                                                            mat->get_block_dim(),
+                                                            mat->get_info()->get_bsrmv_info(),
+                                                            x->get_datatype(),
+                                                            x->get_const_values(),
                                                             beta_type,
                                                             beta,
-                                                            y->data_type,
-                                                            y->values)));
+                                                            y->get_datatype(),
+                                                            y->get_values())));
                 return rocsparse_status_success;
             }
             }
@@ -600,25 +601,25 @@ namespace rocsparse
                 //
                 // If algorithm 1 or default is selected and analysis step is required
                 //
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
                     rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
-                                                                         mat->rows,
-                                                                         mat->cols,
-                                                                         mat->nnz,
-                                                                         mat->descr,
-                                                                         mat->data_type,
-                                                                         mat->const_val_data,
-                                                                         mat->row_type,
-                                                                         mat->const_row_data,
-                                                                         mat->col_type,
-                                                                         mat->const_col_data,
+                                                                         mat->get_rows(),
+                                                                         mat->get_cols(),
+                                                                         mat->get_nnz(),
+                                                                         mat->get_descr(),
+                                                                         mat->get_data_type(),
+                                                                         mat->get_const_val_data(),
+                                                                         mat->get_row_type(),
+                                                                         mat->get_const_row_data(),
+                                                                         mat->get_col_type(),
+                                                                         mat->get_const_col_data(),
                                                                          &csrmv_info)));
-                    mat->info->set_csrmv_info(csrmv_info);
-                    mat->analysed = true;
+                    mat->get_info()->set_csrmv_info(csrmv_info);
+                    mat->set_analysed(true);
                 }
 
                 return rocsparse_status_success;
@@ -630,28 +631,28 @@ namespace rocsparse
                     (rocsparse::csrmv(handle,
                                       trans,
                                       alg_csrmv,
-                                      mat->rows,
-                                      mat->cols,
-                                      mat->nnz,
+                                      mat->get_rows(),
+                                      mat->get_cols(),
+                                      mat->get_nnz(),
                                       alpha_type,
                                       alpha,
-                                      mat->descr,
-                                      mat->data_type,
-                                      mat->const_val_data,
-                                      mat->row_type,
-                                      mat->const_row_data,
-                                      mat->row_type,
-                                      reinterpret_cast<const char*>(mat->const_row_data)
-                                          + rocsparse::indextype_sizeof(mat->row_type),
-                                      mat->col_type,
-                                      mat->const_col_data,
-                                      mat->info->get_csrmv_info(),
-                                      x->data_type,
-                                      x->const_values,
+                                      mat->get_descr(),
+                                      mat->get_data_type(),
+                                      mat->get_const_val_data(),
+                                      mat->get_row_type(),
+                                      mat->get_const_row_data(),
+                                      mat->get_row_type(),
+                                      reinterpret_cast<const char*>(mat->get_const_row_data())
+                                          + rocsparse::indextype_sizeof(mat->get_row_type()),
+                                      mat->get_col_type(),
+                                      mat->get_const_col_data(),
+                                      mat->get_info()->get_csrmv_info(),
+                                      x->get_datatype(),
+                                      x->get_const_values(),
                                       beta_type,
                                       beta,
-                                      y->data_type,
-                                      y->values,
+                                      y->get_datatype(),
+                                      y->get_values(),
                                       0,
                                       nullptr,
                                       nullptr,
@@ -676,25 +677,25 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
                     rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
-                                                                         mat->rows,
-                                                                         mat->cols,
-                                                                         mat->nnz,
-                                                                         mat->descr,
-                                                                         mat->data_type,
-                                                                         mat->const_val_data,
-                                                                         mat->col_type,
-                                                                         mat->const_col_data,
-                                                                         mat->row_type,
-                                                                         mat->const_row_data,
+                                                                         mat->get_rows(),
+                                                                         mat->get_cols(),
+                                                                         mat->get_nnz(),
+                                                                         mat->get_descr(),
+                                                                         mat->get_data_type(),
+                                                                         mat->get_const_val_data(),
+                                                                         mat->get_col_type(),
+                                                                         mat->get_const_col_data(),
+                                                                         mat->get_row_type(),
+                                                                         mat->get_const_row_data(),
                                                                          &csrmv_info)));
-                    mat->info->set_csrmv_info(csrmv_info);
-                    mat->analysed = true;
+                    mat->get_info()->set_csrmv_info(csrmv_info);
+                    mat->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
@@ -704,25 +705,25 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv(handle,
                                                             trans,
                                                             alg_csrmv,
-                                                            mat->rows,
-                                                            mat->cols,
-                                                            mat->nnz,
+                                                            mat->get_rows(),
+                                                            mat->get_cols(),
+                                                            mat->get_nnz(),
                                                             alpha_type,
                                                             alpha,
-                                                            mat->descr,
-                                                            mat->data_type,
-                                                            mat->const_val_data,
-                                                            mat->col_type,
-                                                            mat->const_col_data,
-                                                            mat->row_type,
-                                                            mat->const_row_data,
-                                                            mat->info->get_csrmv_info(),
-                                                            x->data_type,
-                                                            x->const_values,
+                                                            mat->get_descr(),
+                                                            mat->get_data_type(),
+                                                            mat->get_const_val_data(),
+                                                            mat->get_col_type(),
+                                                            mat->get_const_col_data(),
+                                                            mat->get_row_type(),
+                                                            mat->get_const_row_data(),
+                                                            mat->get_info()->get_csrmv_info(),
+                                                            x->get_datatype(),
+                                                            x->get_const_values(),
                                                             beta_type,
                                                             beta,
-                                                            y->data_type,
-                                                            y->values,
+                                                            y->get_datatype(),
+                                                            y->get_values(),
                                                             fallback_algorithm)));
                 return rocsparse_status_success;
             }
@@ -748,22 +749,22 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::ellmv(handle,
                                                             trans,
-                                                            mat->rows,
-                                                            mat->cols,
+                                                            mat->get_rows(),
+                                                            mat->get_cols(),
                                                             alpha_type,
                                                             alpha,
-                                                            mat->descr,
-                                                            mat->data_type,
-                                                            mat->const_val_data,
-                                                            mat->col_type,
-                                                            mat->const_col_data,
-                                                            mat->ell_width,
-                                                            x->data_type,
-                                                            x->const_values,
+                                                            mat->get_descr(),
+                                                            mat->get_data_type(),
+                                                            mat->get_const_val_data(),
+                                                            mat->get_col_type(),
+                                                            mat->get_const_col_data(),
+                                                            mat->get_ell_width(),
+                                                            x->get_datatype(),
+                                                            x->get_const_values(),
                                                             beta_type,
                                                             beta,
-                                                            y->data_type,
-                                                            y->values)));
+                                                            y->get_datatype(),
+                                                            y->get_values())));
                 return rocsparse_status_success;
             }
             }
@@ -840,9 +841,9 @@ try
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    ROCSPARSE_CHECKARG(3, mat, (mat->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, x, (x->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(6, y, (y->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(3, mat, (mat->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, x, (x->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(6, y, (y->get_init() == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmv(handle,

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,7 +104,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(mat->format)
+        switch(mat->get_format())
         {
         case rocsparse_format_coo:
         {
@@ -114,16 +114,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_matrix_coo_buffer_size_impl<T, I>(
                     handle,
-                    (I)mat->rows,
-                    (I)mat->cols,
-                    mat->nnz,
-                    (const T*)mat->const_val_data,
-                    (const I*)mat->const_row_data,
-                    (const I*)mat->const_col_data,
-                    mat->idx_base,
-                    (mat->descr)->type,
-                    (mat->descr)->fill_mode,
-                    (mat->descr)->storage_mode,
+                    (I)mat->get_rows(),
+                    (I)mat->get_cols(),
+                    mat->get_nnz(),
+                    (const T*)mat->get_const_val_data(),
+                    (const I*)mat->get_const_row_data(),
+                    (const I*)mat->get_const_col_data(),
+                    mat->get_idx_base(),
+                    (mat->get_descr())->type,
+                    (mat->get_descr())->fill_mode,
+                    (mat->get_descr())->storage_mode,
                     buffer_size)));
                 return rocsparse_status_success;
             }
@@ -131,16 +131,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(
                     (rocsparse::check_matrix_coo_impl<T, I>(handle,
-                                                            (I)mat->rows,
-                                                            (I)mat->cols,
-                                                            mat->nnz,
-                                                            (const T*)mat->const_val_data,
-                                                            (const I*)mat->const_row_data,
-                                                            (const I*)mat->const_col_data,
-                                                            mat->idx_base,
-                                                            (mat->descr)->type,
-                                                            (mat->descr)->fill_mode,
-                                                            (mat->descr)->storage_mode,
+                                                            (I)mat->get_rows(),
+                                                            (I)mat->get_cols(),
+                                                            mat->get_nnz(),
+                                                            (const T*)mat->get_const_val_data(),
+                                                            (const I*)mat->get_const_row_data(),
+                                                            (const I*)mat->get_const_col_data(),
+                                                            mat->get_idx_base(),
+                                                            (mat->get_descr())->type,
+                                                            (mat->get_descr())->fill_mode,
+                                                            (mat->get_descr())->storage_mode,
                                                             data_status,
                                                             temp_buffer)));
                 return rocsparse_status_success;
@@ -156,16 +156,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_matrix_csr_buffer_size_impl<T, I, J>(
                     handle,
-                    (J)mat->rows,
-                    (J)mat->cols,
-                    (I)mat->nnz,
-                    (const T*)mat->const_val_data,
-                    (const I*)mat->const_row_data,
-                    (const J*)mat->const_col_data,
-                    mat->idx_base,
-                    (mat->descr)->type,
-                    (mat->descr)->fill_mode,
-                    (mat->descr)->storage_mode,
+                    (J)mat->get_rows(),
+                    (J)mat->get_cols(),
+                    (I)mat->get_nnz(),
+                    (const T*)mat->get_const_val_data(),
+                    (const I*)mat->get_const_row_data(),
+                    (const J*)mat->get_const_col_data(),
+                    mat->get_idx_base(),
+                    (mat->get_descr())->type,
+                    (mat->get_descr())->fill_mode,
+                    (mat->get_descr())->storage_mode,
                     buffer_size)));
                 return rocsparse_status_success;
             }
@@ -173,16 +173,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(
                     (rocsparse::check_matrix_csr_impl<T, I, J>(handle,
-                                                               (J)mat->rows,
-                                                               (J)mat->cols,
-                                                               (I)mat->nnz,
-                                                               (const T*)mat->const_val_data,
-                                                               (const I*)mat->const_row_data,
-                                                               (const J*)mat->const_col_data,
-                                                               mat->idx_base,
-                                                               (mat->descr)->type,
-                                                               (mat->descr)->fill_mode,
-                                                               (mat->descr)->storage_mode,
+                                                               (J)mat->get_rows(),
+                                                               (J)mat->get_cols(),
+                                                               (I)mat->get_nnz(),
+                                                               (const T*)mat->get_const_val_data(),
+                                                               (const I*)mat->get_const_row_data(),
+                                                               (const J*)mat->get_const_col_data(),
+                                                               mat->get_idx_base(),
+                                                               (mat->get_descr())->type,
+                                                               (mat->get_descr())->fill_mode,
+                                                               (mat->get_descr())->storage_mode,
                                                                data_status,
                                                                temp_buffer)));
                 return rocsparse_status_success;
@@ -198,16 +198,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_matrix_csc_buffer_size_impl<T, I, J>(
                     handle,
-                    (J)mat->rows,
-                    (J)mat->cols,
-                    (I)mat->nnz,
-                    (const T*)mat->const_val_data,
-                    (const I*)mat->const_col_data,
-                    (const J*)mat->const_row_data,
-                    mat->idx_base,
-                    (mat->descr)->type,
-                    (mat->descr)->fill_mode,
-                    (mat->descr)->storage_mode,
+                    (J)mat->get_rows(),
+                    (J)mat->get_cols(),
+                    (I)mat->get_nnz(),
+                    (const T*)mat->get_const_val_data(),
+                    (const I*)mat->get_const_col_data(),
+                    (const J*)mat->get_const_row_data(),
+                    mat->get_idx_base(),
+                    (mat->get_descr())->type,
+                    (mat->get_descr())->fill_mode,
+                    (mat->get_descr())->storage_mode,
                     buffer_size)));
                 return rocsparse_status_success;
             }
@@ -215,16 +215,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(
                     (rocsparse::check_matrix_csc_impl<T, I, J>(handle,
-                                                               (J)mat->rows,
-                                                               (J)mat->cols,
-                                                               (I)mat->nnz,
-                                                               (const T*)mat->const_val_data,
-                                                               (const I*)mat->const_col_data,
-                                                               (const J*)mat->const_row_data,
-                                                               mat->idx_base,
-                                                               (mat->descr)->type,
-                                                               (mat->descr)->fill_mode,
-                                                               (mat->descr)->storage_mode,
+                                                               (J)mat->get_rows(),
+                                                               (J)mat->get_cols(),
+                                                               (I)mat->get_nnz(),
+                                                               (const T*)mat->get_const_val_data(),
+                                                               (const I*)mat->get_const_col_data(),
+                                                               (const J*)mat->get_const_row_data(),
+                                                               mat->get_idx_base(),
+                                                               (mat->get_descr())->type,
+                                                               (mat->get_descr())->fill_mode,
+                                                               (mat->get_descr())->storage_mode,
                                                                data_status,
                                                                temp_buffer)));
                 return rocsparse_status_success;
@@ -240,15 +240,15 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_matrix_ell_buffer_size_impl<T, I>(
                     handle,
-                    (I)mat->rows,
-                    (I)mat->cols,
-                    (I)mat->ell_width,
-                    (const T*)mat->const_val_data,
-                    (const I*)mat->const_col_data,
-                    mat->idx_base,
-                    (mat->descr)->type,
-                    (mat->descr)->fill_mode,
-                    (mat->descr)->storage_mode,
+                    (I)mat->get_rows(),
+                    (I)mat->get_cols(),
+                    (I)mat->get_ell_width(),
+                    (const T*)mat->get_const_val_data(),
+                    (const I*)mat->get_const_col_data(),
+                    mat->get_idx_base(),
+                    (mat->get_descr())->type,
+                    (mat->get_descr())->fill_mode,
+                    (mat->get_descr())->storage_mode,
                     buffer_size)));
                 return rocsparse_status_success;
             }
@@ -256,15 +256,15 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(
                     (rocsparse::check_matrix_ell_impl<T, I>(handle,
-                                                            (I)mat->rows,
-                                                            (I)mat->cols,
-                                                            (I)mat->ell_width,
-                                                            (const T*)mat->const_val_data,
-                                                            (const I*)mat->const_col_data,
-                                                            mat->idx_base,
-                                                            (mat->descr)->type,
-                                                            (mat->descr)->fill_mode,
-                                                            (mat->descr)->storage_mode,
+                                                            (I)mat->get_rows(),
+                                                            (I)mat->get_cols(),
+                                                            (I)mat->get_ell_width(),
+                                                            (const T*)mat->get_const_val_data(),
+                                                            (const I*)mat->get_const_col_data(),
+                                                            mat->get_idx_base(),
+                                                            (mat->get_descr())->type,
+                                                            (mat->get_descr())->fill_mode,
+                                                            (mat->get_descr())->storage_mode,
                                                             data_status,
                                                             temp_buffer)));
                 return rocsparse_status_success;
@@ -280,41 +280,41 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_matrix_gebsr_buffer_size_impl<T, I, J>(
                     handle,
-                    mat->block_dir,
-                    (J)mat->rows,
-                    (J)mat->cols,
-                    (I)mat->nnz,
-                    (J)mat->block_dim,
-                    (J)mat->block_dim,
-                    (const T*)mat->const_val_data,
-                    (const I*)mat->const_row_data,
-                    (const J*)mat->const_col_data,
-                    mat->idx_base,
-                    (mat->descr)->type,
-                    (mat->descr)->fill_mode,
-                    (mat->descr)->storage_mode,
+                    mat->get_block_dir(),
+                    (J)mat->get_rows(),
+                    (J)mat->get_cols(),
+                    (I)mat->get_nnz(),
+                    (J)mat->get_block_dim(),
+                    (J)mat->get_block_dim(),
+                    (const T*)mat->get_const_val_data(),
+                    (const I*)mat->get_const_row_data(),
+                    (const J*)mat->get_const_col_data(),
+                    mat->get_idx_base(),
+                    (mat->get_descr())->type,
+                    (mat->get_descr())->fill_mode,
+                    (mat->get_descr())->storage_mode,
                     buffer_size)));
                 return rocsparse_status_success;
             }
             case rocsparse_check_spmat_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    (rocsparse::check_matrix_gebsr_impl<T, I, J>(handle,
-                                                                 mat->block_dir,
-                                                                 (J)mat->rows,
-                                                                 (J)mat->cols,
-                                                                 (I)mat->nnz,
-                                                                 (J)mat->block_dim,
-                                                                 (J)mat->block_dim,
-                                                                 (const T*)mat->const_val_data,
-                                                                 (const I*)mat->const_row_data,
-                                                                 (const J*)mat->const_col_data,
-                                                                 mat->idx_base,
-                                                                 (mat->descr)->type,
-                                                                 (mat->descr)->fill_mode,
-                                                                 (mat->descr)->storage_mode,
-                                                                 data_status,
-                                                                 temp_buffer)));
+                RETURN_IF_ROCSPARSE_ERROR((
+                    rocsparse::check_matrix_gebsr_impl<T, I, J>(handle,
+                                                                mat->get_block_dir(),
+                                                                (J)mat->get_rows(),
+                                                                (J)mat->get_cols(),
+                                                                (I)mat->get_nnz(),
+                                                                (J)mat->get_block_dim(),
+                                                                (J)mat->get_block_dim(),
+                                                                (const T*)mat->get_const_val_data(),
+                                                                (const I*)mat->get_const_row_data(),
+                                                                (const J*)mat->get_const_col_data(),
+                                                                mat->get_idx_base(),
+                                                                (mat->get_descr())->type,
+                                                                (mat->get_descr())->fill_mode,
+                                                                (mat->get_descr())->storage_mode,
+                                                                data_status,
+                                                                temp_buffer)));
                 return rocsparse_status_success;
             }
             }
@@ -456,14 +456,14 @@ try
                        ((temp_buffer == nullptr) && (buffer_size == nullptr)),
                        rocsparse_status_invalid_pointer);
 
-    ROCSPARSE_CHECKARG(1, mat, (mat->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(1, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1, mat, (mat->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, mat, (mat->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::check_spmat_dynamic_dispatch(rocsparse::determine_I_indextype(mat),
                                                 rocsparse::determine_J_indextype(mat),
-                                                mat->data_type,
-                                                mat->format,
+                                                mat->get_data_type(),
+                                                mat->get_format(),
                                                 handle,
                                                 mat,
                                                 data_status,

@@ -59,12 +59,12 @@ namespace rocsparse
            || compute_type == rocsparse_datatype_f64_r)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::doti_template(handle,
-                                                               (I)x->nnz,
-                                                               (const X*)x->val_data,
-                                                               (const I*)x->idx_data,
-                                                               (const Y*)y->values,
+                                                               (I)x->get_nnz(),
+                                                               (const X*)x->get_val_data(),
+                                                               (const I*)x->get_idx_data(),
+                                                               (const Y*)y->get_values(),
                                                                (T*)result,
-                                                               x->idx_base));
+                                                               x->get_idx_base()));
             return rocsparse_status_success;
         }
 
@@ -100,12 +100,12 @@ namespace rocsparse
             if(trans == rocsparse_operation_none)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::doti_template(handle,
-                                                                   (I)x->nnz,
-                                                                   (const X*)x->val_data,
-                                                                   (const I*)x->idx_data,
-                                                                   (const Y*)y->values,
+                                                                   (I)x->get_nnz(),
+                                                                   (const X*)x->get_val_data(),
+                                                                   (const I*)x->get_idx_data(),
+                                                                   (const Y*)y->get_values(),
                                                                    (T*)result,
-                                                                   x->idx_base));
+                                                                   x->get_idx_base()));
                 return rocsparse_status_success;
             }
 
@@ -113,12 +113,12 @@ namespace rocsparse
             if(trans == rocsparse_operation_conjugate_transpose)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dotci_template(handle,
-                                                                    (I)x->nnz,
-                                                                    (const X*)x->val_data,
-                                                                    (const I*)x->idx_data,
-                                                                    (const Y*)y->values,
+                                                                    (I)x->get_nnz(),
+                                                                    (const X*)x->get_val_data(),
+                                                                    (const I*)x->get_idx_data(),
+                                                                    (const Y*)y->get_values(),
                                                                     (T*)result,
-                                                                    x->idx_base));
+                                                                    x->get_idx_base()));
                 return rocsparse_status_success;
             }
         }
@@ -335,15 +335,15 @@ try
     }
 
     // Check if descriptors are initialized
-    ROCSPARSE_CHECKARG(2, x, x->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(3, y, y->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, x, x->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(3, y, y->get_init() == false, rocsparse_status_not_initialized);
 
-    ROCSPARSE_CHECKARG(2, x, (x->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(3, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     rocsparse::spvv_t f;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::spvv_find(&f, compute_type, x->idx_type, x->data_type, y->data_type));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spvv_find(
+        &f, compute_type, x->get_idx_type(), x->get_data_type(), y->get_data_type()));
     RETURN_IF_ROCSPARSE_ERROR(
         f(handle, trans, x, y, result, compute_type, buffer_size, temp_buffer));
 

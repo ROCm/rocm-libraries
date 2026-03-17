@@ -115,7 +115,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const rocsparse_format format_A = A->format;
+        const rocsparse_format format_A = A->get_format();
         switch(stage)
         {
         case rocsparse_spgemm_stage_buffer_size:
@@ -128,24 +128,24 @@ namespace rocsparse
                     rocsparse::csrgemm_buffer_size_template(handle,
                                                             trans_A,
                                                             trans_B,
-                                                            (J)A->rows,
-                                                            (J)B->cols,
-                                                            (J)A->cols,
+                                                            (J)A->get_rows(),
+                                                            (J)B->get_cols(),
+                                                            (J)A->get_cols(),
                                                             (const T*)alpha,
-                                                            A->descr,
-                                                            (I)A->nnz,
-                                                            (const I*)A->const_row_data,
-                                                            (const J*)A->const_col_data,
-                                                            B->descr,
-                                                            (I)B->nnz,
-                                                            (const I*)B->const_row_data,
-                                                            (const J*)B->const_col_data,
+                                                            A->get_descr(),
+                                                            (I)A->get_nnz(),
+                                                            (const I*)A->get_const_row_data(),
+                                                            (const J*)A->get_const_col_data(),
+                                                            B->get_descr(),
+                                                            (I)B->get_nnz(),
+                                                            (const I*)B->get_const_row_data(),
+                                                            (const J*)B->get_const_col_data(),
                                                             (const T*)beta,
-                                                            D->descr,
-                                                            (I)D->nnz,
-                                                            (const I*)D->const_row_data,
-                                                            (const J*)D->const_col_data,
-                                                            C->info,
+                                                            D->get_descr(),
+                                                            (I)D->get_nnz(),
+                                                            (const I*)D->get_const_row_data(),
+                                                            (const J*)D->get_const_col_data(),
+                                                            C->get_info(),
                                                             buffer_size));
                 return rocsparse_status_success;
             }
@@ -153,28 +153,28 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::bsrgemm_buffer_size_template(handle,
-                                                            A->block_dir,
+                                                            A->get_block_dir(),
                                                             trans_A,
                                                             trans_B,
-                                                            (J)A->rows,
-                                                            (J)B->cols,
-                                                            (J)A->cols,
-                                                            (J)A->block_dim,
+                                                            (J)A->get_rows(),
+                                                            (J)B->get_cols(),
+                                                            (J)A->get_cols(),
+                                                            (J)A->get_block_dim(),
                                                             (const T*)alpha,
-                                                            A->descr,
-                                                            (I)A->nnz,
-                                                            (const I*)A->const_row_data,
-                                                            (const J*)A->const_col_data,
-                                                            B->descr,
-                                                            (I)B->nnz,
-                                                            (const I*)B->const_row_data,
-                                                            (const J*)B->const_col_data,
+                                                            A->get_descr(),
+                                                            (I)A->get_nnz(),
+                                                            (const I*)A->get_const_row_data(),
+                                                            (const J*)A->get_const_col_data(),
+                                                            B->get_descr(),
+                                                            (I)B->get_nnz(),
+                                                            (const I*)B->get_const_row_data(),
+                                                            (const J*)B->get_const_col_data(),
                                                             (const T*)beta,
-                                                            D->descr,
-                                                            (I)D->nnz,
-                                                            (const I*)D->const_row_data,
-                                                            (const J*)D->const_col_data,
-                                                            C->info,
+                                                            D->get_descr(),
+                                                            (I)D->get_nnz(),
+                                                            (const I*)D->get_const_row_data(),
+                                                            (const J*)D->get_const_col_data(),
+                                                            C->get_info(),
                                                             buffer_size));
                 return rocsparse_status_success;
             }
@@ -206,30 +206,30 @@ namespace rocsparse
                     = rocsparse::csrgemm_nnz_template(handle,
                                                       trans_A,
                                                       trans_B,
-                                                      (J)A->rows,
-                                                      (J)B->cols,
-                                                      (J)A->cols,
-                                                      A->descr,
-                                                      (I)A->nnz,
-                                                      (const I*)A->const_row_data,
-                                                      (const J*)A->const_col_data,
-                                                      B->descr,
-                                                      (I)B->nnz,
-                                                      (const I*)B->const_row_data,
-                                                      (const J*)B->const_col_data,
-                                                      D->descr,
-                                                      (I)D->nnz,
-                                                      (const I*)D->const_row_data,
-                                                      (const J*)D->const_col_data,
-                                                      C->descr,
-                                                      (I*)C->row_data,
+                                                      (J)A->get_rows(),
+                                                      (J)B->get_cols(),
+                                                      (J)A->get_cols(),
+                                                      A->get_descr(),
+                                                      (I)A->get_nnz(),
+                                                      (const I*)A->get_const_row_data(),
+                                                      (const J*)A->get_const_col_data(),
+                                                      B->get_descr(),
+                                                      (I)B->get_nnz(),
+                                                      (const I*)B->get_const_row_data(),
+                                                      (const J*)B->get_const_col_data(),
+                                                      D->get_descr(),
+                                                      (I)D->get_nnz(),
+                                                      (const I*)D->get_const_row_data(),
+                                                      (const J*)D->get_const_col_data(),
+                                                      C->get_descr(),
+                                                      (I*)C->get_row_data(),
                                                       &nnz_C,
-                                                      C->info,
+                                                      C->get_info(),
                                                       temp_buffer);
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, ptr_mode));
                 RETURN_IF_ROCSPARSE_ERROR(status);
-                C->nnz = nnz_C;
+                C->set_nnz(nnz_C);
 
                 return rocsparse_status_success;
             }
@@ -243,34 +243,34 @@ namespace rocsparse
                     rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
                 const rocsparse_status status
                     = rocsparse::bsrgemm_nnzb_template(handle,
-                                                       A->block_dir,
+                                                       A->get_block_dir(),
                                                        trans_A,
                                                        trans_B,
-                                                       (J)A->rows,
-                                                       (J)B->cols,
-                                                       (J)A->cols,
-                                                       (J)A->block_dim,
-                                                       A->descr,
-                                                       (I)A->nnz,
-                                                       (const I*)A->const_row_data,
-                                                       (const J*)A->const_col_data,
-                                                       B->descr,
-                                                       (I)B->nnz,
-                                                       (const I*)B->const_row_data,
-                                                       (const J*)B->const_col_data,
-                                                       D->descr,
-                                                       (I)D->nnz,
-                                                       (const I*)D->const_row_data,
-                                                       (const J*)D->const_col_data,
-                                                       C->descr,
-                                                       (I*)C->row_data,
+                                                       (J)A->get_rows(),
+                                                       (J)B->get_cols(),
+                                                       (J)A->get_cols(),
+                                                       (J)A->get_block_dim(),
+                                                       A->get_descr(),
+                                                       (I)A->get_nnz(),
+                                                       (const I*)A->get_const_row_data(),
+                                                       (const J*)A->get_const_col_data(),
+                                                       B->get_descr(),
+                                                       (I)B->get_nnz(),
+                                                       (const I*)B->get_const_row_data(),
+                                                       (const J*)B->get_const_col_data(),
+                                                       D->get_descr(),
+                                                       (I)D->get_nnz(),
+                                                       (const I*)D->get_const_row_data(),
+                                                       (const J*)D->get_const_col_data(),
+                                                       C->get_descr(),
+                                                       (I*)C->get_row_data(),
                                                        &nnzb_C,
-                                                       C->info,
+                                                       C->get_info(),
                                                        temp_buffer);
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, ptr_mode));
                 RETURN_IF_ROCSPARSE_ERROR(status);
-                C->nnz = nnzb_C;
+                C->set_nnz(nnzb_C);
 
                 return rocsparse_status_success;
             }
@@ -293,71 +293,73 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 // CSR format
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_template(handle,
-                                                                      trans_A,
-                                                                      trans_B,
-                                                                      (J)A->rows,
-                                                                      (J)B->cols,
-                                                                      (J)A->cols,
-                                                                      (const T*)alpha,
-                                                                      A->descr,
-                                                                      (I)A->nnz,
-                                                                      (const T*)A->const_val_data,
-                                                                      (const I*)A->const_row_data,
-                                                                      (const J*)A->const_col_data,
-                                                                      B->descr,
-                                                                      (I)B->nnz,
-                                                                      (const T*)B->const_val_data,
-                                                                      (const I*)B->const_row_data,
-                                                                      (const J*)B->const_col_data,
-                                                                      (const T*)beta,
-                                                                      D->descr,
-                                                                      (I)D->nnz,
-                                                                      (const T*)D->const_val_data,
-                                                                      (const I*)D->const_row_data,
-                                                                      (const J*)D->const_col_data,
-                                                                      C->descr,
-                                                                      (T*)C->val_data,
-                                                                      (const I*)C->const_row_data,
-                                                                      (J*)C->col_data,
-                                                                      C->info,
-                                                                      temp_buffer));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::csrgemm_template(handle,
+                                                trans_A,
+                                                trans_B,
+                                                (J)A->get_rows(),
+                                                (J)B->get_cols(),
+                                                (J)A->get_cols(),
+                                                (const T*)alpha,
+                                                A->get_descr(),
+                                                (I)A->get_nnz(),
+                                                (const T*)A->get_const_val_data(),
+                                                (const I*)A->get_const_row_data(),
+                                                (const J*)A->get_const_col_data(),
+                                                B->get_descr(),
+                                                (I)B->get_nnz(),
+                                                (const T*)B->get_const_val_data(),
+                                                (const I*)B->get_const_row_data(),
+                                                (const J*)B->get_const_col_data(),
+                                                (const T*)beta,
+                                                D->get_descr(),
+                                                (I)D->get_nnz(),
+                                                (const T*)D->get_const_val_data(),
+                                                (const I*)D->get_const_row_data(),
+                                                (const J*)D->get_const_col_data(),
+                                                C->get_descr(),
+                                                (T*)C->get_val_data(),
+                                                (const I*)C->get_const_row_data(),
+                                                (J*)C->get_col_data(),
+                                                C->get_info(),
+                                                temp_buffer));
 
                 return rocsparse_status_success;
             }
             case rocsparse_format_bsr:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrgemm_template(handle,
-                                                                      A->block_dir,
-                                                                      trans_A,
-                                                                      trans_B,
-                                                                      (J)A->rows,
-                                                                      (J)B->cols,
-                                                                      (J)A->cols,
-                                                                      (J)A->block_dim,
-                                                                      (const T*)alpha,
-                                                                      A->descr,
-                                                                      (I)A->nnz,
-                                                                      (const T*)A->const_val_data,
-                                                                      (const I*)A->const_row_data,
-                                                                      (const J*)A->const_col_data,
-                                                                      B->descr,
-                                                                      (I)B->nnz,
-                                                                      (const T*)B->const_val_data,
-                                                                      (const I*)B->const_row_data,
-                                                                      (const J*)B->const_col_data,
-                                                                      (const T*)beta,
-                                                                      D->descr,
-                                                                      (I)D->nnz,
-                                                                      (const T*)D->const_val_data,
-                                                                      (const I*)D->const_row_data,
-                                                                      (const J*)D->const_col_data,
-                                                                      C->descr,
-                                                                      (T*)C->val_data,
-                                                                      (const I*)C->const_row_data,
-                                                                      (J*)C->col_data,
-                                                                      C->info,
-                                                                      temp_buffer));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::bsrgemm_template(handle,
+                                                A->get_block_dir(),
+                                                trans_A,
+                                                trans_B,
+                                                (J)A->get_rows(),
+                                                (J)B->get_cols(),
+                                                (J)A->get_cols(),
+                                                (J)A->get_block_dim(),
+                                                (const T*)alpha,
+                                                A->get_descr(),
+                                                (I)A->get_nnz(),
+                                                (const T*)A->get_const_val_data(),
+                                                (const I*)A->get_const_row_data(),
+                                                (const J*)A->get_const_col_data(),
+                                                B->get_descr(),
+                                                (I)B->get_nnz(),
+                                                (const T*)B->get_const_val_data(),
+                                                (const I*)B->get_const_row_data(),
+                                                (const J*)B->get_const_col_data(),
+                                                (const T*)beta,
+                                                D->get_descr(),
+                                                (I)D->get_nnz(),
+                                                (const T*)D->get_const_val_data(),
+                                                (const I*)D->get_const_row_data(),
+                                                (const J*)D->get_const_col_data(),
+                                                C->get_descr(),
+                                                (T*)C->get_val_data(),
+                                                (const I*)C->get_const_row_data(),
+                                                (J*)C->get_col_data(),
+                                                C->get_info(),
+                                                temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_format_coo:
@@ -392,26 +394,26 @@ namespace rocsparse
                     rocsparse::csrgemm_symbolic_template(handle,
                                                          trans_A,
                                                          trans_B,
-                                                         (J)A->rows,
-                                                         (J)B->cols,
-                                                         (J)A->cols,
-                                                         A->descr,
-                                                         (I)A->nnz,
-                                                         (const I*)A->const_row_data,
-                                                         (const J*)A->const_col_data,
-                                                         B->descr,
-                                                         (I)B->nnz,
-                                                         (const I*)B->const_row_data,
-                                                         (const J*)B->const_col_data,
-                                                         D->descr,
-                                                         (I)D->nnz,
-                                                         (const I*)D->const_row_data,
-                                                         (const J*)D->const_col_data,
-                                                         C->descr,
-                                                         (I)C->nnz,
-                                                         (const I*)C->const_row_data,
-                                                         (J*)C->col_data,
-                                                         C->info,
+                                                         (J)A->get_rows(),
+                                                         (J)B->get_cols(),
+                                                         (J)A->get_cols(),
+                                                         A->get_descr(),
+                                                         (I)A->get_nnz(),
+                                                         (const I*)A->get_const_row_data(),
+                                                         (const J*)A->get_const_col_data(),
+                                                         B->get_descr(),
+                                                         (I)B->get_nnz(),
+                                                         (const I*)B->get_const_row_data(),
+                                                         (const J*)B->get_const_col_data(),
+                                                         D->get_descr(),
+                                                         (I)D->get_nnz(),
+                                                         (const I*)D->get_const_row_data(),
+                                                         (const J*)D->get_const_col_data(),
+                                                         C->get_descr(),
+                                                         (I)C->get_nnz(),
+                                                         (const I*)C->get_const_row_data(),
+                                                         (J*)C->get_col_data(),
+                                                         C->get_info(),
                                                          temp_buffer));
                 return rocsparse_status_success;
             }
@@ -438,32 +440,32 @@ namespace rocsparse
                     rocsparse::csrgemm_numeric_template(handle,
                                                         trans_A,
                                                         trans_B,
-                                                        (J)A->rows,
-                                                        (J)B->cols,
-                                                        (J)A->cols,
+                                                        (J)A->get_rows(),
+                                                        (J)B->get_cols(),
+                                                        (J)A->get_cols(),
                                                         (const T*)alpha,
-                                                        A->descr,
-                                                        (I)A->nnz,
-                                                        (const T*)A->const_val_data,
-                                                        (const I*)A->const_row_data,
-                                                        (const J*)A->const_col_data,
-                                                        B->descr,
-                                                        (I)B->nnz,
-                                                        (const T*)B->const_val_data,
-                                                        (const I*)B->const_row_data,
-                                                        (const J*)B->const_col_data,
+                                                        A->get_descr(),
+                                                        (I)A->get_nnz(),
+                                                        (const T*)A->get_const_val_data(),
+                                                        (const I*)A->get_const_row_data(),
+                                                        (const J*)A->get_const_col_data(),
+                                                        B->get_descr(),
+                                                        (I)B->get_nnz(),
+                                                        (const T*)B->get_const_val_data(),
+                                                        (const I*)B->get_const_row_data(),
+                                                        (const J*)B->get_const_col_data(),
                                                         (const T*)beta,
-                                                        D->descr,
-                                                        (I)D->nnz,
-                                                        (const T*)D->const_val_data,
-                                                        (const I*)D->const_row_data,
-                                                        (const J*)D->const_col_data,
-                                                        C->descr,
-                                                        (I)C->nnz,
-                                                        (T*)C->val_data,
-                                                        (const I*)C->const_row_data,
-                                                        (const J*)C->const_col_data,
-                                                        C->info,
+                                                        D->get_descr(),
+                                                        (I)D->get_nnz(),
+                                                        (const T*)D->get_const_val_data(),
+                                                        (const I*)D->get_const_row_data(),
+                                                        (const J*)D->get_const_col_data(),
+                                                        C->get_descr(),
+                                                        (I)C->get_nnz(),
+                                                        (T*)C->get_val_data(),
+                                                        (const I*)C->get_const_row_data(),
+                                                        (const J*)C->get_const_col_data(),
+                                                        C->get_info(),
                                                         temp_buffer));
                 return rocsparse_status_success;
             }
@@ -723,32 +725,45 @@ namespace rocsparse
         //    }
         //
 
-        ROCSPARSE_CHECKARG(4, A, (A->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(5, B, (B->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(7, D, (D->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(8, C, (C->init == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(4, A, (A->get_init() == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(5, B, (B->get_init() == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(7, D, (D->get_init() == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(8, C, (C->get_init() == false), rocsparse_status_not_initialized);
 
-        ROCSPARSE_CHECKARG(4, A, (A->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(5, B, (B->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(7, D, (D->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(8, C, (C->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(4, A, (A->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5, B, (B->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(7, D, (D->get_batch_count() != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(8, C, (C->get_batch_count() != 1), rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(5, B, (B->format != A->format), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(7, D, (D->format != A->format), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(8, C, (C->format != A->format), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            5, B, (B->get_format() != A->get_format()), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            7, D, (D->get_format() != A->get_format()), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            8, C, (C->get_format() != A->get_format()), rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(4, A, (A->data_type != compute_type), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(5, B, (B->data_type != compute_type), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(7, D, (D->data_type != compute_type), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(8, C, (C->data_type != compute_type), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            4, A, (A->get_data_type() != compute_type), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            5, B, (B->get_data_type() != compute_type), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            7, D, (D->get_data_type() != compute_type), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            8, C, (C->get_data_type() != compute_type), rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(5, B, (B->row_type != A->row_type), rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(7, D, (D->row_type != A->row_type), rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(8, C, (C->row_type != A->row_type), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            5, B, (B->get_row_type() != A->get_row_type()), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            7, D, (D->get_row_type() != A->get_row_type()), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            8, C, (C->get_row_type() != A->get_row_type()), rocsparse_status_type_mismatch);
 
-        ROCSPARSE_CHECKARG(5, B, (B->col_type != A->col_type), rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(7, D, (D->col_type != A->col_type), rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(8, C, (C->col_type != A->col_type), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            5, B, (B->get_col_type() != A->get_col_type()), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            7, D, (D->get_col_type() != A->get_col_type()), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            8, C, (C->get_col_type() != A->get_col_type()), rocsparse_status_type_mismatch);
 
         return rocsparse_status_continue;
     }
@@ -808,8 +823,8 @@ try
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spgemm_template_dispatch(A->row_type,
-                                                                  A->col_type,
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spgemm_template_dispatch(A->get_row_type(),
+                                                                  A->get_col_type(),
                                                                   compute_type,
 
                                                                   handle,

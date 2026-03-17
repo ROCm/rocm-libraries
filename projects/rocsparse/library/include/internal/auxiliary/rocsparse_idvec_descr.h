@@ -174,10 +174,10 @@ rocsparse_status rocsparse_idvec_destroy(rocsparse_handle      handle,
                                          rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
-   *  \brief Set a property of the indexing vector descriptor
+   *  \brief Get a property of the indexing vector descriptor
    *
    *  \details
-   *  \p rocsparse_idvec_set_prop sets a property of the indexing vector descriptor.
+   *  \p rocsparse_idvec_get_prop sets a property of the indexing vector descriptor.
    *
    *  @param[in]
    *  handle  handle to the rocsparse library context queue.

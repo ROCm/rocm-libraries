@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -463,16 +463,16 @@ try
     ROCSPARSE_CHECKARG_ENUM(2, trans_B);
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, mat_A);
-    ROCSPARSE_CHECKARG(4, mat_A, mat_A->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, mat_A, mat_A->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, mat_A, (mat_A->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_POINTER(5, mat_B);
-    ROCSPARSE_CHECKARG(5, mat_B, mat_B->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(5, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5, mat_B, mat_B->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, mat_B, (mat_B->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_POINTER(6, beta);
     ROCSPARSE_CHECKARG_POINTER(7, mat_C);
-    ROCSPARSE_CHECKARG(7, mat_C, mat_C->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(7, mat_C, mat_C->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_ENUM(8, compute_type);
 
@@ -494,11 +494,11 @@ try
                                                    compute_type,
                                                    rocsparse::determine_I_indextype(mat_C),
                                                    rocsparse::determine_J_indextype(mat_C),
-                                                   mat_A->data_type,
-                                                   mat_B->data_type,
-                                                   mat_C->data_type));
+                                                   mat_A->get_datatype(),
+                                                   mat_B->get_datatype(),
+                                                   mat_C->get_data_type()));
 
-    RETURN_IF_ROCSPARSE_ERROR(sddmm_buffer_size_function(mat_C->format,
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_buffer_size_function(mat_C->get_format(),
                                                          handle,
                                                          trans_A,
                                                          trans_B,
@@ -913,14 +913,14 @@ try
     ROCSPARSE_CHECKARG_ENUM(2, trans_B);
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, mat_A);
-    ROCSPARSE_CHECKARG(4, mat_A, mat_A->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, mat_A, mat_A->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(5, mat_B);
-    ROCSPARSE_CHECKARG(5, mat_B, mat_B->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, mat_B, mat_B->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(6, beta);
     ROCSPARSE_CHECKARG_POINTER(7, mat_C);
-    ROCSPARSE_CHECKARG(7, mat_C, mat_C->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(7, mat_C, mat_C->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_ENUM(8, compute_type);
 
@@ -935,7 +935,7 @@ try
                        (trans_B == rocsparse_operation_conjugate_transpose),
                        rocsparse_status_not_implemented);
 
-    if(mat_C->nnz == 0)
+    if(mat_C->get_nnz() == 0)
     {
         return rocsparse_status_success;
     }
@@ -946,11 +946,11 @@ try
                                                   compute_type,
                                                   rocsparse::determine_I_indextype(mat_C),
                                                   rocsparse::determine_J_indextype(mat_C),
-                                                  mat_A->data_type,
-                                                  mat_B->data_type,
-                                                  mat_C->data_type));
+                                                  mat_A->get_datatype(),
+                                                  mat_B->get_datatype(),
+                                                  mat_C->get_data_type()));
 
-    RETURN_IF_ROCSPARSE_ERROR(sddmm_preprocess_function(mat_C->format,
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_preprocess_function(mat_C->get_format(),
                                                         handle,
                                                         trans_A,
                                                         trans_B,
@@ -1364,14 +1364,14 @@ try
     ROCSPARSE_CHECKARG_ENUM(2, trans_B);
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, mat_A);
-    ROCSPARSE_CHECKARG(4, mat_A, mat_A->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, mat_A, mat_A->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(5, mat_B);
-    ROCSPARSE_CHECKARG(5, mat_B, mat_B->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, mat_B, mat_B->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(6, beta);
     ROCSPARSE_CHECKARG_POINTER(7, mat_C);
-    ROCSPARSE_CHECKARG(7, mat_C, mat_C->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(7, mat_C, mat_C->get_init() == false, rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_ENUM(8, compute_type);
 
@@ -1386,7 +1386,7 @@ try
                        (trans_B == rocsparse_operation_conjugate_transpose),
                        rocsparse_status_not_implemented);
 
-    if(mat_C->nnz == 0)
+    if(mat_C->get_nnz() == 0)
     {
         return rocsparse_status_success;
     }
@@ -1397,11 +1397,11 @@ try
                                        compute_type,
                                        rocsparse::determine_I_indextype(mat_C),
                                        rocsparse::determine_J_indextype(mat_C),
-                                       mat_A->data_type,
-                                       mat_B->data_type,
-                                       mat_C->data_type));
+                                       mat_A->get_datatype(),
+                                       mat_B->get_datatype(),
+                                       mat_C->get_data_type()));
 
-    RETURN_IF_ROCSPARSE_ERROR(sddmm_function(mat_C->format,
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_function(mat_C->get_format(),
                                              handle,
                                              trans_A,
                                              trans_B,

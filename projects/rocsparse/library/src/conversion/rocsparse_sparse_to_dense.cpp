@@ -82,53 +82,54 @@ namespace rocsparse
         }
 
         // COO
-        if(mat_A->format == rocsparse_format_coo)
+        if(mat_A->get_format() == rocsparse_format_coo)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::coo2dense_template(handle,
-                                                                    (I)mat_A->rows,
-                                                                    (I)mat_A->cols,
-                                                                    mat_A->nnz,
-                                                                    mat_A->descr,
-                                                                    (const T*)mat_A->const_val_data,
-                                                                    (const I*)mat_A->const_row_data,
-                                                                    (const I*)mat_A->const_col_data,
-                                                                    (T*)mat_B->values,
-                                                                    mat_B->ld,
-                                                                    mat_B->order));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::coo2dense_template(handle,
+                                              (I)mat_A->get_rows(),
+                                              (I)mat_A->get_cols(),
+                                              mat_A->get_nnz(),
+                                              mat_A->get_descr(),
+                                              (const T*)mat_A->get_const_val_data(),
+                                              (const I*)mat_A->get_const_row_data(),
+                                              (const I*)mat_A->get_const_col_data(),
+                                              (T*)mat_B->get_values(),
+                                              mat_B->get_ld(),
+                                              mat_B->get_order()));
             return rocsparse_status_success;
         }
 
         // CSR
-        if(mat_A->format == rocsparse_format_csr)
+        if(mat_A->get_format() == rocsparse_format_csr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csx2dense_impl<rocsparse_direction_row>(handle,
-                                                                   (J)mat_A->rows,
-                                                                   (J)mat_A->cols,
-                                                                   mat_A->descr,
-                                                                   (const T*)mat_A->const_val_data,
-                                                                   (const I*)mat_A->const_row_data,
-                                                                   (const J*)mat_A->const_col_data,
-                                                                   (T*)mat_B->values,
-                                                                   mat_B->ld,
-                                                                   mat_B->order));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csx2dense_impl<rocsparse_direction_row>(
+                handle,
+                (J)mat_A->get_rows(),
+                (J)mat_A->get_cols(),
+                mat_A->get_descr(),
+                (const T*)mat_A->get_const_val_data(),
+                (const I*)mat_A->get_const_row_data(),
+                (const J*)mat_A->get_const_col_data(),
+                (T*)mat_B->get_values(),
+                mat_B->get_ld(),
+                mat_B->get_order()));
             return rocsparse_status_success;
         }
 
         // CSC
-        if(mat_A->format == rocsparse_format_csc)
+        if(mat_A->get_format() == rocsparse_format_csc)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csx2dense_impl<rocsparse_direction_column>(
                 handle,
-                (J)mat_A->rows,
-                (J)mat_A->cols,
-                mat_A->descr,
-                (const T*)mat_A->const_val_data,
-                (const I*)mat_A->const_col_data,
-                (const J*)mat_A->const_row_data,
-                (T*)mat_B->values,
-                mat_B->ld,
-                mat_B->order));
+                (J)mat_A->get_rows(),
+                (J)mat_A->get_cols(),
+                mat_A->get_descr(),
+                (const T*)mat_A->get_const_val_data(),
+                (const I*)mat_A->get_const_col_data(),
+                (const J*)mat_A->get_const_row_data(),
+                (T*)mat_B->get_values(),
+                mat_B->get_ld(),
+                mat_B->get_order()));
             return rocsparse_status_success;
         }
 
@@ -274,29 +275,29 @@ try
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, mat_A);
 
-    ROCSPARSE_CHECKARG(1, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, mat_A, (mat_A->get_init() == false), rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(2, mat_B);
-    ROCSPARSE_CHECKARG(2, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, mat_B, (mat_B->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_ENUM(3, alg);
     ROCSPARSE_CHECKARG(4,
                        buffer_size,
                        (temp_buffer == nullptr && buffer_size == nullptr),
                        rocsparse_status_invalid_pointer);
 
-    ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1, mat_A, (mat_A->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, mat_B, (mat_B->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     rocsparse::sparse_to_dense_t f;
-    if(mat_A->format == rocsparse_format_csc)
+    if(mat_A->get_format() == rocsparse_format_csc)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_dense_find(
-            &f, mat_A->col_type, mat_A->row_type, mat_A->data_type));
+            &f, mat_A->get_col_type(), mat_A->get_row_type(), mat_A->get_data_type()));
     }
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_dense_find(
-            &f, mat_A->row_type, mat_A->col_type, mat_A->data_type));
+            &f, mat_A->get_row_type(), mat_A->get_col_type(), mat_A->get_data_type()));
     }
 
     RETURN_IF_ROCSPARSE_ERROR(f(handle, mat_A, mat_B, alg, buffer_size, temp_buffer));

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@ namespace rocsparse
 
     rocsparse_status spmat_ell2csr_nnz(rocsparse_handle            handle,
                                        rocsparse_const_spmat_descr source,
-                                       rocsparse_const_spmat_descr target,
+                                       rocsparse_spmat_descr       target,
                                        int64_t*                    out_csr_nnz);
 
     rocsparse_status spmat_ell2csr_buffer_size(rocsparse_handle            handle,

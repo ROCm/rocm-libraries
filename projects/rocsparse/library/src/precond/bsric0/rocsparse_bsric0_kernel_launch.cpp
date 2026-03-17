@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,13 +47,13 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
 
     rocsparse::bsric0_kernel_launch_t launch{};
 
-    if((sleep) || (handle->wavefront_size == 32) || (max_nnzb > 128) || (A->block_dim > 32))
+    if((sleep) || (handle->wavefront_size == 32) || (max_nnzb > 128) || (A->get_block_dim() > 32))
     {
         launch = find_bsric0_kernel_general_launch(handle, bsric0_info, A);
     }
     else
     {
-        if(A->block_dim <= 8)
+        if(A->get_block_dim() <= 8)
         {
             if(max_nnzb <= 32)
             {
@@ -64,11 +64,11 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
                 launch = find_bsric0_kernel_2_8_launch(handle, bsric0_info, A);
             }
         }
-        else if(A->block_dim <= 16)
+        else if(A->get_block_dim() <= 16)
         {
             launch = find_bsric0_kernel_9_16_launch(handle, bsric0_info, A);
         }
-        else if(A->block_dim <= 32)
+        else if(A->get_block_dim() <= 32)
         {
             launch = find_bsric0_kernel_17_32_launch(handle, bsric0_info, A);
         }
@@ -82,7 +82,7 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
 
     RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                        0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
+                                       sizeof(int32_t) * A->get_rows() * A->get_batch_count(),
                                        handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsric0_info, A, buffer_size, buffer));

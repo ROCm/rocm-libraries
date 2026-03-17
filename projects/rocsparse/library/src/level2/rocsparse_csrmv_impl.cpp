@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -294,7 +294,8 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
             bool all_gamma_zero = true;
             for(rocsparse_int i = 0; i < num_extra; ++i)
             {
-                if(reinterpret_cast<const T*>(gamma_vec->const_values)[i] != static_cast<T>(0))
+                if(reinterpret_cast<const T*>(gamma_vec->get_const_values())[i]
+                   != static_cast<T>(0))
                 {
                     all_gamma_zero = false;
                     break;

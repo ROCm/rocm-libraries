@@ -28,7 +28,10 @@
 #ifndef ROCSPARSE_AUXILIARY_H
 #define ROCSPARSE_AUXILIARY_H
 
+#include "internal/auxiliary/rocsparse_dnvec_descr.h"
 #include "internal/auxiliary/rocsparse_idvec_descr.h"
+#include "internal/auxiliary/rocsparse_spattern_descr.h"
+#include "internal/auxiliary/rocsparse_spmat_descr.h"
 #include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 #ifdef __cplusplus

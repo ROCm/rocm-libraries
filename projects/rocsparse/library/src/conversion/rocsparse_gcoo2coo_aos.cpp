@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -83,19 +83,19 @@ rocsparse_status rocsparse::spmat_coo2coo_aos(rocsparse_handle            handle
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo2coo_aos(handle,
-                                                      source_->rows,
-                                                      source_->nnz,
-                                                      source_->row_type,
-                                                      source_->const_row_data,
-                                                      source_->col_type,
-                                                      source_->const_col_data,
-                                                      source_->data_type,
-                                                      source_->const_val_data,
-                                                      source_->idx_base,
-                                                      target_->row_type,
-                                                      target_->ind_data,
-                                                      target_->data_type,
-                                                      target_->val_data,
-                                                      target_->idx_base));
+                                                      source_->get_rows(),
+                                                      source_->get_nnz(),
+                                                      source_->get_row_type(),
+                                                      source_->get_const_row_data(),
+                                                      source_->get_col_type(),
+                                                      source_->get_const_col_data(),
+                                                      source_->get_data_type(),
+                                                      source_->get_const_val_data(),
+                                                      source_->get_idx_base(),
+                                                      target_->get_row_type(),
+                                                      target_->get_ind_data(),
+                                                      target_->get_data_type(),
+                                                      target_->get_val_data(),
+                                                      target_->get_idx_base()));
     return rocsparse_status_success;
 }

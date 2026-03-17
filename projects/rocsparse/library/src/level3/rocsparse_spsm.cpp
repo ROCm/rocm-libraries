@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -152,63 +152,63 @@ namespace rocsparse
                                            void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = matA->data_type;
+        const rocsparse_datatype alpha_datatype = matA->get_data_type();
         // 1) B col order + transposed and C row order
         // 2) B row order + non-transposed and C row order
         void* csrsm_buffer = temp_buffer;
-        if(matB->rows > 0 && matB->cols > 0)
+        if(matB->get_rows() > 0 && matB->get_cols() > 0)
         {
-            const size_t sizeof_datatype = rocsparse::datatype_sizeof(matC->data_type);
-            if(matB->order == rocsparse_order_column)
+            const size_t sizeof_datatype = rocsparse::datatype_sizeof(matC->get_datatype());
+            if(matB->get_order() == rocsparse_order_column)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(matC->values,
-                                                     sizeof_datatype * matC->ld,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->rows,
-                                                     matB->cols,
+                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(matC->get_values(),
+                                                     sizeof_datatype * matC->get_ld(),
+                                                     matB->get_const_values(),
+                                                     sizeof_datatype * matB->get_ld(),
+                                                     sizeof_datatype * matB->get_rows(),
+                                                     matB->get_cols(),
                                                      hipMemcpyDeviceToDevice,
                                                      handle->stream));
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(matC->values,
-                                                     sizeof_datatype * matC->ld,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->cols,
-                                                     matB->rows,
+                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(matC->get_values(),
+                                                     sizeof_datatype * matC->get_ld(),
+                                                     matB->get_const_values(),
+                                                     sizeof_datatype * matB->get_ld(),
+                                                     sizeof_datatype * matB->get_cols(),
+                                                     matB->get_rows(),
                                                      hipMemcpyDeviceToDevice,
                                                      handle->stream));
             }
         }
 
-        switch(matA->format)
+        switch(matA->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
-                                                             matC->values,
-                                                             matC->ld,
-                                                             matC->order,
-                                                             matA->info,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
+                                                             matC->get_values(),
+                                                             matC->get_ld(),
+                                                             matC->get_order(),
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -218,25 +218,25 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
-                                                             matC->values,
-                                                             matC->ld,
-                                                             matC->order,
-                                                             matA->info,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
+                                                             matC->get_values(),
+                                                             matC->get_ld(),
+                                                             matC->get_order(),
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -266,68 +266,69 @@ namespace rocsparse
                                             void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = matA->data_type;
+        const rocsparse_datatype alpha_datatype = matA->get_data_type();
 
-        const size_t sizeof_datatype = rocsparse::datatype_sizeof(matB->data_type);
+        const size_t sizeof_datatype = rocsparse::datatype_sizeof(matB->get_datatype());
 
         // 1) B col order + transposed and C col order
         // 2) B row order + non-transposed and C col order
-        void* spsm_buffer  = temp_buffer;
-        void* csrsm_buffer = ((char*)temp_buffer)
-                             + ((sizeof_datatype * matB->rows * matB->cols - 1) / 256 + 1) * 256;
+        void* spsm_buffer = temp_buffer;
+        void* csrsm_buffer
+            = ((char*)temp_buffer)
+              + ((sizeof_datatype * matB->get_rows() * matB->get_cols() - 1) / 256 + 1) * 256;
 
-        if(matB->rows > 0 && matB->cols > 0)
+        if(matB->get_rows() > 0 && matB->get_cols() > 0)
         {
-            if(matB->order == rocsparse_order_column)
+            if(matB->get_order() == rocsparse_order_column)
             {
                 RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(spsm_buffer,
-                                                     sizeof_datatype * matB->rows,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->rows,
-                                                     matB->cols,
+                                                     sizeof_datatype * matB->get_rows(),
+                                                     matB->get_const_values(),
+                                                     sizeof_datatype * matB->get_ld(),
+                                                     sizeof_datatype * matB->get_rows(),
+                                                     matB->get_cols(),
                                                      hipMemcpyDeviceToDevice,
                                                      handle->stream));
             }
             else
             {
                 RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(spsm_buffer,
-                                                     sizeof_datatype * matB->cols,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->cols,
-                                                     matB->rows,
+                                                     sizeof_datatype * matB->get_cols(),
+                                                     matB->get_const_values(),
+                                                     sizeof_datatype * matB->get_ld(),
+                                                     sizeof_datatype * matB->get_cols(),
+                                                     matB->get_rows(),
                                                      hipMemcpyDeviceToDevice,
                                                      handle->stream));
             }
         }
 
-        switch(matA->format)
+        switch(matA->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
                                                              spsm_buffer,
-                                                             matC->cols,
+                                                             matC->get_cols(),
                                                              rocsparse_order_row,
-                                                             matA->info,
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -337,25 +338,25 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
                                                              spsm_buffer,
-                                                             matC->cols,
+                                                             matC->get_cols(),
                                                              rocsparse_order_row,
-                                                             matA->info,
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -371,31 +372,31 @@ namespace rocsparse
         }
         }
 
-        if(matB->rows > 0 && matB->cols > 0)
+        if(matB->get_rows() > 0 && matB->get_cols() > 0)
         {
-            if(matB->order == rocsparse_order_column)
+            if(matB->get_order() == rocsparse_order_column)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->rows,
-                                                                     matB->cols,
-                                                                     matB->data_type,
+                                                                     matB->get_rows(),
+                                                                     matB->get_cols(),
+                                                                     matB->get_datatype(),
                                                                      spsm_buffer,
-                                                                     matB->rows,
-                                                                     matC->data_type,
-                                                                     matC->values,
-                                                                     matC->ld));
+                                                                     matB->get_rows(),
+                                                                     matC->get_datatype(),
+                                                                     matC->get_values(),
+                                                                     matC->get_ld()));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->cols,
-                                                                     matB->rows,
-                                                                     matB->data_type,
+                                                                     matB->get_cols(),
+                                                                     matB->get_rows(),
+                                                                     matB->get_datatype(),
                                                                      spsm_buffer,
-                                                                     matB->cols,
-                                                                     matC->data_type,
-                                                                     matC->values,
-                                                                     matC->ld));
+                                                                     matB->get_cols(),
+                                                                     matC->get_datatype(),
+                                                                     matC->get_values(),
+                                                                     matC->get_ld()));
             }
         }
 
@@ -414,64 +415,64 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const rocsparse_datatype alpha_datatype = matA->data_type;
+        const rocsparse_datatype alpha_datatype = matA->get_data_type();
         // 1) B row order + transposed and C row order
         // 2) B col order + non-transposed and C row order
         void* csrsm_buffer = temp_buffer;
-        if(matB->rows > 0 && matB->cols > 0)
+        if(matB->get_rows() > 0 && matB->get_cols() > 0)
         {
-            if(matB->order == rocsparse_order_column)
+            if(matB->get_order() == rocsparse_order_column)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->rows,
-                                                                     matB->cols,
-                                                                     matB->data_type,
-                                                                     matB->const_values,
-                                                                     matB->ld,
-                                                                     matC->data_type,
-                                                                     matC->values,
-                                                                     matC->ld));
+                                                                     matB->get_rows(),
+                                                                     matB->get_cols(),
+                                                                     matB->get_datatype(),
+                                                                     matB->get_const_values(),
+                                                                     matB->get_ld(),
+                                                                     matC->get_datatype(),
+                                                                     matC->get_values(),
+                                                                     matC->get_ld()));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->cols,
-                                                                     matB->rows,
-                                                                     matB->data_type,
-                                                                     matB->const_values,
-                                                                     matB->ld,
-                                                                     matC->data_type,
-                                                                     matC->values,
-                                                                     matC->ld));
+                                                                     matB->get_cols(),
+                                                                     matB->get_rows(),
+                                                                     matB->get_datatype(),
+                                                                     matB->get_const_values(),
+                                                                     matB->get_ld(),
+                                                                     matC->get_datatype(),
+                                                                     matC->get_values(),
+                                                                     matC->get_ld()));
             }
         }
 
-        switch(matA->format)
+        switch(matA->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
-                                                             matC->values,
-                                                             matC->ld,
-                                                             matC->order,
-                                                             matA->info,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
+                                                             matC->get_values(),
+                                                             matC->get_ld(),
+                                                             matC->get_order(),
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -481,25 +482,25 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
-                                                             matC->values,
-                                                             matC->ld,
-                                                             matC->order,
-                                                             matA->info,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
+                                                             matC->get_values(),
+                                                             matC->get_ld(),
+                                                             matC->get_order(),
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -529,71 +530,73 @@ namespace rocsparse
                                              void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = matA->data_type;
+        const rocsparse_datatype alpha_datatype = matA->get_data_type();
 
         // 1) B row order + transposed and C col order
         // 2) B col order + non-transposed and C col order
-        void* spsm_buffer = temp_buffer;
-        void* csrsm_buffer
-            = ((char*)temp_buffer)
-              + ((rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols - 1) / 256
-                 + 1)
-                    * 256;
+        void* spsm_buffer  = temp_buffer;
+        void* csrsm_buffer = ((char*)temp_buffer)
+                             + ((rocsparse::datatype_sizeof(matB->get_datatype()) * matB->get_rows()
+                                     * matB->get_cols()
+                                 - 1)
+                                    / 256
+                                + 1)
+                                   * 256;
 
-        if(matB->rows > 0 && matB->cols > 0)
+        if(matB->get_rows() > 0 && matB->get_cols() > 0)
         {
-            if(matB->order == rocsparse_order_column)
+            if(matB->get_order() == rocsparse_order_column)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->rows,
-                                                                     matB->cols,
-                                                                     matB->data_type,
-                                                                     matB->const_values,
-                                                                     matB->ld,
-                                                                     matB->data_type,
+                                                                     matB->get_rows(),
+                                                                     matB->get_cols(),
+                                                                     matB->get_datatype(),
+                                                                     matB->get_const_values(),
+                                                                     matB->get_ld(),
+                                                                     matB->get_datatype(),
                                                                      spsm_buffer,
-                                                                     matB->cols));
+                                                                     matB->get_cols()));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->cols,
-                                                                     matB->rows,
-                                                                     matB->data_type,
-                                                                     matB->const_values,
-                                                                     matB->ld,
-                                                                     matB->data_type,
+                                                                     matB->get_cols(),
+                                                                     matB->get_rows(),
+                                                                     matB->get_datatype(),
+                                                                     matB->get_const_values(),
+                                                                     matB->get_ld(),
+                                                                     matB->get_datatype(),
                                                                      spsm_buffer,
-                                                                     matB->rows));
+                                                                     matB->get_rows()));
             }
         }
 
-        switch(matA->format)
+        switch(matA->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
                                                              spsm_buffer,
-                                                             matC->cols,
+                                                             matC->get_cols(),
                                                              rocsparse_order_row,
-                                                             matA->info,
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -603,25 +606,25 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             matA->rows,
-                                                             matC->cols,
-                                                             matA->nnz,
+                                                             matA->get_rows(),
+                                                             matC->get_cols(),
+                                                             matA->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             matA->descr,
-                                                             matA->data_type,
-                                                             matA->const_val_data,
-                                                             matA->row_type,
-                                                             matA->const_row_data,
-                                                             matA->col_type,
-                                                             matA->const_col_data,
-                                                             matC->data_type,
+                                                             matA->get_descr(),
+                                                             matA->get_data_type(),
+                                                             matA->get_const_val_data(),
+                                                             matA->get_row_type(),
+                                                             matA->get_const_row_data(),
+                                                             matA->get_col_type(),
+                                                             matA->get_const_col_data(),
+                                                             matC->get_datatype(),
                                                              spsm_buffer,
-                                                             matC->cols,
+                                                             matC->get_cols(),
                                                              rocsparse_order_row,
-                                                             matA->info,
+                                                             matA->get_info(),
                                                              rocsparse_solve_policy_auto,
-                                                             matA->info->get_csrsm_info(),
+                                                             matA->get_info()->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -637,31 +640,31 @@ namespace rocsparse
         }
         }
 
-        if(matB->rows > 0 && matB->cols > 0)
+        if(matB->get_rows() > 0 && matB->get_cols() > 0)
         {
-            if(matB->order == rocsparse_order_column)
+            if(matB->get_order() == rocsparse_order_column)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->cols,
-                                                                     matB->rows,
-                                                                     matB->data_type,
+                                                                     matB->get_cols(),
+                                                                     matB->get_rows(),
+                                                                     matB->get_datatype(),
                                                                      spsm_buffer,
-                                                                     matB->cols,
-                                                                     matC->data_type,
-                                                                     matC->values,
-                                                                     matC->ld));
+                                                                     matB->get_cols(),
+                                                                     matC->get_datatype(),
+                                                                     matC->get_values(),
+                                                                     matC->get_ld()));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                                     matB->rows,
-                                                                     matB->cols,
-                                                                     matB->data_type,
+                                                                     matB->get_rows(),
+                                                                     matB->get_cols(),
+                                                                     matB->get_datatype(),
                                                                      spsm_buffer,
-                                                                     matB->rows,
-                                                                     matC->data_type,
-                                                                     matC->values,
-                                                                     matC->ld));
+                                                                     matB->get_rows(),
+                                                                     matC->get_datatype(),
+                                                                     matC->get_values(),
+                                                                     matC->get_ld()));
             }
         }
 
@@ -681,47 +684,48 @@ namespace rocsparse
                           void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = matA->data_type;
+        const rocsparse_datatype alpha_datatype = matA->get_data_type();
 
-        rocsparse::spsm_case spsm_case = spsm_get_case(trans_B, matB->order, matC->order);
+        rocsparse::spsm_case spsm_case
+            = spsm_get_case(trans_B, matB->get_order(), matC->get_order());
 
         switch(stage)
         {
         case rocsparse_spsm_stage_buffer_size:
         {
-            switch(matA->format)
+            switch(matA->get_format())
             {
             case rocsparse_format_csr:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_buffer_size(handle,
                                                                        trans_A,
                                                                        trans_B,
-                                                                       matA->rows,
-                                                                       matC->cols,
-                                                                       matA->nnz,
+                                                                       matA->get_rows(),
+                                                                       matC->get_cols(),
+                                                                       matA->get_nnz(),
                                                                        alpha_datatype,
-                                                                       matA->descr,
-                                                                       matA->data_type,
-                                                                       matA->const_val_data,
-                                                                       matA->row_type,
-                                                                       matA->const_row_data,
-                                                                       matA->col_type,
-                                                                       matA->const_col_data,
-                                                                       matC->data_type,
-                                                                       matC->order,
-                                                                       matA->info,
+                                                                       matA->get_descr(),
+                                                                       matA->get_data_type(),
+                                                                       matA->get_const_val_data(),
+                                                                       matA->get_row_type(),
+                                                                       matA->get_const_row_data(),
+                                                                       matA->get_col_type(),
+                                                                       matA->get_const_col_data(),
+                                                                       matC->get_datatype(),
+                                                                       matC->get_order(),
+                                                                       matA->get_info(),
                                                                        rocsparse_solve_policy_auto,
                                                                        buffer_size));
 
                 if(spsm_case == rocsparse::spsm_case::NT_NT
                    || spsm_case == rocsparse::spsm_case::T_NT)
                 {
-                    *buffer_size
-                        += ((rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols
-                             - 1)
-                                / 256
-                            + 1)
-                           * 256;
+                    *buffer_size += ((rocsparse::datatype_sizeof(matB->get_datatype())
+                                          * matB->get_rows() * matB->get_cols()
+                                      - 1)
+                                         / 256
+                                     + 1)
+                                    * 256;
                 }
                 return rocsparse_status_success;
             }
@@ -731,32 +735,32 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_buffer_size(handle,
                                                                        trans_A,
                                                                        trans_B,
-                                                                       matA->rows,
-                                                                       matC->cols,
-                                                                       matA->nnz,
+                                                                       matA->get_rows(),
+                                                                       matC->get_cols(),
+                                                                       matA->get_nnz(),
                                                                        alpha_datatype,
-                                                                       matA->descr,
-                                                                       matA->data_type,
-                                                                       matA->const_val_data,
-                                                                       matA->row_type,
-                                                                       matA->const_row_data,
-                                                                       matA->col_type,
-                                                                       matA->const_col_data,
-                                                                       matC->data_type,
-                                                                       matC->order,
-                                                                       matA->info,
+                                                                       matA->get_descr(),
+                                                                       matA->get_data_type(),
+                                                                       matA->get_const_val_data(),
+                                                                       matA->get_row_type(),
+                                                                       matA->get_const_row_data(),
+                                                                       matA->get_col_type(),
+                                                                       matA->get_const_col_data(),
+                                                                       matC->get_datatype(),
+                                                                       matC->get_order(),
+                                                                       matA->get_info(),
                                                                        rocsparse_solve_policy_auto,
                                                                        buffer_size));
 
                 if(spsm_case == rocsparse::spsm_case::NT_NT
                    || spsm_case == rocsparse::spsm_case::T_NT)
                 {
-                    *buffer_size
-                        += ((rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols
-                             - 1)
-                                / 256
-                            + 1)
-                           * 256;
+                    *buffer_size += ((rocsparse::datatype_sizeof(matB->get_data_type())
+                                          * matB->get_rows() * matB->get_cols()
+                                      - 1)
+                                         / 256
+                                     + 1)
+                                    * 256;
                 }
                 return rocsparse_status_success;
             }
@@ -778,81 +782,82 @@ namespace rocsparse
             void* csrsm_buffer = temp_buffer;
             if(spsm_case == rocsparse::spsm_case::NT_NT || spsm_case == rocsparse::spsm_case::T_NT)
             {
-                csrsm_buffer
-                    = reinterpret_cast<char*>(temp_buffer)
-                      + ((rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols - 1)
-                             / 256
-                         + 1)
-                            * 256;
+                csrsm_buffer = reinterpret_cast<char*>(temp_buffer)
+                               + ((rocsparse::datatype_sizeof(matB->get_datatype())
+                                       * matB->get_rows() * matB->get_cols()
+                                   - 1)
+                                      / 256
+                                  + 1)
+                                     * 256;
             }
 
-            switch(matA->format)
+            switch(matA->get_format())
             {
             case rocsparse_format_csr:
             {
-                if(matA->analysed == false)
+                if(matA->get_analysed() == false)
                 {
-                    rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
+                    rocsparse_csrsm_info csrsm_info = matA->get_info()->get_csrsm_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsm_analysis(handle,
                                                    trans_A,
                                                    trans_B,
-                                                   matA->rows,
-                                                   matC->cols,
-                                                   matA->nnz,
+                                                   matA->get_rows(),
+                                                   matC->get_cols(),
+                                                   matA->get_nnz(),
                                                    alpha_datatype,
                                                    alpha,
-                                                   matA->descr,
-                                                   matA->data_type,
-                                                   matA->const_val_data,
-                                                   matA->row_type,
-                                                   matA->const_row_data,
-                                                   matA->col_type,
-                                                   matA->const_col_data,
-                                                   matC->data_type,
-                                                   matC->values,
-                                                   matC->ld,
-                                                   matA->info,
+                                                   matA->get_descr(),
+                                                   matA->get_data_type(),
+                                                   matA->get_const_val_data(),
+                                                   matA->get_row_type(),
+                                                   matA->get_const_row_data(),
+                                                   matA->get_col_type(),
+                                                   matA->get_const_col_data(),
+                                                   matC->get_datatype(),
+                                                   matC->get_values(),
+                                                   matC->get_ld(),
+                                                   matA->get_info(),
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
                                                    &csrsm_info,
                                                    csrsm_buffer)));
 
-                    matA->analysed = true;
+                    matA->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
 
             case rocsparse_format_coo:
             {
-                if(matA->analysed == false)
+                if(matA->get_analysed() == false)
                 {
-                    rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
+                    rocsparse_csrsm_info csrsm_info = matA->get_info()->get_csrsm_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosm_analysis(handle,
                                                    trans_A,
                                                    trans_B,
-                                                   matA->rows,
-                                                   matC->cols,
-                                                   matA->nnz,
+                                                   matA->get_rows(),
+                                                   matC->get_cols(),
+                                                   matA->get_nnz(),
                                                    alpha_datatype,
                                                    alpha,
-                                                   matA->descr,
-                                                   matA->data_type,
-                                                   matA->const_val_data,
-                                                   matA->row_type,
-                                                   matA->const_row_data,
-                                                   matA->col_type,
-                                                   matA->const_col_data,
-                                                   matC->data_type,
-                                                   matC->values,
-                                                   matC->ld,
-                                                   matA->info,
+                                                   matA->get_descr(),
+                                                   matA->get_data_type(),
+                                                   matA->get_const_val_data(),
+                                                   matA->get_row_type(),
+                                                   matA->get_const_row_data(),
+                                                   matA->get_col_type(),
+                                                   matA->get_const_col_data(),
+                                                   matC->get_datatype(),
+                                                   matC->get_values(),
+                                                   matC->get_ld(),
+                                                   matA->get_info(),
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
                                                    &csrsm_info,
                                                    csrsm_buffer)));
-                    matA->analysed = true;
+                    matA->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
@@ -933,19 +938,20 @@ try
     ROCSPARSE_CHECKARG_ENUM(2, trans_B);
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, matA);
-    ROCSPARSE_CHECKARG(4, matA, matA->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, matA, matA->batch_count != 1, rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, matA, matA->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, matA, matA->get_batch_count() != 1, rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG_POINTER(5, matB);
-    ROCSPARSE_CHECKARG(5, matB, matB->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(5, matB, matB->batch_count != 1, rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5, matB, matB->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, matB, matB->get_batch_count() != 1, rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG_POINTER(6, matC);
-    ROCSPARSE_CHECKARG(6, matC, matC->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(6, matC, matC->batch_count != 1, rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(6, matC, matC->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(6, matC, matC->get_batch_count() != 1, rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG_ENUM(7, compute_type);
     ROCSPARSE_CHECKARG(7,
                        compute_type,
-                       (compute_type != matA->data_type || compute_type != matB->data_type
-                        || compute_type != matC->data_type),
+                       (compute_type != matA->get_data_type()
+                        || compute_type != matB->get_datatype()
+                        || compute_type != matC->get_datatype()),
                        rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_ENUM(8, alg);

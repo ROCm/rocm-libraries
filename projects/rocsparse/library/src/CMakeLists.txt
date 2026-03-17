@@ -26,10 +26,23 @@ set(rocsparse_source
 
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
+  src/auxiliary/rocsparse_dnmat.cpp
+  src/auxiliary/rocsparse_dnvec.cpp
   src/auxiliary/rocsparse_error.cpp
-  src/auxiliary/rocsparse_idvec_descr.cpp
+  src/auxiliary/rocsparse_hyb_mat.cpp
+  src/auxiliary/rocsparse_idvec.cpp
+  src/auxiliary/rocsparse_spattern.cpp
+  src/auxiliary/rocsparse_spmat.cpp
+  src/auxiliary/rocsparse_spmat_backward.cpp
+  src/auxiliary/rocsparse_spvec.cpp
 
-# Common
+  # Common
+  src/common/rocsparse_dnmat_descr.cpp
+  src/common/rocsparse_dnvec_descr.cpp
+  src/common/rocsparse_idvec_descr.cpp
+  src/common/rocsparse_spattern_descr.cpp
+  src/common/rocsparse_spmat_descr.cpp
+  src/common/rocsparse_spvec_descr.cpp
   src/common/rocsparse_common.cpp
   src/common/rocsparse_valset.cpp
   src/common/rocsparse_conjugate.cpp

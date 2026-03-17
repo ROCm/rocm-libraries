@@ -165,13 +165,30 @@ typedef struct _rocsparse_spmat_descr* rocsparse_spmat_descr;
 typedef struct _rocsparse_spmat_descr const* rocsparse_const_spmat_descr;
 
 /*! \ingroup types_module
+ *  \brief Generic API descriptor of the sparsity pattern of a sparse matrix.
+ *
+ *  \details
+ *  The rocSPARSE sparsity pattern descriptor is a structure holding all properties of a sparsity pattern.
+ *  It should be destroyed at the end using rocsparse_spattern_destroy().
+ */
+typedef struct _rocsparse_spattern_descr* rocsparse_spattern_descr;
+
+/*! \ingroup types_module
+ *  \brief Generic API descriptor of the sparsity pattern of a sparse matrix.
+ *
+ *  \details
+ *  The rocSPARSE constant sparsity pattern descriptor is a constant pointer to a sparsity pattern descriptor.
+ */
+typedef struct _rocsparse_spattern_descr const* rocsparse_const_spattern_descr;
+
+/*! \ingroup types_module
  *  \brief Generic API descriptor of the dense vector.
  *
  *  \details
  *  The rocSPARSE dense vector descriptor is a structure holding all properties of a dense vector.
- *  It must be initialized using rocsparse_create_dnvec_descr() and the returned
+ *  It must be initialized using rocsparse_create_dnvec_descr(), or rocsparse_dnvec_descr_create() and the returned
  *  descriptor must be passed to all subsequent generic API library calls that involve the dense vector.
- *  It should be destroyed at the end using rocsparse_destroy_dnvec_descr().
+ *  It should be destroyed at the end using rocsparse_destroy_dnvec_descr(), or rocsparse_dnvec_descr_destroy().
  */
 typedef struct _rocsparse_dnvec_descr* rocsparse_dnvec_descr;
 
@@ -1252,6 +1269,182 @@ typedef enum rocsparse_idvec_prop_
      */
     rocsparse_idvec_prop_batch_dist,
 } rocsparse_idvec_prop;
+
+/*!
+ * @ingroup types_module
+ * @brief Properties of a dense vector.
+ */
+typedef enum rocsparse_dnvec_prop_
+{
+    /*!
+     * @brief The \ref rocsparse_datatype.
+     */
+    rocsparse_dnvec_prop_datatype,
+    /*!
+     * @brief The number of elements, of type int64_t.
+     */
+    rocsparse_dnvec_prop_size,
+    /*!
+     * @brief The size in bytes, of type size_t.
+     */
+    rocsparse_dnvec_prop_size_in_bytes,
+    /*!
+     * @brief The increment, of type int64_t, default value is 1.
+     */
+    rocsparse_dnvec_prop_inc,
+    /*!
+     * @brief The batch layout, \ref rocsparse_batchtype.
+     */
+    rocsparse_dnvec_prop_batchtype,
+    /*!
+     * @brief The batch storage, \ref rocsparse_batchstorage.
+     */
+    rocsparse_dnvec_prop_batchstorage,
+    /*!
+     * @brief The batch count, of type int64_t, default value is 1.
+     */
+    rocsparse_dnvec_prop_batch_count,
+    /*!
+     * @brief The batch distance, default value is 0.
+     */
+    rocsparse_dnvec_prop_batch_dist,
+} rocsparse_dnvec_prop;
+
+/*!
+ * @brief Properties of a dense matrix.
+ */
+typedef enum rocsparse_dnmat_prop_
+{
+    /*!
+     * @brief The \ref rocsparse_datatype.
+     */
+    rocsparse_dnmat_prop_datatype,
+    /*!
+     * @brief The \ref rocsparse_order.
+     */
+    rocsparse_dnmat_prop_order,
+    /*!
+     * @brief The number of rows, int64_t.
+     */
+    rocsparse_dnmat_prop_rows,
+    /*!
+     * @brief The number of columnd, int64_t.
+     */
+    rocsparse_dnmat_prop_cols,
+    /*!
+     * @brief The leading dimension, int64_t.
+     */
+    rocsparse_dnmat_prop_ld,
+    /*!
+     * @brief The batch layout, \ref rocsparse_batchtype.
+     */
+    rocsparse_dnmat_prop_batchtype,
+    /*!
+     * @brief The batch storage, \ref rocsparse_batchstorage, \ref rocsparse_batchstorage_soa by default.
+     */
+    rocsparse_dnmat_prop_batchstorage,
+    /*!
+     * @brief The batch count, int64_t, default value is 1.
+     */
+    rocsparse_dnmat_prop_batch_count,
+    /*!
+     * @brief The batch distance, default value is 0.
+     */
+    rocsparse_dnmat_prop_batch_dist,
+} rocsparse_dnmat_prop;
+
+/*!
+ * @brief Properties of the sparsity pattern of a sparse matrix.
+ */
+typedef enum rocsparse_spattern_prop_
+{
+    /*!
+     * @brief The format, \ref rocsparse_format.
+     */
+    rocsparse_spattern_prop_format,
+    /*!
+     * @brief The number of rows, int64_t.
+     */
+    rocsparse_spattern_prop_rows,
+    /*!
+     * @brief The number of columns, int64_t.
+     */
+    rocsparse_spattern_prop_cols,
+    /*!
+     * @brief The number of non-zeros, int64_t.
+     */
+    rocsparse_spattern_prop_nnz,
+    /*!
+   * @brief The block dimension, int64_t, default is 1.
+   */
+    rocsparse_spattern_prop_block_dim,
+    /*!
+   * @brief The block direction , \ref rocsparse_direction, default is \ref rocsparse_direction_column.
+   */
+    rocsparse_spattern_prop_block_dir,
+    /*!
+     * @brief The width of the ellpack format, int64_t.
+     */
+    rocsparse_spattern_prop_ell_width,
+    /*!
+     * @brief The width of the block-ellpack format, int64_t.
+     */
+    rocsparse_spattern_prop_bell_width,
+    /*!
+     * @brief The slice size of the sliced-ellpack format, int64_t.
+     */
+    rocsparse_spattern_prop_sell_slice_size,
+    /*!
+     * @brief The colval size of the sliced-ellpack format, int64_t.
+     */
+    rocsparse_spattern_prop_sell_colval_size,
+    /*!
+     * @brief The batch count, int64_t, default value is 1.
+     */
+    rocsparse_spattern_prop_batch_count
+} rocsparse_spattern_prop;
+
+/*!
+ * @brief Data of the sparsity pattern of a sparse matrix.
+ */
+typedef enum rocsparse_spattern_data_
+{
+    /*!
+     * @brief The row data, as a \ref rocsparse_idvec_descr.
+     */
+    rocsparse_spattern_data_row,
+    /*!
+     * @brief The column data, as a \ref rocsparse_idvec_descr.
+     */
+    rocsparse_spattern_data_column,
+} rocsparse_spattern_data;
+
+typedef enum rocsparse_spmat_prop_
+{
+    /*!
+     * @brief The format, \ref rocsparse_format.
+     */
+    rocsparse_spmat_prop_format,
+    /*!
+     * @brief The number of rows, int64_t.
+     * @note With block formats, e.g. \ref rocsparse_format_bsr, the number of symbolic rows is different from the number of numeric rows.
+     */
+    rocsparse_spmat_prop_rows,
+    /*!
+     * @brief The number of columns, int64_t.
+     * @note With block formats, e.g. \ref rocsparse_format_bsr, the number of symbolic rows is different from the number of numeric rows.
+     */
+    rocsparse_spmat_prop_cols,
+    /*!
+     * @brief The number of numeric non-zeros, int64_t.
+     * @note With some formats, e.g. \ref rocsparse_format_bsr, the number of symbolic non-zeros is different from the number of numeric non-zeros.
+     */
+    rocsparse_spmat_prop_nnz,
+    /*!
+   * @brief The batch count, int64_t, default value is 1.
+   */
+    rocsparse_spmat_prop_batch_count
+} rocsparse_spmat_prop;
 
 #ifdef __cplusplus
 }

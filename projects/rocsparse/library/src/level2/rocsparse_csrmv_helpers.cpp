@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ namespace rocsparse
             {
                 // Copy the pointer value directly to device array element
                 RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)(&z_array[i]),
-                                                   &(z_vecs[i]->const_values),
+                                                   z_vecs[i]->get_ref_const_values(),
                                                    sizeof(const Z*),
                                                    hipMemcpyHostToDevice,
                                                    handle->stream));
@@ -69,7 +69,7 @@ namespace rocsparse
         if(gamma_vec != nullptr)
         {
             // The gamma values are in the dnvec, copy them to the device array
-            const T* gamma_data = reinterpret_cast<const T*>(gamma_vec->const_values);
+            const T* gamma_data = reinterpret_cast<const T*>(gamma_vec->get_const_values());
 
             RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)gamma_device_array,
                                                gamma_data,

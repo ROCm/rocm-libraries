@@ -471,21 +471,21 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
 
 rocsparse_status rocsparse::spmat_ell2csr_nnz(rocsparse_handle            handle,
                                               rocsparse_const_spmat_descr source,
-                                              rocsparse_const_spmat_descr target,
+                                              rocsparse_spmat_descr       target,
                                               int64_t*                    out_csr_nnz)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gell2csr_nnz(handle,
-                                                      source->rows,
-                                                      source->cols,
-                                                      source->descr,
-                                                      source->ell_width,
-                                                      source->col_type,
-                                                      source->const_col_data,
-                                                      target->descr,
-                                                      target->row_type,
-                                                      target->row_data,
+                                                      source->get_rows(),
+                                                      source->get_cols(),
+                                                      source->get_descr(),
+                                                      source->get_ell_width(),
+                                                      source->get_col_type(),
+                                                      source->get_const_col_data(),
+                                                      target->get_descr(),
+                                                      target->get_row_type(),
+                                                      target->get_row_data(),
                                                       out_csr_nnz));
 
     return rocsparse_status_success;
@@ -511,21 +511,21 @@ rocsparse_status rocsparse::spmat_ell2csr(rocsparse_handle            handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gell2csr(handle,
-                                                  source->rows,
-                                                  source->cols,
-                                                  source->descr,
-                                                  source->ell_width,
-                                                  source->data_type,
-                                                  source->const_val_data,
-                                                  source->col_type,
-                                                  source->const_col_data,
-                                                  target->descr,
-                                                  target->data_type,
-                                                  target->val_data,
-                                                  target->row_type,
-                                                  target->row_data,
-                                                  target->col_type,
-                                                  target->col_data));
+                                                  source->get_rows(),
+                                                  source->get_cols(),
+                                                  source->get_descr(),
+                                                  source->get_ell_width(),
+                                                  source->get_data_type(),
+                                                  source->get_const_val_data(),
+                                                  source->get_col_type(),
+                                                  source->get_const_col_data(),
+                                                  target->get_descr(),
+                                                  target->get_data_type(),
+                                                  target->get_val_data(),
+                                                  target->get_row_type(),
+                                                  target->get_row_data(),
+                                                  target->get_col_type(),
+                                                  target->get_col_data()));
 
     return rocsparse_status_success;
 }

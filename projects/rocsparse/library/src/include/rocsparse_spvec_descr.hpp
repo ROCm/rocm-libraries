@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 
 struct _rocsparse_spvec_descr
 {
+protected:
     bool init{};
 
     int64_t size{};
@@ -46,4 +47,42 @@ struct _rocsparse_spvec_descr
 
     int64_t batch_count{1};
     int64_t batch_stride{0};
+
+public:
+    //
+    bool get_init() const;
+    void set_init(bool);
+    //
+    int64_t get_size() const;
+    void    set_size(int64_t);
+    //
+    int64_t get_nnz() const;
+    void    set_nnz(int64_t);
+    //
+    void* get_idx_data() const;
+    void  set_idx_data(void*);
+    //
+    void* get_val_data() const;
+    void  set_val_data(void*);
+    //
+    const void* get_const_idx_data() const;
+    void        set_const_idx_data(const void*);
+    //
+    const void* get_const_val_data() const;
+    void        set_const_val_data(const void*);
+    //
+    rocsparse_indextype get_idx_type() const;
+    void                set_idx_type(rocsparse_indextype);
+    //
+    rocsparse_datatype get_data_type() const;
+    void               set_data_type(rocsparse_datatype);
+    //
+    rocsparse_index_base get_idx_base() const;
+    void                 set_idx_base(rocsparse_index_base);
+    //
+    int64_t get_batch_count() const;
+    void    set_batch_count(int64_t);
+    //
+    void    set_batch_stride(int64_t);
+    int64_t get_batch_stride() const;
 };

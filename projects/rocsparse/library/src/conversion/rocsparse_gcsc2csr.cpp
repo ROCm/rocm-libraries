@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -245,16 +245,16 @@ rocsparse_status rocsparse::spmat_csc2csr_buffer_size(rocsparse_handle          
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsc2csr_buffer_size(
         handle,
-        source_->rows,
-        source_->cols,
-        source_->nnz,
+        source_->get_rows(),
+        source_->get_cols(),
+        source_->get_nnz(),
         //
-        source_->col_type,
-        source_->row_type,
-        source_->const_col_data,
-        source_->const_row_data,
+        source_->get_col_type(),
+        source_->get_row_type(),
+        source_->get_const_col_data(),
+        source_->get_const_row_data(),
         //
-        (target_->val_data != nullptr && source_->const_val_data != nullptr)
+        (target_->get_val_data() != nullptr && source_->get_const_val_data() != nullptr)
             ? rocsparse_action_numeric
             : rocsparse_action_symbolic,
         buffer_size_));
@@ -269,28 +269,28 @@ rocsparse_status rocsparse::spmat_csc2csr(rocsparse_handle            handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::gcsc2csr(handle,
-                            source_->rows,
-                            source_->cols,
-                            source_->nnz,
-                            //
-                            source_->data_type,
-                            source_->col_type,
-                            source_->row_type,
-                            //
-                            source_->const_val_data,
-                            source_->const_col_data,
-                            source_->const_row_data,
-                            //
-                            target_->val_data,
-                            target_->col_data,
-                            target_->row_data,
-                            //
-                            (target_->val_data != nullptr && source_->const_val_data != nullptr)
-                                ? rocsparse_action_numeric
-                                : rocsparse_action_symbolic,
-                            source_->idx_base,
-                            buffer_));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsc2csr(
+        handle,
+        source_->get_rows(),
+        source_->get_cols(),
+        source_->get_nnz(),
+        //
+        source_->get_data_type(),
+        source_->get_col_type(),
+        source_->get_row_type(),
+        //
+        source_->get_const_val_data(),
+        source_->get_const_col_data(),
+        source_->get_const_row_data(),
+        //
+        target_->get_val_data(),
+        target_->get_col_data(),
+        target_->get_row_data(),
+        //
+        (target_->get_val_data() != nullptr && source_->get_const_val_data() != nullptr)
+            ? rocsparse_action_numeric
+            : rocsparse_action_symbolic,
+        source_->get_idx_base(),
+        buffer_));
     return rocsparse_status_success;
 }

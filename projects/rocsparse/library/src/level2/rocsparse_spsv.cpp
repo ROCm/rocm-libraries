@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -109,7 +109,7 @@ namespace rocsparse
                                  void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format format = mat->format;
+        const rocsparse_format format = mat->get_format();
         switch(format)
         {
         case rocsparse_format_csr:
@@ -131,9 +131,9 @@ namespace rocsparse
 
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                    rocsparse_csrsv_info csrsv_info = mat->get_info()->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
                                                    trans,
@@ -142,14 +142,14 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
+                    mat->set_analysed(true);
                 }
 
                 return rocsparse_status_success;
             }
             case rocsparse_spsv_stage_compute:
             {
-                const rocsparse_datatype datatype = mat->data_type;
+                const rocsparse_datatype datatype = mat->get_data_type();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                                  trans,
                                                                  datatype,
@@ -159,7 +159,7 @@ namespace rocsparse
                                                                  x,
                                                                  y,
                                                                  rocsparse_solve_policy_auto,
-                                                                 mat->info->get_csrsv_info(),
+                                                                 mat->get_info()->get_csrsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }
@@ -189,9 +189,9 @@ namespace rocsparse
             }
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                    rocsparse_csrsv_info csrsv_info = mat->get_info()->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
                                                    trans,
@@ -200,14 +200,14 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
+                    mat->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
 
             case rocsparse_spsv_stage_compute:
             {
-                const rocsparse_datatype datatype = mat->data_type;
+                const rocsparse_datatype datatype = mat->get_data_type();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve(handle,
                                                                  trans,
                                                                  datatype,
@@ -217,7 +217,7 @@ namespace rocsparse
                                                                  x,
                                                                  y,
                                                                  rocsparse_solve_policy_auto,
-                                                                 mat->info->get_csrsv_info(),
+                                                                 mat->get_info()->get_csrsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }
@@ -286,18 +286,19 @@ try
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    ROCSPARSE_CHECKARG(3, mat, (mat->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, x, (x->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(5, y, (y->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(3, mat, (mat->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, x, (x->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, y, (y->get_init() == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
-    ROCSPARSE_CHECKARG(3, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, x, (x->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(5, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, mat, (mat->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     // Check for matching types while we do not support mixed precision computation
-    ROCSPARSE_CHECKARG(3, mat, (mat->data_type != compute_type), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, x, (x->data_type != compute_type), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(5, y, (y->data_type != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(
+        3, mat, (mat->get_data_type() != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->get_datatype() != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5, y, (y->get_datatype() != compute_type), rocsparse_status_not_implemented);
 
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::spsv(handle, trans, alpha, mat, x, y, alg, stage, buffer_size, temp_buffer));

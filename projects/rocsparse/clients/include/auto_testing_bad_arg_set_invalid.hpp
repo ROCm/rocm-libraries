@@ -358,3 +358,33 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_idvec_prop& p)
 {
     p = (rocsparse_idvec_prop)-1;
 }
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_dnvec_prop& p)
+{
+    p = (rocsparse_dnvec_prop)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_dnmat_prop& p)
+{
+    p = (rocsparse_dnmat_prop)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spattern_prop& p)
+{
+    p = (rocsparse_spattern_prop)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spattern_data& p)
+{
+    p = (rocsparse_spattern_data)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spmat_prop& p)
+{
+    p = (rocsparse_spmat_prop)-1;
+}

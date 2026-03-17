@@ -146,6 +146,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_spmat_descr.cpp
   test_dnvec_descr.cpp
   test_idvec_descr.cpp
+  test_spattern_descr.cpp
   test_dnmat_descr.cpp
   test_const_spvec_descr.cpp
   test_const_spmat_descr.cpp
@@ -294,6 +295,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmat_descr.cpp
 ../testings/testing_dnvec_descr.cpp
 ../testings/testing_idvec_descr.cpp
+../testings/testing_spattern_descr.cpp
 ../testings/testing_dnmat_descr.cpp
 ../testings/testing_const_spvec_descr.cpp
 ../testings/testing_const_spmat_descr.cpp

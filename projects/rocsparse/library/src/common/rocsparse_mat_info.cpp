@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -269,9 +269,15 @@ rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
 
 _rocsparse_mat_info::~_rocsparse_mat_info()
 {
+    hipStream_t default_stream{};
+    WARNING_IF_ROCSPARSE_ERROR(this->destroy(default_stream));
+}
+
+rocsparse_status _rocsparse_mat_info::destroy(hipStream_t stream)
+{
 
     // Clear csrgemm info struct
-    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrgemm_info(this->csrgemm_info));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrgemm_info(this->csrgemm_info));
 
     if(this->csritsv_info != nullptr)
     {
@@ -284,7 +290,7 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
 
     //
     // TRM_INFO data are automatically destroyed.
@@ -310,4 +316,6 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
         delete sorted_coo2csr_info;
         this->set_sorted_coo2csr_info(nullptr);
     }
+
+    return rocsparse_status_success;
 }

@@ -45,24 +45,25 @@ try
     ROCSPARSE_CHECKARG_POINTER(2, x);
 
     // Check if descriptors are initialized
-    ROCSPARSE_CHECKARG(1, y, y->init == false, rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(2, x, x->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, y, y->get_init() == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, x, x->get_init() == false, rocsparse_status_not_initialized);
 
-    ROCSPARSE_CHECKARG(1, y, (y->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(2, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(1, y, (y->get_batch_count() != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, x, (x->get_batch_count() != 1), rocsparse_status_not_implemented);
 
     // Check for matching types while we do not support mixed precision computation
-    ROCSPARSE_CHECKARG(2, x, (x->data_type != y->data_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(
+        2, x, (x->get_data_type() != y->get_data_type()), rocsparse_status_not_implemented);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthr(handle,
-                                              x->nnz,
-                                              y->data_type,
-                                              y->const_values,
-                                              x->data_type,
-                                              x->val_data,
-                                              x->idx_type,
-                                              x->const_idx_data,
-                                              x->idx_base));
+                                              x->get_nnz(),
+                                              y->get_data_type(),
+                                              y->get_const_values(),
+                                              x->get_data_type(),
+                                              x->get_val_data(),
+                                              x->get_idx_type(),
+                                              x->get_const_idx_data(),
+                                              x->get_idx_base()));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

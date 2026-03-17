@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 
 rocsparse_indextype rocsparse::determine_I_indextype(rocsparse_const_spmat_descr mat)
 {
-    switch(mat->format)
+    switch(mat->get_format())
     {
     case rocsparse_format_coo:
     case rocsparse_format_coo_aos:
@@ -35,18 +35,18 @@ rocsparse_indextype rocsparse::determine_I_indextype(rocsparse_const_spmat_descr
     case rocsparse_format_bsr:
     case rocsparse_format_sell:
     {
-        return mat->row_type;
+        return mat->get_row_type();
     }
     case rocsparse_format_csc:
     {
-        return mat->col_type;
+        return mat->get_col_type();
     }
     }
 }
 
 rocsparse_indextype rocsparse::determine_J_indextype(rocsparse_const_spmat_descr mat)
 {
-    switch(mat->format)
+    switch(mat->get_format())
     {
     case rocsparse_format_coo:
     case rocsparse_format_coo_aos:
@@ -56,11 +56,11 @@ rocsparse_indextype rocsparse::determine_J_indextype(rocsparse_const_spmat_descr
     case rocsparse_format_bsr:
     case rocsparse_format_sell:
     {
-        return mat->col_type;
+        return mat->get_col_type();
     }
     case rocsparse_format_csc:
     {
-        return mat->row_type;
+        return mat->get_row_type();
     }
     }
 }

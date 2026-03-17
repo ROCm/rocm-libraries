@@ -96,6 +96,63 @@ struct rocsparse_idvec_prop_t
     }
 };
 
+struct rocsparse_dnvec_prop_t
+{
+    using value_t                     = rocsparse_dnvec_prop;
+    static constexpr uint32_t nvalues = 9;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = { rocsparse_dnvec_prop_datatype,
+    rocsparse_dnvec_prop_size,
+    rocsparse_dnvec_prop_size_in_bytes,
+    rocsparse_dnvec_prop_inc,
+    rocsparse_dnvec_prop_batchtype,
+    rocsparse_dnvec_prop_batchstorage,
+    rocsparse_dnvec_prop_batch_count,
+    rocsparse_dnvec_prop_batch_dist
+  };
+    // clang-format on
+
+    static const char* to_string(rocsparse_dnvec_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_dnvec_prop_datatype:
+        {
+            return "rocsparse_dnvec_prop_datatype";
+        }
+        case rocsparse_dnvec_prop_size:
+        {
+            return "rocsparse_dnvec_prop_size";
+        }
+        case rocsparse_dnvec_prop_size_in_bytes:
+        {
+            return "rocsparse_dnvec_prop_size_in_bytes";
+        }
+        case rocsparse_dnvec_prop_inc:
+        {
+            return "rocsparse_dnvec_prop_size_inc";
+        }
+        case rocsparse_dnvec_prop_batchtype:
+        {
+            return "rocsparse_dnvec_prop_batchtype";
+        }
+        case rocsparse_dnvec_prop_batchstorage:
+        {
+            return "rocsparse_dnvec_prop_batchstorage";
+        }
+        case rocsparse_dnvec_prop_batch_count:
+        {
+            return "rocsparse_dnvec_prop_batch_count";
+        }
+        case rocsparse_dnvec_prop_batch_dist:
+        {
+            return "rocsparse_dnvec_prop_batch_dist";
+        }
+        }
+        return "unknown";
+    }
+};
+
 struct rocsparse_batchtype_t
 {
     using value_t                     = rocsparse_batchtype;

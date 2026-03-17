@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -463,13 +463,13 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
     // Quick return if possible
-    if(A->rows == 0)
+    if(A->get_rows() == 0)
     {
         return rocsparse_status_success;
     }
 
     auto csrsv_info = p_csrsv_info[0];
-    auto descr      = A->descr;
+    auto descr      = A->get_descr();
     // Check matrix type
     ROCSPARSE_CHECKARG(2,
                        A,
@@ -483,7 +483,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
                        (descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    auto info = A->info;
+    auto info = A->get_info();
     // Differentiate the analysis policies
     if(analysis_policy == rocsparse_analysis_policy_reuse)
     {
@@ -513,16 +513,16 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
     // Perform analysis
     RETURN_IF_ROCSPARSE_ERROR(csrsv_info->recreate(handle,
                                                    trans,
-                                                   A->rows,
-                                                   A->nnz,
-                                                   A->descr,
-                                                   A->data_type,
-                                                   A->const_val_data,
+                                                   A->get_rows(),
+                                                   A->get_nnz(),
+                                                   A->get_descr(),
+                                                   A->get_data_type(),
+                                                   A->get_const_val_data(),
                                                    // csr_val_stride,
-                                                   A->row_type,
-                                                   A->const_row_data,
-                                                   A->col_type,
-                                                   A->const_col_data,
+                                                   A->get_row_type(),
+                                                   A->get_const_row_data(),
+                                                   A->get_col_type(),
+                                                   A->get_const_col_data(),
                                                    temp_buffer));
 
     return rocsparse_status_success;

@@ -364,3 +364,33 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_idvec_prop& p)
 {
     return rocsparse_status_invalid_value;
 }
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_dnvec_prop& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_dnmat_prop& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spattern_prop& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spattern_data& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spmat_prop& p)
+{
+    return rocsparse_status_invalid_value;
+}
