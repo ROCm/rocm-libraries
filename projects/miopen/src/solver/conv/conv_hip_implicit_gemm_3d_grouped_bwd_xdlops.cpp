@@ -486,15 +486,12 @@ static const std::vector<std::string> ranked_gemm_3d_grp_bwd = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 256, 64, Default, 8, 8, 8>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<32, 64, 32, 64, Default, 8, 8, 8>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>"
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>"
 };
 // clang-format on
 
