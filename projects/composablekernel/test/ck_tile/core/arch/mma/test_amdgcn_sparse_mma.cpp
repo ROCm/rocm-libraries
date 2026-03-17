@@ -71,6 +71,24 @@ TEST(SparseMMATrait, MmaOpTraitsIntegration)
     std::cout << "MmaOpTraits correctly integrates sparse operations" << std::endl;
 }
 
+TEST(SparseMMATrait, TestConceptRequirements)
+{
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+    using TestSparseMmma = amdgcn_mma<fp16_t,
+                                      fp16_t,
+                                      fp32_t,
+                                      16u,
+                                      16u,
+                                      32u,
+                                      DefaultSparseMfmaCtrlFlags,
+                                      CompilerTargetGfx950,
+                                      MmaOpFamily::SPARSE>;
+    static_assert(MmaOpI<TestSparseMmma>);
+#else
+    GTEST_SKIP() << "Not compiled with concepts. Skipping test.";
+#endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+}
+
 TEST(SparseMMATrait, DenseVsSparseDistinction)
 {
     // Dense MFMA from mfma/mfma_gfx9.hpp
