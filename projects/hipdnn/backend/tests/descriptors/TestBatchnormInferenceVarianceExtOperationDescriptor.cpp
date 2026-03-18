@@ -477,7 +477,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, GetAttributeTensorD
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawX)));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
+    std::unique_ptr<HipdnnBackendDescriptor> const retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -724,7 +724,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, ToStringContainsExp
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    std::string const str = desc->toString();
     ASSERT_NE(str.find("BatchnormInferenceVarianceExtOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=80"), std::string::npos);
     ASSERT_NE(str.find("mean_uid=81"), std::string::npos);

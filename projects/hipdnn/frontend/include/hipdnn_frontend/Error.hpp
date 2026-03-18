@@ -26,7 +26,7 @@
 #define HIPDNN_CHECK_ERROR(x) \
     do                        \
     {                         \
-        auto err = x;         \
+        const auto err = x;   \
         if(err.is_bad())      \
         {                     \
             return err;       \

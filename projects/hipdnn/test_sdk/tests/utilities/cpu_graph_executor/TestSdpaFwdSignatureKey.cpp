@@ -18,38 +18,51 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestSdpaFwdSignatureKey, EqualityOperator)
 {
-    SdpaFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    SdpaFwdSignatureKey key3{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
-    SdpaFwdSignatureKey key4{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
+    SdpaFwdSignatureKey const key3{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
+    SdpaFwdSignatureKey const key4{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
     EXPECT_TRUE(key3 == key4);
 
-    SdpaFwdSignatureKey key5{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key6{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
+    SdpaFwdSignatureKey const key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key6{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
     EXPECT_FALSE(key5 == key6);
 
-    SdpaFwdSignatureKey key7{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key8{DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key7{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key8{
+        DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    SdpaFwdSignatureKey key9{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key10{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
+    SdpaFwdSignatureKey const key9{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key10{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key9 == key10);
 }
 
 TEST(TestSdpaFwdSignatureKey, HashFunction)
 {
-    SdpaFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    SdpaFwdSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key4{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    SdpaFwdSignatureKey key5{DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    SdpaFwdSignatureKey key6{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
+    SdpaFwdSignatureKey const key3{
+        DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key4{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    SdpaFwdSignatureKey const key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    SdpaFwdSignatureKey const key6{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
     auto hash4 = key4.hashSelf();
@@ -62,9 +75,9 @@ TEST(TestSdpaFwdSignatureKey, HashFunction)
 
 TEST(TestSdpaFwdSignatureKey, Copy)
 {
-    SdpaFwdSignatureKey original{
+    SdpaFwdSignatureKey const original{
         DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::FLOAT};
-    SdpaFwdSignatureKey copied{original};
+    SdpaFwdSignatureKey const copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.qDataType, DataType::FLOAT);
@@ -75,12 +88,12 @@ TEST(TestSdpaFwdSignatureKey, Copy)
 
 TEST(TestSdpaFwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    SdpaFwdSignatureKey expectedKey{
+    SdpaFwdSignatureKey const expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
-    std::vector<int64_t> qDims = {1, 1, 1, 1};
-    std::vector<int64_t> kDims = {1, 1, 1, 1};
-    std::vector<int64_t> vDims = {1, 1, 1, 1};
+    std::vector<int64_t> const qDims = {1, 1, 1, 1};
+    std::vector<int64_t> const kDims = {1, 1, 1, 1};
+    std::vector<int64_t> const vDims = {1, 1, 1, 1};
 
     SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims);
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
@@ -89,7 +102,7 @@ TEST(TestSdpaFwdSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    SdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    SdpaFwdSignatureKey const keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

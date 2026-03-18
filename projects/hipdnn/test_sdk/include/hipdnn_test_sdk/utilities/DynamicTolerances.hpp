@@ -72,14 +72,14 @@ float calculateConvWrwTolerance(double inputMin,
         numberOfAccumulations *= static_cast<uint64_t>(dyDims[i]); // Spatial dimensions
     }
 
-    double maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
-    double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    double const maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
+    double const maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
 
     // Worst case product magnitude
-    double maxProduct = maxAbsInput * maxAbsDy;
+    double const maxProduct = maxAbsInput * maxAbsDy;
 
     // Bound on sum(|x_i * y_i|)
-    double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
+    double const sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     double accumulatedTolerance = 0.0;
@@ -91,7 +91,7 @@ float calculateConvWrwTolerance(double inputMin,
         // gamma_n = n * u / (1 - n * u)
         // We assume NO FMAs are used, so factor is 2n.
         // gamma_2n = 2 * n * u / (1 - 2 * n * u)
-        double nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
+        double const nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
 
         if(nU >= 1.0)
         {
@@ -100,7 +100,7 @@ float calculateConvWrwTolerance(double inputMin,
                 "Error bound is undefined/infinite.");
         }
 
-        double gamma = nU / (1.0 - nU);
+        double const gamma = nU / (1.0 - nU);
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
     else
@@ -112,7 +112,7 @@ float calculateConvWrwTolerance(double inputMin,
         // gamma_2n = sqrt(2n) * u
         // k_sigma = 6.0 for high confidence
         constexpr double K_SIGMA = 6.0;
-        double gamma
+        double const gamma
             = K_SIGMA * std::sqrt(2.0 * static_cast<double>(numberOfAccumulations)) * epsilon;
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
@@ -138,12 +138,12 @@ float calculateConvWrwTolerance(double inputMin,
         // Error_P <= |P_true| * (|d_x| + |d_dy|) <= |P_true| * (epsilon + epsilon)
         // Error_P <= 2 * |P_true| * epsilon
         // Summing over N accumulations: Total_Error <= 2 * sum(|x_i * y_i|) * epsilon
-        double castingError = 2.0 * sumAbsProductBound * epsilon;
+        double const castingError = 2.0 * sumAbsProductBound * epsilon;
         accumulatedTolerance += castingError;
     }
 
     // Calculate final accumulated value magnitude for casting error
-    double maxPossibleOutputValue = sumAbsProductBound;
+    double const maxPossibleOutputValue = sumAbsProductBound;
 
     double castTolerance = 0.0;
     // Calculate precision loss due to casting from ComputeType to OutputType.
@@ -160,7 +160,7 @@ float calculateConvWrwTolerance(double inputMin,
     }
 
     // Total tolerance is the sum of accumulation error and cast error
-    double totalTolerance = accumulatedTolerance + castTolerance;
+    double const totalTolerance = accumulatedTolerance + castTolerance;
 
     // Check if totalTolerance exceeds the maximum representable value of OutputType
     if(totalTolerance > static_cast<double>(std::numeric_limits<OutputType>::max()))
@@ -228,14 +228,14 @@ float calculateConvDgradTolerance(
         numberOfAccumulations *= static_cast<uint64_t>(wDims[i]); // Spatial dimensions
     }
 
-    double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
-    double maxAbsW = std::max(std::abs(wMin), std::abs(wMax));
+    double const maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    double const maxAbsW = std::max(std::abs(wMin), std::abs(wMax));
 
     // Worst case product magnitude
-    double maxProduct = maxAbsDy * maxAbsW;
+    double const maxProduct = maxAbsDy * maxAbsW;
 
     // Bound on sum(|dy_i * w_i|)
-    double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
+    double const sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     double accumulatedTolerance = 0.0;
@@ -247,7 +247,7 @@ float calculateConvDgradTolerance(
         // gamma_n = n * u / (1 - n * u)
         // We assume NO FMAs are used, so factor is 2n.
         // gamma_2n = 2 * n * u / (1 - 2 * n * u)
-        double nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
+        double const nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
 
         if(nU >= 1.0)
         {
@@ -256,7 +256,7 @@ float calculateConvDgradTolerance(
                 "Error bound is undefined/infinite.");
         }
 
-        double gamma = nU / (1.0 - nU);
+        double const gamma = nU / (1.0 - nU);
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
     else
@@ -268,7 +268,7 @@ float calculateConvDgradTolerance(
         // gamma_2n = sqrt(2n) * u
         // k_sigma = 6.0 for high confidence
         constexpr double K_SIGMA = 6.0;
-        double gamma
+        double const gamma
             = K_SIGMA * std::sqrt(2.0 * static_cast<double>(numberOfAccumulations)) * epsilon;
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
@@ -294,12 +294,12 @@ float calculateConvDgradTolerance(
         // Error_P <= |P_true| * (|d_dy| + |d_w|) <= |P_true| * (epsilon + epsilon)
         // Error_P <= 2 * |P_true| * epsilon
         // Summing over N accumulations: Total_Error <= 2 * sum(|dy_i * w_i|) * epsilon
-        double castingError = 2.0 * sumAbsProductBound * epsilon;
+        double const castingError = 2.0 * sumAbsProductBound * epsilon;
         accumulatedTolerance += castingError;
     }
 
     // Calculate final accumulated value magnitude for casting error
-    double maxPossibleOutputValue = sumAbsProductBound;
+    double const maxPossibleOutputValue = sumAbsProductBound;
 
     double castTolerance = 0.0;
     // Calculate precision loss due to casting from ComputeType to OutputType.
@@ -316,7 +316,7 @@ float calculateConvDgradTolerance(
     }
 
     // Total tolerance is the sum of accumulation error and cast error
-    double totalTolerance = accumulatedTolerance + castTolerance;
+    double const totalTolerance = accumulatedTolerance + castTolerance;
 
     // Check if totalTolerance exceeds the maximum representable value of OutputType
     if(totalTolerance > static_cast<double>(std::numeric_limits<OutputType>::max()))
@@ -380,14 +380,14 @@ float calculateConvFpropTolerance(
         numberOfAccumulations *= static_cast<uint64_t>(wDims[i]); // Filter spatial dimensions R, S
     }
 
-    double maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
-    double maxAbsW = std::max(std::abs(wMin), std::abs(wMax));
+    double const maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
+    double const maxAbsW = std::max(std::abs(wMin), std::abs(wMax));
 
     // Worst case product magnitude
-    double maxProduct = maxAbsInput * maxAbsW;
+    double const maxProduct = maxAbsInput * maxAbsW;
 
     // Bound on sum(|x_i * w_i|)
-    double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
+    double const sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     double accumulatedTolerance = 0.0;
@@ -399,7 +399,7 @@ float calculateConvFpropTolerance(
         // gamma_n = n * u / (1 - n * u)
         // We assume NO FMAs are used, so factor is 2n.
         // gamma_2n = 2 * n * u / (1 - 2 * n * u)
-        double nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
+        double const nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
 
         if(nU >= 1.0)
         {
@@ -408,7 +408,7 @@ float calculateConvFpropTolerance(
                 "Error bound is undefined/infinite.");
         }
 
-        double gamma = nU / (1.0 - nU);
+        double const gamma = nU / (1.0 - nU);
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
     else
@@ -420,7 +420,7 @@ float calculateConvFpropTolerance(
         // gamma_2n = sqrt(2n) * u
         // k_sigma = 6.0 for high confidence
         constexpr double K_SIGMA = 6.0;
-        double gamma
+        double const gamma
             = K_SIGMA * std::sqrt(2.0 * static_cast<double>(numberOfAccumulations)) * epsilon;
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
@@ -446,12 +446,12 @@ float calculateConvFpropTolerance(
         // Error_P <= |P_true| * (|d_x| + |d_w|) <= |P_true| * (epsilon + epsilon)
         // Error_P <= 2 * |P_true| * epsilon
         // Summing over N accumulations: Total_Error <= 2 * sum(|x_i * w_i|) * epsilon
-        double castingError = 2.0 * sumAbsProductBound * epsilon;
+        double const castingError = 2.0 * sumAbsProductBound * epsilon;
         accumulatedTolerance += castingError;
     }
 
     // Calculate final accumulated value magnitude for casting error
-    double maxPossibleOutputValue = sumAbsProductBound;
+    double const maxPossibleOutputValue = sumAbsProductBound;
 
     double castTolerance = 0.0;
     // Calculate precision loss due to casting from ComputeType to OutputType.
@@ -468,7 +468,7 @@ float calculateConvFpropTolerance(
     }
 
     // Total tolerance is the sum of accumulation error and cast error
-    double totalTolerance = accumulatedTolerance + castTolerance;
+    double const totalTolerance = accumulatedTolerance + castTolerance;
 
     // Check if totalTolerance exceeds the maximum representable value of OutputType
     if(totalTolerance > static_cast<double>(std::numeric_limits<OutputType>::max()))
