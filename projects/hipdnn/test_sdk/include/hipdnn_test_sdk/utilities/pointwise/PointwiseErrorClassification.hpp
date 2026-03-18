@@ -93,10 +93,8 @@ inline PointwiseErrorClass classifyPointwiseOp(hipdnn_data_sdk::data_objects::Po
     case PointwiseMode::GELU_APPROX_TANH_BWD:
     case PointwiseMode::SOFTPLUS_BWD:
     case PointwiseMode::SWISH_BWD:
-        return PointwiseErrorClass::COMPOSITE_BWD;
-
     default:
-        return PointwiseErrorClass::COMPOSITE_BWD; // Conservative fallback
+        return PointwiseErrorClass::COMPOSITE_BWD;
     }
 }
 
