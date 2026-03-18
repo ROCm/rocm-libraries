@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-if(SDPAKERNELPROVIDER_ENABLE_TESTS)
+if(NOT SDPAKERNELPROVIDER_SKIP_TESTS)
     include(FetchContent)
 
     # Try to find GTest first
