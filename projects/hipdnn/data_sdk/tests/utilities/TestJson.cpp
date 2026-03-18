@@ -232,7 +232,7 @@ TEST(TestJson, FlatbufferStringToJsonImplicit)
 
     auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
 
-    nlohmann::json j = sv->value();
+    const nlohmann::json j = sv->value();
     EXPECT_TRUE(j.is_string());
     EXPECT_EQ(j.get<std::string>(), "implicit_test");
 }
@@ -292,7 +292,7 @@ TEST(TestJson, FlatbufferStringVectorToJson)
 TEST(TestJson, FlatbufferEmptyStringVectorToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<flatbuffers::String>> emptyOffsets;
+    const std::vector<flatbuffers::Offset<flatbuffers::String>> emptyOffsets;
     auto vecOffset = builder.CreateVector(emptyOffsets);
 
     auto scOffset = CreateStringConstraint(builder, 0, vecOffset);
