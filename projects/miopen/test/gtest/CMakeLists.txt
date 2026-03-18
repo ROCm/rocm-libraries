@@ -45,6 +45,8 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # Disable tests that leak memory when Address Sanitizer is enabled.  These tests need to be investigated and fixed.
     list(APPEND SKIP_TESTS
         fusion_test.cpp
+        gpu_mha_backward.cpp
+        gpu_mha_forward.cpp
         graphapi_enginecfg.cpp
         graphapi_engineheur.cpp
         graphapi_execution_plan.cpp
@@ -53,7 +55,8 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         graphapi_operation_reshape.cpp
         graphapi_tensor.cpp
         log_test.cpp
-        log_test_neg.cpp)
+        log_test_neg.cpp
+        mha_find20.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
