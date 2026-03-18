@@ -341,7 +341,7 @@ private:
         const std::unordered_map<std::shared_ptr<TensorAttributes>, size_t>& tensorToOriginNode)
         const
     {
-        size_t nodeCount = _sub_nodes.size();
+        size_t const nodeCount = _sub_nodes.size();
         detail::GraphStructure structure;
         structure.adjacencyList.resize(nodeCount);
 
@@ -353,7 +353,7 @@ private:
                 auto it = tensorToOriginNode.find(input);
                 if(it != tensorToOriginNode.end())
                 {
-                    size_t outputNodeIndex = it->second;
+                    size_t const outputNodeIndex = it->second;
                     structure.adjacencyList[outputNodeIndex].push_back(inputNodeIndex);
                 }
             }
@@ -365,7 +365,7 @@ private:
     std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOriginNodeMap() const
     {
         std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOriginNode;
-        size_t nodeCount = _sub_nodes.size();
+        size_t const nodeCount = _sub_nodes.size();
 
         for(size_t i = 0; i < nodeCount; ++i)
         {
@@ -716,7 +716,7 @@ public:
      */
     Error topologicallySortGraph()
     {
-        size_t nodeCount = _sub_nodes.size();
+        size_t const nodeCount = _sub_nodes.size();
 
         if(nodeCount == 0)
         {

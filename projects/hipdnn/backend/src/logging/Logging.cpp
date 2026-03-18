@@ -132,6 +132,7 @@ BackendLogState& getBackendLogState()
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-no-recursion) Intentional: logging macros trigger lazy initialization
 void logHipDeviceInfo(hipStream_t stream)
 {
     int deviceId = 0;
@@ -163,6 +164,7 @@ void logHipDeviceInfo(hipStream_t stream)
         props.clockRate);
 }
 
+// NOLINTNEXTLINE(misc-no-recursion) Intentional: lazy init may trigger logging which re-enters
 void initialize()
 {
     if(sLoggingShutdown.load(std::memory_order_acquire))
@@ -174,7 +176,7 @@ void initialize()
     auto& state = getBackendLogState();
     // Fast path: check if already initialized with read lock (allows concurrent read access)
     {
-        std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        std::shared_lock<std::shared_mutex> const lock(state.loggerStateMutex);
         if(state.loggerInitialized)
         {
             return;
@@ -184,7 +186,7 @@ void initialize()
     // Slow path: actually initialize with write lock (first call only)
     try
     {
-        std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        std::unique_lock<std::shared_mutex> const lock(state.loggerStateMutex);
         if(state.loggerInitialized) // Check again - race protection
         {
             return;
@@ -224,8 +226,8 @@ void initialize()
         // Add console or file sink to async dist_sink if logging enabled via env vars
         // getLogLevel() will read from environment on first call, or return cached value
         // if setLogLevel() was called programmatically
-        hipdnnSeverity_t logLevel = hipdnn_data_sdk::logging::getLogLevel();
-        std::string logFilePath = hipdnn_data_sdk::utilities::trim(
+        hipdnnSeverity_t const logLevel = hipdnn_data_sdk::logging::getLogLevel();
+        std::string const logFilePath = hipdnn_data_sdk::utilities::trim(
             hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE", ""));
 
         if(logLevel != HIPDNN_SEV_OFF)
@@ -270,7 +272,7 @@ void initialize()
 void loggerShutdown()
 {
     auto& state = getBackendLogState();
-    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+    std::unique_lock<std::shared_mutex> const lock(state.loggerStateMutex);
 
     // Clear all user callbacks first (atomically disable)
     for(auto& [key, info] : state.userCallbacks)
@@ -350,7 +352,7 @@ hipdnnStatus_t lockedAddUserCallback(BackendLogState& state,
     sink->set_level(toSpdlogLevel(minLevel));
     sink->set_pattern(BACKEND_LOGGER_PATTERN);
 
-    bool isAsync = (mode == HIPDNN_LOG_CALLBACK_ASYNC);
+    bool const isAsync = (mode == HIPDNN_LOG_CALLBACK_ASYNC);
 
     // Add to appropriate dist_sink (loggers already created in initialize())
     if(isAsync)
@@ -378,9 +380,9 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
 {
 
     // Check if mode changed (requires sink migration)
-    bool wasSyncNowAsync
+    bool const wasSyncNowAsync
         = (info.mode == HIPDNN_LOG_CALLBACK_SYNC && newMode == HIPDNN_LOG_CALLBACK_ASYNC);
-    bool wasAsyncNowSync
+    bool const wasAsyncNowSync
         = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC && newMode == HIPDNN_LOG_CALLBACK_SYNC);
 
     if(wasSyncNowAsync || wasAsyncNowSync)
@@ -441,7 +443,7 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
     }
 
     // Remove from dist_sink
-    bool isAsync = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC);
+    bool const isAsync = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC);
     if(isAsync)
     {
         state.asyncSharedDistSink->remove_sink(info.sink);
@@ -481,7 +483,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     initialize();
 
     auto& state = getBackendLogState();
-    std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+    std::unique_lock<std::shared_mutex> const lock(state.loggerStateMutex);
 
     if(!state.loggerInitialized)
     {
@@ -489,7 +491,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     }
 
     // Create composite key
-    BackendLogState::CallbackKey key{callback, userHandle};
+    BackendLogState::CallbackKey const key{callback, userHandle};
 
     // Check if removing (SEV_OFF)
     if(minLevel == HIPDNN_SEV_OFF)
@@ -526,7 +528,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     // Detect and prevent reentrant logging to avoid stack overflow. This can occur when
     // a user's synchronous log callback triggers another log message (e.g., by calling a
     // hipDNN API that logs, or by directly invoking the logger from within the callback).
-    thread_local int s_recursionDepth = 0;
+    static thread_local int s_recursionDepth = 0;
 
     if(s_recursionDepth > 0)
     {
@@ -547,7 +549,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         {
             --s_recursionDepth;
         }
-    } guard;
+    } const guard;
 
     // Lazy-init; ensure backend logger is initialized.
     initialize();
@@ -562,7 +564,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 
     {
         auto& state = getBackendLogState();
-        std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        std::shared_lock<std::shared_mutex> const lock(state.loggerStateMutex);
 
         if(state.asyncSinkCount.load(std::memory_order_acquire) > 0)
         {

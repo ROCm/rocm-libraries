@@ -17,10 +17,13 @@
 
 using namespace hipdnn_data_sdk::data_objects;
 
+namespace
+{
+
 void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
                             const std::string& context)
 {
-    nlohmann::json graphJson = *graph;
+    nlohmann::json const graphJson = *graph;
 
     flatbuffers::FlatBufferBuilder builder;
     auto newGraphBuilder = hipdnn_data_sdk::json::to<Graph>(builder, graphJson);
@@ -37,8 +40,8 @@ void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
     auto t2 = newGraph->tensors()->begin();
     for(; t1 != graph->tensors()->end() && t2 != newGraph->tensors()->end(); t1++, t2++)
     {
-        std::unique_ptr<TensorAttributesT> t1ptr(t1->UnPack());
-        std::unique_ptr<TensorAttributesT> t2ptr(t2->UnPack());
+        std::unique_ptr<TensorAttributesT> const t1ptr(t1->UnPack());
+        std::unique_ptr<TensorAttributesT> const t2ptr(t2->UnPack());
         EXPECT_EQ(*t1ptr, *t2ptr) << context;
     }
 
@@ -47,11 +50,13 @@ void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
     auto n2 = newGraph->nodes()->begin();
     for(; n1 != graph->nodes()->end() && n2 != newGraph->nodes()->end(); n1++, n2++)
     {
-        std::unique_ptr<NodeT> n1ptr(n1->UnPack());
-        std::unique_ptr<NodeT> n2ptr(n2->UnPack());
+        std::unique_ptr<NodeT> const n1ptr(n1->UnPack());
+        std::unique_ptr<NodeT> const n2ptr(n2->UnPack());
         EXPECT_EQ(*n1ptr, *n2ptr) << context;
     }
 }
+
+} // namespace
 
 TEST(TestJson, GraphToJsonAndBack)
 {
@@ -161,6 +166,9 @@ TEST(TestJson, GraphToJsonAndBack)
     }
 }
 
+namespace
+{
+
 void vectorTestSuite(std::vector<int> const& vec, const std::string& context)
 {
     nlohmann::json vecJson = vec;
@@ -172,20 +180,22 @@ void vectorTestSuite(std::vector<int> const& vec, const std::string& context)
     EXPECT_EQ(vec, vecJson.get<std::vector<int>>()) << context;
 }
 
-TEST(TestJson, FromVector)
-{
-    vectorTestSuite({0, 1, 2, 3, 4}, "(filled vector)");
-    vectorTestSuite({}, "(empty vector)");
-}
-
 template <class T>
 void enumTestSuite(T value, const std::string& stringRep, const std::string& context)
 {
     auto jsonStringRep = "\"" + stringRep + "\"";
-    nlohmann::json jsonValue = value;
+    nlohmann::json const jsonValue = value;
     EXPECT_EQ(value, jsonValue.get<T>()) << context;
     EXPECT_EQ(jsonValue.dump(), std::string{jsonStringRep}) << context;
     EXPECT_EQ(nlohmann::json(stringRep).get<T>(), value) << context;
+}
+
+} // namespace
+
+TEST(TestJson, FromVector)
+{
+    vectorTestSuite({0, 1, 2, 3, 4}, "(filled vector)");
+    vectorTestSuite({}, "(empty vector)");
 }
 
 TEST(TestJson, Enum)
