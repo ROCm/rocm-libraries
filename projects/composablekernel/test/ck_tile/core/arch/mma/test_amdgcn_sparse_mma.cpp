@@ -8,7 +8,7 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
-#include "ck_tile/core/arch/mma/sparse_mma.hpp"
+#include "ck_tile/core/arch/mma/sparse/sparse_mma_pipeline.hpp"
 #include <hip/hip_runtime.h>
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/host/hip_check_error.hpp"

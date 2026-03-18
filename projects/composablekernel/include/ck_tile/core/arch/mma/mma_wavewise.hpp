@@ -171,7 +171,7 @@ struct WaveWiseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFl
                 }
             }
         }
-        else
+        else if constexpr(AccumPolicy == MmaAccumPolicy::COL_MAJOR)
         {
             // "Col-major" accumulation over the M-dimension fragments first.
             // Pseudo code here, but we would basically iterate over the blocks in col-major order
@@ -186,6 +186,10 @@ struct WaveWiseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFl
                     }
                 }
             }
+        }
+        else
+        {
+            static_assert(false);
         }
     }
 };

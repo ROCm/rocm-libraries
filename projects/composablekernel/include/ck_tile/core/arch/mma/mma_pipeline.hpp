@@ -8,21 +8,14 @@
 #include "mma_selector.hpp"
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
-#include <netdb.h>
-#include <optional>
-#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
 enum struct MmaPipelineOptionFlag
 {
-    NONE                   = 0x0,
-    C_TRANSPOSE            = 0x1,
-    SWIZZLE_A              = 0x2,
-    SWIZZLE_B              = 0x4,
-    DOUBLE_ATTR_NUM_ACCESS = 0x8,
-    QUAD_ATTR_NUM_ACCESS   = 0x10,
-    COMPRESS_A             = 0x20,
+    NONE        = 0x0,
+    C_TRANSPOSE = 0x1,
+    COMPRESS_A  = 0x2,
 };
 
 struct MmaPipelineOptionFlags
@@ -81,12 +74,6 @@ struct MmaPipelineBase
     static constexpr auto Flags = MmaPipelineOptionFlags(Flags_);
     // TODO: Implement those cases
     static_assert(!(Flags & MmaPipelineOptionFlag::C_TRANSPOSE), "Flag not yet implemented");
-    static_assert(!(Flags & MmaPipelineOptionFlag::SWIZZLE_A), "Flag not yet implemented");
-    static_assert(!(Flags & MmaPipelineOptionFlag::SWIZZLE_B), "Flag not yet implemented");
-    static_assert(!(Flags & MmaPipelineOptionFlag::DOUBLE_ATTR_NUM_ACCESS),
-                  "Flag not yet implemented");
-    static_assert(!(Flags & MmaPipelineOptionFlag::QUAD_ATTR_NUM_ACCESS),
-                  "Flag not yet implemented");
 
     private:
     template <typename DstT, typename SrcT>
@@ -106,7 +93,7 @@ struct MmaPipelineBase
 
     protected:
     template <MmaPipelineOptionFlag Flag>
-    CK_TILE_DEVICE static bool hasFlag()
+    constexpr CK_TILE_DEVICE static bool hasFlag()
     {
         return Flags & Flag;
     }
