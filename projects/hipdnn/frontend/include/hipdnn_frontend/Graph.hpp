@@ -5,9 +5,9 @@
  * @file Graph.hpp
  * @brief Main Graph class for building and executing deep learning operations
  *
- * This is the primary header most users will include. It contains the Graph
- * class — hipDNN's top-level API for describing, compiling, and running DNN
- * operations on AMD GPUs.
+ * This header defines the Graph class — hipDNN's top-level API for describing,
+ * compiling, and running DNN operations on AMD GPUs. It is included
+ * automatically via `#include <hipdnn_frontend.hpp>`.
  *
  * @section graph_overview Overview
  *
