@@ -18,8 +18,8 @@ struct ExtractStrideOrderTestCase
 };
 
 // Outside anonymous namespace so ADL finds it for gtest printing
-std::ostream& operator<<(std::ostream& os,
-                         const ExtractStrideOrderTestCase& tc) // NOLINT(misc-use-internal-linkage)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+std::ostream& operator<<(std::ostream& os, const ExtractStrideOrderTestCase& tc)
 {
     os << "ExtractStrideOrderTestCase(";
     os << " strides: ";
