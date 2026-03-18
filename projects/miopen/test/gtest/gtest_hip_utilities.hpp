@@ -10,7 +10,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
-#include <hip/hip_bfloat16.h>
+#include <hip/hip_bf16.h>
 
 #include <cstddef>
 
@@ -47,7 +47,7 @@ struct ToDeviceType<half_float::half>
 template <>
 struct ToDeviceType<bfloat16>
 {
-    using type = hip_bfloat16;
+    using type = __hip_bfloat16;
 };
 
 template <typename T>

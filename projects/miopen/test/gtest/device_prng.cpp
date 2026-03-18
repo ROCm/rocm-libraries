@@ -31,7 +31,7 @@ __global__ void philox_kernel(T* out, size_t n, uint64_t seed)
             // 1.0 / 9007... is 2^-53, normalizing the integer to [0, 1).
             out[i] = static_cast<double>(raw >> 11) * (1.0 / 9007199254740992.0);
         }
-        else if constexpr(std::is_same_v<T, hip_bfloat16>)
+        else if constexpr(std::is_same_v<T, __hip_bfloat16>)
         {
             // raw >> 57 keeps top 7 bits (BFloat16 mantissa size).
             // 1.0f / 128.0f is 2^-7.
