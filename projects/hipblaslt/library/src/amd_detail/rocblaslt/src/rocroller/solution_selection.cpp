@@ -35,7 +35,7 @@ constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSize
 constexpr size_t possibleSwizzleTileSizesCount = 38;
 
 constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleSwizzleTileSizes
-    = {{{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128}, //TODO: Add these in once rocRoller supports swizzleB
+    = {{{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128},
         {32, 128, 128},  {32, 256, 128},  {32, 384, 128},  {32, 512, 128},  {32, 640, 128},
         {32, 768, 128},  {32, 896, 128},  {32, 1024, 128}, {64, 128, 128},  {64, 256, 128},
         {64, 384, 128},  {64, 512, 128},  {64, 640, 128},  {64, 768, 128},  {64, 896, 128},
@@ -223,7 +223,6 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                            && kernelType.scaleTypeB.preTile.size() == 2);
         int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile);
         wgt.k /= unrollAmount;
-        std::cout<<"Workgroup Tile:"<<wgt.m<<"x"<<wgt.n<<"x"<<wgt.k<<std::endl;
 
         if((requestedAlgoCount == -1)
            || (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0))
