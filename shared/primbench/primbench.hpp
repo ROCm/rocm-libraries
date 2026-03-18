@@ -24,8 +24,8 @@
     #include <amd_smi/amdsmi.h>
     #include <hip/hip_runtime.h>
 #elif defined(__CUDACC__)
-    #include <nvml.h>
     #include <cuda/std/chrono>
+    #include <nvml.h>
 #else
     #error "Unsupported GPU platform"
 #endif
@@ -69,46 +69,56 @@
 #ifdef __HIP__
     /// Exits the program with an error message if the given API call returns a failure status.
     #define PRIMBENCH_CHECK(status)                                                \
-        do {                                                                       \
+        do                                                                         \
+        {                                                                          \
             if(status != hipSuccess)                                               \
             {                                                                      \
                 std::cerr << __FILE__ << ":" << __LINE__                           \
-                        << ": HIP error: " << hipGetErrorString(status) << "\n"; \
+                          << ": HIP error: " << hipGetErrorString(status) << "\n"; \
                 exit(status);                                                      \
             }                                                                      \
-        } while (0)
+        }                                                                          \
+        while(0)
 
     /// Exits the program with an error message if the given AMD SMI API call returns a failure status.
     #define PRIMBENCH_AMDSMI_CHECK(status)                                                        \
-        do {                                                                                      \
+        do                                                                                        \
+        {                                                                                         \
             if(status != AMDSMI_STATUS_SUCCESS)                                                   \
             {                                                                                     \
                 const char* errstr = "(unknown)";                                                 \
                 amdsmi_status_code_to_string(status, &errstr);                                    \
                 std::cerr << __FILE__ << ":" << __LINE__ << ": AMDSMI error: " << errstr << "\n"; \
-                exit(status);                                                                \
+                exit(status);                                                                     \
             }                                                                                     \
-        } while (0)
+        }                                                                                         \
+        while(0)
 #else
     /// Exits the program with an error message if the given API call returns a failure status.
     #define PRIMBENCH_CHECK(status)                                                  \
-        do {                                                                         \
+        do                                                                           \
+        {                                                                            \
             if(status != cudaSuccess)                                                \
             {                                                                        \
                 std::cerr << __FILE__ << ":" << __LINE__                             \
-                        << ": CUDA error: " << cudaGetErrorString(status) << "\n"; \
+                          << ": CUDA error: " << cudaGetErrorString(status) << "\n"; \
                 exit(status);                                                        \
             }                                                                        \
-        } while (0)
+        }                                                                            \
+        while(0)
 
     /// Exits the program with an error message if the given NVML API call returns a failure status.
-    #define PRIMBENCH_NVML_CHECK(status)                                                                         \
-        do {                                                                                                     \
-            if (status != NVML_SUCCESS) {                                                                        \
-                std::cerr << __FILE__ << ":" << __LINE__ << ": NVML error: " << nvmlErrorString(status) << "\n"; \
-                exit(status);                                                                                    \
-            }                                                                                                    \
-        } while (0)
+    #define PRIMBENCH_NVML_CHECK(status)                                          \
+        do                                                                        \
+        {                                                                         \
+            if(status != NVML_SUCCESS)                                            \
+            {                                                                     \
+                std::cerr << __FILE__ << ":" << __LINE__                          \
+                          << ": NVML error: " << nvmlErrorString(status) << "\n"; \
+                exit(status);                                                     \
+            }                                                                     \
+        }                                                                         \
+        while(0)
 #endif
 
 namespace primbench
@@ -116,11 +126,11 @@ namespace primbench
 
 // Backend-agnostic stream type and default stream constant.
 #ifdef __HIP__
-    using stream_t = hipStream_t;
-    constexpr stream_t default_stream = hipStreamDefault;
+using stream_t                    = hipStream_t;
+constexpr stream_t default_stream = hipStreamDefault;
 #else
-    using stream_t = cudaStream_t;
-    constexpr stream_t default_stream = cudaStreamDefault;
+using stream_t                    = cudaStream_t;
+constexpr stream_t default_stream = cudaStreamDefault;
 #endif
 
 // Forward declarations for the detail namespace.
@@ -131,13 +141,13 @@ void log(Args&&... args);
 /// Settings that benchmarks and users can pass.
 struct settings
 {
-    size_t      size     = 128 * primbench::MiB; ///< Input array size.
-    bool        hot      = false; ///< Hot means not clearing GPU cache between batches.
-    uint32_t    seed     = 42; ///< The seed to use for input array generation.
-    std::string json_out = "results.json"; ///< Output JSON file path.
-    std::string csv_out  = ""; ///< Output CSV file path.
-    std::string filter   = ""; ///< Regex filter of specialization names to benchmark.
-    bool        dry      = false; ///< Flag to perform a dry run.
+    size_t      size                 = 128 * primbench::MiB; ///< Input array size.
+    bool        hot                  = false; ///< Hot means not clearing GPU cache between batches.
+    uint32_t    seed                 = 42; ///< The seed to use for input array generation.
+    std::string json_out             = "results.json"; ///< Output JSON file path.
+    std::string csv_out              = ""; ///< Output CSV file path.
+    std::string filter               = ""; ///< Regex filter of specialization names to benchmark.
+    bool        dry                  = false; ///< Flag to perform a dry run.
     double      min_gpu_ms_per_batch = 10.0; ///< Minimum GPU batch duration.
     double      min_secs             = 1.0; ///< Minimum benchmark duration.
     double      noise_timeout_secs   = 10.0; ///< Max duration before noisy benchmark times out.
@@ -147,10 +157,9 @@ struct settings
     uint16_t    max_gpu_temp            = 60; ///< Maximum GPU temperature.
     double      max_warming_secs        = 60.0; ///< Max GPU warmup time.
     double      max_cooling_secs        = 60.0; ///< Max GPU cooldown time.
-    bool     output_batches        = false; ///< Flag to output batch details.
-    uint32_t spaces_per_indent     = 4; ///< JSON indentation spaces.
-    double   stream_blocking_timeout_secs
-        = 10.0; ///< Max duration before stream blocking times out.
+    bool        output_batches          = false; ///< Flag to output batch details.
+    uint32_t    spaces_per_indent       = 4; ///< JSON indentation spaces.
+    double stream_blocking_timeout_secs = 10.0; ///< Max duration before stream blocking times out.
 
     using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
     std::map<std::string, custom_arg_value>
@@ -249,13 +258,13 @@ namespace gpu_backend
 {
 
 #ifdef __HIP__
-    using error_t = hipError_t;
-    using event_t = hipEvent_t;
-    constexpr unsigned host_register_mapped = hipHostRegisterMapped;
+using error_t                           = hipError_t;
+using event_t                           = hipEvent_t;
+constexpr unsigned host_register_mapped = hipHostRegisterMapped;
 #else
-    using error_t = cudaError_t;
-    using event_t = cudaEvent_t;
-    constexpr unsigned host_register_mapped = cudaHostRegisterMapped;
+using error_t                           = cudaError_t;
+using event_t                           = cudaEvent_t;
+constexpr unsigned host_register_mapped = cudaHostRegisterMapped;
 #endif
 
 inline error_t event_create(event_t* event)
@@ -303,7 +312,7 @@ inline error_t get_last_error()
 #endif
 }
 
-inline error_t gpu_free(void *device)
+inline error_t gpu_free(void* device)
 {
 #ifdef __HIP__
     return hipFree(device);
@@ -312,7 +321,7 @@ inline error_t gpu_free(void *device)
 #endif
 }
 
-inline error_t gpu_malloc(void **device, size_t size)
+inline error_t gpu_malloc(void** device, size_t size)
 {
 #ifdef __HIP__
     return hipMalloc(device, size);
@@ -321,7 +330,7 @@ inline error_t gpu_malloc(void **device, size_t size)
 #endif
 }
 
-inline error_t host_get_device_pointer(void **device, void *host, unsigned flags)
+inline error_t host_get_device_pointer(void** device, void* host, unsigned flags)
 {
 #ifdef __HIP__
     return hipHostGetDevicePointer(device, host, flags);
@@ -330,7 +339,7 @@ inline error_t host_get_device_pointer(void **device, void *host, unsigned flags
 #endif
 }
 
-inline error_t host_register(void *ptr, size_t size, unsigned flags)
+inline error_t host_register(void* ptr, size_t size, unsigned flags)
 {
 #ifdef __HIP__
     return hipHostRegister(ptr, size, flags);
@@ -339,7 +348,7 @@ inline error_t host_register(void *ptr, size_t size, unsigned flags)
 #endif
 }
 
-inline error_t host_unregister(void *ptr)
+inline error_t host_unregister(void* ptr)
 {
 #ifdef __HIP__
     return hipHostUnregister(ptr);
@@ -348,7 +357,7 @@ inline error_t host_unregister(void *ptr)
 #endif
 }
 
-inline error_t memset_async(void *device, int value, size_t count, stream_t stream)
+inline error_t memset_async(void* device, int value, size_t count, stream_t stream)
 {
 #ifdef __HIP__
     return hipMemsetAsync(device, value, count, stream);
@@ -384,7 +393,7 @@ inline error_t stream_synchronize(stream_t stream)
 #endif
 }
 
-}
+} // namespace gpu_backend
 
 /// Bring GPU backend wrappers into this namespace so we can call
 /// functions like gpu_malloc() without the gpu_backend:: prefix.
@@ -412,8 +421,10 @@ public:
     uint16_t get_temp() const
     {
         int64_t t;
-        PRIMBENCH_AMDSMI_CHECK(
-            amdsmi_get_temp_metric(m_amdsmi_device, get_temperature_type(), AMDSMI_TEMP_CURRENT, &t));
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_temp_metric(m_amdsmi_device,
+                                                      get_temperature_type(),
+                                                      AMDSMI_TEMP_CURRENT,
+                                                      &t));
         return t;
     }
 
@@ -427,15 +438,15 @@ public:
         ss << "\"name\":\"" << dev_prop.name << "\"";
 
         std::string arch = dev_prop.gcnArchName;
-        size_t pos = arch.find(':');
-        if (pos != std::string::npos) {
+        size_t      pos  = arch.find(':');
+        if(pos != std::string::npos)
+        {
             arch = arch.substr(0, pos);
         }
         ss << ",\"arch\":\"" << arch << "\"";
 
         char pci_bus_id_arr[32];
-        PRIMBENCH_CHECK(
-            hipDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), m_hip_device));
+        PRIMBENCH_CHECK(hipDeviceGetPCIBusId(pci_bus_id_arr, sizeof(pci_bus_id_arr), m_hip_device));
         ss << ",\"pci_bus_id\":\"" << pci_bus_id_arr << "\"";
 
         ss << "}";
@@ -451,8 +462,8 @@ public:
         ss << "\"name\":\"hip\"";
 
         // HIP version.
-        ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR
-        << "." << HIP_VERSION_PATCH << "-" << HIP_VERSION_GITHASH << "\"";
+        ss << ",\"hip_version\":\"" << HIP_VERSION_MAJOR << "." << HIP_VERSION_MINOR << "."
+           << HIP_VERSION_PATCH << "-" << HIP_VERSION_GITHASH << "\"";
 
         // HIP runtime version (integer, e.g., 60443482 -> 6.4.43482).
         int runtime_ver;
@@ -625,9 +636,7 @@ public:
         PRIMBENCH_CHECK(cudaGetDeviceProperties(&dev_prop, m_cuda_device));
         ss << "\"name\":\"" << dev_prop.name << "\"";
 
-        ss << ",\"arch\":\""
-        << dev_prop.major << "."
-        << dev_prop.minor << "\"";
+        ss << ",\"arch\":\"" << dev_prop.major << "." << dev_prop.minor << "\"";
 
         char pci_bus_id_arr[32];
         PRIMBENCH_CHECK(
@@ -661,10 +670,8 @@ public:
         // Compiler.
         ss << ",\"compiler\":{";
         ss << "\"name\":\"nvcc\"";
-        ss << ",\"version\":\""
-            << __CUDACC_VER_MAJOR__ << "."
-            << __CUDACC_VER_MINOR__ << "."
-            << __CUDACC_VER_BUILD__ << "\"";
+        ss << ",\"version\":\"" << __CUDACC_VER_MAJOR__ << "." << __CUDACC_VER_MINOR__ << "."
+           << __CUDACC_VER_BUILD__ << "\"";
         ss << "}";
 
         // Monitoring.
@@ -683,6 +690,7 @@ public:
     {
         return "gpu";
     }
+
 private:
     monitor()
     {
@@ -1089,8 +1097,10 @@ private:
     std::string json_escape(std::string_view s) const
     {
         std::ostringstream o;
-        for (unsigned char c : s) {
-            switch (c) {
+        for(unsigned char c : s)
+        {
+            switch(c)
+            {
                 case '\"': o << "\\\""; break;
                 case '\\': o << "\\\\"; break;
                 case '\b': o << "\\b"; break;
@@ -1099,11 +1109,12 @@ private:
                 case '\r': o << "\\r"; break;
                 case '\t': o << "\\t"; break;
                 default:
-                    if (c < 0x20) {
-                        o << "\\u"
-                        << std::hex << std::setw(4) << std::setfill('0')
-                        << (int)c;
-                    } else {
+                    if(c < 0x20)
+                    {
+                        o << "\\u" << std::hex << std::setw(4) << std::setfill('0') << (int)c;
+                    }
+                    else
+                    {
                         o << c;
                     }
             }
@@ -1428,8 +1439,8 @@ inline void print_dry_header(std::string_view algo_name,
     size_t      status_col_width = status_header.size();
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(specialization_col_width) << std::left << "Specialization" << "  " << "Index/"
-              << specialization_count << "\n";
+              << std::setw(specialization_col_width) << std::left << "Specialization" << "  "
+              << "Index/" << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + specialization_col_width + 2 + family_col_width;
 
@@ -1454,11 +1465,12 @@ inline void print_header(std::string_view          algo_name,
               << std::setw(noise_col_width) << std::left << "Noise" << "  "
               << std::setw(gpu_temp_col_width) << std::left << "GPU °C" << "  "
               << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec" << "  "
-              << std::setw(specialization_col_width) << std::left << "Specialization" << "  " << "Index/"
-              << specialization_count << "\n";
+              << std::setw(specialization_col_width) << std::left << "Specialization" << "  "
+              << "Index/" << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + noise_col_width + 2 + gpu_temp_col_width + 2
-                             + bytes_per_sec_col_width + 2 + specialization_col_width + 2 + family_col_width;
+                             + bytes_per_sec_col_width + 2 + specialization_col_width + 2
+                             + family_col_width;
 
     for(size_t i = 0; i < underline_width; ++i)
         std::cout << horizontal_bar;
@@ -1609,10 +1621,11 @@ inline void print_progress(uint64_t         iteration,
 
 #ifdef __HIP__
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
-__global__ void block_stream_kernel(volatile int32_t* is_blocked,
-                            volatile int32_t* timeout_flag,
-                            double            timeout_seconds,
-                            long long int     wall_clock_rate)
+__global__
+void block_stream_kernel(volatile int32_t* is_blocked,
+                         volatile int32_t* timeout_flag,
+                         double            timeout_seconds,
+                         long long int     wall_clock_rate)
 {
     const long long int start_time = wall_clock64();
     const long long int timeout_cycles
@@ -1629,18 +1642,19 @@ __global__ void block_stream_kernel(volatile int32_t* is_blocked,
 }
 #else
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
-__global__ void block_stream_kernel(volatile int32_t* is_blocked,
-                                    volatile int32_t* timeout_flag,
-                                    double            timeout_seconds)
+__global__
+void block_stream_kernel(volatile int32_t* is_blocked,
+                         volatile int32_t* timeout_flag,
+                         double            timeout_seconds)
 {
-    using clock = cuda::std::chrono::high_resolution_clock;
-    auto start_time = clock::now();
+    using clock                                    = cuda::std::chrono::high_resolution_clock;
+    auto                                start_time = clock::now();
     cuda::std::chrono::duration<double> timeout_duration(timeout_seconds);
 
-    while (*is_blocked == 1)
+    while(*is_blocked == 1)
     {
         auto elapsed = cuda::std::chrono::duration<double>(clock::now() - start_time);
-        if (elapsed >= timeout_duration)
+        if(elapsed >= timeout_duration)
         {
             *timeout_flag = 1; // Signal timeout to host.
             break; // Exit loop.
@@ -1662,15 +1676,19 @@ public:
     {
         // Register host memory for blocking flags.
         PRIMBENCH_CHECK(host_register(&m_host_flag, sizeof(m_host_flag), host_register_mapped));
-        PRIMBENCH_CHECK(host_register(&m_host_timeout_flag, sizeof(m_host_timeout_flag), host_register_mapped));
+        PRIMBENCH_CHECK(
+            host_register(&m_host_timeout_flag, sizeof(m_host_timeout_flag), host_register_mapped));
 
         // Temporary non-volatile pointers.
         int32_t* temp_device_flag         = nullptr;
         int32_t* temp_device_timeout_flag = nullptr;
 
         // Get device pointers to mapped host memory.
-        PRIMBENCH_CHECK(host_get_device_pointer(reinterpret_cast<void**>(&temp_device_flag), &m_host_flag, 0));
-        PRIMBENCH_CHECK(host_get_device_pointer(reinterpret_cast<void**>(&temp_device_timeout_flag), &m_host_timeout_flag, 0));
+        PRIMBENCH_CHECK(
+            host_get_device_pointer(reinterpret_cast<void**>(&temp_device_flag), &m_host_flag, 0));
+        PRIMBENCH_CHECK(host_get_device_pointer(reinterpret_cast<void**>(&temp_device_timeout_flag),
+                                                &m_host_timeout_flag,
+                                                0));
 
         // Assign temporary pointers to volatile members.
         m_device_flag         = temp_device_flag;
@@ -1681,7 +1699,8 @@ public:
         int device_id;
         PRIMBENCH_CHECK(hipGetDevice(&device_id));
         int wall_clk_rate_k_hz = 0;
-        PRIMBENCH_CHECK(hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
+        PRIMBENCH_CHECK(
+            hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
         m_wall_clock_rate = wall_clk_rate_k_hz;
 #endif
     }
@@ -1975,7 +1994,8 @@ public:
     /// each kernel launch.
     void clear_cache(stream_t stream)
     {
-        PRIMBENCH_CHECK(memset_async(m_device_storage.get_ptr(), 0, m_device_storage.get_size(), stream));
+        PRIMBENCH_CHECK(
+            memset_async(m_device_storage.get_ptr(), 0, m_device_storage.get_size(), stream));
     }
 
     // This type is not copy assignable.
@@ -1989,7 +2009,8 @@ private:
 
 /// Warms the GPU, using complex enough dummy kernel code
 /// that the compiler can't optimize it away.
-__global__ void warmup_kernel(float* data, int n)
+__global__
+void warmup_kernel(float* data, int n)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx < n)
@@ -2238,16 +2259,16 @@ private:
     /// Performs a single iteration of the benchmark loop.
     ///
     /// @return `true` if the benchmark should stop (stable noise or timeout).
-    bool run_iteration(std::function<void()>&       kernel,
-                       std::vector<event_t>&        events,
-                       uint64_t&                    iterations,
-                       std::vector<float>&          iterations_ms,
+    bool run_iteration(std::function<void()>&                       kernel,
+                       std::vector<event_t>&                        events,
+                       uint64_t&                                    iterations,
+                       std::vector<float>&                          iterations_ms,
                        const std::chrono::steady_clock::time_point& start,
-                       uint16_t                     start_temp,
-                       double&                      elapsed_gpu_secs,
-                       const std::string&           name,
-                       const std::string&           serialized_meta,
-                       size_t                       bytes_per_item)
+                       uint16_t                                     start_temp,
+                       double&                                      elapsed_gpu_secs,
+                       const std::string&                           name,
+                       const std::string&                           serialized_meta,
+                       size_t                                       bytes_per_item)
     {
         const auto& s = m_settings;
 
@@ -2383,7 +2404,7 @@ private:
     void init_kernels_per_batch(std::function<void()> kernel)
     {
         std::vector<event_t> events(2);
-        std::vector<float>      iterations_ms;
+        std::vector<float>   iterations_ms;
         m_kernels_per_batch = 1;
 
         // Without this, the very first timed batch can be very slow.
@@ -2492,7 +2513,7 @@ private:
     }
 
     /// Fills iteration times (ms) using HIP event timing.
-    void fill_iterations_ms(std::vector<float>&            iterations_ms,
+    void fill_iterations_ms(std::vector<float>&         iterations_ms,
                             const std::vector<event_t>& events) const
     {
         for(size_t i = 0; i < m_kernels_per_batch; i++)
@@ -2910,14 +2931,17 @@ private:
         }
     }
 
-    std::string                                  _appname; ///< Stores argv[0].
-    std::unordered_map<std::string, std::string> _parsed; ///< Stores pairs of passed flag_name+flag_value.
+    std::string _appname; ///< Stores argv[0].
+    std::unordered_map<std::string, std::string>
+        _parsed; ///< Stores pairs of passed flag_name+flag_value.
 
     std::vector<std::pair<std::string, std::string>> _descriptions; ///< Preserves insertion order.
 
-    std::unordered_set<std::string> _description_keys_set; ///< Prevents duplicate descriptions being printed.
+    std::unordered_set<std::string>
+        _description_keys_set; ///< Prevents duplicate descriptions being printed.
 
-    std::unordered_map<std::string, std::string> _defaults; ///< Stores string representation of default values.
+    std::unordered_map<std::string, std::string>
+        _defaults; ///< Stores string representation of default values.
 
     std::unordered_set<std::string> _registered; ///< Tracks which arguments were registered.
 
@@ -3145,7 +3169,8 @@ public:
 
         m_specialization_col_width = compute_max_specialization_width(algorithm);
 
-        m_family_col_width = std::string("Index/").size() + std::to_string(specializations.size()).size();
+        m_family_col_width
+            = std::string("Index/").size() + std::to_string(specializations.size()).size();
 
         print_header(algorithm);
 
@@ -3322,13 +3347,13 @@ private:
     {
         std::regex pattern(m_settings.filter);
         specializations.erase(std::remove_if(specializations.begin(),
-                                                    specializations.end(),
-                                                    [&pattern](const auto& spec) {
-                                                        return !std::regex_search(
-                                                            spec.get()->meta().serialize_name(),
-                                                            pattern);
-                                                    }),
-                                     specializations.end());
+                                             specializations.end(),
+                                             [&pattern](const auto& spec) {
+                                                 return !std::regex_search(
+                                                     spec.get()->meta().serialize_name(),
+                                                     pattern);
+                                             }),
+                              specializations.end());
     }
 
     /// Ensures that at least one specialization is queued.
@@ -3398,7 +3423,7 @@ private:
     /// and ensures all specialization names are unique.
     size_t compute_max_specialization_width(std::string_view algorithm)
     {
-        size_t max_width = 0;
+        size_t                          max_width = 0;
         std::unordered_set<std::string> seen_names;
 
         for(const auto& bp : specializations)
