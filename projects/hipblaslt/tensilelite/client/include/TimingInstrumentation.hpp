@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstring>
@@ -16,6 +17,10 @@ namespace TensileLite
         // Global flag to enable/disable timing instrumentation output
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
+
+        // Accumulated overhead of the timing instrumentation itself (in nanoseconds).
+        // Tracks string copies, formatting, and I/O — excludes clock::now() calls.
+        inline std::atomic<int64_t> g_timingOverheadNs{0};
 
         // Fast formatters — to_chars into a caller-supplied buffer
         inline char* fmtOne(char* p, char* end, const char* s)
@@ -59,7 +64,23 @@ namespace TensileLite
 
         inline void flushTimingBuffer()
         {
+            if(g_timingInstrumentationEnabled)
+            {
+                double overheadMs
+                    = g_timingOverheadNs.load(std::memory_order_relaxed) / 1'000'000.0;
+                writeLine("TIMING:timing_overhead:", overheadMs);
+            }
             std::clog.flush();
+        }
+
+        using TimingClock = std::chrono::high_resolution_clock;
+
+        // Helper to accumulate overhead (time around non-clock work)
+        inline void accumulateOverhead(TimingClock::time_point t0, TimingClock::time_point t1)
+        {
+            g_timingOverheadNs.fetch_add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count(),
+                std::memory_order_relaxed);
         }
 
         // Simple RAII timer that records timing on destruction
@@ -71,21 +92,37 @@ namespace TensileLite
         class ScopedTimer
         {
         public:
-            using clock = std::chrono::high_resolution_clock;
+            using clock = TimingClock;
 
             ScopedTimer(const std::string& category)
-                : m_category(category)
-                , m_start(clock::now())
             {
+                if(g_timingInstrumentationEnabled)
+                {
+                    auto t0    = clock::now();
+                    m_category = category;
+                    auto t1    = clock::now();
+                    accumulateOverhead(t0, t1);
+                }
+                m_startOverhead = g_timingOverheadNs.load(std::memory_order_relaxed);
+                m_start         = clock::now();
             }
 
             ~ScopedTimer()
             {
                 if(g_timingInstrumentationEnabled)
                 {
-                    auto end      = clock::now();
-                    auto duration = std::chrono::duration<double, std::milli>(end - m_start);
-                    writeLine("TIMING:", m_category, ":", duration.count());
+                    auto end = clock::now();
+                    // Subtract overhead accumulated by child timers during our span
+                    auto childOverheadNs
+                        = g_timingOverheadNs.load(std::memory_order_relaxed) - m_startOverhead;
+                    auto rawNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     end - m_start)
+                                     .count();
+                    double durationMs = (rawNs - childOverheadNs) / 1'000'000.0;
+                    auto   t0         = clock::now();
+                    writeLine("TIMING:", m_category, ":", durationMs);
+                    auto t1 = clock::now();
+                    accumulateOverhead(t0, t1);
                 }
             }
 
@@ -100,6 +137,7 @@ namespace TensileLite
         private:
             std::string                    m_category;
             std::chrono::time_point<clock> m_start;
+            int64_t                        m_startOverhead = 0;
         };
 
         // Report a timing value directly (for GPU timings already measured)
@@ -107,7 +145,10 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
+                auto t0 = TimingClock::now();
                 writeLine("TIMING:", category, ":", ms);
+                auto t1 = TimingClock::now();
+                accumulateOverhead(t0, t1);
             }
         }
 
@@ -117,8 +158,11 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
+                auto t0 = TimingClock::now();
                 writeLine("TIMING_CONTEXT:M=", M, ",N=", N, ",K=", K,
                           ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
+                auto t1 = TimingClock::now();
+                accumulateOverhead(t0, t1);
             }
         }
 
@@ -129,9 +173,12 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
+                auto t0 = TimingClock::now();
                 writeLine("TIMING_CONTEXT_GROUPED:index=", index, ",total=", totalGemms,
                           ",M=", M, ",N=", N, ",K=", K,
                           ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
+                auto t1 = TimingClock::now();
+                accumulateOverhead(t0, t1);
             }
         }
 

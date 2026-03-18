@@ -37,16 +37,37 @@ if not _timing_logger.handlers:
     _timing_logger.setLevel(logging.INFO)
     _timing_logger.propagate = False
 
+# Accumulated overhead of the timing instrumentation itself (in nanoseconds).
+# Tracks f-string formatting and logger.info calls — excludes time.time_ns().
+_timing_overhead_ns = 0
+
 
 @contextmanager
 def timing_context(category_name):
     """Context manager for timing instrumentation."""
     if globalParameters.get("TimingInstrumentation", False):
+        global _timing_overhead_ns
+        overhead_snapshot = _timing_overhead_ns
         start = time.time_ns()
         try:
             yield
         finally:
-            elapsed_ms = (time.time_ns() - start) / 1_000_000
-            _timing_logger.info(f"TIMING:{category_name}:{elapsed_ms:.3f}")
+            elapsed_ns = time.time_ns() - start
+            # Subtract overhead accumulated by child timers during our span
+            child_overhead_ns = _timing_overhead_ns - overhead_snapshot
+            adjusted_ms = (elapsed_ns - child_overhead_ns) / 1_000_000
+            t0 = time.time_ns()
+            _timing_logger.info(f"TIMING:{category_name}:{adjusted_ms:.3f}")
+            t1 = time.time_ns()
+            _timing_overhead_ns += t1 - t0
     else:
         yield
+
+
+def emit_timing_overhead():
+    """Emit accumulated Python timing overhead as a TIMING line and reset."""
+    global _timing_overhead_ns
+    if _timing_overhead_ns > 0:
+        ms = _timing_overhead_ns / 1_000_000
+        _timing_logger.info(f"TIMING:python_timing_overhead:{ms:.3f}")
+        _timing_overhead_ns = 0

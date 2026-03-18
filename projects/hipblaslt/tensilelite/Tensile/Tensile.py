@@ -45,7 +45,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from Tensile.Common.TimingInstrumentation import timing_context, emit_timing_overhead
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -125,6 +125,7 @@ def executeStepsInConfig(
                 buildOnly,
                 solutionPoolFiles,
             )
+        emit_timing_overhead()
         print1("")
 
     if buildOnly:
