@@ -235,11 +235,20 @@ TEST_P(hipfftxtunitdesc, desccreation)
     const hipfftXtSubFormat format = std::get<2>(GetParam());
     const size_t dimension = std::get<3>(GetParam()); // FIXME: use
 
+    const int Nx    = 32;
+    const int Ny    = 36;
+    const int Nz    = 38;
+    // Just batch=1 for now.
+    
     if(verbose > 0)
     {
         std::cout << "hipfftxt plan creation test: " << directionname(direction)
                   << (realcomplex ? " real/complex" : "complex/complex")
                   << " dimension " << dimension << "\n";
+        std::cout << "Nx: " << Nx << " Ny: " << Ny;
+        if(dimension == 3)
+            std::cout << " Nz: " << Nz;
+        std::cout << "\n";
     }
 
     // FIXME: handle variable number of GPUs
@@ -247,11 +256,6 @@ TEST_P(hipfftxtunitdesc, desccreation)
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
     
-    // FIXME: handle 3D as well.
-    const int Nx    = 32;
-    const int Ny    = 36;
-    const int Nz    = 38;
-    // Just batch=1 for now.
 
     // TODO: 3D, other sizes, batch, etc.
     std::vector<size_t> batches = {1};
@@ -272,7 +276,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
     //const size_t splitdim = isinput ? lastdim - 1 : lastdim;
     //const size_t splitdim = isinput ? lastdim - 1 : lastdim;
     //const size_t splitdim = lastdim - 2; // FIXME
-    const size_t splitdim = isinput ? 1 : 2; // FIXME
+    const size_t splitdim = isinput ? 1 : 2;
 
     if(verbose)
     {
@@ -313,12 +317,12 @@ TEST_P(hipfftxtunitdesc, desccreation)
     const auto hostdatabatchlengths = computedatabatchlengths(isherm, batchlengths);
     const auto host_strides = default_strides(dft_type, placement, io, lengths);
     hostdiststrides.insert(hostdiststrides.end(), host_strides.begin(), host_strides.end());
-    if(verbose > 1)
+    if(verbose > 0)
     {
         std::cout << "dft_type: " << transform_type_name(dft_type) << "\n";
         std::cout << "placement: " << fft_result_placement_name(placement) << "\n";
         std::cout << "io: " << fft_io_name(io) << "\n";
-        std::cout << "host batch/length:";
+        std::cout << "transform batch/length:";
         for(auto val : batchlengths)
             std::cout << " " << val;
         std::cout << "\n";
@@ -683,11 +687,11 @@ TEST_P(hipfftxtunitdesc, desccreation)
         for(size_t igpu=0; igpu < gpus.size(); ++igpu)
         {
             std::cout << igpu << "\n";
-            std::cout << "\tbatch/length:";
+            std::cout << "\tbrick batch/length:";
             for(const auto val : brick_batchlengths[igpu])
                 std::cout << " " << val;
             std::cout << "\n";
-            std::cout << "\tdist/stride:";
+            std::cout << "\tbrick dist/stride:";
             for(const auto val : brick_diststrides[igpu])
                 std::cout << " " << val;
             std::cout << "\n";
@@ -703,12 +707,13 @@ TEST_P(hipfftxtunitdesc, desccreation)
         {
             for(size_t yidx = 0; yidx < hostdatabatchlengths[2]; ++yidx)
             {
+                // FIXME: deal with 3D.
                 const std::vector<size_t> hostidx = {0, xidx, yidx};
                 const auto bufidx = devidx(ngpus, hostidx, hostdatabatchlengths);
 
                 // Just look at the first value for each buffer.
-                // if(std::all_of(bufidx.begin() + 1, bufidx.end(),
-                //                [](const size_t idx ) { return idx == 0; })) 
+                if(std::all_of(bufidx.begin() + 1, bufidx.end(),
+                               [](const size_t idx ) { return idx == 0; })) 
                 {
                     std::stringstream idxstrs;
                     idxstrs << hostidx[0]

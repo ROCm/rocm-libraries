@@ -28,6 +28,9 @@
 #include <numeric>
 #include <vector>
 
+#include <iostream> // FIXME: temp
+
+
 #include "fft_enums.h"
 #include "data_layout.h"
 #include "../library/include/hipfft/hipfft.h"
@@ -106,6 +109,9 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
                             const bool isrealcomplex,
                             const hipfftXtSubFormat subformat)
 {
+
+    std::cout << "isrealcomplex: " << isrealcomplex << std::endl;
+    
     // We assume that the brick vector has already been allocated, but the brick data is not yet
     // computed.
     if(bricks.size() == 0)
@@ -122,32 +128,35 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     const size_t         nbatch   = batchlength[0];
     fft_result_placement placement;
     fft_io               io;
-    fft_transform_type   dft_type = isrealcomplex ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
+    const fft_transform_type dft_type
+        = isrealcomplex ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
+
+    const bool isherm = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
     
     // The subformat tells us which dimension is split.
     // Real in-place data needs extra padding.
-    size_t splitidx = 0;
+    size_t splitdim = 0;
     if(nbatch == 1)
     {
         switch(subformat)
         {
         case HIPFFT_XT_FORMAT_INPUT:
-            splitidx = 1; // X-axis is split
+            splitdim = 1; // X-axis is split
             placement = fft_placement_notinplace;
             io = fft_io_in;
             break;
         case HIPFFT_XT_FORMAT_OUTPUT:
-            splitidx = 2; // Y-axis is split
+            splitdim = 2; // Y-axis is split
             placement = fft_placement_notinplace;
             io = fft_io_out;
             break;
         case HIPFFT_XT_FORMAT_INPLACE:
-            splitidx = 1; // X-axis is split
+            splitdim = 1; // X-axis is split
             placement = fft_placement_inplace;
             io = fft_io_in;
             break;
         case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            splitidx = 2; // Y-axis is split
+            splitdim = 2; // Y-axis is split
             placement = fft_placement_inplace;
             io = fft_io_out;
             break;
@@ -166,13 +175,13 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
     else
     {
         // Multi-batch transforms are trivially divided.
-        splitidx = 0;
+        splitdim = 0;
         throw std::runtime_error("Multi-batch multi-gpu transforms not implimented");
     }
 
     // We are going to put the Hermitian-symmetric length change here:
     auto batchlengthdata = batchlength;
-    if(isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+    if(isherm)
     {
         // We have Hermitian-symmetric data
         const auto hindex = batchlengthdata.size() - 1;
@@ -180,7 +189,7 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         batchlengthdata[hindex] = hlength / 2 + 1;
     }
     
-    const auto ngpus = bricks.size();;
+    const auto ngpus = bricks.size();
     for(size_t ibrick = 0; ibrick < bricks.size(); ++ibrick)
     {
         auto& brick = bricks[ibrick];
@@ -188,19 +197,27 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         brick.field_lower.resize(dim);
         std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
         if(ibrick > 0)
-            brick.field_lower[splitidx] = bricks[ibrick-1].field_lower[splitidx];
+            brick.field_lower[splitdim] = bricks[ibrick-1].field_lower[splitdim];
 
-        const size_t splitlen = batchlengthdata[splitidx];
+        const size_t splitlen = batchlengthdata[splitdim];
         const size_t bricksplitlen = splitlen / ngpus + (ibrick < splitlen %  bricks.size()? 1 : 0);
         brick.field_upper = batchlengthdata;
         if(ibrick > 0)
         {
-            brick.field_lower[splitidx] = bricks[ibrick - 1].field_upper[splitidx];
+            brick.field_lower[splitdim] = bricks[ibrick - 1].field_upper[splitdim];
         }
-        brick.field_upper[splitidx] = brick.field_lower[splitidx] + bricksplitlen;
+        brick.field_upper[splitdim] = brick.field_lower[splitdim] + bricksplitlen;
 
-        brick.brick_stride = default_strides(dft_type, placement, io, brick.field_lower,
+        // FIXME: for 3D transforms, do we need to do this?
+        brick.brick_stride = default_strides(isherm ? fft_transform_type_complex_forward :dft_type,
+                                             placement,
+                                             io,
+                                             brick.field_lower,
                                              brick.field_upper);
+        std::cout << "new brick_stride:";
+        for(auto val : brick.brick_stride)
+            std::cout << " " << val;
+        std::cout << std::endl;
     }
 }
 
