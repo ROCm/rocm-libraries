@@ -79,7 +79,7 @@ public:
             }
 
             // Validate divisibility of the target dimension by block_size
-            size_t targetAxis
+            size_t const targetAxis
                 = axis.has_value() ? static_cast<size_t>(axis.value()) : xDims.size() - 1;
             if(targetAxis < xDims.size() && xDims[targetAxis] > 0)
             {
@@ -160,7 +160,7 @@ public:
             if(blockSize.has_value() && blockSize.value() > 0)
             {
                 auto scaleDims = x->get_dim();
-                size_t scaleAxis
+                size_t const scaleAxis
                     = axis.has_value() ? static_cast<size_t>(axis.value()) : scaleDims.size() - 1;
 
                 if(scaleAxis < scaleDims.size())

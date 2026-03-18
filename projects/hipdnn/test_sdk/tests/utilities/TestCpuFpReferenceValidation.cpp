@@ -16,6 +16,8 @@ using namespace hipdnn_data_sdk::helpers;
 using namespace hipdnn_data_sdk::types;
 using hipdnn_test_sdk::detail::safeTestTypeCast;
 
+namespace
+{
 template <typename T>
 void makeTensorsEqual(T& tensor1, T& tensor2)
 {
@@ -23,18 +25,20 @@ void makeTensorsEqual(T& tensor1, T& tensor2)
         tensor2.setHostValue(tensor1.getHostValue(indices), indices);
     });
 }
+} // namespace
 
 /* ======== CpuFpReferenceValidation tests ======== */
 
 TEST(TestCpuFpReferenceValidation, NegativeToleranceThrows)
 {
-    EXPECT_THROW(CpuFpReferenceValidation<float> refValidation(-1e-5f), std::invalid_argument);
+    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(-1e-5f),
+                 std::invalid_argument);
 }
 
 TEST(TestCpuFpReferenceValidationFp32, BasicTensorUsage)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<float> tensor1(dims);
     tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
@@ -46,14 +50,15 @@ TEST(TestCpuFpReferenceValidationFp32, BasicTensorUsage)
 
 TEST(TestCpuFpReferenceValidationFp32, TensorsToleranceDifferent)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
     tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
     makeTensorsEqual<Tensor<float>>(tensor1, tensor2);
-    std::vector<int64_t> indices = {2, 5}; //index 25 because strides are [10, 1] so 10*2 + 1*5 = 25
+    std::vector<int64_t> const indices
+        = {2, 5}; //index 25 because strides are [10, 1] so 10*2 + 1*5 = 25
     tensor2.setHostValue(1000, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -62,8 +67,8 @@ TEST(TestCpuFpReferenceValidationFp32, TensorsToleranceDifferent)
 // Additional BasicTensorUsage tests for other data types
 TEST(TestCpuFpReferenceValidationBfp16, BasicTensorUsage)
 {
-    CpuFpReferenceValidation<bfloat16> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<bfloat16> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<bfloat16> tensor1(dims);
     tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
@@ -75,8 +80,8 @@ TEST(TestCpuFpReferenceValidationBfp16, BasicTensorUsage)
 
 TEST(TestCpuFpReferenceValidationFp16, BasicTensorUsage)
 {
-    CpuFpReferenceValidation<half> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<half> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<half> tensor1(dims);
     tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
@@ -88,8 +93,8 @@ TEST(TestCpuFpReferenceValidationFp16, BasicTensorUsage)
 
 TEST(TestCpuFpReferenceValidationFp64, BasicTensorUsage)
 {
-    CpuFpReferenceValidation<double> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<double> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<double> tensor1(dims);
     tensor1.fillTensorWithRandomValues(-1.0, 1.0);
@@ -102,8 +107,8 @@ TEST(TestCpuFpReferenceValidationFp64, BasicTensorUsage)
 // TensorNotComparable tests
 TEST(TestCpuFpReferenceValidationBfp16, TensorNotComparable)
 {
-    CpuFpReferenceValidation<bfloat16> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<bfloat16> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<bfloat16> tensor1(dims);
     Tensor<bfloat16> tensor2(dims);
@@ -115,8 +120,8 @@ TEST(TestCpuFpReferenceValidationBfp16, TensorNotComparable)
 
 TEST(TestCpuFpReferenceValidationFp16, TensorNotComparable)
 {
-    CpuFpReferenceValidation<half> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<half> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<half> tensor1(dims);
     Tensor<half> tensor2(dims);
@@ -128,8 +133,8 @@ TEST(TestCpuFpReferenceValidationFp16, TensorNotComparable)
 
 TEST(TestCpuFpReferenceValidationFp32, TensorNotComparable)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -141,8 +146,8 @@ TEST(TestCpuFpReferenceValidationFp32, TensorNotComparable)
 
 TEST(TestCpuFpReferenceValidationFp64, TensorNotComparable)
 {
-    CpuFpReferenceValidation<double> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<double> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<double> tensor1(dims);
     Tensor<double> tensor2(dims);
@@ -155,9 +160,9 @@ TEST(TestCpuFpReferenceValidationFp64, TensorNotComparable)
 // Tolerance tests
 TEST(TestCpuFpReferenceValidation, TensorToleranceComparison)
 {
-    CpuFpReferenceValidation<double> refValidationLowTolerance(1e-7f, 1e-7f);
-    CpuFpReferenceValidation<double> refValidationHighTolerance(1e-5f, 1e-5f);
-    std::vector<int64_t> dims = {10, 10};
+    CpuFpReferenceValidation<double> const refValidationLowTolerance(1e-7f, 1e-7f);
+    CpuFpReferenceValidation<double> const refValidationHighTolerance(1e-5f, 1e-5f);
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<double> tensor1(dims);
     Tensor<double> tensor2(dims);
@@ -170,8 +175,8 @@ TEST(TestCpuFpReferenceValidation, TensorToleranceComparison)
 
 TEST(TestCpuFpReferenceValidation, TensorDefaultTolerance)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {1};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {1};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -184,7 +189,7 @@ TEST(TestCpuFpReferenceValidation, TensorDefaultTolerance)
 // Edge case: different element counts
 TEST(TestCpuFpReferenceValidation, TensorDifferentElementCounts)
 {
-    CpuFpReferenceValidation<float> refValidation;
+    CpuFpReferenceValidation<float> const refValidation;
 
     Tensor<float> tensor1({10, 10});
     Tensor<float> tensor2({5, 5});
@@ -196,9 +201,9 @@ TEST(TestCpuFpReferenceValidation, TensorDifferentElementCounts)
 
 TEST(TestCpuFpReferenceValidationStrided, StridedTensorEqual)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
@@ -216,9 +221,9 @@ TEST(TestCpuFpReferenceValidationStrided, StridedTensorEqual)
 
 TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
@@ -232,7 +237,7 @@ TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
     });
 
     // Change one element in tensor2
-    std::vector<int64_t> indices = {1, 1, 1, 1};
+    std::vector<int64_t> const indices = {1, 1, 1, 1};
     tensor2.setHostValue(9999.0f, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -240,9 +245,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
 
 TEST(TestCpuFpReferenceValidation, StridedTensorAllZeros)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
@@ -255,10 +260,10 @@ TEST(TestCpuFpReferenceValidation, StridedTensorAllZeros)
 
 TEST(TestCpuFpReferenceValidation, StridedTensorDifferentStrides)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides1 = {2, 4, 8, 16};
-    std::vector<int64_t> strides2 = {8, 4, 2, 1}; // Different stride order
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides1 = {2, 4, 8, 16};
+    std::vector<int64_t> const strides2 = {8, 4, 2, 1}; // Different stride order
 
     Tensor<float> tensor1(dims, strides1);
     Tensor<float> tensor2(dims, strides2);
@@ -275,16 +280,16 @@ TEST(TestCpuFpReferenceValidation, StridedTensorDifferentStrides)
 
 TEST(TestCpuFpReferenceValidation, StridedTensorWithTolerance)
 {
-    float customTolerance = 1e-5f;
-    CpuFpReferenceValidation<float> refValidation(customTolerance, customTolerance);
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    float const customTolerance = 1e-5f;
+    CpuFpReferenceValidation<float> const refValidation(customTolerance, customTolerance);
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
 
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        float value = 1.0f;
+        float const value = 1.0f;
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value + 5e-6f, indices); // Within tolerance
     });
@@ -294,9 +299,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorWithTolerance)
 
 TEST(TestCpuFpReferenceValidation, StridedTensorFirstElementDiffers)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
@@ -305,7 +310,7 @@ TEST(TestCpuFpReferenceValidation, StridedTensorFirstElementDiffers)
     tensor2.fillTensorWithValue(1.0f);
 
     // Change first element
-    std::vector<int64_t> indices = {0, 0, 0, 0};
+    std::vector<int64_t> const indices = {0, 0, 0, 0};
     tensor2.setHostValue(2.0f, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -313,9 +318,9 @@ TEST(TestCpuFpReferenceValidation, StridedTensorFirstElementDiffers)
 
 TEST(TestCpuFpReferenceValidation, StridedTensorLastElementDiffers)
 {
-    CpuFpReferenceValidation<float> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuFpReferenceValidation<float> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
@@ -324,7 +329,7 @@ TEST(TestCpuFpReferenceValidation, StridedTensorLastElementDiffers)
     tensor2.fillTensorWithValue(1.0f);
 
     // Change last element
-    std::vector<int64_t> indices = {1, 1, 1, 1};
+    std::vector<int64_t> const indices = {1, 1, 1, 1};
     tensor2.setHostValue(2.0f, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -332,7 +337,7 @@ TEST(TestCpuFpReferenceValidation, StridedTensorLastElementDiffers)
 
 TEST(TestCpuFpReferenceValidation, TensorSameElementCountDifferentDims)
 {
-    CpuFpReferenceValidation<float> refValidation;
+    CpuFpReferenceValidation<float> const refValidation;
 
     Tensor<float> tensor1({2, 50}); // 100 elements
     Tensor<float> tensor2({10, 10}); // 100 elements
@@ -350,8 +355,8 @@ TEST(TestCpuFpReferenceValidation, TensorSameElementCountDifferentDims)
 
 TEST(TestCpuIntReferenceValidationInt32, BasicTensorUsage)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<int32_t> tensor1(dims);
     tensor1.fillTensorWithRandomValues(-25, 25);
@@ -363,8 +368,8 @@ TEST(TestCpuIntReferenceValidationInt32, BasicTensorUsage)
 
 TEST(TestCpuIntReferenceValidationInt8, BasicTensorUsage)
 {
-    CpuIntReferenceValidation<int8_t> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuIntReferenceValidation<int8_t> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<int8_t> tensor1(dims);
     tensor1.fillTensorWithRandomValues(-128, 127);
@@ -376,8 +381,8 @@ TEST(TestCpuIntReferenceValidationInt8, BasicTensorUsage)
 
 TEST(TestCpuIntReferenceValidationUint8, BasicTensorUsage)
 {
-    CpuIntReferenceValidation<uint8_t> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuIntReferenceValidation<uint8_t> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<uint8_t> tensor1(dims);
     tensor1.fillTensorWithRandomValues(0, 256);
@@ -390,8 +395,8 @@ TEST(TestCpuIntReferenceValidationUint8, BasicTensorUsage)
 // TensorNotComparable tests
 TEST(TestCpuIntReferenceValidationInt32, TensorNotComparable)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<int32_t> tensor1(dims);
     Tensor<int32_t> tensor2(dims);
@@ -403,8 +408,8 @@ TEST(TestCpuIntReferenceValidationInt32, TensorNotComparable)
 
 TEST(TestCpuIntReferenceValidationInt8, TensorNotComparable)
 {
-    CpuIntReferenceValidation<int8_t> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuIntReferenceValidation<int8_t> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<int8_t> tensor1(dims);
     Tensor<int8_t> tensor2(dims);
@@ -416,8 +421,8 @@ TEST(TestCpuIntReferenceValidationInt8, TensorNotComparable)
 
 TEST(TestCpuIntReferenceValidationUint8, TensorNotComparable)
 {
-    CpuIntReferenceValidation<uint8_t> refValidation;
-    std::vector<int64_t> dims = {10, 10};
+    CpuIntReferenceValidation<uint8_t> const refValidation;
+    std::vector<int64_t> const dims = {10, 10};
 
     Tensor<uint8_t> tensor1(dims);
     Tensor<uint8_t> tensor2(dims);
@@ -430,7 +435,7 @@ TEST(TestCpuIntReferenceValidationUint8, TensorNotComparable)
 // Edge case: different element counts
 TEST(TestCpuIntReferenceValidation, TensorDifferentElementCounts)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
+    CpuIntReferenceValidation<int32_t> const refValidation;
 
     Tensor<int32_t> tensor1({10, 10});
     Tensor<int32_t> tensor2({5, 5});
@@ -442,9 +447,9 @@ TEST(TestCpuIntReferenceValidation, TensorDifferentElementCounts)
 
 TEST(TestCpuIntReferenceValidationStrided, StridedTensorEqual)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<int32_t> tensor1(dims, strides);
     Tensor<int32_t> tensor2(dims, strides);
@@ -462,9 +467,9 @@ TEST(TestCpuIntReferenceValidationStrided, StridedTensorEqual)
 
 TEST(TestCpuIntReferenceValidation, StridedTensorNotEqual)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<int32_t> tensor1(dims, strides);
     Tensor<int32_t> tensor2(dims, strides);
@@ -478,7 +483,7 @@ TEST(TestCpuIntReferenceValidation, StridedTensorNotEqual)
     });
 
     // Change one element in tensor2
-    std::vector<int64_t> indices = {1, 1, 1, 1};
+    std::vector<int64_t> const indices = {1, 1, 1, 1};
     tensor2.setHostValue(9999.0f, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -486,9 +491,9 @@ TEST(TestCpuIntReferenceValidation, StridedTensorNotEqual)
 
 TEST(TestCpuIntReferenceValidation, StridedTensorAllZeros)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<int32_t> tensor1(dims, strides);
     Tensor<int32_t> tensor2(dims, strides);
@@ -501,10 +506,10 @@ TEST(TestCpuIntReferenceValidation, StridedTensorAllZeros)
 
 TEST(TestCpuIntReferenceValidation, StridedTensorDifferentStrides)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides1 = {2, 4, 8, 16};
-    std::vector<int64_t> strides2 = {8, 4, 2, 1}; // Different stride order
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides1 = {2, 4, 8, 16};
+    std::vector<int64_t> const strides2 = {8, 4, 2, 1}; // Different stride order
 
     Tensor<int32_t> tensor1(dims, strides1);
     Tensor<int32_t> tensor2(dims, strides2);
@@ -521,9 +526,9 @@ TEST(TestCpuIntReferenceValidation, StridedTensorDifferentStrides)
 
 TEST(TestCpuIntReferenceValidation, StridedTensorFirstElementDiffers)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<int32_t> tensor1(dims, strides);
     Tensor<int32_t> tensor2(dims, strides);
@@ -532,7 +537,7 @@ TEST(TestCpuIntReferenceValidation, StridedTensorFirstElementDiffers)
     tensor2.fillTensorWithValue(1);
 
     // Change first element
-    std::vector<int64_t> indices = {0, 0, 0, 0};
+    std::vector<int64_t> const indices = {0, 0, 0, 0};
     tensor2.setHostValue(2, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -540,9 +545,9 @@ TEST(TestCpuIntReferenceValidation, StridedTensorFirstElementDiffers)
 
 TEST(TestCpuIntReferenceValidation, StridedTensorLastElementDiffers)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    CpuIntReferenceValidation<int32_t> const refValidation;
+    std::vector<int64_t> const dims = {2, 2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8, 16};
 
     Tensor<int32_t> tensor1(dims, strides);
     Tensor<int32_t> tensor2(dims, strides);
@@ -551,7 +556,7 @@ TEST(TestCpuIntReferenceValidation, StridedTensorLastElementDiffers)
     tensor2.fillTensorWithValue(1);
 
     // Change last element
-    std::vector<int64_t> indices = {1, 1, 1, 1};
+    std::vector<int64_t> const indices = {1, 1, 1, 1};
     tensor2.setHostValue(2, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
@@ -559,7 +564,7 @@ TEST(TestCpuIntReferenceValidation, StridedTensorLastElementDiffers)
 
 TEST(TestCpuIntReferenceValidation, TensorSameElementCountDifferentDims)
 {
-    CpuIntReferenceValidation<int32_t> refValidation;
+    CpuIntReferenceValidation<int32_t> const refValidation;
 
     Tensor<int32_t> tensor1({2, 50}); // 100 elements
     Tensor<int32_t> tensor2({10, 10}); // 100 elements

@@ -26,7 +26,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
     // Scale/bias shape = normalized dims (last N-1 dims for NCHW, i.e., dims[1:])
-    std::vector<int64_t> normalizedDims(dims.begin() + 1, dims.end());
+    std::vector<int64_t> const normalizedDims(dims.begin() + 1, dims.end());
     auto normalizedStrides = hipdnn_data_sdk::utilities::generateStrides(normalizedDims);
 
     int64_t uid = 1;

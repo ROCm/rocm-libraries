@@ -213,7 +213,7 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
         return {{ErrorCode::INVALID_VALUE, "Flatbuffer data is nullptr or has zero size"}, {}};
     }
 
-    hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
+    hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper const knobWrapper(fbData.ptr, fbData.size);
 
     if(!knobWrapper.isValid())
     {
@@ -226,7 +226,7 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
     std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> knobT(fbKnob->UnPack());
 
     // Get knob_id for error messages
-    std::string knobId = knobT->knob_id;
+    std::string const knobId = knobT->knob_id;
 
     // Extract default value from the union
     KnobValueVariant defaultValue;
@@ -293,7 +293,7 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
     // Validate that the default_value satisfies the constraint
     if(knob._constraint)
     {
-        KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
+        KnobSetting const defaultSetting(knob._knobId, knob._defaultValue);
         auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
         if(validationError.code != ErrorCode::OK)
         {
