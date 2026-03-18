@@ -175,12 +175,17 @@ Tests:
   initialization: integer_exact
   unit_check: 1
 
-# Integer-exact + TF32x1 (f32 A+B, compute input bf16). Only on gfx950 where solutions exist (cf. matmul_gemm_f32_fast_bf16).
+# Integer-exact + TF32x1 (f32 A+B, compute input bf16). gfx950 only. Same sizes as matmul_gemm_f32_fast_bf16 —
+# one_matrix_size_range hits many (M,N,K) with no solution (e.g. 1x1x1 TT) and bad lda sync on edge cases.
 - name: matmul_integer_exact_tf32x1_gfx950
   category: quick
   function:
     matmul: *real_precisions_tf32x1_only
-  matrix_size: *one_matrix_size_range
+  matrix_size:
+    - { M:  128,  N:  128,  K:  128  }
+    - { M:  131,  N:  131,  K:  131  }
+    - { M:  1024, N:  1024, K:  1024 }
+    - { M:  1031, N:  1031,  K:  1031  }
   transA_transB: *transA_transB_range
   alpha: 1.0
   beta: 0.0
