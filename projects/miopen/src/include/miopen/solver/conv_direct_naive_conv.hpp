@@ -150,29 +150,23 @@ auto MakeStrideArray(V vec)
     return std::move(ret);
 }
 
-miopen::solver::ConvSolution
-GetConv2DFWDSolution(const ExecutionContext& ctx,
-                     const miopen::conv::ProblemDescription& problem);
+miopen::solver::ConvSolution GetConv2DFWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem);
 
-miopen::solver::ConvSolution
-GetConv3DFWDSolution(const ExecutionContext& ctx,
-                     const miopen::conv::ProblemDescription& problem);
+miopen::solver::ConvSolution GetConv3DFWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem);
 
-miopen::solver::ConvSolution
-GetConv2DWRWSolution(const ExecutionContext& ctx,
-                     const miopen::conv::ProblemDescription& problem);
+miopen::solver::ConvSolution GetConv2DWRWSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem);
 
-miopen::solver::ConvSolution
-GetConv3DWRWSolution(const ExecutionContext& ctx,
-                     const miopen::conv::ProblemDescription& problem);
+miopen::solver::ConvSolution GetConv3DWRWSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem);
 
-miopen::solver::ConvSolution
-GetConv2DBWDSolution(const ExecutionContext& ctx,
-                     const miopen::conv::ProblemDescription& problem);
+miopen::solver::ConvSolution GetConv2DBWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem);
 
-miopen::solver::ConvSolution
-GetConv3DBWDSolution(const ExecutionContext& ctx,
-                     const miopen::conv::ProblemDescription& problem);
+miopen::solver::ConvSolution GetConv3DBWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem);
 } // end namespace conv_internal
 
 } // namespace conv

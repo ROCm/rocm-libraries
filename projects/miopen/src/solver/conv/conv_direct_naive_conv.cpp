@@ -393,8 +393,8 @@ inline void PrepareBatchedKernelRun(int batch_start,
 
 namespace conv_internal {
 
-miopen::solver::ConvSolution
-GetConv2DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution GetConv2DFWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem)
 {
     miopen::solver::ConvSolution result;
 
@@ -465,11 +465,10 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
-            decltype(auto) data_ctx =
-                primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
-            const auto& tensors = data_ctx.tensors;
-            float elapsed       = 0;
-            auto in_strides     = MakeStrideArray<5>(
+            decltype(auto) data_ctx = primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
+            const auto& tensors     = data_ctx.tensors;
+            float elapsed           = 0;
+            auto in_strides         = MakeStrideArray<5>(
                 SplitStrideCtoGC(group, tensors.inDesc.GetStrides(), G_stride_idx));
             // For weights, we split K to (G, K_per_group), which is always index 0
             auto wei_strides =
@@ -610,8 +609,8 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     return result;
 }
 
-miopen::solver::ConvSolution
-GetConv3DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution GetConv3DFWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem)
 {
     miopen::solver::ConvSolution result;
 
@@ -686,11 +685,10 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
-            decltype(auto) data_ctx =
-                primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
-            const auto& tensors = data_ctx.tensors;
-            float elapsed       = 0;
-            auto in_strides     = MakeStrideArray<6>(
+            decltype(auto) data_ctx = primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
+            const auto& tensors     = data_ctx.tensors;
+            float elapsed           = 0;
+            auto in_strides         = MakeStrideArray<6>(
                 SplitStrideCtoGC(group, tensors.inDesc.GetStrides(), G_stride_idx));
             // For weights, we split K to (G, K_per_group), which is always index 0
             auto wei_strides =
@@ -777,8 +775,8 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     return result;
 }
 
-miopen::solver::ConvSolution
-GetConv2DWRWSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution GetConv2DWRWSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem)
 {
     miopen::solver::ConvSolution result;
 
@@ -908,8 +906,8 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     return result;
 }
 
-miopen::solver::ConvSolution
-GetConv3DWRWSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution GetConv3DWRWSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem)
 {
     miopen::solver::ConvSolution result;
 
@@ -1019,8 +1017,8 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     return result;
 }
 
-miopen::solver::ConvSolution
-GetConv2DBWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution GetConv2DBWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem)
 {
     miopen::solver::ConvSolution result;
 
@@ -1163,8 +1161,8 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDes
     return result;
 }
 
-miopen::solver::ConvSolution
-GetConv3DBWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution GetConv3DBWDSolution(const ExecutionContext& ctx,
+                                                  const miopen::conv::ProblemDescription& problem)
 {
     miopen::solver::ConvSolution result;
 

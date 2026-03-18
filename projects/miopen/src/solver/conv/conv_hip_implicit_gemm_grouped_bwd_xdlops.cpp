@@ -523,8 +523,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(
 }
 
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
-    const ExecutionContext& ctx,
-    const ProblemDescription& problem)
+    const ExecutionContext& ctx, const ProblemDescription& problem)
 {
     split_k   = 1;
     index     = 0;
@@ -588,8 +587,8 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);
 #else
-   (void)ctx;
-   (void)problem;
+    (void)ctx;
+    (void)problem;
 #endif
 }
 
@@ -766,9 +765,8 @@ ConvHipImplicitGemmGroupBwdXdlops::Search(const ExecutionContext& ctx,
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
-    const ExecutionContext& ctx,
-    const ProblemDescription& problem) const
+bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(const ExecutionContext& ctx,
+                                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
@@ -803,8 +801,8 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     case miopenDouble: break;
     }
 #else
-   (void)ctx;
-   (void)problem;
+    (void)ctx;
+    (void)problem;
 #endif
     return false;
 }

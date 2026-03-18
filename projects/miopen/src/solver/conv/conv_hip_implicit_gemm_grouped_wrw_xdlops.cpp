@@ -569,8 +569,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(
 }
 
 void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
-    const ExecutionContext& ctx,
-    const ProblemDescription& problem)
+    const ExecutionContext& ctx, const ProblemDescription& problem)
 {
     split_k   = 1;
     index     = 0;
@@ -811,9 +810,8 @@ ConvHipImplicitGemmGroupWrwXdlops::Search(const ExecutionContext& ctx,
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(
-    const ExecutionContext& ctx,
-    const ProblemDescription& problem) const
+bool ConvHipImplicitGemmGroupWrwXdlops::IsApplicable(const ExecutionContext& ctx,
+                                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
@@ -882,8 +880,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
         config.UseTF32());
 #else
     (void)ctx;
-    (void)problem,
-    (void)config;
+    (void)problem, (void)config;
     return {};
 #endif
 }

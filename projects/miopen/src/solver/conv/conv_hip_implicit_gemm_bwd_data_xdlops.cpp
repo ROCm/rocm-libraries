@@ -224,9 +224,8 @@ void PerformanceConfigHipImplicitGemmBwdXdlops::DefaultKernelFromList(const Exec
     }
 }
 
-void PerformanceConfigHipImplicitGemmBwdXdlops::HeuristicInit(
-    const ExecutionContext& ctx,
-    const ProblemDescription& problem)
+void PerformanceConfigHipImplicitGemmBwdXdlops::HeuristicInit(const ExecutionContext& ctx,
+                                                              const ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "";
@@ -290,8 +289,7 @@ bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValidValue() const
     return index < valid_kernels.size();
 }
 
-bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValid(
-    const ProblemDescription& problem) const
+bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValid(const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
@@ -307,7 +305,7 @@ bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValid(
     case miopenDouble: break;
     }
 #else
-   (void)problem;
+    (void)problem;
 #endif
     return false;
 }
@@ -343,9 +341,8 @@ ConvHipImplicitGemmBwdXdlops::Search(const ExecutionContext& ctx,
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-bool ConvHipImplicitGemmBwdXdlops::IsApplicable(
-    const ExecutionContext& ctx,
-    const ProblemDescription& problem) const
+bool ConvHipImplicitGemmBwdXdlops::IsApplicable(const ExecutionContext& ctx,
+                                                const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS))

@@ -121,7 +121,7 @@ public:
                                     const TensorDescriptor& hDesc,
                                     miopenRNNFWDMode_t mode)
     {
-    #ifndef NDEBUG
+#ifndef NDEBUG
         auto [max_layers_hid, max_batch_hid, hidden_vec_sz] = miopen::tien<3>(hDesc.GetLengths());
         auto [max_batch_in, max_seq, input_vec_sz]          = miopen::tien<3>(xDesc.GetLengths());
         assert(max_batch_in <= max_batch_hid);
@@ -131,7 +131,7 @@ public:
         assert(static_cast<size_t>(layers_cnt) * (is_seq_bidir ? 2 : 1) <= max_layers_hid);
         // class update req
         assert(!is_seq_bidir);
-    #endif
+#endif
         // TODO all size_t
         GeneralLstmRedBuffer rb_layout = forwardInterimInfoBuilder(rnnDesc, xDesc);
 
