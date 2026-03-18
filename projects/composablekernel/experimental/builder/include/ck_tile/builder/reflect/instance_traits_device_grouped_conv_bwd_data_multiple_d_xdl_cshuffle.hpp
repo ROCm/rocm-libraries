@@ -296,19 +296,19 @@ struct InstanceTraits<
         oss << ","
             << detail::conv_bwd_data_spec_name(
                    kConvBwdDataSpecialization); // 14. ConvBackwardDataSpecialization
-        oss << "," << kDoPadGemmM;  // 15. GEMM padding for M dimension
-        oss << "," << kDoPadGemmN;  // 16. GEMM padding for N dimension
-        oss << "," << kNumGemmKPrefetchStage; // 17. Number of GEMM K prefetch stages
-        oss << "," << kBlockSize;   // 18. BlockSize
-        oss << "," << kMPerBlock;   // 19. MPerBlock
-        oss << "," << kNPerBlock;   // 20. NPerBlock
-        oss << "," << kK0PerBlock;  // 21. K0PerBlock
-        oss << "," << kAK1;         // 22. AK1
-        oss << "," << kBK1;         // 23. BK1
-        oss << "," << kMPerXDL;     // 24. MPerXDL
-        oss << "," << kNPerXDL;     // 25. NPerXDL
-        oss << "," << kMXdlPerWave; // 26. MXdlPerWave
-        oss << "," << kNXdlPerWave; // 27. NXdlPerWave
+        oss << "," << kDoPadGemmM;              // 15. GEMM padding for M dimension
+        oss << "," << kDoPadGemmN;              // 16. GEMM padding for N dimension
+        oss << "," << kNumGemmKPrefetchStage;   // 17. Number of GEMM K prefetch stages
+        oss << "," << kBlockSize;               // 18. BlockSize
+        oss << "," << kMPerBlock;               // 19. MPerBlock
+        oss << "," << kNPerBlock;               // 20. NPerBlock
+        oss << "," << kK0PerBlock;              // 21. K0PerBlock
+        oss << "," << kAK1;                     // 22. AK1
+        oss << "," << kBK1;                     // 23. BK1
+        oss << "," << kMPerXDL;                 // 24. MPerXDL
+        oss << "," << kNPerXDL;                 // 25. NPerXDL
+        oss << "," << kMXdlPerWave;             // 26. MXdlPerWave
+        oss << "," << kNXdlPerWave;             // 27. NXdlPerWave
         oss << "," << detail::sequence_name<ABlockTransferThreadClusterLengths_K0_M_K1>(); // 28.
         oss << "," << detail::sequence_name<ABlockTransferThreadClusterArrangeOrder>();    // 29.
         oss << "," << detail::sequence_name<ABlockTransferSrcAccessOrder>();               // 30.

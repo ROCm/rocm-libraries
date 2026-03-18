@@ -59,10 +59,10 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
 template <auto SIGNATURE>
 std::tuple<bool, float, std::string, int>
 run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
-                                           const std::string& split_k,
-                                           const ckt::Inputs<SIGNATURE>& inputs,
-                                           const ckt::Outputs<SIGNATURE>& outputs,
-                                           const ck_tile::stream_config& s_conf)
+                                         const std::string& split_k,
+                                         const ckt::Inputs<SIGNATURE>& inputs,
+                                         const ckt::Outputs<SIGNATURE>& outputs,
+                                         const ck_tile::stream_config& s_conf)
 {
     float best_avg_time = std::numeric_limits<float>::max();
     std::string best_op_name, op_name;

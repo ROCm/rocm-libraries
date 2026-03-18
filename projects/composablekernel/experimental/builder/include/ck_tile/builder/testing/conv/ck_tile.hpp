@@ -65,10 +65,11 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
         {
             if(kargs.k_batch > 1)
             {
-                const std::size_t zeroing_size = std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
-                                                     std::end(kargs.wei_g_k_c_xs_lengths.data),
-                                                     1,
-                                                     std::multiplies<std::size_t>());
+                const std::size_t zeroing_size =
+                    std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
+                                    std::end(kargs.wei_g_k_c_xs_lengths.data),
+                                    1,
+                                    std::multiplies<std::size_t>());
 
                 ck_tile::hip_check_error(
                     hipMemsetAsync(kargs.wei_ptr,
@@ -82,10 +83,11 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
         {
             if(kargs.k_batch > 1)
             {
-                const std::size_t zeroing_size = std::accumulate(std::begin(kargs.in_g_n_c_wis_lengths.data),
-                                                     std::end(kargs.in_g_n_c_wis_lengths.data),
-                                                     1,
-                                                     std::multiplies<std::size_t>());
+                const std::size_t zeroing_size =
+                    std::accumulate(std::begin(kargs.in_g_n_c_wis_lengths.data),
+                                    std::end(kargs.in_g_n_c_wis_lengths.data),
+                                    1,
+                                    std::multiplies<std::size_t>());
 
                 ck_tile::hip_check_error(
                     hipMemsetAsync(kargs.in_ptr,

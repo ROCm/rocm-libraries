@@ -636,12 +636,12 @@ struct TransformConvBwdDataToGemm
         // TODO Add support for NumGroupsToMerge > 1
         if constexpr(ConvSpec == ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
-            return make_naive_tensor_descriptor(make_tuple(N_ * Di_* Hi_ * Wi_, C_),
+            return make_naive_tensor_descriptor(make_tuple(N_ * Di_ * Hi_ * Wi_, C_),
                                                 make_tuple(WiStride, CStride),
                                                 number<VectorSizeC>{},
                                                 I1);
         }
-        else 
+        else
         {
             return make_naive_tensor_descriptor(
                 make_tuple(N_, Di_, Hi_, Wi_, C_),
@@ -660,7 +660,7 @@ struct TransformConvBwdDataToGemm
             return make_naive_tensor_descriptor(
                 make_tuple(K_, C_), make_tuple(C_, I1), number<VectorSizeB>{}, I1);
         }
-        else 
+        else
         {
             return make_naive_tensor_descriptor(
                 make_tuple(K_, Z_, Y_, X_, C_),
