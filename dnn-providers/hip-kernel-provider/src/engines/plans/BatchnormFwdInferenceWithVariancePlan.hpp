@@ -5,11 +5,19 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-#include "HipKernelUtils.hpp"
-#include "PlanInterface.hpp"
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-namespace hip_kernel_plugin
+#include "HipKernelHandle.hpp"
+#include "HipKernelUtils.hpp"
+#include "hip/ICompiledProgram.hpp"
+#include "hip/IRunnableKernel.hpp"
+
+#include <memory>
+
+namespace hip_kernel_provider
 {
+
+class IKernelCompiler;
 
 class BatchnormFwdInferenceWithVarianceParams
 {
@@ -60,11 +68,11 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdInferenceWithVariancePlan : public IPlan
+class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
-    BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
-                                          bool benchmarkingEnabled = false);
+    explicit BatchnormFwdInferenceWithVariancePlan(
+        BatchnormFwdInferenceWithVarianceParams&& inferenceParams);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
     BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
@@ -74,16 +82,29 @@ public:
     BatchnormFwdInferenceWithVariancePlan& operator=(BatchnormFwdInferenceWithVariancePlan&&)
         = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
+
+    void execute(const HipKernelHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
-    [[maybe_unused]] bool _benchmarkingEnabled;
+
+    // Populated by compile()
+    std::unique_ptr<ICompiledProgram> _compiledProgram;
+    std::unique_ptr<IRunnableKernel> _runnableKernel;
+
+    // Kernel launch parameters computed during compile()
+    unsigned int _channels = 0;
+    unsigned int _inCstride = 0;
+    unsigned int _batchCount = 0;
+    unsigned int _cStride = 0;
+    unsigned int _hwStride = 0;
+    unsigned int _batchStride = 0;
 };
 
 }

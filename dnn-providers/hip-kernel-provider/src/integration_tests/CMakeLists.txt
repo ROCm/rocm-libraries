@@ -10,6 +10,7 @@ add_executable(
     hip_kernel_provider_integration_tests
     main.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
+    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
 )
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

@@ -2,18 +2,16 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
-#include "hip/HipKernel.hpp"
-#include "hip/HipProgram.hpp"
-#include "hip/HipUtils.hpp"
 
-#include <hip/hip_runtime_api.h>
+#include "hip/IKernelCompiler.hpp"
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <sstream>
-#include <stdexcept>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
@@ -109,30 +107,44 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
 }
 
 BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
-    BatchnormFwdInferenceWithVarianceParams&& inferenceParams, bool benchmarkingEnabled)
+    BatchnormFwdInferenceWithVarianceParams&& inferenceParams)
     : _inferenceParams(std::move(inferenceParams))
-    , _benchmarkingEnabled(benchmarkingEnabled)
 {
 }
 
 size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+    [[maybe_unused]] const HipKernelHandle& handle) const
 {
     // No workspace needed for batchnorm inference with variance
     return 0;
 }
 
-void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHandle& handle,
-                                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                                    uint32_t numDeviceBuffers,
-                                                    [[maybe_unused]] void* workspace) const
+namespace
 {
-    // Get device and properties
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
+size_t computeVectorSize(bool isLayoutNHWC, int channels, unsigned int inCstride)
+{
+    if(isLayoutNHWC)
+    {
+        if(channels % 4 == 0)
+        {
+            return 4;
+        }
+        return channels % 2 == 0 ? 2 : 1;
+    }
+
+    if(inCstride % 4 == 0)
+    {
+        return 4;
+    }
+    return inCstride % 2 == 0 ? 2 : 1;
+}
+
+} // namespace
+
+void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kernelCompiler,
+                                                    const hipDeviceProp_t& deviceProperties)
+{
     // Determine data type configuration
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
@@ -147,8 +159,13 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     const auto* xDims = _inferenceParams.x()->dims();
     const auto* xStrides = _inferenceParams.x()->strides();
 
-    int n, c, h, w;
-    int nStride, cStride, wStride;
+    int n = 0;
+    int c = 0;
+    int h = 0;
+    int w = 0;
+    int nStride = 0;
+    int cStride = 0;
+    int wStride = 0;
 
     // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
     if(xDims->size() == 4)
@@ -166,7 +183,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     {
         n = static_cast<int>(xDims->Get(0));
         c = static_cast<int>(xDims->Get(1));
-        int d = static_cast<int>(xDims->Get(2));
+        auto d = static_cast<int>(xDims->Get(2));
         h = static_cast<int>(xDims->Get(3));
         w = static_cast<int>(xDims->Get(4));
         // For 5D, combine D*H*W into spatial dimension
@@ -178,49 +195,54 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     }
     else
     {
-        throw std::runtime_error("Unsupported tensor dimension: " + std::to_string(xDims->size()));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xDims->size()));
     }
 
-    unsigned int in_cstride = static_cast<unsigned int>(h * w);
+    auto inCstride = static_cast<unsigned int>(h * w);
 
     // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
     bool isLayoutNHWC = (xStrides->Get(1) == 1);
 
     // Calculate vector size based on layout
-    size_t vectorsize = isLayoutNHWC ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
-                                     : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
+    auto vectorsize = computeVectorSize(isLayoutNHWC, c, inCstride);
 
     // Calculate block and grid dimensions
-    size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;
-    size_t max_localsize = 256;
+    size_t xlocalsize = 0;
+    size_t xgridsize = 0;
+    size_t ylocalsize = 0;
+    size_t ygridsize = 0;
+    size_t zlocalsize = 0;
+    size_t zgridsize = 0;
+    size_t maxLocalsize = 256;
 
     if(isLayoutNHWC)
     {
-        xlocalsize = std::min(static_cast<size_t>(c) / vectorsize, max_localsize);
+        xlocalsize = std::min(static_cast<size_t>(c) / vectorsize, maxLocalsize);
         xgridsize
             = ((static_cast<size_t>(c) / vectorsize) + xlocalsize - 1) / xlocalsize * xlocalsize;
 
-        ylocalsize = max_localsize / xlocalsize;
-        ygridsize = (in_cstride + ylocalsize - 1) / ylocalsize * ylocalsize;
+        ylocalsize = maxLocalsize / xlocalsize;
+        ygridsize = (inCstride + ylocalsize - 1) / ylocalsize * ylocalsize;
     }
     else
     {
         xlocalsize = 1;
         xgridsize = ((static_cast<size_t>(c) + xlocalsize - 1) / xlocalsize) * xlocalsize;
 
-        ylocalsize = max_localsize;
-        ygridsize = ((in_cstride / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
+        ylocalsize = maxLocalsize;
+        ygridsize = ((inCstride / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
     }
 
     zlocalsize = 1;
-    size_t active_threads_xy = xgridsize * ygridsize;
-    size_t max_active_threads
-        = static_cast<size_t>(props.multiProcessorCount) * 32 * static_cast<size_t>(props.warpSize);
+    size_t activeThreadsXy = xgridsize * ygridsize;
+    auto maxActiveThreads = static_cast<size_t>(deviceProperties.multiProcessorCount) * 32
+                            * static_cast<size_t>(deviceProperties.warpSize);
 
-    if(active_threads_xy < max_active_threads)
+    if(activeThreadsXy < maxActiveThreads)
     {
-        zgridsize
-            = std::min(size_t{max_active_threads / active_threads_xy}, static_cast<size_t>(n));
+        zgridsize = std::min(maxActiveThreads / activeThreadsXy, static_cast<size_t>(n));
     }
     else
     {
@@ -228,31 +250,32 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     }
 
     // Detect GPU architecture
-    std::string archName(props.gcnArchName);
+    std::string archName(deviceProperties.gcnArchName);
     bool isGfx103X = (archName.find("gfx103") == 0);
     bool isGfx110X = (archName.find("gfx110") == 0);
     bool isGfx120X = (archName.find("gfx120") == 0);
     bool isGfx115X = (archName.find("gfx115") == 0);
 
-    // Get activation parameters
+    // Get activation mode
     int nrnOpId = 0;
-    float alpha = 0.0f;
-    float beta = 0.0f;
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
         const auto& activation = *_inferenceParams.optActivation();
         nrnOpId = static_cast<int>(activation.mode);
-        alpha = static_cast<float>(activation.alpha);
-        beta = static_cast<float>(activation.beta);
     }
-
-    // Get epsilon
-    double epsilon = _inferenceParams.epsilonValue();
 
     // Prepare compilation options
     std::vector<std::string> options;
-    options.emplace_back("-I/opt/rocm/include");
+    auto rocmPath
+        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
+    if(!rocmPath.empty())
+    {
+        auto rocmIncludeArg = "-I" + rocmPath + "/include";
+        options.emplace_back(rocmIncludeArg);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "BatchnormFwdInferencePlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
+    }
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16Mix ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=") + (useBfp16Mix ? "1" : "0"));
@@ -269,18 +292,39 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120X ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115X ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
-    options.emplace_back(std::string("--offload-arch=") + props.gcnArchName);
+    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
-    // Create and configure kernel
-    auto hipProgram = HipProgram("BatchNormFwdInferSpatial.cpp", options);
-    auto hipKernel = HipKernel(hipProgram, "BatchNormFwdInferSpatialEst");
+    // Compile kernel and configure launch dimensions
+    _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
+    _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEst");
 
-    hipKernel.SetBlockSize(static_cast<unsigned int>(xlocalsize),
-                           static_cast<unsigned int>(ylocalsize),
-                           static_cast<unsigned int>(zlocalsize));
-    hipKernel.SetGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                          static_cast<unsigned int>(ygridsize / ylocalsize),
-                          static_cast<unsigned int>(zgridsize / zlocalsize));
+    _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
+                                  static_cast<unsigned int>(ylocalsize),
+                                  static_cast<unsigned int>(zlocalsize));
+    _runnableKernel->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                 static_cast<unsigned int>(ygridsize / ylocalsize),
+                                 static_cast<unsigned int>(zgridsize / zlocalsize));
+
+    // Store kernel launch parameters
+    _channels = static_cast<unsigned int>(c);
+    _inCstride = inCstride;
+    _batchCount = static_cast<unsigned int>(n);
+    _cStride = static_cast<unsigned int>(cStride);
+    _hwStride = static_cast<unsigned int>(wStride);
+    _batchStride = static_cast<unsigned int>(nStride);
+}
+
+void BatchnormFwdInferenceWithVariancePlan::execute(const HipKernelHandle& handle,
+                                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                    uint32_t numDeviceBuffers,
+                                                    [[maybe_unused]] void* workspace) const
+{
+    if(!_runnableKernel)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "BatchnormFwdInferencePlan::execute() called before compile()");
+    }
 
     // Get device buffer pointers
     auto xBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -294,8 +338,11 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     auto estVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
         _inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
-    unsigned int hwStride = static_cast<unsigned int>(wStride);
-    unsigned int batchStride = static_cast<unsigned int>(nStride);
+    // Get epsilon
+    double epsilon = _inferenceParams.epsilonValue();
+
+    float activationAlpha = 0.0f;
+    float activationBeta = 0.0f;
 
     // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
@@ -303,45 +350,49 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
         auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
-        hipKernel.Launch(handle.getStream(),
-                         xBuffer.ptr,
-                         activationOutBuffer.ptr,
-                         estMeanBuffer.ptr,
-                         estVarianceBuffer.ptr,
-                         scaleBuffer.ptr,
-                         biasBuffer.ptr,
-                         epsilon,
-                         static_cast<unsigned int>(c),
-                         static_cast<unsigned int>(in_cstride),
-                         static_cast<unsigned int>(n),
-                         static_cast<unsigned int>(cStride),
-                         hwStride,
-                         batchStride,
-                         alpha,
-                         beta);
+        // Get activation parameters
+        const auto& activation = *_inferenceParams.optActivation();
+        activationAlpha = static_cast<float>(activation.alpha);
+        activationBeta = static_cast<float>(activation.beta);
+
+        _runnableKernel->launch(handle.getStream(),
+                                xBuffer.ptr,
+                                activationOutBuffer.ptr,
+                                estMeanBuffer.ptr,
+                                estVarianceBuffer.ptr,
+                                scaleBuffer.ptr,
+                                biasBuffer.ptr,
+                                epsilon,
+                                _channels,
+                                _inCstride,
+                                _batchCount,
+                                _cStride,
+                                _hwStride,
+                                _batchStride,
+                                activationAlpha,
+                                activationBeta);
     }
     else
     {
         auto yBuffer = hip_kernel_utils::findDeviceBuffer(
             _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
-        hipKernel.Launch(handle.getStream(),
-                         xBuffer.ptr,
-                         yBuffer.ptr,
-                         estMeanBuffer.ptr,
-                         estVarianceBuffer.ptr,
-                         scaleBuffer.ptr,
-                         biasBuffer.ptr,
-                         epsilon,
-                         static_cast<unsigned int>(c),
-                         static_cast<unsigned int>(in_cstride),
-                         static_cast<unsigned int>(n),
-                         static_cast<unsigned int>(cStride),
-                         hwStride,
-                         batchStride,
-                         alpha,
-                         beta);
+        _runnableKernel->launch(handle.getStream(),
+                                xBuffer.ptr,
+                                yBuffer.ptr,
+                                estMeanBuffer.ptr,
+                                estVarianceBuffer.ptr,
+                                scaleBuffer.ptr,
+                                biasBuffer.ptr,
+                                epsilon,
+                                _channels,
+                                _inCstride,
+                                _batchCount,
+                                _cStride,
+                                _hwStride,
+                                _batchStride,
+                                activationAlpha,
+                                activationBeta);
     }
 }
-
 }

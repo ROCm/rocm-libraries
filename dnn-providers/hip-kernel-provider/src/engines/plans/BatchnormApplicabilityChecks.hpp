@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider
@@ -102,6 +103,11 @@ void checkTensorShapesSupported(
 
 void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormInferenceVarianceExtTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 

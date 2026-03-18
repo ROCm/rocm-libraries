@@ -8,6 +8,7 @@
 #include "BatchnormPlanBuilder.hpp"
 #include "engines/plans/BatchnormApplicabilityChecks.hpp"
 #include "engines/plans/BatchnormFwdInferencePlan.hpp"
+#include "engines/plans/BatchnormFwdInferenceWithVariancePlan.hpp"
 
 namespace hip_kernel_provider
 {
@@ -43,7 +44,9 @@ bool BatchnormPlanBuilder::isApplicable(
 
         if(!opGraph.hasOnlySupportedAttributes(
                std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
-                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes}))
+                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+                   hipdnn_data_sdk::data_objects::NodeAttributes::
+                       BatchnormInferenceAttributesVarianceExt}))
         {
             HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
             return false;
@@ -53,8 +56,22 @@ bool BatchnormPlanBuilder::isApplicable(
 
         try
         {
-            checkBatchnormInferenceTensorConfigSupported(
-                *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+            switch(node.attributes_type())
+            {
+            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+                checkBatchnormInferenceTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+                break;
+            case hipdnn_data_sdk::data_objects::NodeAttributes::
+                BatchnormInferenceAttributesVarianceExt:
+                checkBatchnormInferenceVarianceExtTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
+                    opGraph.getTensorMap());
+                break;
+            default:
+                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                               "Unexpected node attribute type");
+            }
         }
         catch(const std::exception& e)
         {
@@ -103,6 +120,23 @@ void buildPlanInferenceSingleNode(
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanInferenceWithVarianceSingleNode(
+    [[maybe_unused]] const HipKernelHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    const IKernelCompiler& kernelCompiler,
+    const IDevicePropertyProvider& devicePropertyProvider,
+    HipKernelContext& executionContext)
+{
+    const auto& attr = nodeWrapper.attributesAs<
+        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+
+    BatchnormFwdInferenceWithVarianceParams params(attr, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
+    plan->compile(kernelCompiler, devicePropertyProvider.getDeviceProperties());
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void BatchnormPlanBuilder::initializeExecutionSettings(
@@ -122,9 +156,34 @@ void BatchnormPlanBuilder::buildPlan(
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
-    HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
-    buildPlanInferenceSingleNode(
-        handle, opGraph, nodeWrapper, _kernelCompiler, _devicePropertyProvider, executionContext);
+    switch(nodeWrapper.attributesType())
+    {
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
+        buildPlanInferenceSingleNode(handle,
+                                     opGraph,
+                                     nodeWrapper,
+                                     _kernelCompiler,
+                                     _devicePropertyProvider,
+                                     executionContext);
+        break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Building batchnorm fwd inference with variance plan for node: " << nodeName);
+        buildPlanInferenceWithVarianceSingleNode(handle,
+                                                 opGraph,
+                                                 nodeWrapper,
+                                                 _kernelCompiler,
+                                                 _devicePropertyProvider,
+                                                 executionContext);
+        break;
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported node type for batchnorm plan builder: "
+                + std::string(
+                    hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
+    }
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(
