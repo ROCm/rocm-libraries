@@ -151,5 +151,5 @@ Write-Host "  CMAKE_HIP_COMPILER_ROCM_ROOT:  $RocmDevelUnix"
 Write-Host ""
 Write-Host "=== Sample CMake command for hipDNN ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "cmake -GNinja -DGPU_TARGETS=$GpuTarget -DCMAKE_HIP_COMPILER_ROCM_ROOT=$RocmDevelUnix -DCMAKE_PREFIX_PATH=$RocmDevelUnix -DCMAKE_PROGRAM_PATH=$ClangPathUnix .." -ForegroundColor White
+Write-Host "cmake -GNinja -DGPU_TARGETS=$GpuTarget -DCMAKE_PREFIX_PATH=$RocmDevelUnix -DCMAKE_PROGRAM_PATH=$ClangPathUnix .." -ForegroundColor White
 Write-Host ""
