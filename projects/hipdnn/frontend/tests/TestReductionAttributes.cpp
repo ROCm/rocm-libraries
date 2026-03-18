@@ -203,7 +203,7 @@ TEST(TestReductionAttributes, FromFlatBufferRoundTrip)
 
 TEST(TestReductionAttributes, IsDeterministicDefaultsFalse)
 {
-    ReductionAttributes attrs;
+    const ReductionAttributes attrs;
     EXPECT_FALSE(attrs.get_is_deterministic());
 }
 

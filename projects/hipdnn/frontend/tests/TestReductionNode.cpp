@@ -41,8 +41,8 @@ ReductionAttributes makeValidAttrs()
 
 TEST(TestReductionNode, ValidNodePreValidates)
 {
-    GraphAttributes graphAttributes;
-    ReductionNode node(makeValidAttrs(), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(makeValidAttrs(), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -54,8 +54,8 @@ TEST(TestReductionNode, MissingXError)
     attrs.set_mode(ReductionMode::ADD);
     attrs.set_y(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -67,8 +67,8 @@ TEST(TestReductionNode, MissingYError)
     attrs.set_mode(ReductionMode::ADD);
     attrs.set_x(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -81,8 +81,8 @@ TEST(TestReductionNode, MissingModeError)
     attrs.set_y(std::make_shared<TensorAttributes>());
     // mode intentionally not set
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -95,8 +95,8 @@ TEST(TestReductionNode, NotSetModeError)
     attrs.set_x(std::make_shared<TensorAttributes>());
     attrs.set_y(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -104,7 +104,7 @@ TEST(TestReductionNode, NotSetModeError)
 
 TEST(TestReductionNode, InferPropertiesNode)
 {
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     auto attrs = makeValidAttrs();
     ReductionNode node(std::move(attrs), graphAttributes);
 
@@ -140,8 +140,8 @@ TEST_P(TestReductionNodeAllModes, ValidNodePreValidates)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK) << "Mode " << static_cast<int>(mode) << " should be valid";
@@ -173,8 +173,8 @@ TEST(TestReductionNode, RankMismatchError)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -195,8 +195,8 @@ TEST(TestReductionNode, OutputDimExceedsInputError)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -217,8 +217,8 @@ TEST(TestReductionNode, NoReductionDimError)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -242,8 +242,8 @@ TEST(TestReductionNode, PartialReductionValid)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -264,8 +264,8 @@ TEST(TestReductionNode, ReducedDimNotOneError)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -286,8 +286,8 @@ TEST(TestReductionNode, NoDimsSkipsDimValidation)
     attrs.set_x(x);
     attrs.set_y(y);
 
-    GraphAttributes graphAttributes;
-    ReductionNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ReductionNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);

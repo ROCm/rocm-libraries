@@ -42,6 +42,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <memory>
@@ -264,7 +265,7 @@ void unpackNodeFromFlatBuffer(
             }
             case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
             {
-                auto attr = ReductionAttributes::fromFlatBuffer(
+                auto attr = graph::ReductionAttributes::fromFlatBuffer(
                     fbNode->attributes_as_ReductionAttributes(), tensorMap);
                 if(fbNode->name() != nullptr)
                 {
