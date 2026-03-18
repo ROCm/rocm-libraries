@@ -3,12 +3,13 @@
 
 #pragma once
 
-#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <variant>
+#include <vector>
 
 namespace TensileLite
 {
@@ -18,14 +19,46 @@ namespace TensileLite
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
 
-        // Accumulated overhead of the timing instrumentation itself (in nanoseconds).
-        // Tracks string copies, formatting, and I/O — excludes clock::now() calls.
-        inline std::atomic<int64_t> g_timingOverheadNs{0};
+        // ---- Deferred I/O buffer ------------------------------------------------
+        //
+        // During measurement, timing data is captured as raw structs with no string
+        // formatting or I/O. All formatting and writing happens in flushTimingBuffer().
+        //
+        // Note: single-threaded. The benchmark loop in main.cpp is sequential.
 
-        // Fast formatters — to_chars into a caller-supplied buffer
+        struct TimingRec
+        {
+            const char* category;
+            double      durationMs;
+        };
+
+        struct ContextRec
+        {
+            size_t      M, N, K, batchCount;
+            std::string typeA, typeD;
+        };
+
+        struct GroupedContextRec
+        {
+            size_t      index, totalGemms;
+            size_t      M, N, K, batchCount;
+            std::string typeA, typeD;
+        };
+
+        using TimingRecord = std::variant<TimingRec, ContextRec, GroupedContextRec>;
+        inline std::vector<TimingRecord> g_timingBuffer;
+
+        // Reserve buffer capacity upfront. Real workloads produce ~2M+ records.
+        inline void initTimingBuffer(size_t capacity = 2'500'000)
+        {
+            g_timingBuffer.reserve(capacity);
+        }
+
+        // ---- Formatting helpers (used only during flush) ------------------------
+
         inline char* fmtOne(char* p, char* end, const char* s)
         {
-            auto len = std::strlen(s);
+            auto len   = std::strlen(s);
             auto avail = static_cast<size_t>(end - p);
             if(len > avail)
                 len = avail;
@@ -54,7 +87,7 @@ namespace TensileLite
         template<typename... Args>
         inline void writeLine(Args&&... args)
         {
-            char buf[256];
+            char        buf[256];
             char*       p   = buf;
             char* const end = buf + sizeof(buf) - 1;
             ((p = fmtOne(p, end, args)), ...);
@@ -62,67 +95,63 @@ namespace TensileLite
             std::clog.write(buf, p - buf);
         }
 
+        // Format and write all buffered records, then clear the buffer.
         inline void flushTimingBuffer()
         {
-            if(g_timingInstrumentationEnabled)
+            for(auto& rec : g_timingBuffer)
             {
-                double overheadMs
-                    = g_timingOverheadNs.load(std::memory_order_relaxed) / 1'000'000.0;
-                writeLine("TIMING:timing_overhead:", overheadMs);
+                std::visit(
+                    [](auto& r)
+                    {
+                        using T = std::decay_t<decltype(r)>;
+                        if constexpr(std::is_same_v<T, TimingRec>)
+                            writeLine("TIMING:", r.category, ":", r.durationMs);
+                        else if constexpr(std::is_same_v<T, ContextRec>)
+                            writeLine("TIMING_CONTEXT:M=", r.M, ",N=", r.N, ",K=", r.K,
+                                      ",batch=", r.batchCount,
+                                      ",typeA=", r.typeA, ",typeD=", r.typeD);
+                        else
+                            writeLine("TIMING_CONTEXT_GROUPED:index=", r.index,
+                                      ",total=", r.totalGemms,
+                                      ",M=", r.M, ",N=", r.N, ",K=", r.K,
+                                      ",batch=", r.batchCount,
+                                      ",typeA=", r.typeA, ",typeD=", r.typeD);
+                    },
+                    rec);
             }
+            g_timingBuffer.clear();
             std::clog.flush();
         }
 
         using TimingClock = std::chrono::high_resolution_clock;
 
-        // Helper to accumulate overhead (time around non-clock work)
-        inline void accumulateOverhead(TimingClock::time_point t0, TimingClock::time_point t1)
-        {
-            g_timingOverheadNs.fetch_add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count(),
-                std::memory_order_relaxed);
-        }
-
-        // Simple RAII timer that records timing on destruction
+        // Simple RAII timer that records timing on destruction.
         // Output format: TIMING:<category>:<duration_ms>
-        // This format is easily parseable by post-processing scripts
         //
-        // Timing records are written to std::clog (buffered stderr).
-        // Call flushTimingBuffer() to ensure all records are flushed.
+        // Timing records are buffered in g_timingBuffer during measurement.
+        // Call flushTimingBuffer() to format and write all records to std::clog.
         class ScopedTimer
         {
         public:
             using clock = TimingClock;
 
-            ScopedTimer(const std::string& category)
+            ScopedTimer(const char* category)
             {
                 if(g_timingInstrumentationEnabled)
                 {
-                    auto t0    = clock::now();
                     m_category = category;
-                    auto t1    = clock::now();
-                    accumulateOverhead(t0, t1);
+                    m_start    = clock::now();
                 }
-                m_startOverhead = g_timingOverheadNs.load(std::memory_order_relaxed);
-                m_start         = clock::now();
             }
 
             ~ScopedTimer()
             {
                 if(g_timingInstrumentationEnabled)
                 {
-                    auto end = clock::now();
-                    // Subtract overhead accumulated by child timers during our span
-                    auto childOverheadNs
-                        = g_timingOverheadNs.load(std::memory_order_relaxed) - m_startOverhead;
-                    auto rawNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                     end - m_start)
-                                     .count();
-                    double durationMs = (rawNs - childOverheadNs) / 1'000'000.0;
-                    auto   t0         = clock::now();
-                    writeLine("TIMING:", m_category, ":", durationMs);
-                    auto t1 = clock::now();
-                    accumulateOverhead(t0, t1);
+                    auto   end        = clock::now();
+                    double durationMs
+                        = std::chrono::duration<double, std::milli>(end - m_start).count();
+                    g_timingBuffer.push_back(TimingRec{m_category, durationMs});
                 }
             }
 
@@ -135,20 +164,16 @@ namespace TensileLite
             }
 
         private:
-            std::string                    m_category;
+            const char*                    m_category = nullptr;
             std::chrono::time_point<clock> m_start;
-            int64_t                        m_startOverhead = 0;
         };
 
         // Report a timing value directly (for GPU timings already measured)
-        inline void reportTiming(const std::string& category, double ms)
+        inline void reportTiming(const char* category, double ms)
         {
             if(g_timingInstrumentationEnabled)
             {
-                auto t0 = TimingClock::now();
-                writeLine("TIMING:", category, ":", ms);
-                auto t1 = TimingClock::now();
-                accumulateOverhead(t0, t1);
+                g_timingBuffer.push_back(TimingRec{category, ms});
             }
         }
 
@@ -158,11 +183,7 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                auto t0 = TimingClock::now();
-                writeLine("TIMING_CONTEXT:M=", M, ",N=", N, ",K=", K,
-                          ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
-                auto t1 = TimingClock::now();
-                accumulateOverhead(t0, t1);
+                g_timingBuffer.push_back(ContextRec{M, N, K, batchCount, typeA, typeD});
             }
         }
 
@@ -173,12 +194,8 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                auto t0 = TimingClock::now();
-                writeLine("TIMING_CONTEXT_GROUPED:index=", index, ",total=", totalGemms,
-                          ",M=", M, ",N=", N, ",K=", K,
-                          ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
-                auto t1 = TimingClock::now();
-                accumulateOverhead(t0, t1);
+                g_timingBuffer.push_back(
+                    GroupedContextRec{index, totalGemms, M, N, K, batchCount, typeA, typeD});
             }
         }
 

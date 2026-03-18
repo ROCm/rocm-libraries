@@ -45,7 +45,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
-from Tensile.Common.TimingInstrumentation import timing_context, emit_timing_overhead
+from Tensile.Common.TimingInstrumentation import timing_context, calibrate_timing, flush_timing_buffer
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -125,7 +125,7 @@ def executeStepsInConfig(
                 buildOnly,
                 solutionPoolFiles,
             )
-        emit_timing_overhead()
+        flush_timing_buffer()
         print1("")
 
     if buildOnly:
@@ -682,6 +682,11 @@ def Tensile(userArgs):
     for key, value in overrideParameters.items():
         print("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
+
+    calibrate_timing()
+
+    if "MaxFileName" in globalParameters or "MaxFileName" in config:
+        printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
     executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles)
 

@@ -117,6 +117,7 @@ TIMING_HIERARCHY = {
                 "post_solution_lib_update": {},
                 "post_solution_perf_reset": {},
                 "post_solution_sol_advance": {},
+                "post_solution_profiler": {},
             },
             "post_problem": {},
             "finalize_report": {},
