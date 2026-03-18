@@ -285,6 +285,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
             });
             break;
         case hipblaslt_initialization::integer_exact:
+            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]
             if(abc == ABC_dims::A || abc == ABC_dims::C)
             {
                 fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {

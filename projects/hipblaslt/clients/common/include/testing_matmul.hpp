@@ -1259,27 +1259,31 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
-    // integer_exact: these tests fail on gfx11 (Navi)—GPU vs CPU exact match breaks there while
-    // passing on other architectures; skip rather than loosen checks. (General fp16 GEMM on gfx11
-    // still uses widened tolerance elsewhere in this file.)
+    // integer_exact: gfx11 skip disabled temporarily—re-enable with #if 1 after experiments.
+    // (Previously: Navi GPU vs CPU exact match failed; general fp16 GEMM on gfx11 still uses wider tol.)
     if(arg.initialization == hipblaslt_initialization::integer_exact)
     {
+#if 0
         if(hipblaslt_get_arch_major() == 11)
         {
             hipblaslt_cout << "Skipping integer_exact on gfx11 (Navi)"
                            << std::endl;
             return;
         }
+#endif
         const bool is_16bit = (tiA == HIP_R_16F || tiA == HIP_R_16BF);
         if(is_16bit)
         {
+            // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
+            const int32_t k_limit
+                = (arg.alpha == 2.0f && (arg.beta == 0.0f || arg.beta == -2.0f)) ? 256 : 512;
             const int32_t gemm_count = std::max(1, arg.grouped_gemm);
             for(int32_t i = 0; i < gemm_count; i++)
             {
-                if(arg.K[i] > 512)
+                if(arg.K[i] > k_limit)
                 {
                     hipblaslt_cout << "Skipping integer_exact: 16-bit format with K=" << arg.K[i]
-                                   << " > 512 (exact representability limit)" << std::endl;
+                                   << " > " << k_limit << " (exact representability limit)" << std::endl;
                     return;
                 }
             }

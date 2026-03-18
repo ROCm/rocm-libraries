@@ -40,7 +40,7 @@ enum class hipblaslt_initialization
     zero          = 555,
     norm_dist     = 666,
     uniform_01    = 777,
-    integer_exact = 888, // A in [0,1,2], B alternating ±[0,1,2]; exact match when K small
+    integer_exact = 888, // A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta 0 or -2; exact when K bounded
 };
 
 typedef enum class _hipblaslt_activation_type
