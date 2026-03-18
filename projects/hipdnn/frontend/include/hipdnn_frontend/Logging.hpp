@@ -1,5 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+/**
+ * @file Logging.hpp
+ * @brief Frontend logging configuration and log-level control
+ *
+ * Log verbosity is controlled by the `HIPDNN_LOG_LEVEL` environment
+ * variable. Valid values (case-insensitive):
+ * | Value   | Effect                                      |
+ * |---------|---------------------------------------------|
+ * | `info`  | Informational messages and above             |
+ * | `warn`  | Warnings and above                          |
+ * | `error` | Errors and fatal messages only               |
+ * | `fatal` | Fatal messages only                          |
+ * | `off`   | Disable all logging (default)                |
+ *
+ * Example: `HIPDNN_LOG_LEVEL=warn`
+ */
+
 #pragma once
 
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
@@ -9,9 +27,10 @@
 namespace hipdnn_frontend
 {
 
+/// @cond INTERNAL
+/// @brief Component name used for all frontend log messages
 inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
 
-// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
 HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
                                                        = hipdnnLoggingCallback_ext)
 {
@@ -40,14 +59,9 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
 
     return 0;
 }
+/// @endcond
 
-// ============================================================================
-// Frontend Logging Macros (HIPDNN_FE_LOG_*)
-// ============================================================================
-// These macros auto-initialize logging on first use, then log with "hipdnn_frontend"
-// as the component name.
-// Usage: HIPDNN_FE_LOG_INFO("Message " << value);
-
+/// @cond INTERNAL
 #define HIPDNN_FE_LOG_INFO(msg)                                                     \
     do                                                                              \
     {                                                                               \
@@ -75,6 +89,7 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         hipdnn_frontend::initializeFrontendLogging();                                \
         HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
+/// @endcond
 
 // === Logging Callback and Log Level APIs ===
 
@@ -167,5 +182,4 @@ inline Error getGlobalLogLevel(hipdnnSeverity_t& level)
     }
     return {};
 }
-
 } // namespace hipdnn_frontend

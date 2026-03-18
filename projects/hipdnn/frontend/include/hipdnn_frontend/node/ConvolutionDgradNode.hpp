@@ -3,18 +3,16 @@
 #pragma once
 
 #include "Node.hpp"
-#include <algorithm>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradPacker.hpp>
-#include <numeric>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionDgradNode : public BaseNode<ConvolutionDgradNode>
+class ConvolutionDgradNode : public BaseNode<ConvolutionDgradNode, NodeType::CONVOLUTION_DGRAD>
 {
 public:
     ConvDgradAttributes attributes;
@@ -197,7 +195,7 @@ public:
                                         + std::to_string(kernelSize) + ") and dilation ("
                                         + std::to_string(dilationVal) + ")");
 
-                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+                int64_t const expectedOutputSize = (numerator / strideVal) + 1;
 
                 HIPDNN_RETURN_IF_NE(
                     outputSize,

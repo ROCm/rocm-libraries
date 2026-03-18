@@ -8,17 +8,22 @@
 
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::data_objects;
 
+namespace
+{
+
 void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
                             const std::string& context)
 {
-    nlohmann::json graphJson = *graph;
+    nlohmann::json const graphJson = *graph;
 
     flatbuffers::FlatBufferBuilder builder;
     auto newGraphBuilder = hipdnn_data_sdk::json::to<Graph>(builder, graphJson);
@@ -35,8 +40,8 @@ void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
     auto t2 = newGraph->tensors()->begin();
     for(; t1 != graph->tensors()->end() && t2 != newGraph->tensors()->end(); t1++, t2++)
     {
-        std::unique_ptr<TensorAttributesT> t1ptr(t1->UnPack());
-        std::unique_ptr<TensorAttributesT> t2ptr(t2->UnPack());
+        std::unique_ptr<TensorAttributesT> const t1ptr(t1->UnPack());
+        std::unique_ptr<TensorAttributesT> const t2ptr(t2->UnPack());
         EXPECT_EQ(*t1ptr, *t2ptr) << context;
     }
 
@@ -45,11 +50,13 @@ void toJsonAndBackTestSuite(const hipdnn_data_sdk::data_objects::Graph* graph,
     auto n2 = newGraph->nodes()->begin();
     for(; n1 != graph->nodes()->end() && n2 != newGraph->nodes()->end(); n1++, n2++)
     {
-        std::unique_ptr<NodeT> n1ptr(n1->UnPack());
-        std::unique_ptr<NodeT> n2ptr(n2->UnPack());
+        std::unique_ptr<NodeT> const n1ptr(n1->UnPack());
+        std::unique_ptr<NodeT> const n2ptr(n2->UnPack());
         EXPECT_EQ(*n1ptr, *n2ptr) << context;
     }
 }
+
+} // namespace
 
 TEST(TestJson, GraphToJsonAndBack)
 {
@@ -140,6 +147,16 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid block scale quantize graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBpropGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid sdpa backward graph)";
+            break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid custom op graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
@@ -148,6 +165,9 @@ TEST(TestJson, GraphToJsonAndBack)
         toJsonAndBackTestSuite(graph, context);
     }
 }
+
+namespace
+{
 
 void vectorTestSuite(std::vector<int> const& vec, const std::string& context)
 {
@@ -160,20 +180,22 @@ void vectorTestSuite(std::vector<int> const& vec, const std::string& context)
     EXPECT_EQ(vec, vecJson.get<std::vector<int>>()) << context;
 }
 
-TEST(TestJson, FromVector)
-{
-    vectorTestSuite({0, 1, 2, 3, 4}, "(filled vector)");
-    vectorTestSuite({}, "(empty vector)");
-}
-
 template <class T>
 void enumTestSuite(T value, const std::string& stringRep, const std::string& context)
 {
     auto jsonStringRep = "\"" + stringRep + "\"";
-    nlohmann::json jsonValue = value;
+    nlohmann::json const jsonValue = value;
     EXPECT_EQ(value, jsonValue.get<T>()) << context;
     EXPECT_EQ(jsonValue.dump(), std::string{jsonStringRep}) << context;
     EXPECT_EQ(nlohmann::json(stringRep).get<T>(), value) << context;
+}
+
+} // namespace
+
+TEST(TestJson, FromVector)
+{
+    vectorTestSuite({0, 1, 2, 3, 4}, "(filled vector)");
+    vectorTestSuite({}, "(empty vector)");
 }
 
 TEST(TestJson, Enum)
@@ -184,6 +206,118 @@ TEST(TestJson, Enum)
     enumTestSuite(NodeAttributes::BatchnormInferenceAttributes,
                   "BatchnormInferenceAttributes",
                   "(for hipdnn_data_sdk::data_objects::NodeAttributes)");
+}
+
+TEST(TestJson, FlatbufferStringToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto strOffset = builder.CreateString("hello_world");
+    auto svOffset = CreateStringValue(builder, strOffset);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sv->value());
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "hello_world");
+}
+
+TEST(TestJson, FlatbufferStringToJsonImplicit)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto strOffset = builder.CreateString("implicit_test");
+    auto svOffset = CreateStringValue(builder, strOffset);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    const nlohmann::json j = sv->value();
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "implicit_test");
+}
+
+TEST(TestJson, FlatbufferNullStringToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto svOffset = CreateStringValue(builder);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j = "should_be_replaced";
+    flatbuffers::to_json(j, sv->value());
+    EXPECT_TRUE(j.is_string()) << "null flatbuffer string should leave json unchanged";
+    EXPECT_EQ(j.get<std::string>(), "should_be_replaced");
+}
+
+TEST(TestJson, FlatbufferEmptyStringToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto strOffset = builder.CreateString("");
+    auto svOffset = CreateStringValue(builder, strOffset);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sv->value());
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "");
+}
+
+TEST(TestJson, FlatbufferStringVectorToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> stringOffsets;
+    stringOffsets.push_back(builder.CreateString("alpha"));
+    stringOffsets.push_back(builder.CreateString("beta"));
+    stringOffsets.push_back(builder.CreateString("gamma"));
+    auto vecOffset = builder.CreateVector(stringOffsets);
+
+    auto scOffset = CreateStringConstraint(builder, 100, vecOffset);
+    builder.Finish(scOffset);
+
+    auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sc->valid_values());
+    ASSERT_TRUE(j.is_array());
+    ASSERT_EQ(j.size(), 3u);
+    EXPECT_EQ(j[0].get<std::string>(), "alpha");
+    EXPECT_EQ(j[1].get<std::string>(), "beta");
+    EXPECT_EQ(j[2].get<std::string>(), "gamma");
+}
+
+TEST(TestJson, FlatbufferEmptyStringVectorToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<flatbuffers::Offset<flatbuffers::String>> emptyOffsets;
+    auto vecOffset = builder.CreateVector(emptyOffsets);
+
+    auto scOffset = CreateStringConstraint(builder, 0, vecOffset);
+    builder.Finish(scOffset);
+
+    auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sc->valid_values());
+    ASSERT_TRUE(j.is_array());
+    EXPECT_EQ(j.size(), 0u);
+}
+
+TEST(TestJson, FlatbufferNullStringVectorToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto scOffset = CreateStringConstraint(builder);
+    builder.Finish(scOffset);
+
+    auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sc->valid_values());
+    ASSERT_TRUE(j.is_array());
+    EXPECT_EQ(j.size(), 0u);
 }
 
 #endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

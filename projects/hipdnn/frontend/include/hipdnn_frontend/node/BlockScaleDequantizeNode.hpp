@@ -12,7 +12,8 @@
 
 namespace hipdnn_frontend::graph
 {
-class BlockScaleDequantizeNode : public BaseNode<BlockScaleDequantizeNode>
+class BlockScaleDequantizeNode
+    : public BaseNode<BlockScaleDequantizeNode, NodeType::BLOCK_SCALE_DEQUANTIZE>
 {
 public:
     BlockScaleDequantizeAttributes attributes;
@@ -38,6 +39,12 @@ public:
         HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleDequantizeNode missing y for pre-validation");
+
+        // Dequantize output must be a virtual tensor — it is consumed by downstream
+        // operations in a fused graph rather than written to user memory.
+        HIPDNN_RETURN_IF_FALSE(attributes.get_y()->get_is_virtual(),
+                               ErrorCode::INVALID_VALUE,
+                               "BlockScaleDequantizeNode output tensor y must be virtual");
 
         HIPDNN_RETURN_IF_FALSE(!attributes.get_block_size().empty(),
                                ErrorCode::ATTRIBUTE_NOT_SET,

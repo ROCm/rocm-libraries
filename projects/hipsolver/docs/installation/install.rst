@@ -128,7 +128,7 @@ The following sequence of steps builds the dependencies and installs them to the
 
    mkdir -p <HIPSOLVER_BUILD_DIR_PATH>/release/deps
    cd <HIPSOLVER_BUILD_DIR_PATH>/release/deps
-   cmake -DBUILD_BOOST=OFF <HIPSOLVER_SOURCE_PATH>/deps   #assuming boost is installed through package manager as above
+   cmake <HIPSOLVER_SOURCE_PATH>/deps
    make -j$(nproc) install
 
 hipBLAS is only required if the ``BUILD_HIPBLAS_TESTS`` option is set to ``ON``. It's used to ensure

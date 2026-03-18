@@ -24,8 +24,8 @@ bool isSharedLibraryLoaded(const char* libraryPath)
     return handle != nullptr;
 #else
     // Extract the filename from the path for matching
-    std::filesystem::path path(libraryPath);
-    std::string filename = path.filename().string();
+    std::filesystem::path const path(libraryPath);
+    std::string const filename = path.filename().string();
 
     // Read /proc/self/maps to find all loaded shared objects
     std::ifstream maps("/proc/self/maps");
@@ -76,7 +76,7 @@ protected:
 
 TEST_F(IntegrationSetPluginUnloadingModeExt, InvalidModeReturnsBadParam)
 {
-    hipdnnStatus_t status
+    hipdnnStatus_t const status
         = hipdnnSetPluginUnloadMode_ext(static_cast<hipdnnPluginUnloadingMode_ext_t>(-1));
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
 }

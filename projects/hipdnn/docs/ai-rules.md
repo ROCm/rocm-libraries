@@ -32,6 +32,7 @@ ninja              # Build everything
 ninja check        # Build and run ALL tests
 ninja unit-check   # Unit tests only (faster)
 ninja integration-check  # Integration tests only
+ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 ```
 
 ### Test Binaries in `build/bin/`

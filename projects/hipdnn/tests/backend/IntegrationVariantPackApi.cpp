@@ -35,15 +35,17 @@ TEST_F(IntegrationVariantPackDescriptorApi, ValidSetAttributesAndFinalize)
                                         HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                         HIPDNN_TYPE_VOID_PTR,
                                         3,
-                                        devPtrs.data()),
+                                        static_cast<const void*>(devPtrs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(
                   _varpack, HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS, HIPDNN_TYPE_INT64, 3, uids.data()),
               HIPDNN_STATUS_SUCCESS);
-    EXPECT_EQ(
-        hipdnnBackendSetAttribute(
-            _varpack, HIPDNN_ATTR_VARIANT_PACK_WORKSPACE, HIPDNN_TYPE_VOID_PTR, 1, &workspace),
-        HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        1,
+                                        static_cast<const void*>(&workspace)),
+              HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendFinalize(_varpack), HIPDNN_STATUS_SUCCESS);
 }
 
@@ -59,15 +61,17 @@ TEST_F(IntegrationVariantPackDescriptorApi, ValidSetAttributesAndGetAttributesBe
                                         HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                         HIPDNN_TYPE_VOID_PTR,
                                         3,
-                                        devPtrs.data()),
+                                        static_cast<const void*>(devPtrs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(
                   _varpack, HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS, HIPDNN_TYPE_INT64, 3, uids.data()),
               HIPDNN_STATUS_SUCCESS);
-    EXPECT_EQ(
-        hipdnnBackendSetAttribute(
-            _varpack, HIPDNN_ATTR_VARIANT_PACK_WORKSPACE, HIPDNN_TYPE_VOID_PTR, 1, &workspace),
-        HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        1,
+                                        static_cast<const void*>(&workspace)),
+              HIPDNN_STATUS_SUCCESS);
 
     std::array<void*, 3> retrievedDevPtrs;
     int64_t elementCount = 0;
@@ -77,7 +81,7 @@ TEST_F(IntegrationVariantPackDescriptorApi, ValidSetAttributesAndGetAttributesBe
                                         HIPDNN_TYPE_INT64,
                                         3,
                                         &elementCount,
-                                        retrievedDevPtrs.data()),
+                                        static_cast<void*>(retrievedDevPtrs.data())),
               HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -90,10 +94,12 @@ TEST_F(IntegrationVariantPackDescriptorApi, InvalidSetAttributes)
     void* workspace = reinterpret_cast<void*>(0xdeadbeef);
 
     // HIPDNN_STATUS_BAD_PARAM since HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS expects HIPDNN_TYPE_VOID_PTR
-    EXPECT_EQ(
-        hipdnnBackendSetAttribute(
-            _varpack, HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS, HIPDNN_TYPE_INT64, 3, devPtrs.data()),
-        HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                        HIPDNN_TYPE_INT64,
+                                        3,
+                                        static_cast<const void*>(devPtrs.data())),
+              HIPDNN_STATUS_BAD_PARAM);
 
     // HIPDNN_STATUS_BAD_PARAM since HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS expects HIPDNN_TYPE_INT64
     EXPECT_EQ(
@@ -102,10 +108,12 @@ TEST_F(IntegrationVariantPackDescriptorApi, InvalidSetAttributes)
         HIPDNN_STATUS_BAD_PARAM);
 
     // HIPDNN_STATUS_BAD_PARAM since HIPDNN_ATTR_VARIANT_PACK_WORKSPACE expects HIPDNN_TYPE_VOID_PTR
-    EXPECT_EQ(
-        hipdnnBackendSetAttribute(
-            _varpack, HIPDNN_ATTR_VARIANT_PACK_WORKSPACE, HIPDNN_TYPE_VOID_PTR, 2, &workspace),
-        HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                        HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                        HIPDNN_TYPE_VOID_PTR,
+                                        2,
+                                        static_cast<const void*>(&workspace)),
+              HIPDNN_STATUS_BAD_PARAM);
 
     // HIPDNN_STATUS_BAD_PARAM since null ptr passed
     EXPECT_EQ(
@@ -124,7 +132,7 @@ TEST_F(IntegrationVariantPackDescriptorApi, InvalidGetAttributes)
                                         HIPDNN_TYPE_INT64,
                                         3,
                                         &elementCount,
-                                        retrievedDevPtrs.data()),
+                                        static_cast<void*>(retrievedDevPtrs.data())),
               HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -146,7 +154,7 @@ TEST_F(IntegrationVariantPackDescriptorApi, InvalidFinalizeParams)
                                         HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                         HIPDNN_TYPE_VOID_PTR,
                                         devPtrs.size(),
-                                        devPtrs.data()),
+                                        static_cast<const void*>(devPtrs.data())),
               HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
@@ -198,7 +206,7 @@ protected:
                                             HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                             HIPDNN_TYPE_VOID_PTR,
                                             static_cast<int64_t>(_devPtrs.size()),
-                                            _devPtrs.data()),
+                                            static_cast<const void*>(_devPtrs.data())),
                   HIPDNN_STATUS_SUCCESS);
         EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
                                             HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
@@ -206,10 +214,12 @@ protected:
                                             static_cast<int64_t>(_uids.size()),
                                             _uids.data()),
                   HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(
-            hipdnnBackendSetAttribute(
-                _varpack, HIPDNN_ATTR_VARIANT_PACK_WORKSPACE, HIPDNN_TYPE_VOID_PTR, 1, &_workspace),
-            HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendSetAttribute(_varpack,
+                                            HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                            HIPDNN_TYPE_VOID_PTR,
+                                            1,
+                                            static_cast<const void*>(&_workspace)),
+                  HIPDNN_STATUS_SUCCESS);
         EXPECT_EQ(hipdnnBackendFinalize(_varpack), HIPDNN_STATUS_SUCCESS);
     }
 
@@ -231,11 +241,13 @@ TEST_F(IntegrationVariantPackDescriptorApiFinalized, ValidGetAttributes)
                                         HIPDNN_TYPE_VOID_PTR,
                                         3,
                                         &elementCount,
-                                        retrievedDevPtrs.data()),
+                                        static_cast<void*>(retrievedDevPtrs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 3);
-    EXPECT_EQ(
-        std::memcmp(retrievedDevPtrs.data(), _devPtrs.data(), _devPtrs.size() * sizeof(void*)), 0);
+    EXPECT_EQ(std::memcmp(static_cast<const void*>(retrievedDevPtrs.data()),
+                          static_cast<const void*>(_devPtrs.data()),
+                          _devPtrs.size() * sizeof(void*)),
+              0);
 
     EXPECT_EQ(hipdnnBackendGetAttribute(_varpack,
                                         HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
@@ -252,7 +264,7 @@ TEST_F(IntegrationVariantPackDescriptorApiFinalized, ValidGetAttributes)
                                         HIPDNN_TYPE_VOID_PTR,
                                         1,
                                         &elementCount,
-                                        &retrievedWorkspace),
+                                        static_cast<void*>(&retrievedWorkspace)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_EQ(retrievedWorkspace, _workspace);
@@ -271,7 +283,7 @@ TEST_F(IntegrationVariantPackDescriptorApiFinalized, InvalidGetAttributes)
                                         HIPDNN_TYPE_INT64,
                                         3,
                                         &elementCount,
-                                        retrievedDevPtrs.data()),
+                                        static_cast<void*>(retrievedDevPtrs.data())),
               HIPDNN_STATUS_BAD_PARAM);
 
     // HIPDNN_STATUS_BAD_PARAM since HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS expects HIPDNN_TYPE_INT64
@@ -290,7 +302,7 @@ TEST_F(IntegrationVariantPackDescriptorApiFinalized, InvalidGetAttributes)
                                         HIPDNN_TYPE_VOID_PTR,
                                         2,
                                         &elementCount,
-                                        &retrievedWorkspace),
+                                        static_cast<void*>(&retrievedWorkspace)),
               HIPDNN_STATUS_BAD_PARAM);
 
     // HIPDNN_STATUS_BAD_PARAM since arrayOfElements cannot be nullptr
@@ -308,7 +320,7 @@ TEST_F(IntegrationVariantPackDescriptorApiFinalized, InvalidGetAttributes)
                                         HIPDNN_TYPE_VOID_PTR,
                                         3,
                                         nullptr,
-                                        retrievedDevPtrs.data()),
+                                        static_cast<void*>(retrievedDevPtrs.data())),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -318,6 +330,6 @@ TEST_F(IntegrationVariantPackDescriptorApiFinalized, InvalidSetAttributes)
                                         HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                         HIPDNN_TYPE_VOID_PTR,
                                         static_cast<int64_t>(_devPtrs.size()),
-                                        _devPtrs.data()),
+                                        static_cast<const void*>(_devPtrs.data())),
               HIPDNN_STATUS_NOT_INITIALIZED);
 }

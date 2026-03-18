@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <flatbuffers/flatbuffers.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -106,6 +107,22 @@ inline Error setDescriptorAttrDataType(hipdnnBackendDescriptor_t desc,
         desc, attrName, HIPDNN_TYPE_DATA_TYPE, *hipdnnType, errorContext);
 }
 
+// Sets an optional scalar attribute on a backend descriptor. No-op if the
+// optional has no value.
+template <typename T>
+inline Error setDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
+                                             hipdnnBackendAttributeName_t attrName,
+                                             hipdnnBackendAttributeType_t attrType,
+                                             const flatbuffers::Optional<T>& value,
+                                             const std::string& errorContext)
+{
+    if(!value.has_value())
+    {
+        return {};
+    }
+    return setDescriptorAttrScalar(desc, attrName, attrType, value.value(), errorContext);
+}
+
 // Sets a tensor reference attribute on an operation descriptor by looking up
 // the tensor UID in the tensorDescs map.
 inline Error setDescriptorAttrTensorRef(
@@ -122,10 +139,10 @@ inline Error setDescriptorAttrTensorRef(
                 "Tensor UID " + std::to_string(tensorUid) + " not found when setting "
                     + errorContext};
     }
-    auto descPtr = it->second.get();
+    const auto descPtr = it->second.get();
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendSetAttribute(
-            desc, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &descPtr),
+            desc, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&descPtr)),
         "Failed to set " + errorContext);
     return {};
 }
@@ -185,7 +202,7 @@ inline Error
                                             tensor->get_stride(),
                                             "tensor strides"));
 
-    bool isVirtual = tensor->get_is_virtual();
+    bool const isVirtual = tensor->get_is_virtual();
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
                                                HIPDNN_ATTR_TENSOR_IS_VIRTUAL,
                                                HIPDNN_TYPE_BOOLEAN,
@@ -219,6 +236,48 @@ inline Error
 {
     HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, tensor));
     return setDescriptorAttrTensorRef(desc, attrName, tensor->get_uid(), tensorDescs, errorContext);
+}
+
+// Creates a tensor descriptor (if needed) and sets it as a tensor reference
+// attribute on the given operation descriptor. No-op if the tensor is null.
+inline Error ensureAndSetOptionalTensorRef(
+    hipdnnBackendDescriptor_t desc,
+    hipdnnBackendAttributeName_t attrName,
+    const std::shared_ptr<graph::TensorAttributes>& tensor,
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
+    const std::string& errorContext)
+{
+    if(!tensor)
+    {
+        return {};
+    }
+    return ensureAndSetTensorRef(desc, attrName, tensor, tensorDescs, errorContext);
+}
+
+// Creates tensor descriptors (if needed) for each element in the array and
+// sets them as a tensor array attribute on the given operation descriptor.
+inline Error ensureAndSetTensorArrayRef(
+    hipdnnBackendDescriptor_t desc,
+    hipdnnBackendAttributeName_t attrName,
+    const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors,
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
+    const std::string& errorContext)
+{
+    std::vector<hipdnnBackendDescriptor_t> descPtrs;
+    descPtrs.reserve(tensors.size());
+    for(const auto& tensor : tensors)
+    {
+        HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, tensor));
+        descPtrs.push_back(tensorDescs.at(tensor->get_uid()).get());
+    }
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendSetAttribute(desc,
+                                             attrName,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             static_cast<int64_t>(descPtrs.size()),
+                                             static_cast<const void*>(descPtrs.data())),
+        "Failed to set " + errorContext);
+    return {};
 }
 
 } // namespace hipdnn_frontend::detail

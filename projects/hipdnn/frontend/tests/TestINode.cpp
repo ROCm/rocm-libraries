@@ -210,7 +210,7 @@ TEST(TestINode, VisitGraphModifyNodes)
 
 TEST(TestINode, CreateOperationDefaultReturnsError)
 {
-    FakeNode node(1);
+    FakeNode const node(1);
     std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
     std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
 
@@ -219,4 +219,10 @@ TEST(TestINode, CreateOperationDefaultReturnsError)
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.err_msg.find("not implemented") != std::string::npos);
     EXPECT_TRUE(operations.empty());
+}
+
+TEST(TestINode, GetNodeTypeDefaultReturnsUnknown)
+{
+    FakeNode const node(0);
+    EXPECT_EQ(node.getNodeType(), NodeType::UNKNOWN);
 }
