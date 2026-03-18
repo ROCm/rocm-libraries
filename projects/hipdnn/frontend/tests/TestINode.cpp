@@ -210,7 +210,7 @@ TEST(TestINode, VisitGraphModifyNodes)
 
 TEST(TestINode, CreateOperationDefaultReturnsError)
 {
-    FakeNode node(1);
+    FakeNode const node(1);
     std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
     std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
 
@@ -223,6 +223,6 @@ TEST(TestINode, CreateOperationDefaultReturnsError)
 
 TEST(TestINode, GetNodeTypeDefaultReturnsUnknown)
 {
-    FakeNode node(0);
+    FakeNode const node(0);
     EXPECT_EQ(node.getNodeType(), NodeType::UNKNOWN);
 }

@@ -9,11 +9,11 @@ using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestScopedDirectory, CreatesAndDestroys)
 {
-    std::filesystem::path folderPath = "OIJIR44E";
+    std::filesystem::path const folderPath = "OIJIR44E";
     ASSERT_FALSE(std::filesystem::exists(folderPath));
 
     {
-        ScopedDirectory temp(folderPath);
+        ScopedDirectory const temp(folderPath);
         ASSERT_TRUE(std::filesystem::exists(folderPath));
     }
 
@@ -22,7 +22,7 @@ TEST(TestScopedDirectory, CreatesAndDestroys)
 
 TEST(TestScopedDirectory, ExistingPath)
 {
-    std::filesystem::path folderPath = "REPOIEHJv28";
+    std::filesystem::path const folderPath = "REPOIEHJv28";
     ASSERT_FALSE(std::filesystem::exists(folderPath));
     std::filesystem::create_directory(folderPath);
     ASSERT_TRUE(std::filesystem::exists(folderPath));
