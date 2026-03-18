@@ -48,13 +48,13 @@ std::filesystem::path GraphLogger::getOutputDirectory()
 
     // Slow path: another thread may have initialized while we waited for the
     // lock, so check again.
-    std::lock_guard<std::mutex> lock(cacheMutex);
+    const std::lock_guard<std::mutex> lock(cacheMutex);
     if(cacheInitialized.load(std::memory_order_acquire))
     {
         return cachedPath;
     }
 
-    std::string dirPath = hipdnn_data_sdk::utilities::trim(
+    const std::string dirPath = hipdnn_data_sdk::utilities::trim(
         hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_GRAPH_DIR", ""));
 
     if(dirPath.empty())
@@ -109,7 +109,7 @@ void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
     }
 
     auto* graph = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(serializedGraph);
-    nlohmann::json j = *graph;
+    const nlohmann::json j = *graph;
 
     std::ofstream file(fullPath);
     if(file.is_open())
