@@ -231,6 +231,15 @@ template <typename T>
         result.emplace_back(rawDescs[static_cast<size_t>(i)]);
     }
 
+    // Clean up any remaining descriptors beyond actualCount that the backend may have populated
+    for(int64_t i = actualCount; i < count; ++i)
+    {
+        if(rawDescs[static_cast<size_t>(i)] != nullptr)
+        {
+            hipdnnBackend()->backendDestroyDescriptor(rawDescs[static_cast<size_t>(i)]);
+        }
+    }
+
     return std::make_pair(std::move(result), Error{});
 }
 

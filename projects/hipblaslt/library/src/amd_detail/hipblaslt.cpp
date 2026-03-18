@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,11 +46,26 @@ bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHan
 {
     char git_version[128];
     hipblasLtGetGitRevision(handle, &git_version[0]);
-    std::ifstream file_read(override.file_path);
-    std::string   firstline;
-    std::string   header = "Git Version: ";
-    std::getline(file_read, firstline);
-    size_t pos = firstline.find(header);
+    static std::string cached_firstline;
+    static std::string cached_path;
+    static bool        cached = false;
+    std::string        firstline;
+
+    if(!cached || cached_path != override.file_path)
+    {
+        std::ifstream file_read(override.file_path);
+        std::getline(file_read, firstline);
+        cached_firstline = firstline;
+        cached_path      = override.file_path;
+        cached           = true;
+    }
+    else
+    {
+        firstline = cached_firstline;
+    }
+
+    std::string header = "Git Version: ";
+    size_t      pos    = firstline.find(header);
     if(pos != std::string::npos)
     {
         std::string file_version = firstline.substr(pos + header.length());
@@ -218,18 +233,20 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescCreate");
     char* override = std::getenv("HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32");
-    if (override && (computeType == hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_TF32)
-        && (std::string(override) != "")) {
-        switch (std::stoi(std::string(override))) {
-            case 0:
-                computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F;
-                break;
-            case 2:
-                computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_16BF;
-                break;
-            case 1:
-            default:
-                break;
+    if(override && (computeType == hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_TF32)
+       && (std::string(override) != ""))
+    {
+        switch(std::stoi(std::string(override)))
+        {
+        case 0:
+            computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F;
+            break;
+        case 2:
+            computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_16BF;
+            break;
+        case 1:
+        default:
+            break;
         }
     }
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_desc_create(
