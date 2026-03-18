@@ -255,7 +255,9 @@ TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
-    auto rebuiltNode = graphOp->buildNode();
+    auto* op = graphOp->asGraphOperation();
+    ASSERT_NE(op, nullptr);
+    auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
     auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -459,6 +461,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &xCount,
                        static_cast<void*>(&xTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedXDesc(xTensorDesc);
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xTensorDesc, nullptr);
     int64_t xUid = 0;
@@ -475,6 +478,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &wCount,
                        static_cast<void*>(&wTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedWDesc(wTensorDesc);
     ASSERT_EQ(wCount, 1);
     ASSERT_NE(wTensorDesc, nullptr);
     int64_t wUid = 0;
@@ -491,6 +495,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, GetAttributeWorksAfterFromNode)
                        1,
                        &yCount,
                        static_cast<void*>(&yTensorDesc));
+    std::unique_ptr<HipdnnBackendDescriptor> ownedYDesc(yTensorDesc);
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yTensorDesc, nullptr);
     int64_t yUid = 0;
