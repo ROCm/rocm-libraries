@@ -172,14 +172,6 @@ int CountOccurrencesInString(const std::string& text, const std::string& search_
 
 void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_dir)
 {
-    // Use the same GPU mask as other MIOpenDriver tests
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
-    using d_mask = disabled<Gpu::gfx900>;
-    if(!ShouldRunMIOpenDriverTest<d_mask, e_mask>())
-    {
-        GTEST_SKIP();
-    }
-
     // Get driver path using the common function
     const auto driver_path = MIOpenDriverExePath();
     if(driver_path.empty() || !fs::exists(driver_path))
