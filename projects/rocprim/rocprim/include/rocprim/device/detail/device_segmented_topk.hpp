@@ -98,7 +98,8 @@ public:
             constexpr bool with_values = !std::is_same_v<ValuesInputIterator, rocprim::empty_type>;
             // Partition temporary storage for segmented_radix_sort and temporary results
 
-            radix_storage_size_bytes = storage_size - size * sizeof(key_in_t) - (with_values ? size : 0) * sizeof(value_in_t);
+            radix_storage_size_bytes = storage_size - size * sizeof(key_in_t)
+                                       - (with_values ? size : 0) * sizeof(value_in_t);
             // When keys and values are sorted we need temporary storage for both
             ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
                 temporary_storage,
