@@ -41,7 +41,7 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
         int32_t non_zero_pos       = 0;
 
         static_for<0, 3, 1>{}([&](auto j) {
-            if(a_vec[i * 4 + j] != 0.0f)
+            if(static_cast<float>(a_vec[i * 4 + j]) != 0.0f)
             {
                 nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
                 // clear the two‑bit field for this output and insert j
@@ -68,7 +68,7 @@ struct SparseCompressTransform
     template <typename VecType>
     CK_TILE_DEVICE static decltype(auto) exec(VecType&& v, int32_t& idx)
     {
-        using VecTraits                         = vector_traits<std::decay_t<VecType>>;
+        using VecTraits                         = vector_traits<remove_cvref_t<VecType>>;
         using ScalarT                           = typename VecTraits::scalar_type;
         static constexpr auto VecN              = VecTraits::vector_size;
         static constexpr index_t CompressedSize = VecN / CompressionRatio;
@@ -76,9 +76,8 @@ struct SparseCompressTransform
 
         idx = detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
-        VecCompressed result;
-        __builtin_memcpy(&result, &v, sizeof(VecCompressed));
-        return result;
+        // TODO c++20: Use bit_cast
+        return *std::launder(reinterpret_cast<VecCompressed*>(&v));
     }
 };
 
