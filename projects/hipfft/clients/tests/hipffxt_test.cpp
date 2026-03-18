@@ -463,13 +463,13 @@ TEST_P(hipfftxtunitdesc, desccreation)
         EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
     }
 
-    // FIXME: comment
+    // Labmda for initializing the host buffer.  We do not care about Hermitian symmetry in 2D/3D,
+    // as we are just testing data movement, not transforms.
     auto fillhostbuf = [](std::vector<char> &hostbuf,
                           const bool isreal,
                           std::vector<size_t> batchlengths,
                           const std::vector<size_t> &hostdiststrides) -> void  {
         using lint = decltype(batchlengths)::value_type;
-        // FIXME: just have the 2D case right now.
         switch(batchlengths.size())
         {
         case 3:
@@ -581,141 +581,200 @@ TEST_P(hipfftxtunitdesc, desccreation)
     
     // Fine, let's do a copy test and see what happens.
 
-    for(const bool h2d : {true /*, false*/}) // FIXME: enable d2h
-    {
-        const auto copydir = h2d ? HIPFFT_COPY_HOST_TO_DEVICE : HIPFFT_COPY_DEVICE_TO_HOST;
+    // We test the host-to-device copy (since we can easily set up the host data and then check that
+    // the buffers have values where we expect them to be).
+    const auto copydir = HIPFFT_COPY_HOST_TO_DEVICE;
         
-        const size_t nelem = hostdiststrides[0] * hostdatabatchlengths[0];
-        const size_t valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
-        std::vector<char> hostbuf(valsize * nelem);
-        fillhostbuf(hostbuf, isreal, hostdatabatchlengths, hostdiststrides);
+    const size_t nelem = hostdiststrides[0] * hostdatabatchlengths[0];
+    const size_t valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
+    std::vector<char> hostbuf(valsize * nelem);
+    fillhostbuf(hostbuf, isreal, hostdatabatchlengths, hostdiststrides);
 
-        if(verbose > 4)
-        {
-            printhostbuf(hostbuf.data(), isreal, hostdatabatchlengths, hostdiststrides);
-        }
+    if(verbose > 4)
+    {
+        printhostbuf(hostbuf.data(), isreal, hostdatabatchlengths, hostdiststrides);
+    }
         
-        if(h2d)
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               reinterpret_cast<void*>(mydesc),
+                               reinterpret_cast<void*>(hostbuf.data()),
+                               copydir);
+
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy H2D"
+                                         << " failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+
+    if(verbose > 2)
+        std::cout << "finished hipfftXtMemcpy\n";
+
+    // A host copy of the individual distributed GPU buffers:
+    std::vector<std::vector<char>> hostbufparts(gpus.size());
+
+    // Copy the individual buffers to the host:
+    for(const auto igpu : gpus)
+    {
+        if(verbose > 3)
+            std::cout << "buffer " << igpu << " after xtmemcp\n";
+        const auto device = mydesc->descriptor->GPUs[igpu];
+        const auto bufsize = mydesc->descriptor->size[igpu];
+        ASSERT_NE(bufsize, 0) << "gpu buffer size is zero for gpu " << igpu;
+        if(verbose > 3)
         {
-            hipfft_rt = hipfftXtMemcpy(plan,
-                                       reinterpret_cast<void*>(mydesc),
-                                       reinterpret_cast<void*>(hostbuf.data()),
-                                       copydir);
+            std::cout << "device: " << device << "\n";
+            std::cout << "buffer size: " << bufsize << "\n";
+        }
+        hostbufparts[igpu].resize(bufsize);
+        auto devbuf = mydesc->descriptor->data[igpu];
+        auto hipret = hipMemcpy(hostbufparts[igpu].data(), devbuf, bufsize,
+                                hipMemcpyDeviceToHost);
+        EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
+    }
+
+    // Each brick gets it own special set of strides.
+    std::vector<std::vector<size_t>> brick_batchlengths(gpus.size());
+    std::vector<std::vector<size_t>> brick_diststrides(gpus.size());
+
+    for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
+    {
+        brick_batchlengths[igpu] = devbatchlength(ngpus, hostdatabatchlengths, igpu);
+        std::vector<size_t> brick_batches;
+        brick_batches.insert(brick_batches.end(),
+                             brick_batchlengths[igpu].begin(),
+                             brick_batchlengths[igpu].begin() +1);
+        std::vector<size_t> brick_lengths;
+        brick_lengths.insert(brick_lengths.end(),
+                             brick_batchlengths[igpu].begin() + 1,
+                             brick_batchlengths[igpu].end());
+
+        std::vector<size_t> brick_distances;
+        std::vector<size_t> brick_strides;
+        if(isherm)
+        {
+            brick_distances = default_distances(fft_transform_type_complex_forward,
+                                                placement, io,
+                                                brick_lengths, brick_batches);
+            brick_strides = default_strides(fft_transform_type_complex_forward,
+                                            placement, io, brick_lengths);
+
         }
         else
         {
-            hipfft_rt = hipfftXtMemcpy(plan,
-                                       reinterpret_cast<void*>(hostbuf.data()),
-                                       reinterpret_cast<void*>(mydesc),
-                                       copydir);
+            brick_distances = default_distances(dft_type, placement, io,
+                                                brick_lengths, brick_batches);
+            brick_strides = default_strides(dft_type, placement, io, brick_lengths);
         }
-        
-        const decltype(in_goodlist)::value_type v = {realcomplex, forward, format, dimension};
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy "  <<  (h2d ? "H2D" : "D2H")
-                                                 << " failed with code "
-                                                 << hipfft_rt
-                                             << " (" << hipfftResult_string(hipfft_rt) << ")";
-
-        if(verbose > 2)
-            std::cout << "finished hipfftXtMemcpy\n";
-
-        // A host copy of the individual distributed GPU buffers:
-        std::vector<std::vector<char>> hostbufparts(gpus.size());
-
-        // Copy the individual buffers to the host:
-        for(const auto igpu : gpus)
-        {
-            if(verbose > 3)
-                std::cout << "buffer " << igpu << " after xtmemcp\n";
-            const auto device = mydesc->descriptor->GPUs[igpu];
-            const auto bufsize = mydesc->descriptor->size[igpu];
-            ASSERT_NE(bufsize, 0) << "gpu buffer size is zero for gpu " << igpu;
-            if(verbose > 3)
-            {
-                std::cout << "device: " << device << "\n";
-                std::cout << "buffer size: " << bufsize << "\n";
-            }
-            hostbufparts[igpu].resize(bufsize);
-            auto devbuf = mydesc->descriptor->data[igpu];
-            auto hipret = hipMemcpy(hostbufparts[igpu].data(), devbuf, bufsize,
-                                    hipMemcpyDeviceToHost);
-            EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
-        }
-
-        // Each brick gets it own special set of strides.
-        std::vector<std::vector<size_t>> brick_batchlengths(gpus.size());
-        std::vector<std::vector<size_t>> brick_diststrides(gpus.size());
-
-        for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
-        {
-            brick_batchlengths[igpu] = devbatchlength(ngpus, hostdatabatchlengths, igpu);
-            std::vector<size_t> brick_batches;
-            brick_batches.insert(brick_batches.end(),
-                                 brick_batchlengths[igpu].begin(),
-                                 brick_batchlengths[igpu].begin() +1);
-            std::vector<size_t> brick_lengths;
-            brick_lengths.insert(brick_lengths.end(),
-                                 brick_batchlengths[igpu].begin() + 1,
-                                 brick_batchlengths[igpu].end());
-
-            // FIXME: real data is padded, Hermitian-complex data is split.
-            
-            std::vector<size_t> brick_distances;
-            std::vector<size_t> brick_strides;
-            if(isherm)
-            {
-                brick_distances = default_distances(fft_transform_type_complex_forward,
-                                                    placement, io,
-                                                    brick_lengths, brick_batches);
-                brick_strides = default_strides(fft_transform_type_complex_forward,
-                                                placement, io, brick_lengths);
-
-            }
-            else
-            {
-                brick_distances = default_distances(dft_type, placement, io,
-                                                    brick_lengths, brick_batches);
-                brick_strides = default_strides(dft_type, placement, io, brick_lengths);
-            }
                 
-            brick_diststrides[igpu] = brick_distances;
-            brick_diststrides[igpu].insert(brick_diststrides[igpu].end(), brick_strides.begin(),
-                                           brick_strides.end());
-        }
+        brick_diststrides[igpu] = brick_distances;
+        brick_diststrides[igpu].insert(brick_diststrides[igpu].end(), brick_strides.begin(),
+                                       brick_strides.end());
+    }
 
-        if(verbose > 2)
+    if(verbose > 2)
+    {
+        std::cout << "gpu buffer length and dist/strides:\n";
+        for(size_t igpu=0; igpu < gpus.size(); ++igpu)
         {
-            std::cout << "gpu buffer length and dist/strides:\n";
-            for(size_t igpu=0; igpu < gpus.size(); ++igpu)
-            {
-                std::cout << igpu << "\n";
-                std::cout << "\tbrick batch/length:";
-                for(const auto val : brick_batchlengths[igpu])
-                    std::cout << " " << val;
-                std::cout << "\n";
-                std::cout << "\tbrick dist/stride:";
-                for(const auto val : brick_diststrides[igpu])
-                    std::cout << " " << val;
-                std::cout << "\n";
+            std::cout << igpu << "\n";
+            std::cout << "\tbrick batch/length:";
+            for(const auto val : brick_batchlengths[igpu])
+                std::cout << " " << val;
+            std::cout << "\n";
+            std::cout << "\tbrick dist/stride:";
+            for(const auto val : brick_diststrides[igpu])
+                std::cout << " " << val;
+            std::cout << "\n";
 
-                // FIXME: allow printing of subsection
-                // printhostbuf(hostbufparts[igpu].data(), isreal, brick_batchlengths[igpu],
-                //              brick_diststrides[igpu]);
+            // FIXME: allow printing of subsection
+            // printhostbuf(hostbufparts[igpu].data(), isreal, brick_batchlengths[igpu],
+            //              brick_diststrides[igpu]);
+        }
+    }
+        
+    // TODO: lambda this?
+    // Check all of the host buf values and make sure that they're where we expect them to be:
+    switch(batchlengths.size())
+    {
+    case 3:
+        // 1 batch + 2D FFT
+        for(size_t xidx = 0; xidx < hostdatabatchlengths[1]; ++xidx)
+        {
+            for(size_t yidx = 0; yidx < hostdatabatchlengths[2]; ++yidx)
+            {
+                // FIXME: deal with 3D.
+                const std::vector<size_t> hostidx = {0, xidx, yidx};
+                const auto bufidx = devidx(ngpus, hostidx, hostdatabatchlengths);
+
+                // Just look at the first value for each buffer.
+                // if(std::all_of(bufidx.begin() + 1, bufidx.end(),
+                //                [](const size_t idx ) { return idx == 0; })) 
+                {
+                    std::stringstream idxstrs;
+                    idxstrs << hostidx[0]
+                            << " " << hostidx[1]
+                            << " " << hostidx[2]
+                            << " -> "
+                            << bufidx[0]
+                            << " " << bufidx[1]
+                            << " " << bufidx[2]
+                            << " " << bufidx[3]
+                            << "\t";
+                    
+                    const size_t hostoffset = std::inner_product(std::begin(hostidx),
+                                                                 std::end(hostidx),
+                                                                 std::begin(hostdiststrides), 0);
+                    const auto igpu = bufidx[0];
+                    const size_t gpuoffset = std::inner_product(std::begin(bufidx) + 1,
+                                                                std::end(bufidx),
+                                                                std::begin(brick_diststrides[igpu]),
+                                                                0);
+                    if(isreal)
+                    {
+                        const double* hostbufr = (double*) hostbuf.data();
+                        const auto hostval = hostbufr[hostoffset];
+                        const double* gpubufr = (double*) hostbufparts[igpu].data();
+                        const auto gpuval = gpubufr[gpuoffset];
+                        std::stringstream valss;
+                        valss << hostoffset << " -> " << hostval << "\t"
+                              << gpuoffset << " -> " << gpuval << "\n";
+                        if(verbose > 3)
+                        {
+                            std::cout << idxstrs.str() << valss.str()<< std::flush;
+                        }
+                        EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
+                    }
+                    else
+                    {
+                        const std::complex<double>* hostbufr
+                            = (std::complex<double>*) hostbuf.data();
+                        const auto hostval = hostbufr[hostoffset];
+                        const std::complex<double>* gpubufr
+                            = (std::complex<double>*) hostbufparts[igpu].data();
+                        const auto gpuval = gpubufr[gpuoffset];
+                        std::stringstream valss;
+                        valss << hostoffset << " -> " << hostval << "\t"
+                              << gpuoffset << " -> " << gpuval << "\n";
+                        if(verbose > 3)
+                        {
+                            std::cout << idxstrs.str() << valss.str()<< std::flush;
+                        }
+                        EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
+                    }
+
+                }
+                
             }
         }
-        
-        // TODO: lambda this?
-        // Check all of the host buf values and make sure that they're where we expect them to be:
-        switch(batchlengths.size())
+        break;
+    case 4:
+        // 1 batch + 3D FFT
+        for(size_t xidx = 0; xidx < hostdatabatchlengths[1]; ++xidx)
         {
-        case 3:
-            // 1 batch + 2D FFT
-            for(size_t xidx = 0; xidx < hostdatabatchlengths[1]; ++xidx)
+            for(size_t yidx = 0; yidx < hostdatabatchlengths[2]; ++yidx)
             {
-                for(size_t yidx = 0; yidx < hostdatabatchlengths[2]; ++yidx)
+                for(size_t zidx = 0; zidx < hostdatabatchlengths[3]; ++zidx)
                 {
-                    // FIXME: deal with 3D.
-                    const std::vector<size_t> hostidx = {0, xidx, yidx};
+                    const std::vector<size_t> hostidx = {0, xidx, yidx, zidx};
                     const auto bufidx = devidx(ngpus, hostidx, hostdatabatchlengths);
 
                     // Just look at the first value for each buffer.
@@ -775,88 +834,14 @@ TEST_P(hipfftxtunitdesc, desccreation)
                         }
 
                     }
-                
                 }
-            }
-            break;
-        case 4:
-            // 1 batch + 3D FFT
-            for(size_t xidx = 0; xidx < hostdatabatchlengths[1]; ++xidx)
-            {
-                for(size_t yidx = 0; yidx < hostdatabatchlengths[2]; ++yidx)
-                {
-                    for(size_t zidx = 0; zidx < hostdatabatchlengths[3]; ++zidx)
-                    {
-                        const std::vector<size_t> hostidx = {0, xidx, yidx, zidx};
-                        const auto bufidx = devidx(ngpus, hostidx, hostdatabatchlengths);
-
-                        // Just look at the first value for each buffer.
-                        // if(std::all_of(bufidx.begin() + 1, bufidx.end(),
-                        //                [](const size_t idx ) { return idx == 0; })) 
-                        {
-                            std::stringstream idxstrs;
-                            idxstrs << hostidx[0]
-                                    << " " << hostidx[1]
-                                    << " " << hostidx[2]
-                                    << " -> "
-                                    << bufidx[0]
-                                    << " " << bufidx[1]
-                                    << " " << bufidx[2]
-                                    << " " << bufidx[3]
-                                    << "\t";
-                    
-                            const size_t hostoffset = std::inner_product(std::begin(hostidx),
-                                                                         std::end(hostidx),
-                                                                         std::begin(hostdiststrides), 0);
-                            const auto igpu = bufidx[0];
-                            const size_t gpuoffset = std::inner_product(std::begin(bufidx) + 1,
-                                                                        std::end(bufidx),
-                                                                        std::begin(brick_diststrides[igpu]),
-                                                                        0);
-                            if(isreal)
-                            {
-                                const double* hostbufr = (double*) hostbuf.data();
-                                const auto hostval = hostbufr[hostoffset];
-                                const double* gpubufr = (double*) hostbufparts[igpu].data();
-                                const auto gpuval = gpubufr[gpuoffset];
-                                std::stringstream valss;
-                                valss << hostoffset << " -> " << hostval << "\t"
-                                      << gpuoffset << " -> " << gpuval << "\n";
-                                if(verbose > 3)
-                                {
-                                    std::cout << idxstrs.str() << valss.str()<< std::flush;
-                                }
-                                EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
-                            }
-                            else
-                            {
-                                const std::complex<double>* hostbufr
-                                    = (std::complex<double>*) hostbuf.data();
-                                const auto hostval = hostbufr[hostoffset];
-                                const std::complex<double>* gpubufr
-                                    = (std::complex<double>*) hostbufparts[igpu].data();
-                                const auto gpuval = gpubufr[gpuoffset];
-                                std::stringstream valss;
-                                valss << hostoffset << " -> " << hostval << "\t"
-                                      << gpuoffset << " -> " << gpuval << "\n";
-                                if(verbose > 3)
-                                {
-                                    std::cout << idxstrs.str() << valss.str()<< std::flush;
-                                }
-                                EXPECT_EQ(hostval, gpuval) << idxstrs.str() << valss.str();
-                            }
-
-                        }
-                    }
                 
-                }
             }
-            break;
-        default:
-            FAIL() << "dimension not supported";
-            
         }
-        
+        break;
+    default:
+        FAIL() << "dimension not supported";
+            
     }
     
     hipfft_rt = hipfftXtFree(mydesc);
