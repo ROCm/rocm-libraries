@@ -7,6 +7,15 @@ def getPrComments(pullRequest) {
   return comments
 }
 
+def truncateLongResults(results, maxLength = 60000) {
+    def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
+    if (results.length() > maxLength) {
+        def truncateIndex = results.lastIndexOf('\n', maxLength)
+        return results.substring(0, truncateIndex) + truncatedMessage
+    }
+    return results
+}
+
 def withSSH(platform, pipeline) {
     withCredentials(
         [
@@ -33,12 +42,13 @@ def withSSH(platform, pipeline) {
     }
 }
 
-def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true)
+def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true, boolean staticAnalysis=false)
 {
     project.paths.construct_build_prefix()
-    String codeCovFlag = codeCoverage ? '-DCODE_COVERAGE=ON -DSKIP_CPPCHECK=ON -DBUILD_SHARED_LIBS=OFF' : '-DSKIP_CPPCHECK=OFF'
+    String codeCovFlag = codeCoverage ? '-DROCROLLER_ENABLE_COVERAGE=ON -DROCROLLER_BUILD_SHARED_LIBS=OFF' : ''
     String timerFlag = enableTimers ? '-DROCROLLER_ENABLE_TIMERS=ON' : ''
-    String yamlBackendFlag = useYamlCpp ? '-DYAML_BACKEND=YAML_CPP' : '-DYAML_BACKEND=LLVM'
+    String yamlBackendFlag = useYamlCpp ? '' : '-DROCROLLER_ENABLE_YAML_CPP=OFF'
+    String useCppCheck = staticAnalysis ? '-DROCROLLER_ENABLE_CPPCHECK=ON' : ''
 
     withSSH(platform) {
         sshBlock ->
@@ -53,10 +63,11 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                 # Check that all tests are included.
                 ../scripts/check_included_tests.py
                 cmake ../ \\
-                    ${codeCovFlag} ${timerFlag} ${yamlBackendFlag}\\
+                    ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${useCppCheck}\\
+                    -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\
-                    -DROCROLLER_TESTS_SKIP_SLOW=OFF \\
-                    -DBUILD_VERBOSE=ON
+                    -DROCROLLER_ENABLE_FETCH=ON \\
+                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
                 ccache --print-stats
                 make -j ${target}
                 ccache --print-stats
@@ -68,14 +79,11 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
 
 def runTestCommand (platform, project)
 {
-    String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
-
     def command = """#!/usr/bin/env bash
-                set -x
-                cd ${project.paths.project_build_prefix}/build/
-
-                echo Using `nproc` threads for testing.
-                OMP_NUM_THREADS=8 ctest -j `nproc` --output-on-failure ${testExclude}
+                set -ex
+                cd ${project.paths.project_build_prefix}
+                # Run sharded tests (auto-detects ncores/2, respecting cgroups)
+                scripts/run-tests-sharded precheckin-mci build
             """
 
     try
@@ -133,9 +141,9 @@ def runCodeCovTestCommand(platform, project)
         }
         commentString += "## Artifacts\n\n"
         commentString += "* [HTML Coverage Report and Diff](${JOB_URL}/Code_20coverage_20${platform.gpu}_20report) \n"
-        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.report/*view*/) \n"
-        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
-        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.zip) \n"
+        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.report/*view*/) \n"
+        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
+        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.zip) \n"
         commentString += "* [Python Coverage Report](${JOB_URL}/Python_20Code_20coverage_20${platform.gpu}_20report) \n"
         commentString += "\n"
         commentString += "## Commit Hashes\n\n"
@@ -164,13 +172,9 @@ def runBuildDocsCommand(platform, project)
         def command = """#!/usr/bin/env bash
                     set -ex
                     cd ${project.paths.project_build_prefix}
-
                     ${sshBlock}
-
-                    mkdir -p build
-                    cd build
-                    cmake ../
-                    make -j docs
+                    cmake --preset docs -B build -S .
+                    cmake --build build --target docs
                     """
         platform.runCommand(this, command)
     }
@@ -207,11 +211,9 @@ def runPerformanceCommand (platform, project)
 {
     String masterURL = env.CHANGE_ID ? env.JOB_URL.replace("PR-${env.CHANGE_ID}", env.CHANGE_TARGET) : env.JOB_URL
 
-
     withSSH(platform){
         sshBlock ->
         def rrperfSuite = platform.jenkinsLabel.contains('gfx12') ? "all_gfx120X" : "all"
-
 
         if (env.CHANGE_ID)
         {
@@ -223,6 +225,7 @@ def runPerformanceCommand (platform, project)
             {
                 masterCompare = params."Build target branch for comparison"
             }
+
             String masterCompareCommand
             if (masterCompare)
             {
@@ -241,6 +244,10 @@ def runPerformanceCommand (platform, project)
                     ./scripts/rrperf compare \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
+
+                    ./scripts/rrperf compare --format resource_md \\
+                        \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
+                            > resource_comparison_${platform.gpu}.md
                 """
             }
             else
@@ -253,8 +260,12 @@ def runPerformanceCommand (platform, project)
                     cat ./performance_build_${platform.gpu}/performance_${platform.gpu}/**/*.log >> performance_${platform.gpu}_logs.txt
 
                     #Get Master Results
-                    wget ${masterURL}/lastSuccessfulBuild/artifact/*zip*/archive.zip
-                    unzip archive.zip
+                    ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
+                    if wget \${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                      unzip archive.zip
+                    else
+                      echo "WARNING: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
+                    fi
 
                     if [ -f archive/*/*/performance_${platform.gpu}_last.zip ]; then
 
@@ -278,9 +289,15 @@ def runPerformanceCommand (platform, project)
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
+
+                        ./scripts/rrperf compare --format resource_md \\
+                            ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
+                            ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
+                            > resource_comparison_${platform.gpu}.md
                     else
                         touch performance_comparison_${platform.gpu}.html
                         touch performance_comparison_${platform.gpu}.md
+                        touch resource_comparison_${platform.gpu}.md
                         echo "Skipped ${env.CHANGE_TARGET} compare for ${platform.gpu}, no archived performance_${platform.gpu}_last.zip found."
                     fi
                 """
@@ -292,7 +309,8 @@ def runPerformanceCommand (platform, project)
                         ${sshBlock}
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/lib/
+                        export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
+                        export ROCROLLER_BUILD_DIR="\$(pwd)/build"
 
                         ${masterCompareCommand}
 
@@ -316,46 +334,92 @@ def runPerformanceCommand (platform, project)
                         reportName: "Performance Report for ${platform.gpu}",
                         reportTitles: "Report"])
 
-            def commentTitle = "# Performance Report for ${platform.gpu}"
-            def commentString = "${commentTitle}\n\n"
-            def results = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
-            def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
-            commentString += "## Results${estimateString}\n\n"
-            commentString += "${results}\n\n"
-            commentString += "<details><summary>Links</summary>\n\n"
-            commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
-            commentString += "* [Job Link](${env.BUILD_URL}) \n"
-            commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
-            commentString += "</details>\n\n"
+            def perfCommentTitle = "# Performance Report for ${platform.gpu}"
+            def perfCommentString = "${perfCommentTitle}\n\n"
+            def perfResults = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
+            perfResults = truncateLongResults(perfResults)
 
-            boolean commentExists = false
+            def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
+            perfCommentString += "## Results${estimateString}\n\n"
+            perfCommentString += "<details open>\n\n${perfResults}\n</details>\n"
+            perfCommentString += "<details><summary>Links</summary>\n\n"
+            perfCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            perfCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+            perfCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
+            perfCommentString += "</details>\n\n"
+
+            boolean perfCommentExists = false
             for (prComment in getPrComments(pullRequest)) {
-                if (prComment.body.contains(commentTitle))
+                if (prComment.body.contains(perfCommentTitle))
                 {
-                    commentExists = true
-                    prComment.body = commentString
+                    perfCommentExists = true
+                    prComment.body = perfCommentString
                 }
             }
-            if (!commentExists) {
-                def comment = pullRequest.comment(commentString)
+            if (!perfCommentExists) {
+                def comment = pullRequest.comment(perfCommentString)
+            }
+
+            def resCommentTitle = "# Resource Report for ${platform.gpu}"
+            def resCommentString = "${resCommentTitle}\n\n"
+            def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
+            resResults = truncateLongResults(resResults)
+
+            resCommentString += "## Results${estimateString}\n\n"
+            resCommentString += "<details open>\n\n${resResults}\n</details>\n"
+            resCommentString += "<details><summary>Links</summary>\n\n"
+            resCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            resCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+            resCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
+            resCommentString += "</details>\n\n"
+
+            boolean resCommentExists = false
+            for (prComment in getPrComments(pullRequest)) {
+                if (prComment.body.contains(resCommentTitle))
+                {
+                    resCommentExists = true
+                    prComment.body = resCommentString
+                }
+            }
+            if (!resCommentExists) {
+                def comment = pullRequest.comment(resCommentString)
             }
         }
         else
         {
             def ARCHIVE_LIMIT = "101"
 
+            // a parameter can block comparison to target branch
+            def masterCompare = false
+            if (params?."Build target branch for comparison" != null)
+            {
+                masterCompare = params."Build target branch for comparison"
+            }
+
+            String masterCompareString = masterCompare ? "1" : "0"
+
             def command = """#!/usr/bin/env bash
-                        set -x
+                        set -ex
                         cd ${project.paths.project_build_prefix}/
 
                         ${sshBlock}
 
                         #Get Master Results
-                        wget ${masterURL}/lastSuccessfulBuild/artifact/*zip*/archive.zip
-                        unzip archive.zip
+                        ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
+                        if wget \${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                          unzip archive.zip
+                        else
+                          if [ "${masterCompareString}" == "1" ]; then
+                            echo "ERROR: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
+                            exit 1
+                          else
+                            echo "WARNING: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
+                          fi
+                        fi
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/lib/
+                        export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
+                        export ROCROLLER_BUILD_DIR="\$(pwd)/build"
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"
@@ -422,7 +486,7 @@ def runPerformanceCommand (platform, project)
                         <ul>
                         <li><a href='${JOB_URL}/Performance_20Report_20for_20${platform.gpu}'>HTML Report</a></li>
                         <li><a href='${env.BUILD_URL}'>Job Link</a></li>
-                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
+                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
                         </ul>
                         ${email_results}""",
                 to: "dl.rocroller@amd.com"

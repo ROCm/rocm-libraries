@@ -1,4 +1,4 @@
-- {MinimumRequiredVersion: 4.33.0}
+- {MinimumRequiredVersion: 5.0.0}
 - aquavanjaram
 - gfx942
 - [Device 0049, Device 0050]
@@ -70,7 +70,7 @@
   UseE: false
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ""
+  UseScaleAB: ''
   UseScaleAlphaVec: 1
   UseScaleCD: false
 - - 1LDSBuffer: 0
@@ -87,7 +87,7 @@
     CUCount: null
     ClusterLocalRead: 1
     CodeObjectVersion: default
-    CustomKernelName: 'CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942'
+    CustomKernelName: CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942
     DepthU: 64
     DirectToLds: false
     DirectToLdsA: false
@@ -203,86 +203,14 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: false
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 0
-      DestDataType: 0
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: false
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU16_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM0_SUS256_VWA1_WG64_4_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU16_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM1_SUS256_VWA1_WG64_4_1_WGM1
     SourceSwap: false
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -344,7 +272,7 @@
     CUCount: null
     ClusterLocalRead: 1
     CodeObjectVersion: default
-    CustomKernelName: 'CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942'
+    CustomKernelName: CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942
     DepthU: 64
     DirectToLds: false
     DirectToLdsA: false
@@ -460,86 +388,14 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: false
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 0
-      DestDataType: 0
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: false
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU17_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM0_SUS256_VWA1_WG64_4_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU17_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM1_SUS256_VWA1_WG64_4_1_WGM1
     SourceSwap: false
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -601,7 +457,7 @@
     CUCount: null
     ClusterLocalRead: 1
     CodeObjectVersion: default
-    CustomKernelName: 'CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942'
+    CustomKernelName: CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942
     DepthU: 64
     DirectToLds: false
     DirectToLdsA: false
@@ -717,86 +573,14 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: false
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 0
-      DestDataType: 0
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: false
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU18_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM0_SUS256_VWA1_WG64_4_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU18_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM1_SUS256_VWA1_WG64_4_1_WGM1
     SourceSwap: false
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -858,7 +642,7 @@
     CUCount: null
     ClusterLocalRead: 1
     CodeObjectVersion: default
-    CustomKernelName: 'CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942'
+    CustomKernelName: CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942
     DepthU: 64
     DirectToLds: false
     DirectToLdsA: false
@@ -974,86 +758,14 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: false
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 0
-      DestDataType: 0
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StridedBatched: true
-      SupportUserArgs: false
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 3
-    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU19_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM0_SUS256_VWA1_WG64_4_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_MT64x16x64_MI16x16x1_SN_LDSB0_GSU19_LBSPPA1024_LPA16_MIWT1_1_SU4_SUM1_SUS256_VWA1_WG64_4_1_WGM1
     SourceSwap: false
     StaggerU: 4
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0

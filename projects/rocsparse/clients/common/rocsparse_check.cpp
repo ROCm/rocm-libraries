@@ -98,6 +98,17 @@ void unit_check_general(
 }
 
 template <>
+void unit_check_general(int64_t                   M,
+                        int64_t                   N,
+                        const rocsparse_bfloat16* A,
+                        int64_t                   LDA,
+                        const rocsparse_bfloat16* B,
+                        int64_t                   LDB)
+{
+    ROCSPARSE_UNIT_CHECK(M, N, A, LDA, B, LDB, ASSERT_FLOAT_EQ);
+}
+
+template <>
 void unit_check_general(
     int64_t M, int64_t N, const float* A, int64_t LDA, const float* B, int64_t LDB)
 {
@@ -204,6 +215,12 @@ void unit_check_enum(const rocsparse_indextype a, const rocsparse_indextype b)
     ASSERT_TRUE(a == b);
 }
 
+template <>
+void unit_check_enum(const rocsparse_status a, const rocsparse_status b)
+{
+    ASSERT_TRUE(a == b);
+}
+
 #define MAX_TOL_MULTIPLIER 4
 
 template <typename T>
@@ -223,7 +240,7 @@ void near_check_general_template(int64_t            M,
         for(int64_t i = 0; i < M; ++i)
         {
             T compare_val = std::max(rocsparse_abs(A[i + j * LDA] * tol),
-                                     10 * std::numeric_limits<T>::epsilon());
+                                     static_cast<T>(10) * std::numeric_limits<T>::epsilon());
 #ifdef GOOGLE_TEST
             if(rocsparse_isnan(A[i + j * LDA]))
             {
@@ -239,7 +256,8 @@ void near_check_general_template(int64_t            M,
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
                 {
-                    if(rocsparse_abs(A[i + j * LDA] - B[i + j * LDB]) <= compare_val * k)
+                    if(rocsparse_abs(A[i + j * LDA] - B[i + j * LDB])
+                       <= compare_val * static_cast<T>(k))
                     {
                         break;
                     }
@@ -256,7 +274,8 @@ void near_check_general_template(int64_t            M,
                                 << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
                                 << ") failed: " << rocsparse_abs(A[i + j * LDA] - B[i + j * LDB])
                                 << " exceeds permissive range [" << compare_val << ","
-                                << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
+                                << compare_val * static_cast<T>(MAX_TOL_MULTIPLIER) << " ]"
+                                << std::endl;
                         }
 
                         min_passing_tol = std::max(min_passing_tol,
@@ -472,6 +491,7 @@ void near_check_general(
 
 INSTANTIATE(int32_t);
 INSTANTIATE(_Float16);
+INSTANTIATE(rocsparse_bfloat16);
 INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);
@@ -573,6 +593,12 @@ void unit_check_garray(rocsparse_datatype val_type,
     case rocsparse_datatype_u8_r:
     {
         unit_check_segments<uint8_t>(size, (const uint8_t*)source, (const uint8_t*)target);
+        break;
+    }
+    case rocsparse_datatype_bf16_r:
+    {
+        unit_check_segments<rocsparse_bfloat16>(
+            size, (const rocsparse_bfloat16*)source, (const rocsparse_bfloat16*)t);
         break;
     }
     }

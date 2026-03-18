@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -69,18 +46,6 @@ namespace rocRoller
                                               Register::ValuePtr arg2);
 
         virtual std::string name() const = 0;
-
-        /**
-         * @brief For certain vector binary instructions that can not have a literal as the second source, swap.
-         * Side effect: Potentially swaps the lhs and rhs registers
-         *
-         * TODO: Swap if RHS is anything but a VGPR
-         *
-         * @param lhs First source register (src0)
-         * @param rhs Second source register (src1)
-         * @return Generator<Instruction> May yield a move to VGPR instruction if needed
-         */
-        Generator<Instruction> swapIfRHSLiteral(Register::ValuePtr& lhs, Register::ValuePtr& rhs);
 
         /**
          * @brief Use VALU to perform a scalar comparison.
@@ -237,12 +202,22 @@ namespace rocRoller
     template <Expression::CUnary Operation>
     Generator<Instruction> generateOp(Register::ValuePtr dst,
                                       Register::ValuePtr arg,
-                                      Operation const&   expr = Operation{})
+                                      Operation const&   expr = Operation{});
+
+    template <Expression::CUnary Operation>
+    Generator<Instruction>
+        generateOp(Register::ValuePtr dst, Register::ValuePtr arg, Operation const& expr)
     {
+        static_assert(!std::same_as<Operation, Expression::ToScalar>);
         auto gen = GetGenerator<Operation>(dst, arg, expr);
         AssertFatal(gen != nullptr, "No generator");
         co_yield gen->generate(dst, arg, expr);
     }
+
+    template <>
+    Generator<Instruction> generateOp<Expression::ToScalar>(Register::ValuePtr          dst,
+                                                            Register::ValuePtr          arg,
+                                                            Expression::ToScalar const& expr);
 
     template <Expression::CBinary Operation>
     std::shared_ptr<BinaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,

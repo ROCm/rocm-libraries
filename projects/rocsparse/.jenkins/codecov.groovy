@@ -43,7 +43,7 @@ def runCI =
     {
         platform, project->
 
-        def gfilter = "*pre_checkin*"
+        def gfilter = "*quick*:*pre_checkin*"
         commonGroovy.runCoverageCommand(platform, project, gfilter, "release-debug")
     }
 
@@ -70,8 +70,6 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 }

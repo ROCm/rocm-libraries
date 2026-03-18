@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """
 Run multiple performance tests against multiple commits and/or
@@ -36,15 +14,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
 
+import rrperf.args as args
 from rrperf import compare, git
 from rrperf import run as suite_run
-import rrperf.args as args
 
 
 def build_rocroller(
     repo: Path,
+    checkout_dir: Path,
     project_dir: Path,
     commit: str,
     threads: int = 32,
@@ -54,11 +32,11 @@ def build_rocroller(
 
     The build directory path is returned.
     """
-    if not project_dir.is_dir():
-        git.clone(repo, project_dir)
-        git.checkout(project_dir, commit)
+    if not checkout_dir.is_dir():
+        git.clone(repo, checkout_dir)
+        git.checkout(checkout_dir, commit)
 
-    if git.is_dirty(project_dir) and commit != "current":
+    if git.is_dirty(checkout_dir) and commit != "current":
         print(f"Warning: {commit} is dirty")
 
     build_dir = project_dir / "build_perf"
@@ -67,40 +45,46 @@ def build_rocroller(
     subprocess.run(
         [
             "cmake",
+            f"-B {build_dir}",
+            f"-S {project_dir}",
             "-DCMAKE_BUILD_TYPE=Release",
             "-DROCROLLER_ENABLE_TIMERS=ON",
+            "-DROCROLLER_ENABLE_FETCH=ON",
+            "-DCMAKE_PREFIX_PATH='/opt/rocm;/opt/rocm/llvm'",
+            "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-            "-DSKIP_CPPCHECK=On",
+            "-DROCROLLER_ENABLE_CPPCHECK=OFF",
             "../",
         ],
-        cwd=str(build_dir),
+        cwd=str(project_dir),
         check=True,
     )
 
     subprocess.run(
         [
-            "make",
-            "-j",
+            "cmake",
+            "--build",
+            str(build_dir),
+            "--parallel",
             str(threads),
+            "--target",
             "all_clients",
         ],
-        cwd=str(build_dir),
+        cwd=str(project_dir),
         check=True,
     )
 
     return build_dir
 
 
-def ancestral_targets(targets: List[str]):
+def ancestral_targets(targets: list[str]):
     orig_project_dir = git.top()
     targets = git.rev_list(orig_project_dir, targets[0], targets[-1])
     targets.reverse()
     targets = [git.short_hash(orig_project_dir, x) for x in targets]
     if len(targets) == 0:
-        raise RuntimeError(
-            """No targets. Check `git rev-list` and make sure
-            commits are listed from oldest to newest."""
-        )
+        raise RuntimeError("""No targets. Check `git rev-list` and make sure
+            commits are listed from oldest to newest.""")
     return targets
 
 
@@ -115,6 +99,7 @@ def get_args(parser: argparse.ArgumentParser):
         args.group_results,
         args.rundir,
         args.suite,
+        args.id_filter,
     ]
     for arg in common_args:
         arg(parser)
@@ -156,14 +141,14 @@ def run(args):
 
 
 def autoperf(
-    commits: List[str],
+    commits: list[str],
     clonedir: str,
     rundir: str,
-    no_fail: List[str] = None,
+    no_fail: list[str] = None,
     current: bool = False,
     ancestral: bool = False,
     suite: str = None,
-    filter=None,
+    id_filter=None,
     normalize=False,
     y_zero=False,
     plot_median=False,
@@ -175,15 +160,15 @@ def autoperf(
     if no_fail is None:
         no_fail = []
 
-    orig_project_dir = git.top()
+    monorepo_dir = git.top()
 
-    targets = [git.short_hash(orig_project_dir, x) for x in commits]
+    targets = [git.short_hash(monorepo_dir, x) for x in commits]
     no_fail_targets = frozenset(
-        [git.short_hash(orig_project_dir, x) for x in no_fail if x != "current"]
+        [git.short_hash(monorepo_dir, x) for x in no_fail if x != "current"]
     )
 
     if len(targets) + (current) <= 1:
-        targets.append(git.short_hash(orig_project_dir))  # HEAD
+        targets.append(git.short_hash(monorepo_dir))  # HEAD
 
     if ancestral:
         targets = ancestral_targets(targets)
@@ -200,17 +185,22 @@ def autoperf(
     success_no_fail = True
 
     for target in targets:
-        project_dir = top / f"build_{target}"
+        checkout_dir = top / f"build_{target}"
         if target == "current":
-            project_dir = orig_project_dir
+            checkout_dir = monorepo_dir
 
         build_dir: Path = build_rocroller(
-            orig_project_dir,
-            project_dir,
+            monorepo_dir,
+            checkout_dir,
+            checkout_dir / "shared" / "rocroller",
             target,
         )
         target_success, result_dir = suite_run.run_cli(
-            build_dir=build_dir, rundir=rundir, suite=suite, filter=filter, recast=True
+            build_dir=build_dir,
+            rundir=rundir,
+            suite=suite,
+            id_filter=id_filter,
+            recast=True,
         )
         if target in no_fail_targets:
             success_no_fail &= target_success

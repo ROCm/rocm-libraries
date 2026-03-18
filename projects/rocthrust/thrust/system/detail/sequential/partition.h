@@ -22,10 +22,21 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <utility>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -44,18 +55,17 @@ namespace detail
 namespace sequential
 {
 
+// TODO(bgruber): we should make this an alias of _THRUST_STD::iter_swap
 THRUST_EXEC_CHECK_DISABLE
 template <typename ForwardIterator1, typename ForwardIterator2>
 THRUST_HOST_DEVICE void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2)
 {
-  // XXX this isn't correct because it doesn't use thrust::swap
-  using namespace thrust::detail;
-
+  // note: we cannot use swap(*iter1, *iter2) here, because the reference_type's could be proxy references, for which
+  // swap() is not guaranteed to work
   using T = typename thrust::iterator_value<ForwardIterator1>::type;
-
-  T temp = *iter1;
-  *iter1 = *iter2;
-  *iter2 = temp;
+  T temp  = _THRUST_STD::move(*iter1);
+  *iter1  = _THRUST_STD::move(*iter2);
+  *iter2  = _THRUST_STD::move(temp);
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -69,7 +79,7 @@ partition(sequential::execution_policy<DerivedPolicy>&, ForwardIterator first, F
   }
 
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   while (wrapped_pred(*first))
   {
@@ -109,7 +119,7 @@ THRUST_HOST_DEVICE ForwardIterator partition(
   }
 
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   while (wrapped_pred(*stencil_first))
   {
@@ -151,7 +161,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   }
 
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   using T = typename thrust::iterator_value<ForwardIterator>::type;
 
@@ -193,7 +203,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   using T = typename thrust::iterator_value<ForwardIterator>::type;
 
@@ -203,7 +213,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   TempRange temp(exec, first, last);
 
   InputIterator stencil_iter = stencil;
-  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, ++stencil_iter)
+  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, (void) ++stencil_iter)
   {
     if (wrapped_pred(*stencil_iter))
     {
@@ -215,7 +225,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   ForwardIterator middle = first;
   stencil_iter           = stencil;
 
-  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, ++stencil_iter)
+  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, (void) ++stencil_iter)
   {
     if (!wrapped_pred(*stencil_iter))
     {
@@ -242,7 +252,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   for (; first != last; ++first)
   {
@@ -278,9 +288,9 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
-  for (; first != last; ++first, ++stencil)
+  for (; first != last; ++first, (void) ++stencil)
   {
     if (wrapped_pred(*stencil))
     {

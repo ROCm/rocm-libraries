@@ -33,32 +33,49 @@ namespace miopen {
 
 namespace layernorm {
 
+size_t GetStride(const TensorDescriptor& xDesc, int32_t normalized_dim)
+{
+    size_t stride = 1;
+    auto layout   = xDesc.GetLayoutEnum();
+    if(normalized_dim > 1 && layout.has_value() &&
+       (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+    {
+        stride = xDesc.GetLengths()[1]; // stride = C
+    }
+    return stride;
+}
+
+size_t GetOuterSize(const TensorDescriptor& xDesc, int32_t normalized_dim, size_t stride)
+{
+    size_t outer_size = 1;
+    for(size_t i = 0; i < normalized_dim; ++i)
+    {
+        if(!(stride > 1 && i == 1))
+        {
+            outer_size *= xDesc.GetLengths()[i];
+        }
+    }
+    return outer_size;
+}
+
+size_t GetInnerSize(const TensorDescriptor& xDesc, int32_t normalized_dim)
+{
+    size_t inner_size = 1;
+    for(size_t i = normalized_dim; i < xDesc.GetLengths().size(); ++i)
+    {
+        inner_size *= xDesc.GetLengths()[i];
+    }
+    return inner_size;
+}
+
 NetworkConfig ProblemDescription::MakeNetworkConfig() const
 {
-    auto dims         = xDesc.GetLengths();
-    size_t outer_size = 1;
-    size_t inner_size = 1;
-
-    if((mode == MIOPEN_WEIGHT_BIAS_T5) || (mode == MIOPEN_ELEMENTWISE_AFFINE_T5))
-    {
-        inner_size = dims[dims.size() - 1];
-        outer_size = std::accumulate(dims.begin(), dims.end() - 1, 1ULL, std::multiplies<size_t>());
-    }
-    else
-    {
-        outer_size = std::accumulate(
-            dims.begin(), dims.begin() + normalized_dim, 1ULL, std::multiplies<size_t>());
-        inner_size = std::accumulate(
-            dims.begin() + normalized_dim, dims.end(), 1ULL, std::multiplies<size_t>());
-    }
-    auto dtype = xDesc.GetType();
-
     std::ostringstream ss;
 
-    ss << "dtype" << dtype;
+    ss << "dtype" << xDesc.GetType();
     if((mode == MIOPEN_WEIGHT_BIAS_T5) || (mode == MIOPEN_ELEMENTWISE_AFFINE_T5))
     {
-        ss << "normalized_dim" << dims.size() - 1;
+        ss << "normalized_dim" << xDesc.GetLengths().size() - 1;
     }
     else
     {
@@ -71,6 +88,8 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
         ss << "addlayernorm";
     if((mode == MIOPEN_WEIGHT_BIAS_T5) || (mode == MIOPEN_ELEMENTWISE_AFFINE_T5))
         ss << "t5layernorm";
+
+    ss << "stride" << stride;
 
     return NetworkConfig{ss.str()};
 }

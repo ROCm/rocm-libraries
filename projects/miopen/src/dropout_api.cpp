@@ -167,7 +167,7 @@ static void LogCmdDropout(const miopenDropoutDescriptor_t dropoutDesc,
            << " -l " << (miopen::deref(dropoutDesc).seed & 0xFFFFFFFF)
            << " -m " << ((miopen::deref(dropoutDesc).seed >> 32) & 0xFFFFFFFF)
            << " -p " << std::to_string(miopen::deref(dropoutDesc).dropout);
-        // clang-format on 
+        // clang-format on
         MIOPEN_LOG_DRIVER_CMD(ss.str());
     }
 }
@@ -188,17 +188,17 @@ extern "C" miopenStatus_t miopenDropoutForward(miopenHandle_t handle,
     return miopen::try_([&] {
         miopen::deref(dropoutDesc)
             .Dropout(miopen::deref(handle),
-                            miopen::deref(noise_shape),
-                            miopen::deref(xDesc),
-                            DataCast(x),
-                            miopen::deref(yDesc),
-                            DataCast(y),
-                            DataCast(reserveSpace),
-                            reserveSpaceSizeInBytes,
-                            static_cast<size_t>(0),
-                            static_cast<size_t>(0),
-                            static_cast<size_t>(0),
-                            false /* is_backward */);
+                     miopen::deref(noise_shape),
+                     miopen::deref(xDesc),
+                     DataCast(x),
+                     miopen::deref(yDesc),
+                     DataCast(y),
+                     DataCast(reserveSpace),
+                     reserveSpaceSizeInBytes,
+                     static_cast<size_t>(0),
+                     static_cast<size_t>(0),
+                     static_cast<size_t>(0),
+                     false /* is_backward */);
     });
 }
 
@@ -218,16 +218,16 @@ extern "C" miopenStatus_t miopenDropoutBackward(miopenHandle_t handle,
     return miopen::try_([&] {
         miopen::deref(dropoutDesc)
             .Dropout(miopen::deref(handle),
-                             miopen::deref(noise_shape),
-                             miopen::deref(dyDesc),
-                             DataCast(dy),
-                             miopen::deref(dxDesc),
-                             DataCast(dx),
-                             DataCast(reserveSpace),
-                             reserveSpaceSizeInBytes,
-                             static_cast<size_t>(0),
-                             static_cast<size_t>(0),
-                             static_cast<size_t>(0),
-                             true /* is_backward */);
+                     miopen::deref(noise_shape),
+                     miopen::deref(dyDesc),
+                     DataCast(dy),
+                     miopen::deref(dxDesc),
+                     DataCast(dx),
+                     DataCast(reserveSpace),
+                     reserveSpaceSizeInBytes,
+                     static_cast<size_t>(0),
+                     static_cast<size_t>(0),
+                     static_cast<size_t>(0),
+                     true /* is_backward */);
     });
 }

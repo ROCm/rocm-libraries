@@ -27,6 +27,13 @@
 
 rocsparse::trm_info_t::~trm_info_t()
 {
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->row_map));
     this->row_map = nullptr;
 
@@ -52,69 +59,79 @@ int64_t rocsparse::trm_info_t::get_max_nnz() const
     return this->max_nnz;
 }
 
-void rocsparse::trm_info_t::set_row_map(void* const value)
-{
-    this->row_map = value;
-}
 const void* rocsparse::trm_info_t::get_row_map() const
 {
     return this->row_map;
 }
+
 void* rocsparse::trm_info_t::get_row_map()
 {
     return this->row_map;
 }
 
-void rocsparse::trm_info_t::set_diag_ind(void* const value)
+void** rocsparse::trm_info_t::get_ref_row_map()
 {
-    this->diag_ind = value;
+    return &this->row_map;
 }
+
 const void* rocsparse::trm_info_t::get_diag_ind() const
 {
     return this->diag_ind;
 }
+
 void* rocsparse::trm_info_t::get_diag_ind()
 {
     return this->diag_ind;
 }
 
-void rocsparse::trm_info_t::set_transposed_perm(void* const value)
+void** rocsparse::trm_info_t::get_ref_diag_ind()
 {
-    this->transposed_perm = value;
+    return &this->diag_ind;
 }
+
 const void* rocsparse::trm_info_t::get_transposed_perm() const
 {
     return this->transposed_perm;
 }
+
 void* rocsparse::trm_info_t::get_transposed_perm()
 {
     return this->transposed_perm;
 }
 
-void rocsparse::trm_info_t::set_transposed_row_ptr(void* const value)
+void** rocsparse::trm_info_t::get_ref_transposed_perm()
 {
-    this->transposed_row_ptr = value;
+    return &this->transposed_perm;
 }
+
 const void* rocsparse::trm_info_t::get_transposed_row_ptr() const
 {
     return this->transposed_row_ptr;
 }
+
 void* rocsparse::trm_info_t::get_transposed_row_ptr()
 {
     return this->transposed_row_ptr;
 }
 
-void rocsparse::trm_info_t::set_transposed_col_ind(void* const value)
+void** rocsparse::trm_info_t::get_ref_transposed_row_ptr()
 {
-    this->transposed_col_ind = value;
+    return &this->transposed_row_ptr;
 }
+
 const void* rocsparse::trm_info_t::get_transposed_col_ind() const
 {
     return this->transposed_col_ind;
 }
+
 void* rocsparse::trm_info_t::get_transposed_col_ind()
 {
     return this->transposed_col_ind;
+}
+
+void** rocsparse::trm_info_t::get_ref_transposed_col_ind()
+{
+    return &this->transposed_col_ind;
 }
 
 void rocsparse::trm_info_t::set_m(const int64_t value)
@@ -178,17 +195,6 @@ void rocsparse::trm_info_t::set_offset_indextype(const rocsparse_indextype value
 void rocsparse::trm_info_t::set_index_indextype(const rocsparse_indextype value)
 {
     this->index_type_J = value;
-}
-
-void rocsparse::trm_info_t::recreate(rocsparse::trm_info_t** const dp_that)
-{
-    if(dp_that[0] != nullptr)
-    {
-        delete dp_that[0];
-        dp_that[0] = nullptr;
-    }
-
-    dp_that[0] = new rocsparse::trm_info_t();
 }
 
 void rocsparse::trm_info_t::destroy(rocsparse::trm_info_t* const p_that)

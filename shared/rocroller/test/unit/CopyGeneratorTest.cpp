@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
@@ -69,6 +46,105 @@ namespace CopyGeneratorTest
             return {GPUArchitectureGFX::GFX1200};
         }
     };
+
+    static void testEnsureTypeCommutative(rocRoller::ContextPtr& context)
+    {
+        auto literal       = Register::Value::Literal(65536);
+        auto small_literal = Register::Value::Literal(10);
+
+        using Bitset = EnumBitset<Register::Type>;
+        using namespace std::placeholders;
+        auto ensureTypeCommutative = std::bind(&rocRoller::CopyGenerator::ensureTypeCommutative,
+                                               context->copier().get(),
+                                               _1,
+                                               _2,
+                                               _3,
+                                               _4);
+
+        // Throw if LHS is also a literal
+        EXPECT_THROW(
+            {
+                context->schedule(
+                    ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                          literal,
+                                          Bitset{Register::Type::Vector},
+                                          literal));
+            },
+            FatalError);
+
+        // No swap as RHS can be Literal
+        context->schedule(
+            ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                  literal,
+                                  Bitset{Register::Type::Literal},
+                                  literal));
+
+        // No swap as RHS can be Constant
+        context->schedule(
+            ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                  literal,
+                                  Bitset{Register::Type::Constant},
+                                  small_literal));
+
+        // RHS (Literal) swapped with LHS
+        {
+            auto vgpr = std::make_shared<Register::Value>(
+                context, Register::Type::Vector, DataType::Int32, 1);
+            vgpr->allocateNow();
+
+            auto literal_copy = literal;
+            context->schedule(
+                ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                      vgpr,
+                                      Bitset{Register::Type::Vector},
+                                      literal_copy));
+
+            EXPECT_EQ(vgpr, literal);
+        }
+
+        // RHS (Constant) swapped with LHS
+        {
+            auto vgpr = std::make_shared<Register::Value>(
+                context, Register::Type::Vector, DataType::Int32, 1);
+            vgpr->allocateNow();
+
+            auto literal_copy = small_literal;
+            context->schedule(
+                ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Constant},
+                                      vgpr,
+                                      Bitset{Register::Type::Vector},
+                                      literal_copy));
+
+            EXPECT_EQ(vgpr, small_literal);
+        }
+
+        // Move RHS to a new VGPR
+        {
+            auto vgpr = std::make_shared<Register::Value>(
+                context, Register::Type::Vector, DataType::Int32, 1);
+            vgpr->allocateNow();
+            context->schedule(ensureTypeCommutative(
+                Bitset{Register::Type::Vector}, vgpr, Bitset{Register::Type::Vector}, literal));
+        }
+    }
+
+    TEST_F(CopyGenerator90aTest, ensureTypeCommutative)
+    {
+        testEnsureTypeCommutative(m_context);
+        EXPECT_EQ(NormalizedSource("v_mov_b32 v1, 65536"), NormalizedSource(output()));
+    }
+
+    TEST_F(CopyGenerator94xTest, ensureTypeCommutative)
+    {
+        testEnsureTypeCommutative(m_context);
+        EXPECT_EQ(NormalizedSource("v_mov_b32 v1, 65536"), NormalizedSource(output()));
+    }
+
+    TEST_F(CopyGenerator1200Test, ensureTypeCommutative)
+    {
+        testEnsureTypeCommutative(m_context);
+        EXPECT_EQ(NormalizedSource("v_mov_b32 v1, 65536"), NormalizedSource(output()));
+    }
 
     // Test if correct instructions are generated
     TEST_F(CopyGenerator90aTest, Instruction)

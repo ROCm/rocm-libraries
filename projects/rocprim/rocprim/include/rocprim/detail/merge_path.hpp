@@ -131,7 +131,11 @@ void serial_merge(KeyType*                keys_shared,
         key_b = keys_shared[idx_b];
     }
 
+#if defined(__SPIRV__) // TEMP FIX
+    ROCPRIM_NO_UNROLL
+#else
     ROCPRIM_UNROLL
+#endif
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         // If we don't have any in b, we always take from a. Then, if we don't

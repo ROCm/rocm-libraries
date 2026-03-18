@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -204,11 +204,12 @@ build:cmake-minimum-apt:
       - $BUILD_DIR/benchmark/*
       - $BUILD_DIR/CMakeCache.txt
       - $BUILD_DIR/CTestTestfile.cmake
-      - $BUILD_DIR/deps/googlebenchmark/
+      - $BUILD_DIR/deps/rocrand/
+      - $BUILD_DIR/example/CTestTestfile.cmake
+      - $BUILD_DIR/example/example_*
       - $BUILD_DIR/gtest/
       - $BUILD_DIR/test/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
-      - $BUILD_DIR/deps/rocrand/
       - $BUILD_DIR/test/rocprim/test_*
       - $BUILD_DIR/test/rocprim/libtest_*
       - $BUILD_DIR/test/test_*
@@ -369,7 +370,6 @@ autotune:build:
     paths:
       - $BUILD_DIR/benchmarks.tar.zstd
       - $BUILD_DIR/.ninja_log
-      - $BUILD_DIR/deps/googlebenchmark/
     expire_in: 1 week
 
 .test:common:
@@ -610,6 +610,11 @@ benchmark:
       --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
       --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
       --seed "${BENCHMARK_SEED}"
+    - python3
+      .gitlab/report_noise.py
+      --benchmark_json_dir "${BENCHMARK_RESULT_DIR}"
+      --noise_threshold_percentage 1.0
+      --accept_high_noise
   artifacts:
     paths:
       - ${BENCHMARK_RESULT_DIR}
@@ -698,6 +703,11 @@ autotune:execute-tuning:
       --size="${AUTOTUNE_SIZE}"
       --trials="${AUTOTUNE_TRIALS}"
       --seed=82589933
+    - python3
+      .gitlab/report_noise.py
+      --benchmark_json_dir "${AUTOTUNE_RESULT_DIR}"
+      --noise_threshold_percentage 1.0
+      --accept_high_noise
 
 autotune:generate-config:
   image: python:3.10.5-buster

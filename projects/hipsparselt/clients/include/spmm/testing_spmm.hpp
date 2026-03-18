@@ -45,18 +45,18 @@
 template <typename T, typename Tb = T, typename To = T, hipsparseOrder_t order>
 void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
 {
-    auto saturate_i8 = [](Tb val) {
+    using TAccum = float;
+
+    auto saturate_i8 = [](TAccum val) {
         auto _val = std::nearbyint(static_cast<double>(val));
         _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
         return static_cast<To>(_val);
     };
 
-    auto saturate_o = [](Tb val) { return static_cast<To>(val); };
+    auto saturate_o = [](TAccum val) { return static_cast<To>(val); };
 
-    To (*saturate)(Tb val);
+    To (*saturate)(TAccum val);
     saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
-
-    using TAccum = std::conditional_t<std::is_same<__half, Tb>::value, float, Tb>;
 
     for(int64_t i = 0; i < m; i++)
     {
@@ -114,7 +114,7 @@ auto _clippedrelu = [](auto in, auto arg1, auto arg2) -> decltype(in) {
     if(in > arg1)
         return static_cast<decltype(in)>(std::min(in, arg2));
     else
-        return static_cast<decltype(in)>(0);
+        return static_cast<decltype(in)>(std::min(static_cast<decltype(in)>(0.0), arg2));
 };
 
 auto _gelu = [](auto in, auto arg1, auto /*arg2*/) -> decltype(in) {
@@ -974,6 +974,11 @@ void testing_spmm(const Arguments& arg)
         {
             hipsparselt_error = std::abs(
                 norm_check_general<To>('F', tM, tN, ldd, stride_d, hD_gold, hD_1, num_batches));
+
+            if(arg.norm_check_assert)
+            {
+                CHECK_SUCCESS(norm_check<To>(hipsparselt_error));
+            }
         }
 
         // Debug
@@ -1528,4 +1533,14 @@ void testing_aux_plan_assign(const Arguments& arg)
     }
 
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
+}
+
+template <typename Ti,
+          typename To,
+          typename Tc,
+          typename TBias>
+void testing_spmm_logging(const Arguments& arg)
+{
+    Logger logger(arg.logging);
+    testing_spmm<Ti, To, Tc, TBias>(arg);
 }

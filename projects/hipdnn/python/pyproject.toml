@@ -1,0 +1,73 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+[build-system]
+requires = [
+    "scikit-build-core>=0.4.3",
+    "nanobind>=1.8.0",
+    "cmake>=3.18",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "hipdnn-frontend"
+version = "0.1.0"
+description = "Python bindings for the hipDNN frontend library"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "numpy>=1.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "numpy",
+]
+
+[tool.scikit-build]
+# Specify the CMake source directory
+cmake.source-dir = "."
+# Build directory
+build-dir = "build"
+# Minimum CMake version
+cmake.minimum-version = "3.18"
+# Build type
+cmake.build-type = "Release"
+# Where the Python module will be installed
+wheel.install-dir = "hipdnn_frontend"
+# Package data
+wheel.packages = ["hipdnn_frontend"]
+
+[tool.scikit-build.cmake.define]
+# Pass any additional CMake definitions if needed
+CMAKE_PREFIX_PATH = "${CMAKE_PREFIX_PATH}"
+CMAKE_C_COMPILER = "/opt/rocm/llvm/bin/clang"
+CMAKE_CXX_COMPILER = "/opt/rocm/llvm/bin/clang++"
+
+
+hip_DIR = "${hip_DIR}"
+hipdnn_frontend_DIR = "${hipdnn_frontend_DIR}"
+hipdnn_backend_DIR = "${hipdnn_backend_DIR}"
+hipdnn_data_sdk_DIR = "${hipdnn_data_sdk_DIR}"
+
+[tool.cibuildwheel]
+# Skip building for certain Python versions or platforms if needed
+skip = ["pp*", "cp36-*", "cp37-*"]

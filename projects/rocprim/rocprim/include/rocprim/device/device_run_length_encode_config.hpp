@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,179 +55,99 @@ struct run_length_encode_config
 namespace detail
 {
 
-template<typename ReduceByKeyConfig,
-         typename KeyType,
-         typename AccumulatorType,
-         typename BinaryFunction>
-struct wrapped_trivial_runs_config
-    : wrapped_reduce_by_key_config<ReduceByKeyConfig, KeyType, AccumulatorType, BinaryFunction>
-{};
-
-template<typename ReduceByKeyConfig,
-         typename SelectConfig,
-         typename KeyType,
-         typename AccumulatorType,
-         typename BinaryFunction>
-struct wrapped_trivial_runs_config<
-    rocprim::run_length_encode_config<ReduceByKeyConfig, SelectConfig>,
-    KeyType,
-    AccumulatorType,
-    BinaryFunction>
-    : wrapped_reduce_by_key_config<ReduceByKeyConfig, KeyType, AccumulatorType, BinaryFunction>
-{};
-
-template<typename KeyType,
-         typename AccumulatorType,
-         typename BinaryFunction,
-         typename Enable = void>
-struct wrapped_trivial_runs_impl
-    : wrapped_reduce_by_key_impl<KeyType, AccumulatorType, BinaryFunction, Enable>
-{};
-
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
-struct wrapped_trivial_runs_impl<
-    KeyType,
-    AccumulatorType,
-    BinaryFunction,
-    std::enable_if_t<is_arithmetic<KeyType>::value && is_arithmetic<AccumulatorType>::value
-                     && is_binary_functional<BinaryFunction>::value>>
+template<class Config>
+struct select_reduce_by_key_config
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr reduce_by_key_config_params params
-            = default_trivial_runs_config<static_cast<unsigned int>(Arch),
-                                          KeyType,
-                                          AccumulatorType>{};
-    };
+    using type = typename Config::reduce_by_key;
 };
 
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
-struct wrapped_trivial_runs_config<default_config, KeyType, AccumulatorType, BinaryFunction>
-    : wrapped_trivial_runs_impl<KeyType, AccumulatorType, BinaryFunction>
-{};
-
-// Wrap around run_length_encode_config and the newly added non_trivial_runs_config for the
-// run_length_encode_non_trivial_runs algorithm. Three cases are considered for selecting
-// the appropriate config:
-//
-//   - When a run_length_encode_config struct is passed as argument, an specialization of
-//     this struct takes care of mapping the parameters of that config to the newly added
-//     non_trivial_runs_config.
-//
-//   - When a default config is passed, another specialization takes care of using the
-//     default set up of non_trivial_runs_config.
-//
-//   - When a non_trivial_runs_config is passed, the params are set from this config.
-//
-template<typename RLENonTrivialRunsConfig, typename>
-struct wrapped_non_trivial_runs_config
+template<>
+struct select_reduce_by_key_config<rocprim::default_config>
 {
-    static_assert(std::is_same<typename RLENonTrivialRunsConfig::tag,
-                               detail::non_trivial_runs_config_tag>::value,
-                  "Config must be a specialization of struct template non_trivial_runs_config");
-
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr non_trivial_runs_config_params params = RLENonTrivialRunsConfig{};
-    };
+    using type = rocprim::default_config;
 };
 
-template<typename ReduceByKeyConfig, typename SelectConfig, typename InputType>
-struct wrapped_non_trivial_runs_config<
-    rocprim::run_length_encode_config<ReduceByKeyConfig, SelectConfig>,
-    InputType>
+template<class Key, class Value, class BinaryFunction>
+struct run_length_encode_config_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
+    using targets    = run_length_encode_targets;
+    using param_type = reduce_by_key_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
     {
-        // Mapping <reduce_by_key_config, select_config> to non_trivial_runs_config.
-        // Beware that this mapping may impact performance of executions of
-        // run_length_encode_non_trivial_runs with the former run_length_encode_config,
-        // as it may not be the best for all cases.
-        static constexpr unsigned int block_size       = ReduceByKeyConfig::block_size;
-        static constexpr unsigned int items_per_thread = ReduceByKeyConfig::items_per_thread;
+        // Specialization for default config if types are not custom: instantiate the tuned config.
+        if constexpr(rocprim::is_arithmetic<Key>::value && rocprim::is_arithmetic<Value>::value
+                     && rocprim::detail::is_binary_functional<BinaryFunction>::value)
+        {
+            return run_length_encode_config_picker<Target, Key, Value>();
+        }
+        else
+        {
+            return reduce_by_key_config_params_base<Key, Value>();
+        }
+    }
 
-        static constexpr block_load_method load_input_method = ReduceByKeyConfig::load_keys_method;
-        static constexpr block_scan_algorithm scan_algorithm = ReduceByKeyConfig::scan_algorithm;
-
-        static constexpr non_trivial_runs_config_params params
-            = non_trivial_runs_config<block_size,
-                                      items_per_thread,
-                                      load_input_method,
-                                      scan_algorithm>{};
-    };
+    template<class Target>
+    constexpr run_length_encode_config_selector(Target) : params(picker_helper<Target>())
+    {}
 };
 
-// Generic for default config: instantiate base config.
-template<typename InputType, typename Enable = void>
-struct wrapped_non_trivial_runs_impl
+template<class Config>
+struct convert_to_non_trivial_config
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr non_trivial_runs_config_params params =
-            typename default_non_trivial_runs_config_base<InputType>::type{};
-    };
+    using type = Config; // identity by default
 };
 
-// Specialization for default config if types are arithmetic or half/bfloat16-precision
-// floating point types: instantiate the tuned config.
-template<typename InputType>
-struct wrapped_non_trivial_runs_impl<InputType,
-                                     std::enable_if_t<rocprim::is_arithmetic<InputType>::value>>
+// Only convert run_length_encode_config
+template<typename ReduceByKeyConfig, typename SelectConfig>
+struct convert_to_non_trivial_config<run_length_encode_config<ReduceByKeyConfig, SelectConfig>>
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr non_trivial_runs_config_params params
-            = default_non_trivial_runs_config<static_cast<unsigned int>(Arch), InputType>{};
-    };
+    static constexpr unsigned int block_size       = ReduceByKeyConfig::block_size;
+    static constexpr unsigned int items_per_thread = ReduceByKeyConfig::items_per_thread;
+
+    static constexpr block_load_method    load_input_method = ReduceByKeyConfig::load_keys_method;
+    static constexpr block_scan_algorithm scan_algorithm    = ReduceByKeyConfig::scan_algorithm;
+
+    using type
+        = non_trivial_runs_config<block_size, items_per_thread, load_input_method, scan_algorithm>;
 };
 
-// Specialization for default config.
-template<typename InputType>
-struct wrapped_non_trivial_runs_config<default_config, InputType>
-    : wrapped_non_trivial_runs_impl<InputType>
-{};
+template<>
+struct convert_to_non_trivial_config<rocprim::default_config>
+{
+    using type = rocprim::default_config;
+};
 
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
+template<class Key>
+struct run_length_encode_non_trivial_config_selector
+{
+    using targets    = run_length_encode_non_trivial_targets;
+    using param_type = non_trivial_runs_config_params;
 
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
-template<target_arch Arch>
-constexpr reduce_by_key_config_params wrapped_trivial_runs_impl<
-    KeyType,
-    AccumulatorType,
-    BinaryFunction,
-    std::enable_if_t<is_arithmetic<KeyType>::value && is_arithmetic<AccumulatorType>::value
-                     && is_binary_functional<BinaryFunction>::value>>::architecture_config<Arch>::
-    params;
+    param_type params;
 
-template<typename RLENonTrivialRunsConfig, typename InputType>
-template<target_arch Arch>
-constexpr non_trivial_runs_config_params
-    wrapped_non_trivial_runs_config<RLENonTrivialRunsConfig,
-                                    InputType>::architecture_config<Arch>::params;
+    template<class Target>
+    constexpr param_type picker_helper()
+    {
+        // Specialization for default config if types are not custom: instantiate the tuned config.
+        if constexpr(rocprim::is_arithmetic<Key>::value)
+        {
+            return run_length_encode_non_trivial_config_picker<Target, Key>();
+        }
+        else
+        {
+            return non_trivial_runs_config_params_base<Key>();
+        }
+    }
 
-template<typename ReduceByKeyConfig, typename SelectConfig, typename InputType>
-template<target_arch Arch>
-constexpr non_trivial_runs_config_params wrapped_non_trivial_runs_config<
-    rocprim::run_length_encode_config<ReduceByKeyConfig, SelectConfig>,
-    InputType>::architecture_config<Arch>::params;
-
-template<typename InputType, typename Enable>
-template<target_arch Arch>
-constexpr non_trivial_runs_config_params
-    wrapped_non_trivial_runs_impl<InputType, Enable>::architecture_config<Arch>::params;
-
-template<typename InputType>
-template<target_arch Arch>
-constexpr non_trivial_runs_config_params wrapped_non_trivial_runs_impl<
-    InputType,
-    std::enable_if_t<is_arithmetic<InputType>::value>>::architecture_config<Arch>::params;
-
-#endif // DOXYGEN_DOCUMENTATION_BUILD
+    template<class Target>
+    constexpr run_length_encode_non_trivial_config_selector(Target)
+        : params(picker_helper<Target>())
+    {}
+};
 
 } // end namespace detail
 

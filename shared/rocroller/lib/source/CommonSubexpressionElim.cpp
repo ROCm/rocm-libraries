@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommonSubexpressionElim.hpp>
 #include <rocRoller/Expression.hpp>
@@ -108,6 +85,19 @@ namespace rocRoller
                     cpy.r2hs = call(expr.r2hs);
                 }
                 return std::make_shared<Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
+                return std::make_shared<Expression>(std::move(cpy));
             }
 
             ExpressionPtr operator()(Register::ValuePtr const& value) const
@@ -214,6 +204,19 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
+                return std::make_shared<Expression>(std::move(cpy));
+            }
+
             ExpressionPtr operator()(Register::ValuePtr const& value) const
             {
                 return equivalent(value->expression(), m_target->expression())
@@ -306,9 +309,105 @@ namespace rocRoller
                                    (void*)dep.reg->allocation().get(),
                                    (void*)reg->allocation().get());
 
-                        tree.pop_back();
                         tree.back().reg = reg;
                     }
+                    else if(depTypeInfo.isIntegral && expTypeInfo.isIntegral
+                            && depTypeInfo.elementBits == 64 && expTypeInfo.elementBits == 32)
+                    {
+                        std::vector<int> indices;
+                        for(int i = 0; i < depTypeInfo.registerCount;
+                            i += depTypeInfo.elementBits / Register::bitsPerRegister)
+                        {
+                            indices.push_back(i);
+                        }
+                        auto reg = dep.reg->subset(indices);
+                        reg->setVariableType(expr.destinationType);
+                        auto regWithName = tree.back().reg ? tree.back().reg : reg;
+                        reg->setName(regWithName->name() + " convertForwardSubset");
+                        tree.back().reg = reg;
+                    }
+                }
+
+                return tree;
+            }
+
+            ExpressionTree operator()(Reinterpret const& expr) const
+            {
+                auto tree = callUnary(expr);
+                if(tree.empty())
+                {
+                    // Bail
+                    return {};
+                }
+
+                AssertFatal(tree.back().deps.size() == 1);
+                auto        depIdx = *tree.back().deps.begin();
+                auto const& dep    = tree.at(depIdx);
+
+                auto depTypeInfo = DataTypeInfo::Get(dep.reg->variableType());
+                auto expTypeInfo = DataTypeInfo::Get(expr.destinationType);
+
+                AssertFatal(depTypeInfo.elementBytes == expTypeInfo.elementBytes,
+                            "Reinterpret requires same size types: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            depTypeInfo.elementBytes,
+                            " bytes) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.elementBytes,
+                            " bytes)");
+
+                auto registerCount = dep.reg->registerCount();
+                AssertFatal(registerCount == expTypeInfo.registerCount,
+                            "Reinterpret requires same number of registers: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            registerCount,
+                            " registers) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.registerCount,
+                            " registers)");
+
+                // Sets the destination register for Reinterpret as the argument register
+                // but with the reinterpreted type
+                Register::ValuePtr reg
+                    = std::make_shared<Register::Value>(dep.reg->allocation(),
+                                                        dep.reg->regType(),
+                                                        expr.destinationType,
+                                                        dep.reg->allocationCoord());
+                tree.back().reg = reg;
+
+                dep.reg->setName(dep.reg->name() + " reinterpret");
+                Log::trace("Reinterpreting {} to {}",
+                           dep.reg->description(),
+                           tree.back().reg->description());
+
+                return tree;
+            }
+
+            ExpressionTree operator()(BitFieldExtract const& expr) const
+            {
+                auto tree = callUnary(expr);
+                if(tree.empty())
+                    return {};
+
+                AssertFatal(tree.back().deps.size() == 1, ShowValue(tree.back().deps.size()));
+
+                auto        deps               = tree.back().deps;
+                auto        consolidationCount = tree.back().consolidationCount;
+                auto        depIdx             = *deps.begin();
+                auto const& dep                = tree.at(depIdx);
+
+                // Try to simplify BitFieldExtract to a subset
+                if(auto subset = bfeToSubset(expr, dep.reg))
+                {
+                    Log::trace("Eliminating BitFieldExtract of full registers {}",
+                               subset.value()->description());
+                    tree.pop_back();
+                    auto value = subset.value();
+                    tree.push_back({value, value->expression(), deps, consolidationCount});
                 }
 
                 return tree;
@@ -457,6 +556,82 @@ namespace rocRoller
                 return tree;
             }
 
+            ExpressionTree operator()(BitfieldCombine const& expr) const
+            {
+                AssertFatal(
+                    false,
+                    "BitfieldCombine should be lowered to shift and bitwise AND/OR epxressions");
+                return {};
+            }
+
+            template <CNary Expr>
+            ExpressionTree operator()(Expr const& expr) const
+            {
+                std::vector<ExpressionTree> operandTrees;
+                std::set<int>               deps;
+                std::vector<int>            operandLocs;
+                int                         consolidationCount = 0;
+
+                if(expr.operands.empty())
+                {
+                    return {};
+                }
+
+                operandTrees.reserve(expr.operands.size());
+                operandLocs.reserve(expr.operands.size());
+
+                for(auto const& operand : expr.operands)
+                {
+                    ExpressionTree operandTree = generateTree(operand);
+                    if(operandTree.empty())
+                    {
+                        return {};
+                    }
+                    operandTrees.push_back(std::move(operandTree));
+                }
+
+                ExpressionTree tree = operandTrees.at(0);
+                operandLocs.push_back(tree.size() - 1);
+                deps.insert(tree.size() - 1);
+
+                for(size_t i = 1; i < expr.operands.size(); ++i)
+                {
+                    auto combo = combine(tree, operandTrees.at(i));
+                    tree       = std::get<0>(combo);
+                    int loc    = std::get<1>(combo);
+                    operandLocs.push_back(loc);
+                    deps.insert(loc);
+                    consolidationCount += std::get<2>(combo);
+                }
+
+                for(size_t i = 0; i < expr.operands.size(); ++i)
+                {
+                    int loc = operandLocs.at(i);
+                    consolidationCount += tree.at(loc).consolidationCount;
+                }
+
+                std::vector<ExpressionPtr> nodeOperands;
+                nodeOperands.reserve(expr.operands.size());
+                for(size_t i = 0; i < expr.operands.size(); ++i)
+                {
+                    int loc = operandLocs.at(i);
+                    nodeOperands.push_back(canUseAsReg(tree.at(loc))
+                                               ? tree.at(loc).reg->expression()
+                                               : tree.at(loc).expr);
+                }
+
+                tree.push_back(ExpressionNode{
+                    nullptr,
+                    std::make_shared<Expression>(Expr{std::move(nodeOperands)}.copyParams(expr)),
+                    deps,
+                    consolidationCount,
+                });
+
+                setComment(tree.back().expr, getComment(expr));
+
+                return tree;
+            }
+
             ExpressionTree operator()(ScaledMatrixMultiply const& expr) const
             {
                 return {};
@@ -502,6 +677,43 @@ namespace rocRoller
 
         private:
             ContextPtr m_context;
+
+            /**
+             * @brief Attempts to simplify a BitFieldExtract to a register subset
+             *
+             * @param expr The BitFieldExtract expression
+             * @param reg The source register
+             * @return std::optional<Register::ValuePtr> The subset register if simplification is possible, nullopt otherwise
+             */
+            std::optional<Register::ValuePtr> bfeToSubset(BitFieldExtract const& expr,
+                                                          Register::ValuePtr     reg) const
+            {
+                // Check if extraction is aligned to register boundaries
+                if(expr.offset % Register::bitsPerRegister != 0
+                   || expr.width % Register::bitsPerRegister != 0)
+                    return std::nullopt;
+
+                uint registerOffset = expr.offset / Register::bitsPerRegister;
+                uint registerCount  = expr.width / Register::bitsPerRegister;
+
+                // Only simplify if the register count matches the expected output data type
+                if(DataTypeInfo::Get(expr.outputDataType).registerCount != registerCount)
+                    return std::nullopt;
+
+                AssertFatal(registerOffset + registerCount <= reg->registerCount(),
+                            "BitFieldExtract offset and width are out of bounds: ",
+                            ShowValue(registerOffset),
+                            ShowValue(registerCount),
+                            ShowValue(reg->registerCount()));
+
+                // Create subset of registers
+                std::vector<int> indices(registerCount);
+                std::iota(indices.begin(), indices.end(), registerOffset);
+                auto subset = reg->subset(indices);
+                subset->setVariableType(expr.outputDataType);
+
+                return subset;
+            }
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
                                                  bool              allowSpecial = true,
@@ -708,7 +920,12 @@ namespace rocRoller
             if(!expr)
                 return {};
             auto visitor = ConsolidateSubExpressionVisitor(context);
-            return visitor.call(*expr);
+            auto rv      = visitor.call(*expr);
+
+            updateDistances(rv);
+            updatePriorityOrder(rv);
+
+            return rv;
         }
 
         int getConsolidationCount(ExpressionTree const& tree)
@@ -743,9 +960,198 @@ namespace rocRoller
             return rebuildExpressionHelper(tree, tree.size() - 1);
         }
 
+        void updateDistances(ExpressionTree& tree)
+        {
+            if(tree.size() < 2)
+                return;
+
+            for(int idx = 0; idx < tree.size(); idx++)
+            {
+                auto& node = tree[idx];
+                AssertFatal(
+                    node.deps.empty() || *node.deps.rbegin() < idx,
+                    "tree is no longer in topological order! This function needs to be updated!");
+                node.distanceFromRoot = 0;
+            }
+
+            for(auto const& nodeA : std::ranges::views::reverse(tree))
+            {
+                int newLevel = nodeA.distanceFromRoot + 1;
+
+                for(int idxB : nodeA.deps)
+                {
+                    if(tree.at(idxB).distanceFromRoot < newLevel)
+                        tree[idxB].distanceFromRoot = newLevel;
+                }
+            }
+        }
+
+        namespace
+        {
+            /**
+             * @brief Computes Sethi-Ullman inspired weights for each node.
+             *
+             * Weights approximate the minimum number of registers needed to evaluate
+             * a subtree. The algorithm processes nodes bottom-up:
+             *
+             * - Leaf nodes: weight = 0 for literals (immediate operands),
+             *               weight = 1 for values needing a register
+             * - Internal nodes: sort dependency weights descending, then
+             *               weight = max(w[0], w[1]+1, w[2]+2, w[3]+3, ...)
+             */
+            std::vector<int> ComputeWeights(ExpressionTree const& tree)
+            {
+                std::vector<int> weights(tree.size());
+
+                // Process in topological order (the tree is already sorted this way)
+                for(size_t i = 0; i < tree.size(); ++i)
+                {
+                    auto const& node = tree.at(i);
+
+                    // Leaf node - base case
+                    if(node.deps.empty())
+                    {
+                        weights[i] = (node.regType() == Register::Type::Literal) ? 0 : 1;
+                        continue;
+                    }
+
+                    // Collect and sort dependency weights (heaviest first)
+                    std::vector<int> depWeights;
+                    depWeights.reserve(node.deps.size());
+                    for(int dep : node.deps)
+                        depWeights.push_back(weights[dep]);
+                    std::sort(depWeights.begin(), depWeights.end(), std::greater<int>());
+
+                    // Child j needs +j registers to hold results of children 0..j-1.
+                    weights[i] = depWeights[0];
+                    for(size_t j = 1; j < depWeights.size(); ++j)
+                        weights[i] = std::max(weights[i], depWeights[j] + static_cast<int>(j));
+                }
+
+                return weights;
+            }
+
+            /**
+             * @brief Recursive helper for computing Sethi-Ullman inspired traversal order.
+             *
+             * Visits nodes in post-order, with heavier children visited first.
+             */
+            void ComputeOrderRecursive(ExpressionTree const&   tree,
+                                       std::vector<int> const& weights,
+                                       std::vector<int>&       order,
+                                       int                     nodeIdx,
+                                       int&                    orderCounter)
+            {
+                if(order[nodeIdx] != -1) // already visited
+                    return;
+
+                auto const& node = tree.at(nodeIdx);
+
+                // Get dependencies sorted by weight (heaviest first)
+                std::vector<int> deps(node.deps.begin(), node.deps.end());
+                std::sort(deps.begin(), deps.end(), [&weights](int a, int b) {
+                    if(weights[a] != weights[b])
+                        return weights[a] > weights[b]; // heaviest first
+                    return a < b; // tie-breaker
+                });
+
+                for(int dep : deps)
+                    ComputeOrderRecursive(tree, weights, order, dep, orderCounter);
+
+                // Assign order to this node after all children are processed
+                order[nodeIdx] = orderCounter++;
+            }
+        } // namespace
+
+        void updatePriorityOrder(ExpressionTree& tree)
+        {
+            if(tree.empty())
+                return;
+
+            // Verify topological order
+            for(size_t idx = 0; idx < tree.size(); idx++)
+            {
+                auto const& node = tree[idx];
+                if(node.deps.empty())
+                    continue;
+
+                int maxDep = 0;
+                for(int dep : node.deps)
+                    maxDep = std::max(maxDep, dep);
+
+                AssertFatal(maxDep < static_cast<int>(idx),
+                            "ExpressionTree is not in topological order!!",
+                            ShowValue(maxDep),
+                            ShowValue(idx));
+            }
+
+            auto weights = ComputeWeights(tree);
+
+            // Compute traversal order: visit heavier subtrees first
+            std::vector<int> order(tree.size(), -1); // -1 means not visited
+            int              orderCounter = 0;
+
+            // Start from the root (last node in the tree)
+            int rootIdx = static_cast<int>(tree.size()) - 1;
+            ComputeOrderRecursive(tree, weights, order, rootIdx, orderCounter);
+
+            // Store the computed order in each node
+            for(size_t i = 0; i < tree.size(); ++i)
+            {
+                AssertFatal(order[i] != -1,
+                            "Node not visited in ExpressionTree!!",
+                            ShowValue(i),
+                            ShowValue(order[i]));
+                tree[i].priorityOrder = order[i];
+            }
+        }
+
+        std::string statistics(ExpressionTree tree)
+        {
+            std::string rv = fmt::format("Expression tree with {} nodes.", tree.size());
+            updateDistances(tree);
+
+            std::map<int, int> levelCounts;
+            std::map<int, int> levelDeltas;
+            for(int idx = 0; idx < tree.size(); idx++)
+            {
+                auto d = tree[idx].distanceFromRoot;
+                levelCounts[d]++;
+
+                for(auto idx2 : tree[idx].deps)
+                {
+                    auto d2 = tree.at(idx2).distanceFromRoot;
+                    levelDeltas[d2 - d]++;
+                }
+            }
+
+            rv += "Level Value Counts:\n";
+            for(auto [level, count] : std::ranges::views::reverse(levelCounts))
+                rv += fmt::format("{}: {}\n", level, count);
+
+            rv += "Level Delta Counts:\n";
+            for(auto [level, count] : std::ranges::views::reverse(levelDeltas))
+                rv += fmt::format("{}: {}\n", level, count);
+
+            return rv;
+        }
+
         std::string describe(ExpressionNode const& node)
         {
-            return toString(node.expr);
+            std::string desc = "nullptr";
+            if(node.reg)
+                desc = node.reg->description();
+            return fmt::format(
+                "{} = {} (level {})", desc, toString(node.expr), node.distanceFromRoot);
+        }
+
+        Register::Type ExpressionNode::regType() const
+        {
+            if(reg != nullptr)
+                return reg->regType();
+            if(expr != nullptr)
+                return resultRegisterType(expr);
+            return Register::Type::Count;
         }
 
         std::string toDOT(ExpressionTree const& tree)

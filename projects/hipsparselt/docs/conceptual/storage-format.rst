@@ -5,19 +5,19 @@
 .. _storage-format:
 
 ********************************
-Storage format
+hipSPARSELt storage format
 ********************************
 
 hipSPARSELt uses a structured sparsity storage format, which is represented by an
-:math:` \times n` matrix, where:
+:math:`m \times n` matrix, where:
 
 * **m** = number of rows (integer)
 * **n** = number of columns (integer)
-* **sparsity** = 50%, ratio of `nnz` elements in every 2:1 (int) or 4:2 (others) element along the row
-  (4:2 means every 4 continuous elements will only have 2 `nnz` elements)
-* **compressed matrix** = matrix of `nnz` elements containing data
-* **metadata** = matrix of `nnz` elements containing the element indices in every 4:2 or 2:1 array
-  along the row (contents or structure of metadata is dependent on the chosen solution by backend
+* **sparsity** = 50%, the ratio of ``nnz`` elements in every 2:1 (int) or 4:2 (others) element along the row
+  (4:2 means every 4 continuous elements only has 2 ``nnz`` elements)
+* **compressed matrix** = matrix of ``nnz`` elements containing data
+* **metadata** = matrix of ``nnz`` elements containing the element indices in every 4:2 or 2:1 array
+  along the row (the contents or structure of the metadata is dependent on the chosen solution by the backend
   implementation)
 
 Consider the following :math:`4 \times 4` matrix and the structured sparsity structures using

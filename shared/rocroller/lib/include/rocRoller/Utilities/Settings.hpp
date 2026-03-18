@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -146,7 +123,7 @@ namespace rocRoller
         static inline const SettingsOption<Scheduling::SchedulerProcedure> Scheduler{
             "ROCROLLER_SCHEDULER",
             "Scheduler used when scheduling independent instruction streams.",
-            Scheduling::SchedulerProcedure::Sequential,
+            Scheduling::SchedulerProcedure::Priority,
             -1};
 
         static inline const SettingsOption<Scheduling::CostFunction> SchedulerCost{
@@ -184,6 +161,12 @@ namespace rocRoller
             false,
             -1};
 
+        static inline const SettingsOption<bool> NoRegisterLimits{
+            "ROCROLLER_IGNORE_OUT_OF_REGISTERS",
+            "Ignore register count limits for debugging purposes.",
+            false,
+            -1};
+
         static inline const SettingsOption<bool> AllowUnknownInstructions{
             "ROCROLLER_ALLOW_UNKNOWN_INSTRUCTIONS",
             "Whether to allow arbitrary instructions.",
@@ -197,6 +180,13 @@ namespace rocRoller
             false,
             -1};
 
+        static inline const SettingsOption<bool> AuditControlTracers{
+            "ROCROLLER_AUDIT_CONTROL_TRACERS",
+            "Whether to audit predicted use of arguments and/or registers."
+            "Could impact code gen performance.",
+            false,
+            -1};
+
         static inline const SettingsOption<bool> LogGraphs{
             "ROCROLLER_LOG_GRAPHS", "Whether to log graphs after each lowering stage.", true, -1};
 
@@ -207,10 +197,10 @@ namespace rocRoller
             -1};
 
         static inline const SettingsOption<AssemblerType> KernelAssembler{
-            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::Subprocess, -1};
+            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::InProcess, -1};
 
         static inline const SettingsOption<std::string> SubprocessAssemblerPath{
-            "ROCROLLER_SUBPROCESS_ASSEMBLER_PATH", "Path to subprocess assembler", "", -1};
+            "ROCROLLER_DEBUG_ASSEMBLER_PATH", "Path to subprocess assembler", "", -1};
 
         static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
 
@@ -230,6 +220,12 @@ namespace rocRoller
             "ROCROLLER_SERIALIZE_KERNEL_GRAPH_DOT",
             "Serialize kernel graph DOT into assembly file",
             getDefaultValueForKernelGraphDOTSerialization,
+            -1};
+
+        static inline const SettingsOption<std::size_t> GraphNodeLabelMaxLength{
+            "ROCROLLER_KGRAPH_NODE_LABEL_MAX_LENGTH",
+            "Maximum length of KernelGraph node expression when emitting DOT",
+            std::size_t{1000},
             -1};
 
         /**

@@ -39,7 +39,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrcolor_bad_arg(void)
+void testing_csrcolor_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -226,12 +226,13 @@ void testing_csrcolor_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrcolor()
+void testing_csrcolor(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-    // Determine absolute path of test matrix
-    // Matrices are stored at the same path in matrices directory
-    std::string filename = get_filename("nos3.bin");
+    hipsparseIndexBase_t idxBase  = argus.baseA;
+    std::string          filename = argus.filename;
+
+    floating_data_t<T> fractionToColor = make_DataType<floating_data_t<T>>(1.0);
 
     // hipSPARSE handle
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
@@ -240,28 +241,24 @@ hipsparseStatus_t testing_csrcolor()
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idxBase));
+
     // Host structures
-    std::vector<int>     hrow_ptr;
-    std::vector<int>     hcol_ind;
-    std::vector<T>       hval;
-    hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
+    std::vector<int> hrow_ptr;
+    std::vector<int> hcol_ind;
+    std::vector<T>   hval;
 
     // Initial Data on CPU
     srand(12345ULL);
-    floating_data_t<T> fractionToColor = make_DataType<floating_data_t<T>>(1.0);
 
     int m;
     int k;
     int nnz;
-
-    if(read_bin_matrix(filename.c_str(), m, k, nnz, hrow_ptr, hcol_ind, hval, idx_base) != 0)
-    {
-        fprintf(stderr, "Cannot open [read] %s\n", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase));
 
     hipsparseColorInfo_t colorInfo;
-    hipsparseCreateColorInfo(&colorInfo);
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));
 
     // allocate memory on device
     auto drow_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
@@ -296,11 +293,75 @@ hipsparseStatus_t testing_csrcolor()
                                              dcoloring,
                                              dreordering,
                                              colorInfo));
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
 
-    hipsparseDestroyColorInfo(colorInfo);
+    if(argus.unit_check)
+    {
+        std::vector<int> hcoloring(m);
+        std::vector<int> hreordering(m);
+        CHECK_HIP_ERROR(
+            hipMemcpy(hcoloring.data(), dcoloring, sizeof(int) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
+
+        // Check that two adjacent nodes do not have the same color
+        for(int row = 0; row < m; ++row)
+        {
+            int row_color = hcoloring[row];
+
+            int start = hrow_ptr[row] - idxBase;
+            int end   = hrow_ptr[row + 1] - idxBase;
+
+            for(int j = start; j < end; ++j)
+            {
+                int col = hcol_ind[j] - idxBase;
+                if(row != col)
+                {
+                    int col_color = hcoloring[col];
+                    EXPECT_HIPSPARSE_STATUS((row_color != col_color)
+                                                ? HIPSPARSE_STATUS_SUCCESS
+                                                : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                            HIPSPARSE_STATUS_SUCCESS);
+                }
+            }
+        }
+
+        // Check if colors are contiguous
+        int max_value = 0;
+        for(size_t i = 0; i < hcoloring.size(); ++i)
+        {
+            // Check value is well defined.
+            EXPECT_HIPSPARSE_STATUS((hcoloring[i] >= 0 && hcoloring[i] < m)
+                                        ? HIPSPARSE_STATUS_SUCCESS
+                                        : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
+
+            // Calculate maximum value.
+            if(hcoloring[i] > max_value)
+            {
+                max_value = hcoloring[i];
+            }
+        }
+        ++max_value;
+
+#ifdef __HIP_PLATFORM_AMD__
+        std::vector<bool> marker(max_value, false);
+        for(size_t i = 0; i < hcoloring.size(); ++i)
+        {
+            marker[hcoloring[i]] = true;
+        }
+
+        for(int i = 0; i < max_value; ++i)
+        {
+            EXPECT_HIPSPARSE_STATUS(marker[i] ? HIPSPARSE_STATUS_SUCCESS
+                                              : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
+        }
 #endif
+    }
 
-    return HIPSPARSE_STATUS_SUCCESS;
+    CHECK_HIPSPARSE_ERROR(hipsparseDestroyColorInfo(colorInfo));
+#endif
 }
 
 #endif // TESTING_CSRCOLOR_HPP

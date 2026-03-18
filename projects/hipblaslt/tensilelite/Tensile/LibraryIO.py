@@ -28,9 +28,10 @@ from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
 from Tensile.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Problem import ProblemType
+from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import NamedTuple, List, Dict
 import os
@@ -66,8 +67,16 @@ except ImportError:
     printWarning("CSafeLoader not installed. Fallback to SafeLoader.")
 
 try:
-    import msgpack
+    from yaml import CSafeDumper as yamlDumper
 except ImportError:
+    from yaml import SafeDumper as yamlDumper
+    printWarning("CSafeDumper not installed. Fallback to SafeDumper.")
+
+try:
+    import msgpack
+    _msgpack_available = True
+except ImportError:
+    _msgpack_available = False
     print("Message pack python library not detected. Must use YAML backend instead.")
 
 
@@ -97,7 +106,7 @@ def writeYAML(filename, data, **kwargs):
         kwargs["default_flow_style"] = None
 
     with open(filename, "w") as f:
-        yaml.dump(data, f, **kwargs)
+        yaml.dump(data, f, Dumper=yamlDumper, **kwargs)
 
 def writeJson(filename, data):
     """Writes data to file in json format."""
@@ -110,52 +119,53 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
+def _solutionsCacheFilename(yamlFilename):
+    """Return path to the msgpack cache file for a solutions YAML."""
+    base, _ = os.path.splitext(yamlFilename)
+    return base + ".solcache.dat"
+
 def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
     """Writes solution YAML file."""
-
-    # convert objects to nested dictionaries
-    solutionStates = []
-
-    if cache:
+    def load_solution_states_from_cache(filename) -> list[dict]:
+        """Try loading from msgpack cache, falling back to YAML."""
+        cachePath = _solutionsCacheFilename(filename)
+        # Try msgpack cache if available and the cache file exists
+        if _msgpack_available and os.path.exists(cachePath):
+            # If the YAML is newer than the cache, don't use the cache; assume it's stale
+            if os.path.getmtime(cachePath) >= os.path.getmtime(filename):
+                try:
+                    with open(cachePath, "rb") as cf:
+                        return msgpack.unpack(cf, raw=False)
+                except Exception as e:
+                    printWarning("Failed to load solution cache: {}".format(e))
+        # Fall back to YAML
         solYaml = read(filename)
         if biasTypeArgs and activationArgs:
-            solutionStates = solYaml[4:]
+            return solYaml[4:]
         elif biasTypeArgs or activationArgs:
-            solutionStates = solYaml[3:]
+            return solYaml[3:]
         else:
-            solutionStates = solYaml[2:]
-    else:
-        for solution in solutions:
-            solutionState = solution.getAttributes()
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            solutionState["ProblemType"]["DataType"] = \
-                    solutionState["ProblemType"]["DataType"].value
-            solutionState["ProblemType"]["DataTypeA"] = \
-                    solutionState["ProblemType"]["DataTypeA"].value
-            solutionState["ProblemType"]["DataTypeB"] = \
-                    solutionState["ProblemType"]["DataTypeB"].value
-            solutionState["ProblemType"]["DataTypeE"] = \
-                    solutionState["ProblemType"]["DataTypeE"].value
-            solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                    solutionState["ProblemType"]["DataTypeAmaxD"].value
-            solutionState["ProblemType"]["DestDataType"] = \
-                    solutionState["ProblemType"]["DestDataType"].value
-            solutionState["ProblemType"]["ComputeDataType"] = \
-                    solutionState["ProblemType"]["ComputeDataType"].value
-            solutionState["ProblemType"]["BiasDataTypeList"] = \
-                    [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-            solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                    solutionState["ProblemType"]["ActivationComputeDataType"].value
-            solutionState["ProblemType"]["ActivationType"] = \
-                    solutionState["ProblemType"]["ActivationType"].value
-            solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-            if "DataTypeMetadata" in solutionState["ProblemType"]:
-                solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
-            isa = solutionState["ISA"]
-            solutionState["ISA"] = [isa[0], isa[1], isa[2]]
-            solutionStates.append(solutionState)
+            return solYaml[2:]
+
+    with timing_context("python_wsol_prepare"):
+        if cache:
+            with timing_context("python_wsol_prepare_cache"):
+                solutionStates = load_solution_states_from_cache(filename)
+        else:
+            with timing_context("python_wsol_prepare_nocache"):
+                solutionStates: list[dict] = []
+                for solution in solutions:
+                    solutionState = solution.getAttributes()
+                    solutionState["ProblemType"] = solutionState["ProblemType"].state
+                    problemTypeToEnum(solutionState["ProblemType"])
+                    isa = solutionState["ISA"]
+                    solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+                    solutionStates.append(solutionState)
+                if _msgpack_available:
+                    try:
+                        writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
+                    except Exception as e:
+                        printWarning("Failed to write solution cache: {}".format(e))
     # write dictionaries
     with open(filename, "w") as f:
         f.write("- MinimumRequiredVersion: {}\n".format(__version__))
@@ -172,7 +182,7 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             f.write("- ActivationArgs:\n")
             for setting in activationArgs.settingList:
                 f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, default_flow_style=None)
+        yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
 
 
 ###############################
@@ -345,11 +355,8 @@ def parseLibraryLogicData(
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
-
-            # The ActivationType setting in YAML is meaningless in customKernel case.
-            # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
-            solutionState["ProblemType"]["ActivationType"] = problemType["ActivationType"]
-
+        # overwrite problemType if any
+        solutionState["ProblemType"] = problemType
         solutionObject = Solution(
                              solutionState,
                              splitGSU,
@@ -359,15 +366,6 @@ def parseLibraryLogicData(
                              isaInfoMap,
                              srcFile
                          )
-        solutionProblemType = solutionObject["ProblemType"]
-        if problemType != solutionProblemType:
-            # find the mismatched items in ProblemType
-            results = ""
-            solIdx = solutionObject["SolutionIndex"]
-            for item in problemType:
-                if problemType[item] != solutionProblemType[item]:
-                    results += f"\t{item}: {problemType[item]} != {solutionProblemType[item]}\n"
-            printExit(f"ProblemType in library logic file {srcFile} doesn't match solution(idx={solIdx}): \n{results}")
         return solutionObject
 
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
@@ -473,12 +471,21 @@ def getCUCount() -> int:
     """Return the number of CU Count in current Hardware."""
     CU = os.environ.get("CU", None)
     if CU is None:
-        res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={"ROCR_VISIBLE_DEVICES":"0"})
-        CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
-        match = re.search(CU_RE, res.stdout.decode("utf-8").split('\n')[-2])
-        if match:
-            CU = int(match.group('COMPUTE_UNIT').strip())
-    return CU
+        try:
+            res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={**os.environ, "ROCR_VISIBLE_DEVICES": "0"})
+            CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
+            lines = res.stdout.decode("utf-8").strip().split('\n')
+            if lines:
+                match = re.search(CU_RE, lines[-1])
+                if match:
+                    CU = int(match.group('COMPUTE_UNIT').strip())
+        except Exception:
+            pass
+
+    if CU is None:
+        printExit("Failed to get Compute Unit count from rocminfo or env variable 'CU'")
+
+    return int(CU)
 
 def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
     """Creates the data for a library logic file suitable for writing to YAML."""
@@ -534,32 +541,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
-        solutionState["ProblemType"] = solutionState["ProblemType"].state
-        solutionState["ProblemType"]["DataType"] = \
-                solutionState["ProblemType"]["DataType"].value
-        solutionState["ProblemType"]["DataTypeA"] = \
-                solutionState["ProblemType"]["DataTypeA"].value
-        solutionState["ProblemType"]["DataTypeB"] = \
-                solutionState["ProblemType"]["DataTypeB"].value
-        solutionState["ProblemType"]["DataTypeE"] = \
-                solutionState["ProblemType"]["DataTypeE"].value
-        solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                solutionState["ProblemType"]["DataTypeAmaxD"].value
-        solutionState["ProblemType"]["DestDataType"] = \
-                solutionState["ProblemType"]["DestDataType"].value
-        solutionState["ProblemType"]["ComputeDataType"] = \
-                solutionState["ProblemType"]["ComputeDataType"].value
-        solutionState["ProblemType"]["BiasDataTypeList"] = \
-                [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-        solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                solutionState["ProblemType"]["ActivationComputeDataType"].value
-        solutionState["ProblemType"]["ActivationType"] = \
-                solutionState["ProblemType"]["ActivationType"].value
-        solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-        if "DataTypeMetadata" in solutionState["ProblemType"]:
-            solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
+        del solutionState["ProblemType"]
         isa = solutionState["ISA"]
         solutionState["ISA"] = [isa[0], isa[1], isa[2]]
         solutionList.append(solutionState)
@@ -568,32 +550,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
         tileSolutions = logicTuple[5]
         for solution in tileSolutions:
             solutionState = solution.getAttributes()
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            solutionState["ProblemType"]["DataType"] = \
-                    solutionState["ProblemType"]["DataType"].value
-            solutionState["ProblemType"]["DataTypeA"] = \
-                    solutionState["ProblemType"]["DataTypeA"].value
-            solutionState["ProblemType"]["DataTypeB"] = \
-                    solutionState["ProblemType"]["DataTypeB"].value
-            solutionState["ProblemType"]["DataTypeE"] = \
-                    solutionState["ProblemType"]["DataTypeE"].value
-            solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                    solutionState["ProblemType"]["DataTypeAmaxD"].value
-            solutionState["ProblemType"]["DestDataType"] = \
-                    solutionState["ProblemType"]["DestDataType"].value
-            solutionState["ProblemType"]["ComputeDataType"] = \
-                    solutionState["ProblemType"]["ComputeDataType"].value
-            solutionState["ProblemType"]["BiasDataTypeList"] = \
-                    [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-            solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                    solutionState["ProblemType"]["ActivationComputeDataType"].value
-            solutionState["ProblemType"]["ActivationType"] = \
-                    solutionState["ProblemType"]["ActivationType"].value
-            solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-            if "DataTypeMetadata" in solutionState["ProblemType"]:
-                solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
+            del solutionState["ProblemType"]
             solutionList.append(solutionState)
 
     data.append(solutionList)

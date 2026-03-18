@@ -18,6 +18,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/normal_iterator.h>
@@ -91,11 +99,11 @@ public:
   // note that allocate does *not* automatically call deallocate
   THRUST_HOST_DEVICE void allocate(size_type n);
 
-  THRUST_HOST_DEVICE void deallocate();
+  THRUST_HOST_DEVICE void deallocate() noexcept;
 
   THRUST_HOST_DEVICE void swap(contiguous_storage& x);
 
-  THRUST_HOST_DEVICE void default_construct_n(iterator first, size_type n);
+  THRUST_HOST_DEVICE void value_initialize_n(iterator first, size_type n);
 
   THRUST_HOST_DEVICE void uninitialized_fill_n(iterator first, size_type n, const value_type& value);
 
@@ -113,11 +121,12 @@ public:
   THRUST_HOST_DEVICE iterator
   uninitialized_copy_n(thrust::execution_policy<System>& from_system, InputIterator first, Size n, iterator result);
 
-  THRUST_HOST_DEVICE void destroy(iterator first, iterator last);
+  THRUST_HOST_DEVICE void destroy(iterator first, iterator last) noexcept;
 
-  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch(const contiguous_storage& other);
+  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch(const contiguous_storage& other) noexcept;
 
-  THRUST_HOST_DEVICE void destroy_on_allocator_mismatch(const contiguous_storage& other, iterator first, iterator last);
+  THRUST_HOST_DEVICE void
+  destroy_on_allocator_mismatch(const contiguous_storage& other, iterator first, iterator last) noexcept;
 
   THRUST_HOST_DEVICE void set_allocator(const allocator_type& alloc);
 
@@ -132,6 +141,8 @@ public:
   // allow move assignment for a sane implementation of allocator propagation
   // on move assignment
   THRUST_HOST_DEVICE contiguous_storage& operator=(contiguous_storage&& other);
+
+  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(contiguous_storage, const_iterator);
 
 private:
   // XXX we could inherit from this to take advantage of empty base class optimization
@@ -152,15 +163,16 @@ private:
 
   THRUST_HOST_DEVICE bool is_allocator_not_equal_dispatch(false_type, const allocator_type&) const;
 
-  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch_dispatch(true_type, const contiguous_storage& other);
-
-  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage& other);
+  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch_dispatch(true_type, const contiguous_storage& other) noexcept;
 
   THRUST_HOST_DEVICE void
-  destroy_on_allocator_mismatch_dispatch(true_type, const contiguous_storage& other, iterator first, iterator last);
+  deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage& other) noexcept;
 
-  THRUST_HOST_DEVICE void
-  destroy_on_allocator_mismatch_dispatch(false_type, const contiguous_storage& other, iterator first, iterator last);
+  THRUST_HOST_DEVICE void destroy_on_allocator_mismatch_dispatch(
+    true_type, const contiguous_storage& other, iterator first, iterator last) noexcept;
+
+  THRUST_HOST_DEVICE void destroy_on_allocator_mismatch_dispatch(
+    false_type, const contiguous_storage& other, iterator first, iterator last) noexcept;
 
   THRUST_HOST_DEVICE void propagate_allocator_dispatch(true_type, const contiguous_storage& other);
 
@@ -169,12 +181,14 @@ private:
   THRUST_HOST_DEVICE void propagate_allocator_dispatch(true_type, contiguous_storage& other);
 
   THRUST_HOST_DEVICE void propagate_allocator_dispatch(false_type, contiguous_storage& other);
+
+  friend THRUST_HOST_DEVICE void swap(contiguous_storage& lhs, contiguous_storage& rhs) noexcept(noexcept(lhs.swap(rhs)))
+  {
+    lhs.swap(rhs);
+  }
 }; // end contiguous_storage
 
 } // namespace detail
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void swap(detail::contiguous_storage<T, Alloc>& lhs, detail::contiguous_storage<T, Alloc>& rhs);
 
 THRUST_NAMESPACE_END
 

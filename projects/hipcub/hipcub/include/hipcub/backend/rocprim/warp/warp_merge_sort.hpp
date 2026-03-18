@@ -129,7 +129,8 @@ class WarpMergeSort
         ValueT,
         LOGICAL_WARP_THREADS,
         ITEMS_PER_THREAD,
-        WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT, PTX_ARCH>>
+        WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT, PTX_ARCH>,
+        true>
 {
 private:
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == HIPCUB_DEVICE_WARP_THREADS;
@@ -140,7 +141,8 @@ private:
                                                          ValueT,
                                                          LOGICAL_WARP_THREADS,
                                                          ITEMS_PER_THREAD,
-                                                         WarpMergeSort>;
+                                                         WarpMergeSort,
+                                                         true>;
 
   const unsigned int warp_id;
   const uint64_t member_mask;
@@ -148,13 +150,12 @@ private:
 public:
   WarpMergeSort() = delete;
 
-  HIPCUB_DEVICE __forceinline__
-  WarpMergeSort(typename BlockMergeSortStrategyT::TempStorage &temp_storage)
+  HIPCUB_DEVICE __forceinline__ WarpMergeSort(
+      typename BlockMergeSortStrategyT::TempStorage& temp_storage)
       : BlockMergeSortStrategyT(temp_storage,
-                                IS_ARCH_WARP
-                                  ? LaneId()
-                                  : (LaneId() % LOGICAL_WARP_THREADS))
-      , warp_id(IS_ARCH_WARP ? 0 : (LaneId() / LOGICAL_WARP_THREADS))
+                                IS_ARCH_WARP ? ::rocprim::lane_id()
+                                             : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
+      , warp_id(IS_ARCH_WARP ? 0 : (::rocprim::lane_id() / LOGICAL_WARP_THREADS))
       , member_mask(WarpMask<LOGICAL_WARP_THREADS>(warp_id))
   {
   }
@@ -167,7 +168,7 @@ public:
 private:
   HIPCUB_DEVICE __forceinline__ void SyncImplementation() const
   {
-    WARP_SYNC(member_mask);
+      ::rocprim::wave_barrier();
   }
 
   friend BlockMergeSortStrategyT;

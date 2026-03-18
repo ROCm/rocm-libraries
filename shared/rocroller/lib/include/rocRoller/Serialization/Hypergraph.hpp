@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -39,25 +16,22 @@ namespace rocRoller
     namespace Serialization
     {
         template <typename IO>
-        struct MappingTraits<Graph::HypergraphIncident, IO, EmptyContext>
+        struct MappingTraits<Graph::HypergraphIncidenceContainer, IO, EmptyContext>
         {
-            using iot              = IOTraits<IO>;
-            static const bool flow = true;
+            using iot = IOTraits<IO>;
 
-            static void mapping(IO& io, typename Graph::HypergraphIncident& inc)
+            static void mapping(IO& io, Graph::HypergraphIncidenceContainer& incidence)
             {
-                iot::mapRequired(io, "src", inc.src);
-                iot::mapRequired(io, "dst", inc.dst);
-                iot::mapRequired(io, "edgeOrder", inc.edgeOrder);
+                iot::mapRequired(io, "incidenceBySrc", incidence.m_incidenceBySrc);
+                iot::mapRequired(io, "incidenceByDst", incidence.m_incidenceByDst);
             }
 
-            static void mapping(IO& io, typename Graph::HypergraphIncident& inc, EmptyContext&)
+            static void
+                mapping(IO& io, Graph::HypergraphIncidenceContainer& incidence, EmptyContext&)
             {
-                mapping(io, inc);
+                mapping(io, incidence);
             }
         };
-
-        ROCROLLER_SERIALIZE_VECTOR(false, Graph::HypergraphIncident);
 
         template <CNamedVariant Var>
         struct ElementEntry
@@ -109,8 +83,6 @@ namespace rocRoller
 
             static void mapping(IO& io, HG& graph)
             {
-                iot::mapRequired(io, "nextIndex", graph.m_nextIndex);
-
                 std::vector<ElementEntry<Element>> elements;
                 if(iot::outputting(io))
                 {
@@ -127,24 +99,7 @@ namespace rocRoller
                         graph.m_elements[entry.id] = entry.value;
                 }
 
-                std::vector<typename HG::Incident> incidence;
-
-                if(iot::outputting(io))
-                {
-                    auto const& container = graph.m_incidence.template get<typename HG::BySrc>();
-
-                    incidence.reserve(container.size());
-                    std::copy(
-                        container.begin(), container.end(), std::back_insert_iterator(incidence));
-                }
-
-                iot::mapRequired(io, "incidence", incidence);
-
-                if(!iot::outputting(io))
-                {
-                    for(auto& i : incidence)
-                        graph.m_incidence.insert(std::move(i));
-                }
+                iot::mapRequired(io, "incidence", graph.m_incidence);
             }
 
             static void mapping(IO& io, HG& graph, EmptyContext&)

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                         continue;
                     if(length % t == 0)
                     {
-                        if(std::all_of(factors.begin(), factors.end(), [=](unsigned int f) {
+                        if(std::all_of(factors.begin(), factors.end(), [=, this](unsigned int f) {
                                return (length / t) % f == 0;
                            }))
                             threads_per_transform = t;
@@ -70,13 +70,15 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             workgroup_size = threads_per_transform * transforms_per_block;
         }
 
-        nregisters = compute_nregisters(length, factors, threads_per_transform);
-        R.size     = Expression{nregisters};
+        nregisters                = compute_nregisters(length, factors, threads_per_transform);
+        R.size                    = Expression{nregisters};
+        lds_reg_sync.decl_default = Literal{"true"};
     }
     virtual ~StockhamKernel(){};
 
     unsigned int nregisters;
     unsigned int transforms_per_block;
+    unsigned int transforms_per_block_pp;
 
     // data that may be overridden by subclasses (different tiling types)
     unsigned int n_device_calls = 1;
@@ -107,7 +109,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     //
     // arguments
     //
-    // global input/ouput buffer
+    // global input/output buffer
     Variable buf{"buf", "scalar_type", true, true};
 
     // global twiddle table (stacked)
@@ -148,6 +150,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
     Variable lds_row_padding{"lds_row_padding", "unsigned int"};
 
+    // hip thread grid dim
+    Variable grid_dim{"gridDim.x", "unsigned int"};
+
     // hip thread block id
     Variable block_id{"blockIdx.x", "unsigned int"};
 
@@ -163,6 +168,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // So we'd like to do that expensive mod or div once and for all
     // Variable thread_in_device{"thread_in_device", "size_t"};
     Variable thread_in_device{"thread_in_device", "unsigned int"};
+    Variable thread_in_device_pp{"thread_in_device_pp", "unsigned int"};
+    Variable thread_in_device_pp_twiddles{"thread_in_device_pp_twiddles", "unsigned int"};
 
     // global input/output buffer offset to current transform
     Variable offset{"offset", "size_t"};
@@ -210,6 +217,19 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // butterfly registers
     Variable R{"R", "scalar_type", false, false};
 
+    // do syncthreads in lds_reg device functions
+    Variable lds_reg_sync{"lds_reg_sync", "bool"};
+
+    virtual unsigned int launcher_workgroup_size()
+    {
+        return workgroup_size;
+    }
+
+    virtual unsigned int launcher_transforms_per_block()
+    {
+        return transforms_per_block;
+    }
+
     virtual std::vector<unsigned int> launcher_lengths()
     {
         return {length};
@@ -224,6 +244,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         TemplateList tpls;
         tpls.append(scalar_type);
         tpls.append(stride_type);
+        tpls.append(lds_reg_sync);
         return tpls;
     }
 
@@ -311,7 +332,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     {
         NO_GUARD,
         GUARD_BY_IF,
-        GURAD_BY_FUNC_ARG,
+        GUARD_BY_FUNC_ARG,
     };
 
     virtual StatementList real_trans_pre_post()
@@ -498,17 +519,19 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
         Expression guard_expr = Expression{Literal{"true"}};
 
-        // do thread gurad when guard_by_if or guard_by_arg
+        const auto thread_guard_cond = length / width;
+
+        // do thread guard when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
-            if((!trans_dir && threads_per_transform > length / width)
-               || (trans_dir && workgroup_size / transforms_per_block > length / width))
+            if((!trans_dir && threads_per_transform > (length / width))
+               || (trans_dir && workgroup_size / transforms_per_block > (length / width)))
             {
                 if(writeGuard)
-                    guard_expr = Expression{write && (thread < length / width)};
+                    guard_expr = Expression{write && (thread < thread_guard_cond)};
                 else
-                    guard_expr = Expression{thread < length / width};
+                    guard_expr = Expression{thread < thread_guard_cond};
             }
             else
             {
@@ -537,11 +560,11 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform;
 
-            // always do thread gurad
+            // always do thread guard
             if(writeGuard)
-                guard_expr = Expression{write && (thread + dt < length / width)};
+                guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
             else
-                guard_expr = Expression{thread + dt < length / width};
+                guard_expr = Expression{thread + dt < thread_guard_cond};
 
             work = generator(0, iheight, width, dt, guard_expr);
 
@@ -574,7 +597,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         // first pass of load (full)
         unsigned int width  = factors[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
-        body += SyncThreads();
+        body += If{lds_reg_sync, {SyncThreads()}};
         body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
                          width,
                          height,
@@ -604,7 +627,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         unsigned int width     = factors.back();
         float        height    = static_cast<float>(length) / width / threads_per_transform;
         unsigned int cumheight = product(factors.begin(), factors.end() - 1);
-        body += SyncThreads();
+        body += If{lds_reg_sync, {SyncThreads()}};
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
                          width,
                          height,
@@ -615,7 +638,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Function generate_device_function()
     {
         std::string function_name
-            = "forward_length" + std::to_string(length) + "_" + tiling_name() + "_device";
+            = "forward_full_pass_length" + std::to_string(length) + "_" + tiling_name() + "_device";
 
         Function f{function_name};
         f.arguments = device_arguments();
@@ -840,10 +863,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
             templates.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
-            body
-                += Call{"forward_length" + std::to_string(length) + "_" + tiling_name() + "_device",
-                        templates,
-                        arguments};
+            body += Call{"forward_full_pass_length" + std::to_string(length) + "_" + tiling_name()
+                             + "_device",
+                         templates,
+                         arguments};
             body += LineBreak{};
         }
 
@@ -899,9 +922,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual StatementList store_to_global(bool store_registers) = 0;
 
-    virtual TemplateList device_lds_reg_inout_device_call_templates()
+    virtual TemplateList device_lds_reg_inout_device_call_templates(bool syncthreads = true)
     {
-        return {scalar_type, stride_type};
+        Variable sync_var{syncthreads ? "true" : "false", "bool"};
+        return {scalar_type, stride_type, sync_var};
     }
 
     virtual std::vector<Expression> device_lds_reg_inout_device_call_arguments()

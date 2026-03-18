@@ -15,7 +15,12 @@ hipBLAS exports an interface that does not require client changes, regardless of
 chosen backend. Currently, it supports :doc:`rocBLAS <rocblas:index>` and
 NVIDIA CUDA `cuBLAS <https://developer.nvidia.com/cublas>`_ as backends.
 
-The hipBLAS public repository is located at  `<https://github.com/ROCm/hipBLAS>`_.
+The hipBLAS public repository is located at
+`<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas>`_.
+
+.. note::
+
+   The hipBLAS repository for ROCm 6.4.3 and earlier is located at `<https://github.com/ROCm/hipBLAS>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -32,15 +37,14 @@ The hipBLAS public repository is located at  `<https://github.com/ROCm/hipBLAS>`
   .. grid-item-card:: Conceptual
 
     * :doc:`Library source code organization <./conceptual/library-source-code-organization>`
-  
+
   .. grid-item-card:: How to
 
     * :doc:`Use hipBLAS clients <./how-to/using-hipblas-clients>`
-    * :doc:`Contribute to hipBLAS <./how-to/contributing-to-hipblas>`
 
   .. grid-item-card:: Examples
 
-    * `hipBLAS client examples <https://github.com/ROCm/hipBLAS/tree/develop/clients/samples>`_
+    * `hipBLAS client examples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas/clients/samples>`_
 
   .. grid-item-card:: API Reference
 
@@ -50,6 +54,8 @@ The hipBLAS public repository is located at  `<https://github.com/ROCm/hipBLAS>`
 
 To contribute to the documentation, see
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the hipBLAS code base, see :doc:`Contribute to hipBLAS <./contribute>`.
+
 
 You can find licensing information on the
 `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

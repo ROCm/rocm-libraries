@@ -40,24 +40,35 @@ miopenProblemDirection_t CmdArgToDirection(ConvDirection direction)
     MIOPEN_THROW(miopenStatusInternalError);
 }
 
-void ConvDataType(std::stringstream& ss, const miopen::TensorDescriptor& desc)
+void DriverDataType(const std::string& prefix,
+                    std::stringstream& ss,
+                    const miopen::TensorDescriptor& desc)
 {
     if(desc.GetType() == miopenHalf)
     {
-        ss << "convfp16";
+        ss << prefix + "fp16";
     }
     else if(desc.GetType() == miopenBFloat16)
     {
-        ss << "convbfp16";
+        ss << prefix + "bfp16";
     }
     else if(desc.GetType() == miopenInt8)
     {
-        ss << "convint8";
+        ss << prefix + "int8";
     }
     else
     {
-        ss << "conv";
+        ss << prefix;
     }
+}
+
+void DriverDataType(const std::string& prefix,
+                    std::string& str,
+                    const miopen::TensorDescriptor& desc)
+{
+    std::stringstream ss;
+    DriverDataType(prefix, ss, desc);
+    str += ss.str();
 }
 
 // test based on the input tensor and scaleMean.
@@ -141,8 +152,10 @@ void BnDataType(std::stringstream& ss,
 
 void BnDriverInfo(std::stringstream& ss,
                   const BatchNormDirection_t& dir,
-                  const void* resultRunningMean,
-                  const void* resultRunningVariance,
+                  const void* prevResultRunningMean,
+                  const void* prevResultRunningVariance,
+                  const void* nextResultRunningMean,
+                  const void* nextResultRunningVariance,
                   const void* resultSaveMean,
                   const void* resultSaveInvVariance)
 {
@@ -154,7 +167,9 @@ void BnDriverInfo(std::stringstream& ss,
     {
         ss << " --forw 0 -b 1";
     }
-    if((resultRunningMean != nullptr) && (resultRunningVariance != nullptr))
+    // Check if running statistics are enabled (either prev or both prev+next for V3)
+    if((prevResultRunningMean != nullptr && prevResultRunningVariance != nullptr) ||
+       (nextResultRunningMean != nullptr && nextResultRunningVariance != nullptr))
     {
         ss << " -r 1";
     }
@@ -186,7 +201,7 @@ std::string ConvArgsForMIOpenDriver(const miopen::TensorDescriptor& xDesc,
 
     std::stringstream ss;
     if(print_for_conv_driver)
-        ConvDataType(ss, xDesc);
+        DriverDataType("conv", ss, xDesc);
 
     /// \todo Dimensions (N, C, H, W, K..) are always parsed as if layout is NC(D)HW.
     /// For other layouts, invalid values are printed.
@@ -284,12 +299,15 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
                                      const miopenTensorDescriptor_t biasDesc,
                                      const miopenTensorDescriptor_t saveMeanDesc,
                                      miopenBatchNormMode_t bn_mode,
-                                     const void* resultRunningMean,
-                                     const void* resultRunningVariance,
+                                     const void* prevResultRunningMean,
+                                     const void* prevResultRunningVariance,
+                                     const void* nextResultRunningMean,
+                                     const void* nextResultRunningVariance,
                                      const void* resultSaveMean,
                                      const void* resultSaveInvVariance,
                                      const BatchNormDirection_t& dir,
                                      const miopenActivationDescriptor_t activDesc,
+                                     bool useInverseVariance,
                                      bool print_for_bn_driver)
 {
     int size = {0};
@@ -306,33 +324,37 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
                    dir);
     }
 
-    ss << " -n " << miopen::deref(xDesc).GetLengths()[0] // clang-format off
-            << " -c " << miopen::deref(xDesc).GetLengths()[1];
-        if(size == 5)
-        {
-            ss << " -D " << miopen::deref(xDesc).GetLengths()[2]
-            << " -H " << miopen::deref(xDesc).GetLengths()[3]
-            << " -W " << miopen::deref(xDesc).GetLengths()[4];
-        }
-        else
-        {
-            ss << " -H " << miopen::deref(xDesc).GetLengths()[2]
-            << " -W " << miopen::deref(xDesc).GetLengths()[3];
-        }
-        if (activDesc != nullptr && miopen::deref(activDesc).GetMode() != miopenActivationPASTHRU)
-	{
-            ss << " -f " << miopen::deref(activDesc).GetMode()
-	    << " -x " << miopen::deref(activDesc).GetAlpha()
-	    << " -y " << miopen::deref(activDesc).GetBeta()
-	    << " -z " << miopen::deref(activDesc).GetGamma();
-	}
-            ss << " -m " << bn_mode; // clang-format on
+    ss << " -n " << miopen::deref(xDesc).GetLengths()[0];
+    ss << " -c " << miopen::deref(xDesc).GetLengths()[1];
+    if(size == 5)
+    {
+        ss << " -D " << miopen::deref(xDesc).GetLengths()[2];
+        ss << " -H " << miopen::deref(xDesc).GetLengths()[3];
+        ss << " -W " << miopen::deref(xDesc).GetLengths()[4];
+    }
+    else
+    {
+        ss << " -H " << miopen::deref(xDesc).GetLengths()[2];
+        ss << " -W " << miopen::deref(xDesc).GetLengths()[3];
+    }
+
+    if(activDesc != nullptr && miopen::deref(activDesc).GetMode() != miopenActivationPASTHRU)
+    {
+        ss << " -f " << miopen::deref(activDesc).GetMode();
+        ss << " -x " << miopen::deref(activDesc).GetAlpha();
+        ss << " -y " << miopen::deref(activDesc).GetBeta();
+        ss << " -z " << miopen::deref(activDesc).GetGamma();
+    }
+    ss << " -m " << bn_mode;
+    ss << " -I " << (useInverseVariance ? '1' : '0');
     if(print_for_bn_driver)
     {
         BnDriverInfo(ss,
                      dir,
-                     resultRunningMean,
-                     resultRunningVariance,
+                     prevResultRunningMean,
+                     prevResultRunningVariance,
+                     nextResultRunningMean,
+                     nextResultRunningVariance,
                      resultSaveMean,
                      resultSaveInvVariance);
         ss << " --layout " << miopen::deref(xDesc).GetLayout_str();

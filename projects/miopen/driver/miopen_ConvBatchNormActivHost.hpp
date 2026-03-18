@@ -49,6 +49,7 @@ int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 {
     int nIn, cIn, hIn, wIn;
     miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+    const auto tensorLayout = miopen::deref(inputTensor).GetLayout_t();
 
     int n_batchs = nIn;
     int channels = cIn;
@@ -76,7 +77,9 @@ int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,
         { // via rows
             for(int column = 0; column < width; column++)
             { // via columns
-                adjIndex = in_cstride * cidx + width * row + column;
+                adjIndex = (tensorLayout == miopenTensorNCHW)
+                               ? in_cstride * cidx + width * row + column
+                               : width * channels * row + channels * column + cidx;
                 for(int bidx = 0; bidx < n_batchs; bidx++)
                 { // via mini_batch
                     index          = in_nstride * bidx + adjIndex;
@@ -103,6 +106,7 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 
     int nIn, cIn, hIn, wIn;
     miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+    const auto tensorLayout = miopen::deref(inputTensor).GetLayout_t();
 
     int n_batchs = nIn;
     int channels = cIn;
@@ -128,7 +132,9 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
         { // via rows
             for(int column = 0; column < width; column++)
             { // via columns
-                adjIndex          = in_cstride * cidx + width * row + column;
+                adjIndex          = (tensorLayout == miopenTensorNCHW)
+                                        ? in_cstride * cidx + width * row + column
+                                        : width * channels * row + channels * column + cidx;
                 mean              = estimatedMean[adjIndex];
                 variance          = estimatedVariance[adjIndex];
                 double elemInvVar = 1.0 / double(sqrt(variance + epsilon));
@@ -142,7 +148,7 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
                     // y_i = gamma*x_hat + beta
                     out_ptr[index] = (scale_ptr[adjIndex] * inhat) + bias_ptr[adjIndex];
                 } // end for(n_batchs)
-            }     // for (column)
+            } // for (column)
         }
     }
     return (ret);
@@ -202,6 +208,9 @@ void miopenActivationFwdHost(int neuron_type,
         break;
     case MIOPEN_NEURON_ELU: // alpah * (exp(x)-1) | x<=0; x | x>0
         f = [=](Tref x) { return (x > 0) ? x : alpha * std::expm1(x); };
+        break;
+    case MIOPEN_NEURON_CLAMP: // max(alpha, min(beta, x)))
+        f = [=](Tref x) { return std::max(alpha, std::min(beta, x)); };
         break;
     default: printf("ERROR: unknown neuron type: %d\n", neuron_type); break;
     }

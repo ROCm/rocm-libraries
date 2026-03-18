@@ -63,6 +63,7 @@ function( rocblas_client_library_settings lib_target_ )
 
   # We widely use extensions and AMD Clang warnings are too noisy
   target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-c++17-extensions> )
+  target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
 
   if(BUILD_ADDRESS_SANITIZER)
     target_compile_definitions( ${lib_target_} PRIVATE ASAN_BUILD )
@@ -144,6 +145,8 @@ set(rocblas_testing_common_source
     blas3/common_geam.cpp
     blas_ex/common_gemmt.cpp
     blas_ex/common_geam_ex.cpp
+    blas_ex/common_syrk_ex.cpp
+    blas_ex/common_herk_ex.cpp
 )
 
 add_library(rocblas_clients_common OBJECT ${rocblas_testing_common_tensile_source} ${rocblas_common_source})
@@ -160,8 +163,9 @@ endif()
 target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB=${BLAS_LIBRARY} )
 
 
-# target is not linked as OBJECT library but we want any interface flags from dependencies
-target_link_libraries( rocblas_clients_common roc::rocblas hip::host hip::device $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
+# target is not linked as OBJECT library but we want any interface flags from dependencies, e.g. COMMON_LINK_LIBS may bring OpenMP
+target_link_libraries( rocblas_clients_common PUBLIC roc::rocblas hip::host hip::device $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
+if(BUILD_WITH_HIPBLASLT)
+    target_link_libraries( rocblas_clients_common PRIVATE roc::hipblaslt )
+endif()
 target_link_libraries( rocblas_clients_testing_common roc::rocblas hip::host hip::device ${BLAS_LIBRARY} $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
-
-

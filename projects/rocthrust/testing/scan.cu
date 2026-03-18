@@ -27,6 +27,8 @@
 
 #include <unittest/unittest.h>
 
+#include _THRUST_STD_INCLUDE(array)
+
 template <typename T>
 struct max_functor
 {
@@ -37,9 +39,10 @@ struct max_functor
 };
 
 template <class Vector>
-void TestScanSimple(void)
+void TestScanSimple()
 {
   using T = typename Vector::value_type;
+
   // icc miscompiles the intermediate sum updates for custom_numeric.
   // The issue doesn't happen with opts disabled, or on other compilers.
   // Printing the intermediate sum each iteration "fixes" the issue,
@@ -57,54 +60,33 @@ void TestScanSimple(void)
   Vector result(5);
   Vector output(5);
 
-  input[0] = 1;
-  input[1] = 3;
-  input[2] = -2;
-  input[3] = 4;
-  input[4] = -5;
-
+  input = {1, 3, -2, 4, -5};
   Vector input_copy(input);
 
   // inclusive scan
-  iter      = thrust::inclusive_scan(input.begin(), input.end(), output.begin());
-  result[0] = 1;
-  result[1] = 4;
-  result[2] = 2;
-  result[3] = 6;
-  result[4] = 1;
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin());
+  result = {1, 4, 2, 6, 1};
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(input, input_copy);
   ASSERT_EQUAL(output, result);
 
   // exclusive scan
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(0));
-  result[0] = 0;
-  result[1] = 1;
-  result[2] = 4;
-  result[3] = 2;
-  result[4] = 6;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(0));
+  result = {0, 1, 4, 2, 6};
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(input, input_copy);
   ASSERT_EQUAL(output, result);
 
   // exclusive scan with init
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3));
-  result[0] = 3;
-  result[1] = 4;
-  result[2] = 7;
-  result[3] = 5;
-  result[4] = 9;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3));
+  result = {3, 4, 7, 5, 9};
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(input, input_copy);
   ASSERT_EQUAL(output, result);
 
   // inclusive scan with op
-  iter      = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), thrust::plus<T>());
-  result[0] = 1;
-  result[1] = 4;
-  result[2] = 2;
-  result[3] = 6;
-  result[4] = 1;
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), thrust::plus<T>());
+  result = {1, 4, 2, 6, 1};
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(input, input_copy);
   ASSERT_EQUAL(output, result);
@@ -117,24 +99,16 @@ void TestScanSimple(void)
   ASSERT_EQUAL(output, result);
 
   // exclusive scan with init and op
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), thrust::plus<T>());
-  result[0] = 3;
-  result[1] = 4;
-  result[2] = 7;
-  result[3] = 5;
-  result[4] = 9;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), thrust::plus<T>());
+  result = {3, 4, 7, 5, 9};
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(input, input_copy);
   ASSERT_EQUAL(output, result);
 
   // inplace inclusive scan
-  input     = input_copy;
-  iter      = thrust::inclusive_scan(input.begin(), input.end(), input.begin());
-  result[0] = 1;
-  result[1] = 4;
-  result[2] = 2;
-  result[3] = 6;
-  result[4] = 1;
+  input  = input_copy;
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), input.begin());
+  result = {1, 4, 2, 6, 1};
   ASSERT_EQUAL(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQUAL(input, result);
 
@@ -146,24 +120,16 @@ void TestScanSimple(void)
   ASSERT_EQUAL(input, result);
 
   // inplace exclusive scan with init
-  input     = input_copy;
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), input.begin(), T(3));
-  result[0] = 3;
-  result[1] = 4;
-  result[2] = 7;
-  result[3] = 5;
-  result[4] = 9;
+  input  = input_copy;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), input.begin(), T(3));
+  result = {3, 4, 7, 5, 9};
   ASSERT_EQUAL(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQUAL(input, result);
 
   // inplace exclusive scan with implicit init=0
-  input     = input_copy;
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), input.begin());
-  result[0] = 0;
-  result[1] = 1;
-  result[2] = 4;
-  result[3] = 2;
-  result[4] = 6;
+  input  = input_copy;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), input.begin());
+  result = {0, 1, 4, 2, 6};
   ASSERT_EQUAL(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQUAL(input, result);
 }
@@ -241,7 +207,7 @@ void TestExclusiveScanDispatchImplicit()
 }
 DECLARE_UNITTEST(TestExclusiveScanDispatchImplicit);
 
-void TestInclusiveScan32(void)
+void TestInclusiveScan32()
 {
   using T  = int;
   size_t n = 32;
@@ -259,7 +225,7 @@ void TestInclusiveScan32(void)
 }
 DECLARE_UNITTEST(TestInclusiveScan32);
 
-void TestExclusiveScan32(void)
+void TestExclusiveScan32()
 {
   using T  = int;
   size_t n = 32;
@@ -279,21 +245,11 @@ void TestExclusiveScan32(void)
 DECLARE_UNITTEST(TestExclusiveScan32);
 
 template <class IntVector, class FloatVector>
-void TestScanMixedTypes(void)
+void TestScanMixedTypes()
 {
   // make sure we get types for default args and operators correct
-  IntVector int_input(4);
-  int_input[0] = 1;
-  int_input[1] = 2;
-  int_input[2] = 3;
-  int_input[3] = 4;
-
-  FloatVector float_input(4);
-  float_input[0] = 1.5;
-  float_input[1] = 2.5;
-  float_input[2] = 3.5;
-  float_input[3] = 4.5;
-
+  IntVector int_input{1, 2, 3, 4};
+  FloatVector float_input{1.5, 2.5, 3.5, 4.5};
   IntVector int_output(4);
   FloatVector float_output(4);
 
@@ -340,12 +296,12 @@ void TestScanMixedTypes(void)
   ASSERT_EQUAL(float_output[2], 8.5f); // out: 8.0f  in: 3 accum: 11.5f
   ASSERT_EQUAL(float_output[3], 11.5f); // out: 11.f  in: 4 accum: 15.5f
 }
-void TestScanMixedTypesHost(void)
+void TestScanMixedTypesHost()
 {
   TestScanMixedTypes<thrust::host_vector<int>, thrust::host_vector<float>>();
 }
 DECLARE_UNITTEST(TestScanMixedTypesHost);
-void TestScanMixedTypesDevice(void)
+void TestScanMixedTypesDevice()
 {
   TestScanMixedTypes<thrust::device_vector<int>, thrust::device_vector<float>>();
 }
@@ -475,7 +431,7 @@ struct TestScanToDiscardIterator
 VariableUnitTest<TestScanToDiscardIterator, unittest::type_list<unittest::int8_t, unittest::int16_t, unittest::int32_t>>
   TestScanToDiscardIteratorInstance;
 
-void TestScanMixedTypes(void)
+void TestScanMixedTypes()
 {
   const unsigned int n = 113;
 
@@ -515,7 +471,7 @@ void TestScanMixedTypes(void)
 DECLARE_UNITTEST(TestScanMixedTypes);
 
 template <typename T, unsigned int N>
-void _TestScanWithLargeTypes(void)
+void _TestScanWithLargeTypes()
 {
   size_t n = (1024 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -541,7 +497,7 @@ void _TestScanWithLargeTypes(void)
   ASSERT_EQUAL_QUIET(h_output, d_output);
 }
 
-void TestScanWithLargeTypes(void)
+void TestScanWithLargeTypes()
 {
   _TestScanWithLargeTypes<int, 1>();
 
@@ -570,37 +526,16 @@ struct plus_mod3
 };
 
 template <typename Vector>
-void TestInclusiveScanWithIndirection(void)
+void TestInclusiveScanWithIndirection()
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
 
-  Vector data(7);
-  data[0] = 0;
-  data[1] = 1;
-  data[2] = 2;
-  data[3] = 1;
-  data[4] = 2;
-  data[5] = 0;
-  data[6] = 1;
-
-  Vector table(6);
-  table[0] = 0;
-  table[1] = 1;
-  table[2] = 2;
-  table[3] = 0;
-  table[4] = 1;
-  table[5] = 2;
-
+  Vector data{0, 1, 2, 1, 2, 0, 1};
+  Vector table{0, 1, 2, 0, 1, 2};
   thrust::inclusive_scan(data.begin(), data.end(), data.begin(), plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-  ASSERT_EQUAL(data[0], T(0));
-  ASSERT_EQUAL(data[1], T(1));
-  ASSERT_EQUAL(data[2], T(0));
-  ASSERT_EQUAL(data[3], T(1));
-  ASSERT_EQUAL(data[4], T(0));
-  ASSERT_EQUAL(data[5], T(0));
-  ASSERT_EQUAL(data[6], T(1));
+  ASSERT_EQUAL(data, (Vector{0, 1, 0, 1, 0, 0, 1}));
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestInclusiveScanWithIndirection);
 
@@ -620,38 +555,17 @@ struct const_ref_plus_mod3
 };
 
 template <typename Vector>
-void TestInclusiveScanWithConstAccumulator(void)
+void TestInclusiveScanWithConstAccumulator()
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
 
-  Vector data(7);
-  data[0] = 0;
-  data[1] = 1;
-  data[2] = 2;
-  data[3] = 1;
-  data[4] = 2;
-  data[5] = 0;
-  data[6] = 1;
-
-  Vector table(6);
-  table[0] = 0;
-  table[1] = 1;
-  table[2] = 2;
-  table[3] = 0;
-  table[4] = 1;
-  table[5] = 2;
-
+  Vector data{0, 1, 2, 1, 2, 0, 1};
+  Vector table{0, 1, 2, 0, 1, 2};
   thrust::inclusive_scan(
     data.begin(), data.end(), data.begin(), const_ref_plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-  ASSERT_EQUAL(data[0], T(0));
-  ASSERT_EQUAL(data[1], T(1));
-  ASSERT_EQUAL(data[2], T(0));
-  ASSERT_EQUAL(data[3], T(1));
-  ASSERT_EQUAL(data[4], T(0));
-  ASSERT_EQUAL(data[5], T(0));
-  ASSERT_EQUAL(data[6], T(1));
+  ASSERT_EQUAL(data, (Vector{0, 1, 0, 1, 0, 0, 1}));
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestInclusiveScanWithConstAccumulator);
 
@@ -697,6 +611,16 @@ struct iterator_traits<only_set_when_expected_it>
 };
 THRUST_NAMESPACE_END
 
+namespace std
+{
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type = long long;
+  using reference  = only_set_when_expected_it;
+};
+} // namespace std
+
 void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 {
   thrust::constant_iterator<long long> begin(1);
@@ -720,8 +644,10 @@ void TestInclusiveScanWithBigIndexes()
 {
   TestInclusiveScanWithBigIndexesHelper(30);
   TestInclusiveScanWithBigIndexesHelper(31);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestInclusiveScanWithBigIndexesHelper(32);
   TestInclusiveScanWithBigIndexesHelper(33);
+#endif
 }
 
 DECLARE_UNITTEST(TestInclusiveScanWithBigIndexes);
@@ -749,8 +675,10 @@ void TestExclusiveScanWithBigIndexes()
 {
   TestExclusiveScanWithBigIndexesHelper(30);
   TestExclusiveScanWithBigIndexesHelper(31);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestExclusiveScanWithBigIndexesHelper(32);
   TestExclusiveScanWithBigIndexesHelper(33);
+#endif
 }
 
 DECLARE_UNITTEST(TestExclusiveScanWithBigIndexes);
@@ -779,3 +707,95 @@ void TestInclusiveScanWithUserDefinedType()
   ASSERT_EQUAL(static_cast<Int>(vec.back()).i, 5);
 }
 DECLARE_UNITTEST(TestInclusiveScanWithUserDefinedType);
+
+// Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
+// We need a distinct type (instead of an alias) for operator<< to be found via ADL
+struct permutation_t : _THRUST_STD::array<int, 5>
+{
+  permutation_t() = default;
+
+  constexpr THRUST_HOST_DEVICE permutation_t(int a, int b, int c, int d, int e)
+      : _THRUST_STD::array<int, 5>{a, b, c, d, e}
+  {}
+
+  friend std::ostream& operator<<(std::ostream& os, const permutation_t& p)
+  {
+    os << '{';
+    for (std::size_t i = 0; i < p.size(); i++)
+    {
+      if (i > 0)
+      {
+        os << ", ";
+      }
+      os << p[i];
+    }
+    return os << '}';
+  }
+};
+
+// Composes two permutations. This operation is associative, but not commutative.
+struct composition_op_t
+{
+  THRUST_HOST_DEVICE permutation_t operator()(permutation_t lhs, permutation_t rhs) const
+  {
+    permutation_t result;
+    // Get raw pointers to the underlying data to avoid operator[] which
+    // results in debug-assert calls (and __glibcxx_assert_fail) on device.
+    auto lhs_ptr    = lhs.data();
+    auto rhs_ptr    = rhs.data();
+    auto result_ptr = result.data();
+    for (std::size_t i = 0; i < lhs.size(); i++)
+    {
+      result_ptr[i] = rhs_ptr[lhs_ptr[i]];
+    }
+    return result;
+  }
+};
+
+void TestInclusiveScanWithNonCommutativeOp()
+{
+  const thrust::device_vector<permutation_t> input = {
+    {3, 2, 0, 1, 4},
+    {2, 4, 0, 1, 3},
+    {3, 2, 1, 4, 0},
+    {4, 3, 1, 0, 2},
+    {0, 3, 2, 4, 1},
+    {3, 2, 1, 0, 4},
+    {3, 4, 1, 2, 0},
+    {4, 2, 1, 0, 3},
+    {4, 0, 1, 3, 2},
+    {0, 2, 3, 1, 4}};
+  thrust::device_vector<permutation_t> output(10);
+  constexpr auto identity = permutation_t{0, 1, 2, 3, 4};
+
+  thrust::inclusive_scan(input.begin(), input.end(), output.begin(), composition_op_t{});
+  ASSERT_EQUAL(
+    output,
+    (thrust::device_vector<permutation_t>{
+      {3, 2, 0, 1, 4},
+      {1, 0, 2, 4, 3},
+      {2, 3, 1, 0, 4},
+      {1, 0, 3, 4, 2},
+      {3, 0, 4, 1, 2},
+      {0, 3, 4, 2, 1},
+      {3, 2, 0, 1, 4},
+      {0, 1, 4, 2, 3},
+      {4, 0, 2, 1, 3},
+      {4, 0, 3, 2, 1}}));
+
+  thrust::exclusive_scan(input.begin(), input.end(), output.begin(), identity, composition_op_t{});
+  ASSERT_EQUAL(
+    output,
+    (thrust::device_vector<permutation_t>{
+      {0, 1, 2, 3, 4},
+      {3, 2, 0, 1, 4},
+      {1, 0, 2, 4, 3},
+      {2, 3, 1, 0, 4},
+      {1, 0, 3, 4, 2},
+      {3, 0, 4, 1, 2},
+      {0, 3, 4, 2, 1},
+      {3, 2, 0, 1, 4},
+      {0, 1, 4, 2, 3},
+      {4, 0, 2, 1, 3}}));
+}
+DECLARE_UNITTEST(TestInclusiveScanWithNonCommutativeOp);

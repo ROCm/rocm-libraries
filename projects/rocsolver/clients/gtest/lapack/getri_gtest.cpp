@@ -59,7 +59,8 @@ const vector<vector<int>> matrix_size_range = {
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 1}, {500, 600, 1}, {640, 640, 0}, {1000, 1024, 0}, {1200, 1230, 0}};
+    = {{192, 192, 1},   {500, 600, 1}, {640, 640, 0},  {1000, 1024, 0},
+       {1200, 1230, 0}, {511, 511, 0}, {1023, 1023, 0}};
 
 Arguments getri_setup_arguments(getri_tuple tup, bool outofplace)
 {
@@ -84,7 +85,7 @@ class GETRI : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -109,7 +110,7 @@ class GETRI_NPVT : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -134,7 +135,7 @@ class GETRI_OUTOFPLACE : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -159,7 +160,7 @@ class GETRI_NPVT_OUTOFPLACE : public ::TestWithParam<getri_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>

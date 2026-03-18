@@ -72,7 +72,7 @@ def main():
                 data = dataLine.split(",")
                 data = [d.strip() for d in data]
                 baseData.append([int(data[mIdx]), int(data[nIdx]), int(data[bIdx]), int(data[kIdx]), Decimal(data[gflopsIdx])])
-                
+
     newData = []
     with open(args.newBench) as newFile:
         for line in newFile:

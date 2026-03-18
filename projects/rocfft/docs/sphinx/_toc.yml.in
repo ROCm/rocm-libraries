@@ -28,10 +28,12 @@ subtrees:
     title: Use runtime compilation
   - file: how-to/distributed-transforms
     title: Distribute transforms
+  - file: how-to/enabling-logging
+    title: Enable logging
 
 - caption: Samples
   entries:
-  - url: https://github.com/ROCm/rocFFT/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft/clients/samples
     title: GitHub client examples 
 
 - caption: API reference

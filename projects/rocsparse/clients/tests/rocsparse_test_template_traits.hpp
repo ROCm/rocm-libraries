@@ -62,7 +62,7 @@ struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it_
 };
 
 template <rocsparse_test_enum::value_type ROUTINE>
-struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it_plus_int8_float16>
+struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it_gather_scatter>
 {
     using filter = typename rocsparse_test_it_template<ROUTINE>::test;
     template <typename... P>

@@ -1,28 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2022-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <rocRoller/CodeGen/MemoryInstructions.hpp>
+
+#include <rocRoller/KernelOptions_detail.hpp>
 
 #include <algorithm>
 #include <ranges>
@@ -34,16 +17,15 @@ namespace rocRoller
     {
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::load(MemoryKind                        kind,
-                                 Register::ValuePtr                dest,
-                                 Register::ValuePtr                addr,
-                                 Register::ValuePtr                offset,
-                                 int                               numBytes,
-                                 std::string const                 comment,
-                                 bool                              high,
-                                 std::shared_ptr<BufferDescriptor> bufDesc,
-                                 BufferInstructionOptions          buffOpts)
+    inline Generator<Instruction> MemoryInstructions::load(MemoryKind               kind,
+                                                           Register::ValuePtr       dest,
+                                                           Register::ValuePtr       addr,
+                                                           Register::ValuePtr       offset,
+                                                           int                      numBytes,
+                                                           std::string const        comment,
+                                                           bool                     high,
+                                                           Register::ValuePtr       bufDesc,
+                                                           BufferInstructionOptions buffOpts)
     {
         auto               context   = m_context.lock();
         int                offsetVal = 0;
@@ -103,16 +85,15 @@ namespace rocRoller
         }
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::store(MemoryKind                        kind,
-                                  Register::ValuePtr                addr,
-                                  Register::ValuePtr                data,
-                                  Register::ValuePtr                offset,
-                                  int                               numBytes,
-                                  std::string const                 comment,
-                                  bool                              high,
-                                  std::shared_ptr<BufferDescriptor> bufDesc,
-                                  BufferInstructionOptions          buffOpts)
+    inline Generator<Instruction> MemoryInstructions::store(MemoryKind               kind,
+                                                            Register::ValuePtr       addr,
+                                                            Register::ValuePtr       data,
+                                                            Register::ValuePtr       offset,
+                                                            int                      numBytes,
+                                                            std::string const        comment,
+                                                            bool                     high,
+                                                            Register::ValuePtr       bufDesc,
+                                                            BufferInstructionOptions buffOpts)
     {
         auto               context   = m_context.lock();
         int                offsetVal = 0;
@@ -164,16 +145,15 @@ namespace rocRoller
     }
 
     template <MemoryInstructions::MemoryDirection Dir>
-    inline Generator<Instruction>
-        MemoryInstructions::moveData(MemoryKind                        kind,
-                                     Register::ValuePtr                addr,
-                                     Register::ValuePtr                data,
-                                     Register::ValuePtr                offset,
-                                     int                               numBytes,
-                                     std::string const                 comment,
-                                     bool                              high,
-                                     std::shared_ptr<BufferDescriptor> buffDesc,
-                                     BufferInstructionOptions          buffOpts)
+    inline Generator<Instruction> MemoryInstructions::moveData(MemoryKind               kind,
+                                                               Register::ValuePtr       addr,
+                                                               Register::ValuePtr       data,
+                                                               Register::ValuePtr       offset,
+                                                               int                      numBytes,
+                                                               std::string const        comment,
+                                                               bool                     high,
+                                                               Register::ValuePtr       buffDesc,
+                                                               BufferInstructionOptions buffOpts)
     {
         if constexpr(Dir == MemoryDirection::Load)
             co_yield load(kind, data, addr, offset, numBytes, comment, high, buffDesc, buffOpts);
@@ -285,7 +265,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->loadGlobalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(Instruction(
                     concatenate("global_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
@@ -297,7 +277,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -356,7 +336,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->storeGlobalWidth);
                 // Find the largest store instruction that can be used
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(Instruction(concatenate("global_store_dword",
@@ -369,7 +349,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
@@ -396,7 +376,7 @@ namespace rocRoller
             instruction_string, {dest}, {base, offsetLiteral}, {modifier}, "Load scalar value"));
 
         auto ctx = m_context.lock();
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -423,7 +403,7 @@ namespace rocRoller
             instruction_string, {}, {data, addr, offsetLiteral}, {modifier}, "Store scalar value"));
 
         auto ctx = m_context.lock();
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
@@ -486,7 +466,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().loadLocalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->loadLocalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(
                     Instruction(concatenate("ds_read_b", std::to_string(width * m_wordSize * 8)),
@@ -498,7 +478,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -547,7 +527,7 @@ namespace rocRoller
             {
                 // Find the largest store instruction that can be used
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().storeLocalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->storeLocalWidth);
                 auto               offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 Register::ValuePtr vgprs;
                 if(valuesPerWord > 1)
@@ -576,19 +556,18 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::loadBuffer(Register::ValuePtr                dest,
-                                       Register::ValuePtr                addr,
-                                       int                               offset,
-                                       std::shared_ptr<BufferDescriptor> buffDesc,
-                                       BufferInstructionOptions          buffOpts,
-                                       int                               numBytes,
-                                       bool                              high)
+    inline Generator<Instruction> MemoryInstructions::loadBuffer(Register::ValuePtr       dest,
+                                                                 Register::ValuePtr       addr,
+                                                                 int                      offset,
+                                                                 Register::ValuePtr       buffDesc,
+                                                                 BufferInstructionOptions buffOpts,
+                                                                 int                      numBytes,
+                                                                 bool                     high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
@@ -628,7 +607,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         if(numBytes < m_wordSize)
         {
@@ -669,7 +648,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->loadGlobalWidth);
                 auto       offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 const auto soffset        = gpu.isGFX12GPU() ? Register::Value::NullLiteral()
                                                              : Register::Value::Literal(0);
@@ -683,17 +662,17 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                data,
-                                           std::shared_ptr<BufferDescriptor> buffDesc,
-                                           BufferInstructionOptions          buffOpts,
-                                           int                               numBytes,
-                                           Register::ValuePtr                soffset)
+        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr       data,
+                                           Register::ValuePtr       buffDesc,
+                                           BufferInstructionOptions buffOpts,
+                                           int                      numBytes,
+                                           Register::ValuePtr       soffset)
     {
         AssertFatal(data != nullptr);
         AssertFatal(buffOpts.lds);
@@ -724,7 +703,7 @@ namespace rocRoller
             slc += "slc";
         }
 
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         std::string opEnd = "";
         if(numBytes == 1)
@@ -761,19 +740,18 @@ namespace rocRoller
                               {"offen", offsetModifier, glc, slc, lds},
                               "Load value direct to lds"));
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(WaitCount::Zero(
                 ctx->targetArchitecture(), "DEBUG: Wait after direct buffer load to lds"));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::storeBuffer(Register::ValuePtr                data,
-                                        Register::ValuePtr                addr,
-                                        int                               offset,
-                                        std::shared_ptr<BufferDescriptor> buffDesc,
-                                        BufferInstructionOptions          buffOpts,
-                                        int                               numBytes,
-                                        bool                              high)
+    inline Generator<Instruction> MemoryInstructions::storeBuffer(Register::ValuePtr       data,
+                                                                  Register::ValuePtr       addr,
+                                                                  int                      offset,
+                                                                  Register::ValuePtr       buffDesc,
+                                                                  BufferInstructionOptions buffOpts,
+                                                                  int                      numBytes,
+                                                                  bool                     high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -811,14 +789,14 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         // TODO Use UInt32 offset register for StoreTiled operations
         // that use an offset modifier.
         //
         // If an offset modifier is present, we can't use a 64bit
         // vaddr.  This can happen when: the offset register created
-        // by a ComputeIndex operation for a StoreTiled operation is
+        // by AssignIndexExpressions for a StoreTiled operation is
         // 64bit.
         if(!offsetModifier.empty())
             addr = addr->subset({0});
@@ -861,7 +839,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->storeGlobalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
 
                 auto valuesPerWord = m_wordSize / data->variableType().getElementSize();
@@ -890,7 +868,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }

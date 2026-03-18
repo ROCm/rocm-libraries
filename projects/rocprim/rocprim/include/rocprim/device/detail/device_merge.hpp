@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -235,10 +235,10 @@ typename std::enable_if<!WithValues>::type merge_values(unsigned int         fla
     (void)input2_size;
 }
 
-template<class Config, class Key, class Value>
+template<class TargetConfig, class Key, class Value>
 struct merge_kernel_impl_
 {
-    static constexpr merge_config_params params = device_params<Config>();
+    static constexpr merge_config_params params = TargetConfig::params;
 
     static constexpr unsigned int block_size       = params.kernel_config.block_size;
     static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -251,7 +251,10 @@ struct merge_kernel_impl_
         = ::rocprim::block_store<Key,
                                  block_size,
                                  items_per_thread,
-                                 ::rocprim::block_store_method::block_store_transpose>;
+                                 ::rocprim::block_store_method::block_store_transpose,
+                                 1,
+                                 1,
+                                 TargetConfig::wavefront>;
 
     union storage_type
     {
@@ -261,28 +264,26 @@ struct merge_kernel_impl_
         typename keys_store_type::storage_type keys_store;
     };
 
-    template<
-    class IndexIterator,
-    class KeysInputIterator1,
-    class KeysInputIterator2,
-    class KeysOutputIterator,
-    class ValuesInputIterator1,
-    class ValuesInputIterator2,
-    class ValuesOutputIterator,
-    class BinaryFunction
->
+    template<class IndexIterator,
+             class KeysInputIterator1,
+             class KeysInputIterator2,
+             class KeysOutputIterator,
+             class ValuesInputIterator1,
+             class ValuesInputIterator2,
+             class ValuesOutputIterator,
+             class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void merge(IndexIterator indices,
-                       KeysInputIterator1 keys_input1,
-                       KeysInputIterator2 keys_input2,
-                       KeysOutputIterator keys_output,
-                       ValuesInputIterator1 values_input1,
-                       ValuesInputIterator2 values_input2,
-                       ValuesOutputIterator values_output,
-                       const size_t input1_size,
-                       const size_t input2_size,
-                       BinaryFunction compare_function, 
-                       storage_type&           storage)
+    void merge(IndexIterator indices,
+               KeysInputIterator1 keys_input1,
+               KeysInputIterator2 keys_input2,
+               KeysOutputIterator keys_output,
+               ValuesInputIterator1 values_input1,
+               ValuesInputIterator2 values_input2,
+               ValuesOutputIterator values_output,
+               const size_t input1_size,
+               const size_t input2_size,
+               BinaryFunction compare_function, 
+               storage_type&           storage)
     {
         using key_type1   = typename std::iterator_traits<KeysInputIterator1>::value_type;
         using key_type2   = typename std::iterator_traits<KeysInputIterator2>::value_type;

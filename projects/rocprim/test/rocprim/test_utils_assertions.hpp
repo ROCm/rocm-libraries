@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,66 @@
 
 namespace test_utils {
 
+template<class T>
+using is_int128 = std::is_same<rocprim::int128_t, typename std::remove_cv<T>::type>;
+template<class T>
+using is_uint128 = std::is_same<rocprim::uint128_t, typename std::remove_cv<T>::type>;
+
+template<class T>
+using is_double_custom_type = std::is_same<typename std::remove_cv<T>::type, common::custom_type<double,double,1>>;
+    
+namespace {
+// On Windows, GTest doesn't provide the appropriate overloads
+// for printing 128 bit types. As a result, there may be linker errors
+// if you use ASSERT_EQ with these types. In some situations, we may also
+// want to avoid printing other types on Windows.
+// The functions below will avoid ASSERT_EQ when is_printable is true.
+// Instead, they perform the comparison beforehand, storing it in a bool,
+// and then pass that to ASSERT_TRUE. This way, if the values are not equal,
+// only the bool will be printed.
+
+#if defined(_WIN32)
+constexpr bool is_win32 = true;
+#else
+constexpr bool is_win32 = false;
+#endif
+
+template <typename T>
+constexpr bool is_printable = !is_win32 || (
+    !test_utils::is_int128<T>::value &&
+    !test_utils::is_uint128<T>::value &&
+    !test_utils::is_double_custom_type<T>::value);
+
+template <class T, bool UseGTestAssert = is_printable<T>>
+void inline protected_assert_eq(T val, T expected, size_t index)
+{
+    if constexpr (UseGTestAssert)
+    {
+        ASSERT_EQ(val, expected) << "where index = " << index;
+    }
+    else
+    {
+        const bool result = (val == expected);
+        ASSERT_TRUE(result) << "where index = " << index;
+    }
+}
+
+template <class T, bool UseGTestAssert = is_printable<T>>
+void inline protected_assert_eq(T val, T expected)
+{
+    if constexpr (UseGTestAssert)
+    {
+        ASSERT_EQ(val, expected);
+    }
+    else
+    {
+        const bool result = (val == expected);
+        ASSERT_TRUE(result);
+    }
+}
+
+} // end anonymous namespace
+
 // begin assert_eq
 template<class T>
 bool inline bit_equal(const T& a, const T& b)
@@ -75,22 +135,8 @@ void assert_eq(const std::vector<T>& result,
     {
         if(bit_equal(result[i], expected[i]))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-#if defined(_WIN32)
-        // GTest's ASSERT_EQ prints the values if the test fails. On Windows, the version of GTest provided by vcpkg doesn't
-        // provide overloads for printing 128 bit types, resulting in linker errors.
-        // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
-        if (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value || (typeid(T) == typeid(common::custom_type<double,double,1>)))
-        {
-            const bool values_equal = (result[i] == expected[i]);
-            ASSERT_EQ(values_equal, true) << "where index = " << i;
-        }
-        else
-        {
-            ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
-        }
-#else
-        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
-#endif		
+
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i], expected[i], i));
     }
 }
 
@@ -107,15 +153,8 @@ void assert_eq(const std::vector<common::custom_type<T, T, true>>& result,
     {
         if(bit_equal(result[i].x, expected[i].x) && bit_equal(result[i].y, expected[i].y))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-#if defined(_WIN32)
-        // GTest's ASSERT_EQ prints the values if the test fails. On Windows, the version of GTest provided by vcpkg doesn't
-        // provide overloads for printing 128 bit types, resulting in linker errors.
-        // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
-        const bool values_equal = (result[i] == expected[i]);
-        ASSERT_EQ(values_equal, true) << "where index = " << i;
-#else
-        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
-#endif		
+
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i], expected[i], i));
     }
 }
 
@@ -155,22 +194,8 @@ void assert_eq(const T& result, const T& expected)
 {
     if(bit_equal(result, expected))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-#if defined(_WIN32)
-    // GTest's ASSERT_EQ prints the values if the test fails. On Windows, the version of GTest provided by vcpkg doesn't
-    // provide overloads for printing 128 bit types, resulting in linker errors.
-    // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
-    if (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value)
-    {
-        const bool values_equal = (result == expected);
-        ASSERT_EQ(values_equal, true);
-	}
-    else
-    {
-        ASSERT_EQ(result, expected);
-    }
-#else		
-    ASSERT_EQ(result, expected);
-#endif
+
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
 template<class T>
@@ -179,7 +204,7 @@ void assert_eq(const common::custom_type<T, T, true>& result,
 {
     if(bit_equal(result.x, expected.x) && bit_equal(result.y, expected.y))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-    ASSERT_EQ(result, expected);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
 template<>
@@ -239,7 +264,7 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i], expected[i], i));
     }
 }
 
@@ -275,13 +300,13 @@ auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
 template<class T>
 auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
                  const std::vector<common::custom_type<T, T, true>>& expected,
-                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
+                 const float) -> typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        ASSERT_EQ(result[i].x, expected[i].x) << "where index = " << i;
-        ASSERT_EQ(result[i].y, expected[i].y) << "where index = " << i;
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i].x, expected[i].x, i));
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i].y, expected[i].y, i));
     }
 }
 
@@ -317,10 +342,10 @@ auto assert_near(const T& result, const T& expected, const float percent)
 }
 
 template<class T>
-auto assert_near(const T& result, const T& expected, const float)
-    -> typename std::enable_if<std::is_integral<T>::value>::type
+auto assert_near(const T& result, const T& expected, const float) ->
+    typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
-    ASSERT_EQ(result, expected);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
 template<class T, std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value ||
@@ -340,22 +365,28 @@ auto assert_near(const common::custom_type<T, T, true>& result,
 {
     auto diff1 = std::abs(percent * expected.x);
     auto diff2 = std::abs(percent * expected.y);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.x, expected.x, diff1);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.y, expected.y, diff2);
+    if(!bit_equal(result.x, expected.x))
+    {
+        ASSERT_NEAR(result.x, expected.x, diff1);
+    }
+    if(!bit_equal(result.y, expected.y))
+    {
+        ASSERT_NEAR(result.y, expected.y, diff2);
+    }
 }
 
 template<class T>
 auto assert_near(const common::custom_type<T, T, true>& result,
                  const common::custom_type<T, T, true>& expected,
-                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
+                 const float) -> typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
-    ASSERT_EQ(result.x,expected.x);
-    ASSERT_EQ(result.y,expected.y);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result.x, expected.x));
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result.y, expected.y));
 }
 
 template<class T>
 auto assert_near(const T& result, const T& expected, const float /*percent*/) ->
-    typename std::enable_if<!std::is_integral<T>::value && !std::is_floating_point<T>::value
+    typename std::enable_if<!rocprim::is_integral<T>::value && !std::is_floating_point<T>::value
                             && !(std::is_same<T, rocprim::bfloat16>::value
                                  || std::is_same<T, rocprim::half>::value)>::type
 {

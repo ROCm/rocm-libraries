@@ -38,6 +38,7 @@ function display_help()
   echo "    [-d|--dependencies] install build dependencies"
   echo "    [-a|--architecture] Set GPU architecture target(s), e.g., all, gfx000, gfx900, gfx906:xnack-;gfx908:xnack-"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
+  echo "    [-o|--clients-only] build clients only"
   echo "    [-r]--relocatable] create a package to support relocatable ROCm"
   echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
   echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
@@ -70,10 +71,10 @@ supported_distro( )
   fi
 
   case "${ID}" in
-    ubuntu|centos|rhel|fedora|sles|opensuse-leap)
+    ubuntu|debian|centos|rhel|fedora|sles|opensuse-leap|almalinux|rocky|ol)
         true
         ;;
-    *)  printf "This script is currently supported on Ubuntu, CentOS, RHEL, Fedora and SLES\n"
+    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, Alma Linux, Rocky Linux (rocky), and Oracle Linux (ol) (detected: ${ID})\n"
         exit 2
         ;;
   esac
@@ -173,17 +174,19 @@ install_packages( )
 
   local client_dependencies_ubuntu=( "python3" "python3-yaml" )
   local client_dependencies_centos=( "python36" "python3-pip" )
-  local client_dependencies_centos8=( "python36" "python3-pip" )
+  local client_dependencies_centos8=( "python39" "python3-pip" )
   local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" )
   local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" )
 
-  if [[ ( "${ID}" == "centos" ) || ( "${ID}" == "rhel" ) ]]; then
+  if [[ ( "${ID}" == "centos" ) || ( "${ID}" == "rhel" ) || ( "${ID}" == "almalinux" ) || ( "${ID}" == "rocky" ) || ( "${ID}" == "ol" ) ]]; then
     if [[ "${MAJORVERSION}" == "6" ]]; then
       library_dependencies_centos+=( "numactl" )
     else
       library_dependencies_centos+=( "numactl-libs" )
     fi
-    if [[ "${MAJORVERSION}" == "8" ]]; then
+    if [[ "${MAJORVERSION}" == "9" ]]; then
+      client_dependencies_centos8+=( "python3-pyyaml" )
+    elif [[ "${MAJORVERSION}" == "8" ]]; then
       client_dependencies_centos8+=( "python3-pyyaml" )
     else
       client_dependencies_centos8+=( "PyYAML" )
@@ -204,7 +207,7 @@ install_packages( )
   fi
 
   case "${ID}" in
-    ubuntu)
+    ubuntu|debian)
       elevate_if_not_root apt update
       install_apt_packages "${library_dependencies_ubuntu[@]}"
 
@@ -213,7 +216,7 @@ install_packages( )
       fi
       ;;
 
-    centos|rhel)
+    centos|rhel|almalinux|rocky|ol)
 #     yum -y update brings *all* installed packages up to date
 #     without seeking user approval
 #     elevate_if_not_root yum -y update
@@ -252,7 +255,7 @@ install_packages( )
       fi
       ;;
     *)
-      echo "This script is currently supported on Ubuntu, CentOS, RHEL and Fedora"
+      echo "This script is currently supported on Ubuntu, Debian, CentOS, RHEL and Fedora"
       exit 2
       ;;
   esac
@@ -296,6 +299,7 @@ supported_distro
 install_package=false
 install_dependencies=false
 build_clients=false
+build_clients_only=false
 build_release=true
 build_hip_clang=true
 build_static=false
@@ -313,7 +317,6 @@ build_with_offload_compress=true
 matrices_dir=
 matrices_dir_install=
 gpu_architecture=all
-build_freorg_bkwdcomp=false
 declare -a cmake_common_options
 declare -a cmake_client_options
 
@@ -324,7 +327,7 @@ declare -a cmake_client_options
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
- GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicdgrska: -- "$@")
+ GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,clients-only,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicodgrska: -- "$@")
 
 else
   echo "Need a new version of getopt"
@@ -352,6 +355,9 @@ while true; do
             shift ;;
         -c|--clients)
             build_clients=true
+            shift ;;
+        -o|--clients-only)
+            build_clients_only=true
             shift ;;
         -r|--relocatable)
             build_relocatable=true
@@ -398,9 +404,6 @@ while true; do
             shift ;;
         --codecoverage)
             build_codecoverage=true
-            shift ;;
-        --rm-legacy-include-dir)
-            build_freorg_bkwdcomp=false
             shift ;;
         -a|--architecture)
             gpu_architecture=${2}
@@ -496,7 +499,7 @@ fi
 cmake_executable=cmake
 
 case "${ID}" in
-  centos|rhel)
+  centos|rhel|almalinux|rocky|ol)
   cmake_executable=cmake3
   ;;
 esac
@@ -602,13 +605,6 @@ pushd .
     cmake_common_options+=("-DBUILD_WITH_ROCTX=OFF")
   fi
 
-  # freorg backward compatible support enable
-  if [[ "${build_freorg_bkwdcomp}" == true ]]; then
-    cmake_common_options+=("-DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON")
-  else
-    cmake_common_options+=("-DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF")
-  fi
-
   # code coverage
   if [[ "${build_codecoverage}" == true ]]; then
       if [[ "${build_release}" == true ]]; then
@@ -626,6 +622,17 @@ pushd .
   # clients
   if [[ "${build_clients}" == true ]]; then
       cmake_client_options+=("-DBUILD_CLIENTS_SAMPLES=ON" "-DBUILD_CLIENTS_TESTS=ON" "-DBUILD_CLIENTS_BENCHMARKS=ON")
+      #
+      # Add matrices_dir if exists.
+      #
+      if ! [[ "${matrices_dir}" == "" ]];then
+          cmake_client_options+=("-DCMAKE_MATRICES_DIR=${matrices_dir}")
+      fi
+  fi
+
+  # clients only
+  if [[ "${build_clients_only}" == true ]]; then
+      cmake_client_options+=("-DBUILD_CLIENTS_ONLY=ON" "-DBUILD_CLIENTS_SAMPLES=ON" "-DBUILD_CLIENTS_TESTS=ON" "-DBUILD_CLIENTS_BENCHMARKS=ON")
       #
       # Add matrices_dir if exists.
       #
@@ -671,10 +678,10 @@ pushd .
     check_exit_code "$?"
 
     case "${ID}" in
-      ubuntu)
+      ubuntu|debian)
         elevate_if_not_root dpkg -i rocsparse[-\_]*.deb
       ;;
-      centos|rhel)
+      centos|rhel|almalinux|rocky|ol)
         elevate_if_not_root yum -y localinstall rocsparse-*.rpm
       ;;
       fedora)

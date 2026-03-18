@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 run_and_check() {
     "$@"
@@ -10,11 +12,12 @@ run_and_check() {
     return $status
 }
 
-echo "I: Installing tools required for pre-commit checks..."
-run_and_check apt install clang-format-12
+echo "I: Creating and activating virtual environment for pre-commit..."
+python3 -m venv "$(dirname "$0")/../.venv"
+source "$(dirname "$0")/../.venv/bin/activate"
 
-echo "I: Installing pre-commit itself..."
-run_and_check pip3 install pre-commit
+echo "I: Installing pre-commit in virtual environment..."
+run_and_check pip install pre-commit
 run_and_check pre-commit install
 
 echo "I: Installation successful."

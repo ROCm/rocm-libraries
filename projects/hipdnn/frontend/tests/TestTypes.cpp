@@ -1,0 +1,345 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "hipdnn_frontend/Types.hpp"
+#include <gtest/gtest.h>
+#include <sstream>
+
+TEST(TestTypes, ToSdkTypeDataTypes)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toSdkType(DataType::FLOAT), hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(toSdkType(DataType::HALF), hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(toSdkType(DataType::BFLOAT16), hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+    EXPECT_EQ(toSdkType(DataType::DOUBLE), hipdnn_data_sdk::data_objects::DataType::DOUBLE);
+    EXPECT_EQ(toSdkType(DataType::UINT8), hipdnn_data_sdk::data_objects::DataType::UINT8);
+    EXPECT_EQ(toSdkType(DataType::INT32), hipdnn_data_sdk::data_objects::DataType::INT32);
+    EXPECT_EQ(toSdkType(DataType::INT8), hipdnn_data_sdk::data_objects::DataType::INT8);
+    EXPECT_EQ(toSdkType(DataType::FP8_E4M3), hipdnn_data_sdk::data_objects::DataType::FP8_E4M3);
+    EXPECT_EQ(toSdkType(DataType::FP8_E5M2), hipdnn_data_sdk::data_objects::DataType::FP8_E5M2);
+    EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
+}
+
+TEST(TestTypes, FromSdkTypeDataTypes)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FLOAT), DataType::FLOAT);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::HALF), DataType::HALF);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::BFLOAT16), DataType::BFLOAT16);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::DOUBLE), DataType::DOUBLE);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UINT8), DataType::UINT8);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT32), DataType::INT32);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT8), DataType::INT8);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3), DataType::FP8_E4M3);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E5M2), DataType::FP8_E5M2);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
+}
+
+TEST(TestTypes, ConvolutionModeConversion)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toSdkType(ConvolutionMode::CROSS_CORRELATION),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(toSdkType(ConvolutionMode::CONVOLUTION),
+              hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION);
+    EXPECT_EQ(toSdkType(ConvolutionMode::NOT_SET), hipdnn_data_sdk::data_objects::ConvMode::UNSET);
+}
+
+TEST(TestTypes, PointwiseModeConversion)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toSdkType(PointwiseMode::RELU_FWD),
+              hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD);
+    EXPECT_EQ(toSdkType(PointwiseMode::NOT_SET),
+              hipdnn_data_sdk::data_objects::PointwiseMode::UNSET);
+}
+
+TEST(TestTypes, HeuristicModeConversion)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendType(HeuristicMode::FALLBACK),
+              hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
+}
+
+TEST(TestTypes, GetDataTypeEnumFromType)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(getDataTypeEnumFromType<float>(), DataType::FLOAT);
+    EXPECT_EQ(getDataTypeEnumFromType<half>(), DataType::HALF);
+    EXPECT_EQ(getDataTypeEnumFromType<bfloat16>(), DataType::BFLOAT16);
+    EXPECT_EQ(getDataTypeEnumFromType<double>(), DataType::DOUBLE);
+    EXPECT_EQ(getDataTypeEnumFromType<uint8_t>(), DataType::UINT8);
+    EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
+    EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
+    EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
+    EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
+
+    EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
+    EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
+}
+
+TEST(TestTypes, DataTypeToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(DataType::FLOAT), "fp32");
+    EXPECT_STREQ(to_string(DataType::HALF), "fp16");
+    EXPECT_STREQ(to_string(DataType::BFLOAT16), "bf16");
+    EXPECT_STREQ(to_string(DataType::DOUBLE), "fp64");
+    EXPECT_STREQ(to_string(DataType::UINT8), "uint8");
+    EXPECT_STREQ(to_string(DataType::INT32), "int32");
+    EXPECT_STREQ(to_string(DataType::INT8), "int8");
+    EXPECT_STREQ(to_string(DataType::FP8_E4M3), "fp8_e4m3");
+    EXPECT_STREQ(to_string(DataType::FP8_E5M2), "fp8_e5m2");
+    EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
+}
+
+TEST(TestTypes, DataTypeStreamOperator)
+{
+    using namespace hipdnn_frontend;
+
+    std::ostringstream oss;
+
+    oss << DataType::FLOAT;
+    EXPECT_EQ(oss.str(), "fp32");
+    oss.str("");
+
+    oss << DataType::HALF;
+    EXPECT_EQ(oss.str(), "fp16");
+    oss.str("");
+
+    oss << DataType::BFLOAT16;
+    EXPECT_EQ(oss.str(), "bf16");
+    oss.str("");
+
+    oss << DataType::DOUBLE;
+    EXPECT_EQ(oss.str(), "fp64");
+    oss.str("");
+
+    oss << DataType::UINT8;
+    EXPECT_EQ(oss.str(), "uint8");
+    oss.str("");
+
+    oss << DataType::INT32;
+    EXPECT_EQ(oss.str(), "int32");
+    oss.str("");
+
+    oss << DataType::INT8;
+    EXPECT_EQ(oss.str(), "int8");
+    oss.str("");
+
+    oss << DataType::FP8_E4M3;
+    EXPECT_EQ(oss.str(), "fp8_e4m3");
+    oss.str("");
+
+    oss << DataType::FP8_E5M2;
+    EXPECT_EQ(oss.str(), "fp8_e5m2");
+    oss.str("");
+
+    oss << DataType::NOT_SET;
+    EXPECT_EQ(oss.str(), "unknown");
+}
+
+TEST(TestTypes, KnobValueTypeToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(KnobValueType::INT64), "int64");
+    EXPECT_STREQ(to_string(KnobValueType::FLOAT64), "float64");
+    EXPECT_STREQ(to_string(KnobValueType::STRING), "string");
+}
+
+TEST(TestTypes, KnobValueTypeStreamOperator)
+{
+    using namespace hipdnn_frontend;
+
+    std::ostringstream oss;
+
+    oss << KnobValueType::INT64;
+    EXPECT_EQ(oss.str(), "int64");
+    oss.str("");
+
+    oss << KnobValueType::FLOAT64;
+    EXPECT_EQ(oss.str(), "float64");
+    oss.str("");
+
+    oss << KnobValueType::STRING;
+    EXPECT_EQ(oss.str(), "string");
+}
+
+TEST(TestTypes, GetKnobValueTypeFromVariantInt64)
+{
+    using namespace hipdnn_frontend;
+
+    std::variant<int64_t, double, std::string> value = static_cast<int64_t>(42);
+    EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::INT64);
+}
+
+TEST(TestTypes, GetKnobValueTypeFromVariantFloat64)
+{
+    using namespace hipdnn_frontend;
+
+    std::variant<int64_t, double, std::string> value = 3.14;
+    EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::FLOAT64);
+}
+
+TEST(TestTypes, GetKnobValueTypeFromVariantString)
+{
+    using namespace hipdnn_frontend;
+
+    std::variant<int64_t, double, std::string> value = std::string("test");
+    EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::STRING);
+}
+
+TEST(TestTypes, ToSdkTypeKnobValueType)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toSdkType(KnobValueType::INT64), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    EXPECT_EQ(toSdkType(KnobValueType::FLOAT64),
+              hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
+    EXPECT_EQ(toSdkType(KnobValueType::STRING),
+              hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    EXPECT_EQ(toSdkType(KnobValueType::NOT_SET), hipdnn_data_sdk::data_objects::KnobValue::NONE);
+}
+
+TEST(TestTypes, FromSdkTypeKnobValue)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::IntValue),
+              KnobValueType::INT64);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::FloatValue),
+              KnobValueType::FLOAT64);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::StringValue),
+              KnobValueType::STRING);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::KnobValue::NONE), KnobValueType::NOT_SET);
+}
+
+TEST(TestTypes, KnobValueTypeRoundTripConversion)
+{
+    using namespace hipdnn_frontend;
+
+    // Test round-trip conversion: frontend -> SDK -> frontend
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::INT64)), KnobValueType::INT64);
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::FLOAT64)), KnobValueType::FLOAT64);
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::STRING)), KnobValueType::STRING);
+    EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::NOT_SET)), KnobValueType::NOT_SET);
+}
+
+TEST(TestTypes, ToHipdnnDataType)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toHipdnnDataType(DataType::FLOAT), HIPDNN_DATA_FLOAT);
+    EXPECT_EQ(toHipdnnDataType(DataType::DOUBLE), HIPDNN_DATA_DOUBLE);
+    EXPECT_EQ(toHipdnnDataType(DataType::HALF), HIPDNN_DATA_HALF);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT8), HIPDNN_DATA_INT8);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT32), HIPDNN_DATA_INT32);
+    EXPECT_EQ(toHipdnnDataType(DataType::UINT8), HIPDNN_DATA_UINT8);
+    EXPECT_EQ(toHipdnnDataType(DataType::BFLOAT16), HIPDNN_DATA_BFLOAT16);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP8_E4M3), HIPDNN_DATA_FP8_E4M3);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP8_E5M2), HIPDNN_DATA_FP8_E5M2);
+    EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
+{
+    using namespace hipdnn_frontend;
+
+    auto check = [](hipdnnDataType_t hipdnnType, DataType expected) {
+        auto [dt, err] = fromHipdnnDataType(hipdnnType);
+        EXPECT_TRUE(err.is_good())
+            << "Error for " << static_cast<int>(hipdnnType) << ": " << err.get_message();
+        EXPECT_EQ(dt, expected);
+    };
+
+    check(HIPDNN_DATA_FLOAT, DataType::FLOAT);
+    check(HIPDNN_DATA_DOUBLE, DataType::DOUBLE);
+    check(HIPDNN_DATA_HALF, DataType::HALF);
+    check(HIPDNN_DATA_INT8, DataType::INT8);
+    check(HIPDNN_DATA_INT32, DataType::INT32);
+    check(HIPDNN_DATA_UINT8, DataType::UINT8);
+    check(HIPDNN_DATA_BFLOAT16, DataType::BFLOAT16);
+    check(HIPDNN_DATA_FP8_E4M3, DataType::FP8_E4M3);
+    check(HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2);
+}
+
+TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownType = static_cast<hipdnnDataType_t>(9999);
+    auto [dt, err] = fromHipdnnDataType(unknownType);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(dt, DataType::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto dt : {DataType::FLOAT,
+                   DataType::DOUBLE,
+                   DataType::HALF,
+                   DataType::INT8,
+                   DataType::INT32,
+                   DataType::UINT8,
+                   DataType::BFLOAT16,
+                   DataType::FP8_E4M3,
+                   DataType::FP8_E5M2})
+    {
+        auto hipdnnOpt = toHipdnnDataType(dt);
+        ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);
+        auto [roundTripped, err] = fromHipdnnDataType(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good()) << "fromHipdnnDataType failed for " << to_string(dt);
+        EXPECT_EQ(roundTripped, dt) << "Round-trip mismatch for " << to_string(dt);
+    }
+}
+
+TEST(TestTypes, FromHipdnnConvModeValidModes)
+{
+    using namespace hipdnn_frontend;
+
+    auto [xcorr, xcorrErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    EXPECT_TRUE(xcorrErr.is_good());
+    EXPECT_EQ(xcorr, ConvolutionMode::CROSS_CORRELATION);
+
+    auto [conv, convErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    EXPECT_TRUE(convErr.is_good());
+    EXPECT_EQ(conv, ConvolutionMode::CONVOLUTION);
+}
+
+TEST(TestTypes, FromHipdnnConvModeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownMode = static_cast<hipdnnConvolutionMode_t>(9999);
+    auto [mode, err] = fromHipdnnConvMode(unknownMode);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(mode, ConvolutionMode::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnConvModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto mode : {ConvolutionMode::CROSS_CORRELATION, ConvolutionMode::CONVOLUTION})
+    {
+        auto hipdnnOpt = toBackendConvMode(mode);
+        ASSERT_TRUE(hipdnnOpt.has_value());
+        auto [roundTripped, err] = fromHipdnnConvMode(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, mode);
+    }
+}

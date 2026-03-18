@@ -28,7 +28,15 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
 #  include <cub/device/device_merge_sort.cuh>
@@ -51,6 +59,17 @@
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 
 #  include <cstdint>
+
+#  if defined(_CCCL_HAS_NVFP16)
+#    include <cuda_fp16.h>
+#  endif // _CCCL_HAS_NVFP16
+
+#  if defined(_CCCL_HAS_NVBF16)
+_CCCL_DIAG_PUSH
+_CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
+#    include <cuda_bf16.h>
+_CCCL_DIAG_POP
+#  endif // _CCCL_HAS_NVBF16
 
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
@@ -164,13 +183,7 @@ struct dispatch<thrust::detail::false_type, thrust::less<KeyOrVoid>>
        cudaStream_t stream)
   {
     return cub::DeviceRadixSort::SortKeys(
-      d_temp_storage,
-      temp_storage_bytes,
-      keys_buffer,
-      static_cast<int>(count),
-      0,
-      static_cast<int>(sizeof(Key) * 8),
-      stream);
+      d_temp_storage, temp_storage_bytes, keys_buffer, count, 0, static_cast<int>(sizeof(Key) * 8), stream);
   }
 }; // struct dispatch -- sort keys in ascending order;
 
@@ -188,13 +201,7 @@ struct dispatch<thrust::detail::false_type, thrust::greater<KeyOrVoid>>
        cudaStream_t stream)
   {
     return cub::DeviceRadixSort::SortKeysDescending(
-      d_temp_storage,
-      temp_storage_bytes,
-      keys_buffer,
-      static_cast<int>(count),
-      0,
-      static_cast<int>(sizeof(Key) * 8),
-      stream);
+      d_temp_storage, temp_storage_bytes, keys_buffer, count, 0, static_cast<int>(sizeof(Key) * 8), stream);
   }
 }; // struct dispatch -- sort keys in descending order;
 
@@ -212,14 +219,7 @@ struct dispatch<thrust::detail::true_type, thrust::less<KeyOrVoid>>
        cudaStream_t stream)
   {
     return cub::DeviceRadixSort::SortPairs(
-      d_temp_storage,
-      temp_storage_bytes,
-      keys_buffer,
-      items_buffer,
-      static_cast<int>(count),
-      0,
-      static_cast<int>(sizeof(Key) * 8),
-      stream);
+      d_temp_storage, temp_storage_bytes, keys_buffer, items_buffer, count, 0, static_cast<int>(sizeof(Key) * 8), stream);
   }
 }; // struct dispatch -- sort pairs in ascending order;
 
@@ -237,14 +237,7 @@ struct dispatch<thrust::detail::true_type, thrust::greater<KeyOrVoid>>
        cudaStream_t stream)
   {
     return cub::DeviceRadixSort::SortPairsDescending(
-      d_temp_storage,
-      temp_storage_bytes,
-      keys_buffer,
-      items_buffer,
-      static_cast<int>(count),
-      0,
-      static_cast<int>(sizeof(Key) * 8),
-      stream);
+      d_temp_storage, temp_storage_bytes, keys_buffer, items_buffer, count, 0, static_cast<int>(sizeof(Key) * 8), stream);
   }
 }; // struct dispatch -- sort pairs in descending order;
 
@@ -295,7 +288,7 @@ THRUST_RUNTIME_FUNCTION void radix_sort(execution_policy<Derived>& policy, Key* 
     Key* temp_ptr = reinterpret_cast<Key*>(keys_buffer.d_buffers[1]);
     cuda_cub::copy_n(policy, temp_ptr, keys_count, keys);
   }
-  THRUST_IF_CONSTEXPR (SORT_ITEMS::value)
+  _CCCL_IF_CONSTEXPR (SORT_ITEMS::value)
   {
     if (items_buffer.selector != 0)
     {
@@ -313,10 +306,20 @@ THRUST_RUNTIME_FUNCTION void radix_sort(execution_policy<Derived>& policy, Key* 
 namespace __smart_sort
 {
 
+// TODO(bgruber): we can drop thrust::less etc. when they truly alias to the ::cuda::std ones
 template <class Key, class CompareOp>
 using can_use_primitive_sort = ::cuda::std::integral_constant<
   bool,
-  ::cuda::std::is_arithmetic<Key>::value
+  (::cuda::std::is_arithmetic<Key>::value
+#  if defined(_CCCL_HAS_NVFP16) && !defined(__CUDA_NO_HALF_OPERATORS__) && !defined(__CUDA_NO_HALF_CONVERSIONS__)
+   || ::cuda::std::is_same<Key, __half>::value
+#  endif // defined(_CCCL_HAS_NVFP16) && !defined(__CUDA_NO_HALF_OPERATORS__) && !defined(__CUDA_NO_HALF_CONVERSIONS__)
+#  if defined(_CCCL_HAS_NVBF16) && !defined(__CUDA_NO_BFLOAT16_CONVERSIONS__) \
+    && !defined(__CUDA_NO_BFLOAT16_OPERATORS__)
+   || ::cuda::std::is_same<Key, __nv_bfloat16>::value
+#  endif // defined(_CCCL_HAS_NVBF16) && !defined(__CUDA_NO_BFLOAT16_CONVERSIONS__) &&
+         // !defined(__CUDA_NO_BFLOAT16_OPERATORS__)
+   )
     && (::cuda::std::is_same<CompareOp, thrust::less<Key>>::value
         || ::cuda::std::is_same<CompareOp, ::cuda::std::less<Key>>::value
         || ::cuda::std::is_same<CompareOp, thrust::less<void>>::value
@@ -333,7 +336,7 @@ template <
   class KeysIt,
   class ItemsIt,
   class CompareOp,
-  ::cuda::std::__enable_if_t<!can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+  ::cuda::std::enable_if_t<!can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
 THRUST_RUNTIME_FUNCTION void
 smart_sort(Policy& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
@@ -342,12 +345,12 @@ smart_sort(Policy& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_fi
 
 template <
   class SORT_ITEMS,
-  class /* STABLE */,
+  class /*STABLE*/,
   class Policy,
   class KeysIt,
   class ItemsIt,
   class CompareOp,
-  ::cuda::std::__enable_if_t<can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+  ::cuda::std::enable_if_t<can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
 THRUST_RUNTIME_FUNCTION void smart_sort(
   execution_policy<Policy>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {

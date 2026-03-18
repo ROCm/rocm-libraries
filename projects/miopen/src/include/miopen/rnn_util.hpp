@@ -74,17 +74,17 @@ private:
         attached_handle->EnableProfiling(false);
         start = miopen::make_hip_event();
         stop  = miopen::make_hip_event();
-        hipEventRecord(start.get(), attached_handle->GetStream());
+        (void)hipEventRecord(start.get(), attached_handle->GetStream());
 #endif
     }
 
     void RNNProfilingEnd()
     {
 #if MIOPEN_BACKEND_HIP
-        hipEventRecord(stop.get(), attached_handle->GetStream());
-        hipEventSynchronize(stop.get());
+        (void)hipEventRecord(stop.get(), attached_handle->GetStream());
+        (void)hipEventSynchronize(stop.get());
         float eventTime_mS = 0;
-        hipEventElapsedTime(&eventTime_mS, start.get(), stop.get());
+        (void)hipEventElapsedTime(&eventTime_mS, start.get(), stop.get());
 
         attached_handle->EnableProfiling(true);
         attached_handle->ResetKernelTime();
@@ -104,10 +104,10 @@ private:
 inline miopen::HipEventPtr make_hip_fast_event()
 {
     hipEvent_t result = nullptr;
-    hipEventCreateWithFlags(&result, hipEventDisableTiming);
+    (void)hipEventCreateWithFlags(&result, hipEventDisableTiming);
     return miopen::HipEventPtr{result};
 }
-#endif //#if MIOPEN_BACKEND_HIP
+#endif // #if MIOPEN_BACKEND_HIP
 
 void LSTMForwardHiddenStateUpdate(const Handle& handle,
                                   miopenDataType_t rnn_data_type,
@@ -119,8 +119,6 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
                                   int use_batch,
                                   int hy_h,
                                   int hy_stride,
-                                  int wei_len,
-                                  int wei_stride,
                                   ConstData_t cx,
                                   std::size_t cx_offset,
                                   Data_t reserve_space,
@@ -144,8 +142,6 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
                                    int use_batch2,
                                    int hy_h,
                                    int hy_stride,
-                                   int wei_len,
-                                   int wei_stride,
                                    ConstData_t cx,
                                    std::size_t cx_offset,
                                    Data_t reserve_space,

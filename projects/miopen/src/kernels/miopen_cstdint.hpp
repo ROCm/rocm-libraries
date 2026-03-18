@@ -25,7 +25,7 @@
  *******************************************************************************/
 #pragma once
 
-#ifdef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifdef MIOPEN_HIP_RUNTIME_COMPILE
 typedef signed char int8_t;
 typedef unsigned char uint8_t;
 typedef signed short int16_t;
@@ -34,6 +34,7 @@ typedef unsigned short uint16_t;
 typedef signed int int32_t;
 typedef unsigned int uint32_t;
 typedef __hip_internal::uint64_t uint64_t;
+typedef __hip_internal::int64_t int64_t;
 #endif
 
 #else

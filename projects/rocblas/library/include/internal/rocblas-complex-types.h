@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -78,13 +78,13 @@ static_assert(sizeof(hipDoubleComplex) == 2 * sizeof(double),
 // If this is a C compiler, C++ compiler below C++14, or a host-only compiler, we only
 // include minimal definitions of rocblas_float_complex and rocblas_double_complex
 
-/*! \brief Struct to represent a complex number with single precision real and imaginary parts. */
+/*! \brief Struct to represent a complex number with single-precision real and imaginary parts. */
 typedef struct
 {
     float x, y;
 } rocblas_float_complex;
 
-/*! \brief Struct to represent a complex number with double precision real and imaginary parts. */
+/*! \brief Struct to represent a complex number with double-precision real and imaginary parts. */
 typedef struct
 {
     double x, y;
@@ -513,13 +513,13 @@ using rocblas_double_complex = rocblas_complex_num<double>;
 
 /*! \brief rocblas_is_complex<T> returns true iff T is complex */
 template <typename T>
-static constexpr bool rocblas_is_complex = false;
+inline constexpr bool rocblas_is_complex = false;
 
 template <>
-ROCBLAS_CLANG_STATIC constexpr bool rocblas_is_complex<rocblas_float_complex> = true;
+inline constexpr bool rocblas_is_complex<rocblas_float_complex> = true;
 
 template <>
-ROCBLAS_CLANG_STATIC constexpr bool rocblas_is_complex<rocblas_double_complex> = true;
+inline constexpr bool rocblas_is_complex<rocblas_double_complex> = true;
 
 //!
 //! @brief Struct to define pair of value and index.

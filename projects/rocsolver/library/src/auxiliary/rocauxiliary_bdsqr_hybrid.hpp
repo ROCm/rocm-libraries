@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include "common_host_helpers.hpp"
 #include "lapack_host_functions.hpp"
 #include "rocauxiliary_lasr.hpp"
 #include "rocsolver_hybrid_storage.hpp"
@@ -52,7 +53,7 @@ static void swap_template(rocblas_handle handle,
                           I const incy,
                           hipStream_t stream)
 {
-    auto nthreads = warpSize * 2;
+    auto nthreads = get_device_warp_size() * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
     ROCSOLVER_LAUNCH_KERNEL((swap_kernel<T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
@@ -70,7 +71,7 @@ static void rot_template(rocblas_handle handle,
                          S const s,
                          hipStream_t stream)
 {
-    auto nthreads = warpSize * 2;
+    auto nthreads = get_device_warp_size() * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
     ROCSOLVER_LAUNCH_KERNEL((rot_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
@@ -85,7 +86,7 @@ static void scal_template(rocblas_handle handle,
                           I const incx,
                           hipStream_t stream)
 {
-    auto nthreads = warpSize * 2;
+    auto nthreads = get_device_warp_size() * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
     ROCSOLVER_LAUNCH_KERNEL((scal_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
@@ -1391,15 +1392,15 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
     rocsolver_hybrid_storage<T, I, W3> hC;
     rocsolver_hybrid_storage<I, I, I*> hInfo;
 
-    ROCBLAS_CHECK(hD.init_async(n, D, strideD, batch_count, stream));
-    ROCBLAS_CHECK(hE.init_async(n - 1, E, strideE, batch_count, stream));
+    ROCBLAS_CHECK(hD.init_async(n, D, 0, strideD, batch_count, stream));
+    ROCBLAS_CHECK(hE.init_async(n - 1, E, 0, strideE, batch_count, stream));
     if(nv > 0)
-        ROCBLAS_CHECK(hV.init_pointers_only(V + shiftV, strideV, batch_count, stream));
+        ROCBLAS_CHECK(hV.init_pointers_only(V, shiftV, strideV, batch_count, stream));
     if(nu > 0)
-        ROCBLAS_CHECK(hU.init_pointers_only(U + shiftU, strideU, batch_count, stream));
+        ROCBLAS_CHECK(hU.init_pointers_only(U, shiftU, strideU, batch_count, stream));
     if(nc > 0)
-        ROCBLAS_CHECK(hC.init_pointers_only(C + shiftC, strideC, batch_count, stream));
-    ROCBLAS_CHECK(hInfo.init_async(1, info_array, 1, batch_count, stream));
+        ROCBLAS_CHECK(hC.init_pointers_only(C, shiftC, strideC, batch_count, stream));
+    ROCBLAS_CHECK(hInfo.init_async(1, info_array, 0, 1, batch_count, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
     S* hwork = nullptr;

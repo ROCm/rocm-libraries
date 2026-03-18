@@ -79,6 +79,12 @@ inline bool rocsparse_isnan(_Float16 arg)
 }
 
 template <>
+inline bool rocsparse_isnan(rocsparse_bfloat16 arg)
+{
+    return arg != arg;
+}
+
+template <>
 inline bool rocsparse_isnan(double arg)
 {
     return std::isnan(arg);
@@ -139,6 +145,17 @@ inline bool rocsparse_isinf(_Float16 arg)
         uint16_t data;
     } x = {arg};
     return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) == 0;
+}
+
+template <>
+inline bool rocsparse_isinf(rocsparse_bfloat16 arg)
+{
+    union
+    {
+        rocsparse_bfloat16 fp;
+        uint16_t           data;
+    } x = {arg};
+    return (~x.data & 0x7f80) == 0 && (x.data & 0x7f) == 0;
 }
 
 template <>

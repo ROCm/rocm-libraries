@@ -23,10 +23,11 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
+#include "miopen_cstdint.hpp"
 
 #include "float_types.h"
 #include "MIOpenReduceExtreme.hpp"

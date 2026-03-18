@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -7,11 +7,12 @@
 #include "ck/utility/data_type.hpp"
 #include "enable_if.hpp"
 #include "c_style_pointer_cast.hpp"
-#if __clang_major__ == 20
+#if __clang_major__ >= 20
 #include "amd_buffer_addressing_builtins.hpp"
 #else
 #include "amd_buffer_addressing.hpp"
 #endif
+#include "amd_transpose_load.hpp"
 #include "generic_memory_space_atomic.hpp"
 
 namespace ck {
@@ -34,6 +35,10 @@ struct DynamicBuffer
     ElementSpaceSize element_space_size_;
     T invalid_element_value_ = T{0};
 
+    // XXX: PackedSize semantics for pk_i4_t is different from the other packed types.
+    // Objects of f4x2_pk_t and f6_pk_t are counted as 1 element, while
+    // objects of pk_i4_t are counted as 2 elements. Therefore, element_space_size_ for pk_i4_t must
+    // be divided by 2 to correctly represent the number of addressable elements.
     static constexpr index_t PackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<T>, pk_i4_t>)
             return 2;
@@ -65,6 +70,7 @@ struct DynamicBuffer
     __host__ __device__ constexpr T& operator()(IndexType i) { return p_data_[i]; }
 
     template <typename X,
+              bool DoTranspose               = false,
               typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
                                          typename scalar_type<remove_cvref_t<T>>::type>::value ||
                                      !is_native_type<X>(),
@@ -85,7 +91,8 @@ struct DynamicBuffer
         bool constexpr use_amd_buffer_addressing = false;
 #endif
 
-        if constexpr(GetAddressSpace() == AddressSpaceEnum::Global && use_amd_buffer_addressing)
+        if constexpr(GetAddressSpace() == AddressSpaceEnum::Global && use_amd_buffer_addressing &&
+                     !DoTranspose)
         {
             constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
 
@@ -107,6 +114,14 @@ struct DynamicBuffer
                     element_space_size_ / PackedSize,
                     invalid_element_value_);
             }
+        }
+        else if constexpr(GetAddressSpace() == AddressSpaceEnum::Global && DoTranspose)
+        {
+#ifdef __gfx12__
+            return amd_global_load_transpose_to_vgpr(p_data_ + i);
+#else
+            static_assert(!DoTranspose, "load-with-transpose only supported on gfx12+");
+#endif
         }
         else
         {
@@ -139,8 +154,7 @@ struct DynamicBuffer
     template <InMemoryDataOperationEnum Op,
               typename X,
               typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
-                                         typename scalar_type<remove_cvref_t<T>>::type>::value ||
-                                     !is_native_type<X>(),
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value,
                                  bool>::type = false>
     __host__ __device__ void Update(IndexType i, bool is_valid_element, const X& x)
     {
@@ -160,37 +174,7 @@ struct DynamicBuffer
         {
             auto tmp       = this->template Get<X>(i, is_valid_element);
             using scalar_t = typename scalar_type<remove_cvref_t<T>>::type;
-
-#if defined(__gfx942__) || defined(__gfx950__)
-
-            // Properly handle addition for all low-precision types
-            if constexpr(is_same_v<scalar_t, bhalf_t> || is_same_v<scalar_t, half_t>)
-            {
-                if constexpr(is_scalar_type<X>::value)
-                {
-                    // Scalar type: Convert to float, add, convert back
-                    auto result =
-                        type_convert<X>(type_convert<float>(x) + type_convert<float>(tmp));
-                    this->template Set<X>(i, is_valid_element, result);
-                }
-                else
-                {
-                    // Vector type
-                    constexpr auto vector_size = scalar_type<remove_cvref_t<X>>::vector_size;
-                    const vector_type<scalar_t, vector_size> a_vector{tmp};
-                    const vector_type<scalar_t, vector_size> b_vector{x};
-
-                    // Process each element of the vector in higher precision
-                    static_for<0, vector_size, 1>{}([&](auto idx) {
-                        auto result = type_convert<scalar_t>(
-                            type_convert<float>(a_vector.template AsType<scalar_t>()[idx]) +
-                            type_convert<float>(b_vector.template AsType<scalar_t>()[idx]));
-                        this->template Set<scalar_t>(i + idx, is_valid_element, result);
-                    });
-                }
-            }
-#else
-            //   handle bfloat addition
+            // handle bfloat addition
             if constexpr(is_same_v<scalar_t, bhalf_t>)
             {
                 if constexpr(is_scalar_type<X>::value)
@@ -218,8 +202,6 @@ struct DynamicBuffer
             {
                 this->template Set<X>(i, is_valid_element, x + tmp);
             }
-
-#endif
         }
     }
 
@@ -261,7 +243,7 @@ struct DynamicBuffer
 #if CK_USE_AMD_BUFFER_LOAD
         bool constexpr use_amd_buffer_addressing = sizeof(IndexType) <= sizeof(int32_t);
 #else
-        bool constexpr use_amd_buffer_addressing      = false;
+        bool constexpr use_amd_buffer_addressing = false;
 #endif
 
 #if CK_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE
@@ -273,23 +255,15 @@ struct DynamicBuffer
         if constexpr(GetAddressSpace() == AddressSpaceEnum::Global && use_amd_buffer_addressing)
         {
             constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
-            using vector_t = typename vector_type_maker<remove_cvref_t<T>, t_per_x>::type::type;
-            vector_t tmp;
-
-            if constexpr(is_same_v<remove_cvref_t<X>, vector_t>)
-            {
-                tmp = x;
-            }
-            else
-            {
-                __builtin_memcpy(&tmp, &x, sizeof(vector_t));
-            }
 
             amd_buffer_store<remove_cvref_t<T>, t_per_x, coherence>(
-                tmp, p_data_, i, is_valid_element, element_space_size_ / PackedSize);
+                x, p_data_, i, is_valid_element, element_space_size_ / PackedSize);
         }
         else if constexpr(GetAddressSpace() == AddressSpaceEnum::Lds &&
-                          is_same<typename scalar_type<remove_cvref_t<T>>::type, int8_t>::value &&
+                          is_same_v<typename scalar_type<remove_cvref_t<T>>::type, int8_t> &&
+                          !is_same_v<remove_cvref_t<T>,
+                                     pk_i4_t> && // TODO: This needs to be fixed for pk_i4_t which
+                                                 // cannot be handled below, but is stored as int8_t
                           workaround_int8_ds_write_issue)
         {
             if(is_valid_element)

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-j* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -41,23 +18,23 @@ namespace rocRoller
         };
 
         /**
-        *  @brief Cast a half or single precision number to 6-bit floating point number (FP6 or BF6)
-        *
-        *                Sign    Exponent     Mantissa        Bias
-        *  FP6(E2M3)      1          2           3              1
-        *  BF6(E3M2)      1          3           2              3
-        *
-        *  Special values:
-        *                 0   INF/-INF  NaN/-NaN  Max Norm   Min Norm   Max SubNorm   Min SubNorm
-        *  FP6(E2M3)     0x00    N/A       N/A     +/- 7.5   +/- 1.0    +/- 0.875     +/- 0.125
-        *  BF6(E3M2)     0x00    N/A       N/A     +/- 28    +/- 0.25   +/- 0.1875    +/- 0.0625
-        *
-        *  @tparam T Type (half or single precision) to be cast to f6
-        *
-        *  @param _x Floating number to be cast to f8
-    *  @param f6_src_fmt Format (FP6 or BF6) of F6
-        *  @param stochastic_round Stochastic rounding or not
-        */
+         *  @brief Cast a half or single precision number to 6-bit floating point number (FP6 or BF6)
+         *
+         *                Sign    Exponent     Mantissa        Bias
+         *  FP6(E2M3)      1          2           3              1
+         *  BF6(E3M2)      1          3           2              3
+         *
+         *  Special values:
+         *                 0   INF/-INF  NaN/-NaN  Max Norm   Min Norm   Max SubNorm   Min SubNorm
+         *  FP6(E2M3)     0x00    N/A       N/A     +/- 7.5   +/- 1.0    +/- 0.875     +/- 0.125
+         *  BF6(E3M2)     0x00    N/A       N/A     +/- 28    +/- 0.25   +/- 0.1875    +/- 0.0625
+         *
+         *  @tparam T Type (half or single precision) to be cast to f6
+         *
+         *  @param _x Floating number to be cast to f8
+         *  @param f6_src_fmt Format (FP6 or BF6) of F6
+         *  @param stochastic_round Stochastic rounding or not
+         */
         template <typename T>
         uint8_t cast_to_f6(T        _x,
                            uint32_t f6_src_fmt,

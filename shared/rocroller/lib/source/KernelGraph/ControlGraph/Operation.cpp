@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 
@@ -31,6 +8,11 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
+    static_assert(!COperationWithBody<Assign>);
+    static_assert(!COperationWithBody<Multiply>);
+    static_assert(COperationWithBody<ForLoopOp>);
+    static_assert(COperationWithBody<Kernel>);
+
     VariableType getVariableType(Operation const& op)
     {
         auto visitor = [](auto const& op) -> VariableType {
@@ -106,18 +88,6 @@ namespace rocRoller::KernelGraph::ControlGraph
         return concatenate(name(), " ", addTID);
     }
 
-    ComputeIndex::ComputeIndex() = default;
-    ComputeIndex::ComputeIndex(bool     forward,
-                               DataType valueType,
-                               DataType offsetType,
-                               DataType strideType)
-        : forward(forward)
-        , valueType(valueType)
-        , offsetType(offsetType)
-        , strideType(strideType)
-    {
-    }
-
     LoadLinear::LoadLinear() = default;
     LoadLinear::LoadLinear(rocRoller::VariableType const varType)
         : varType(varType)
@@ -125,12 +95,8 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadTiled::LoadTiled() = default;
-    LoadTiled::LoadTiled(rocRoller::VariableType const varType,
-                         bool const                    isTransposedTile,
-                         bool const                    isDirect2LDS)
+    LoadTiled::LoadTiled(rocRoller::VariableType const varType)
         : varType(varType)
-        , isTransposedTile(isTransposedTile)
-        , isDirect2LDS(isDirect2LDS)
     {
     }
 
@@ -221,26 +187,35 @@ namespace rocRoller::KernelGraph::ControlGraph
         return fmt::format("LoadLDSTile{{{}}}", rocRoller::toString(varType));
     }
 
-    RR_CLASS_NAME_IMPL(SetCoordinate);
-    RR_CLASS_NAME_IMPL(ConditionalOp);
+    std::string Deallocate::toString() const
+    {
+        std::ostringstream msg;
+        msg << "Deallocate{";
+        streamJoin(msg, arguments, ", ");
+        msg << "}";
+        return msg.str();
+    }
+
     RR_CLASS_NAME_IMPL(AssertOp);
+    RR_CLASS_NAME_IMPL(Assign);
+    RR_CLASS_NAME_IMPL(ConditionalOp);
+    RR_CLASS_NAME_IMPL(Deallocate);
     RR_CLASS_NAME_IMPL(DoWhileOp);
     RR_CLASS_NAME_IMPL(Exchange);
     RR_CLASS_NAME_IMPL(ForLoopOp);
-    RR_CLASS_NAME_IMPL(UnrollOp);
-    RR_CLASS_NAME_IMPL(Assign);
-    RR_CLASS_NAME_IMPL(ComputeIndex);
+    RR_CLASS_NAME_IMPL(LoadLDSTile);
     RR_CLASS_NAME_IMPL(LoadLinear);
+    RR_CLASS_NAME_IMPL(LoadSGPR);
+    RR_CLASS_NAME_IMPL(LoadTileDirect2LDS);
     RR_CLASS_NAME_IMPL(LoadTiled);
     RR_CLASS_NAME_IMPL(LoadVGPR);
-    RR_CLASS_NAME_IMPL(LoadSGPR);
-    RR_CLASS_NAME_IMPL(LoadLDSTile);
     RR_CLASS_NAME_IMPL(Multiply);
-    RR_CLASS_NAME_IMPL(LoadTileDirect2LDS);
-    RR_CLASS_NAME_IMPL(StoreTiled);
-    RR_CLASS_NAME_IMPL(StoreSGPR);
-    RR_CLASS_NAME_IMPL(StoreLDSTile);
     RR_CLASS_NAME_IMPL(SeedPRNG);
+    RR_CLASS_NAME_IMPL(SetCoordinate);
+    RR_CLASS_NAME_IMPL(StoreLDSTile);
+    RR_CLASS_NAME_IMPL(StoreSGPR);
+    RR_CLASS_NAME_IMPL(StoreTiled);
     RR_CLASS_NAME_IMPL(TensorContraction);
+    RR_CLASS_NAME_IMPL(UnrollOp);
 
 }

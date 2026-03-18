@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_prune_dense2csr_bad_arg(void)
+void testing_prune_dense2csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     size_t safe_size = 100;
@@ -246,7 +246,7 @@ void testing_prune_dense2csr_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_prune_dense2csr(Arguments argus)
+void testing_prune_dense2csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  M         = argus.M;
@@ -263,13 +263,6 @@ hipsparseStatus_t testing_prune_dense2csr(Arguments argus)
 
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
-
-    if(M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     // Allocate host memory
     std::vector<T>   h_A(LDA * N);
@@ -487,8 +480,6 @@ hipsparseStatus_t testing_prune_dense2csr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_PRUNE_DENSE2CSR_HPP

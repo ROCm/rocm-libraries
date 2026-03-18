@@ -129,12 +129,27 @@ protected:
         scheme = CS_3D_RC;
     }
 
-    // Determines if the current node suports
-    // the partial pass optimization.
-    bool CheckPartialPassSupport();
-
     void AssignParams_internal() override;
     void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
+};
+
+/*****************************************************
+ * CS_3D_PP  *
+ *****************************************************/
+class PP3DNode : public InternalNode
+{
+    friend class NodeFactory;
+
+protected:
+    explicit PP3DNode(TreeNode* p)
+        : InternalNode(p)
+    {
+        scheme = CS_3D_PP;
+    }
+
+    void   AssignParams_internal() override;
+    void   BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
+    size_t GetPPOffDim() const;
 };
 
 /*****************************************************
@@ -153,7 +168,7 @@ protected:
         allowInplace   = false;
     }
 
-    // should be overriden by the derived class
+    // should be overridden by the derived class
     virtual size_t sbrc_3D_alignment_dimension() const
     {
         return 0;

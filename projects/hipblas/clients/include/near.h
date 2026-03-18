@@ -27,6 +27,7 @@
 
 #include "hipblas.h"
 #include "host_vector.hpp"
+#include "unit.h"
 
 #ifdef GOOGLE_TEST
 #include "gtest/gtest.h"
@@ -79,57 +80,60 @@ void near_check_general(int64_t        M,
                         host_vector<T> hGPU[],
                         double         abs_error);
 
-// currently only used for half-precision comparisons in dot_ex tests
+template <typename T, typename T_hpa = T>
+void near_check_mixed(int64_t                        M,
+                      int64_t                        N,
+                      int64_t                        lda,
+                      const std::remove_cv_t<T_hpa>* hCPU,
+                      const T*                       hGPU,
+                      double                         abs_error);
+
+// mixed precision or hpl
 template <class T>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance = 0.0;
+inline constexpr double error_tolerance = get_epsilon<T>();
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance<hipblasBfloat16> = 1 / 100.0;
+inline constexpr double error_tolerance<hipblasBfloat16> = 1 / 100.0;
 
 // 2 ^ -14, smallest positive normal number for IEEE16
 template <>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance<hipblasHalf> = 0.000061035;
+inline constexpr double error_tolerance<hipblasHalf> = 0.000061035;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance<std::complex<float>> = 1 / 10000.0;
+inline constexpr double error_tolerance<std::complex<float>> = 1 / 10000.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance<std::complex<double>> = 1 / 1000000.0;
+inline constexpr double error_tolerance<std::complex<double>> = 1 / 1000000.0;
 
-// currently only used for gemm_ex
+// mixed precision or hpl
 template <class Tc, class Ti, class To>
-static constexpr double sum_error_tolerance_for_gfx11 = 0.0;
+static constexpr double sum_error_tolerance_for_gfx11 = get_epsilon<Tc>();
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<float, hipblasBfloat16, float> = 1 / 10.0;
+inline constexpr double sum_error_tolerance_for_gfx11<float, hipblasBfloat16, float> = 1 / 10.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
+inline constexpr double
     sum_error_tolerance_for_gfx11<float, hipblasBfloat16, hipblasBfloat16> = 1 / 10.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<float, hipblasHalf, float> = 1 / 100.0;
+inline constexpr double sum_error_tolerance_for_gfx11<float, hipblasHalf, float> = 1 / 100.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<float, hipblasHalf, hipblasHalf> = 1 / 100.0;
+inline constexpr double sum_error_tolerance_for_gfx11<float, hipblasHalf, hipblasHalf> = 1 / 100.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
+inline constexpr double
     sum_error_tolerance_for_gfx11<hipblasHalf, hipblasHalf, hipblasHalf> = 1 / 100.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<std::complex<float>,
-                                  std::complex<float>,
-                                  std::complex<float>> = 1 / 10000.0;
+inline constexpr double sum_error_tolerance_for_gfx11<std::complex<float>,
+                                                      std::complex<float>,
+                                                      std::complex<float>> = 1 / 10000.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<std::complex<double>,
-                                  std::complex<double>,
-                                  std::complex<double>> = 1 / 1000000.0;
+inline constexpr double sum_error_tolerance_for_gfx11<std::complex<double>,
+                                                      std::complex<double>,
+                                                      std::complex<double>> = 1 / 1000000.0;
 
 #endif

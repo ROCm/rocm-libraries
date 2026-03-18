@@ -14,6 +14,7 @@ LeakyReLU
 matmul
 myst
 NONINFRINGEMENT
+pretraining
 ReLU
 rocSPARSELt
 sublicense

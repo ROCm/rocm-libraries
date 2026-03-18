@@ -63,30 +63,6 @@ bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHan
     return false;
 }
 
-hipblasStatus_t hipErrorToHIPBLASStatus(hipError_t status)
-{
-    switch(status)
-    {
-    case hipSuccess:
-        return HIPBLAS_STATUS_SUCCESS;
-    case hipErrorMemoryAllocation:
-    case hipErrorLaunchOutOfResources:
-        return HIPBLAS_STATUS_ALLOC_FAILED;
-    case hipErrorInvalidDevicePointer:
-        return HIPBLAS_STATUS_INVALID_VALUE;
-    case hipErrorInvalidDevice:
-    case hipErrorInvalidResourceHandle:
-        return HIPBLAS_STATUS_NOT_INITIALIZED;
-    case hipErrorInvalidValue:
-        return HIPBLAS_STATUS_INVALID_VALUE;
-    case hipErrorNoDevice:
-    case hipErrorUnknown:
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    default:
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    }
-}
-
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 {
     switch(status)
@@ -241,6 +217,21 @@ hipblasStatus_t hipblasLtMatmulDescCreate(hipblasLtMatmulDesc_t* matmulDesc,
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescCreate");
+    char* override = std::getenv("HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32");
+    if (override && (computeType == hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_TF32)
+        && (std::string(override) != "")) {
+        switch (std::stoi(std::string(override))) {
+            case 0:
+                computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F;
+                break;
+            case 2:
+                computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_16BF;
+                break;
+            case 1:
+            default:
+                break;
+        }
+    }
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_desc_create(
         (rocblaslt_matmul_desc*)matmulDesc, (rocblaslt_compute_type)computeType, scaleType));
     rocblaslt::Debug::Instance().markerStop();

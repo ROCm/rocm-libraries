@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-// This shared library is available at https://github.com/ROCmSoftwarePlatform/rocJENKINS/
+// This shared library is available at https://github.com/ROCm/rocJENKINS/
 @Library('rocJenkins@pong') _
 
 // This is file for internal AMD use.
@@ -93,17 +93,13 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 
     // For url job names that are outside of the standardJobNameSet i.e. compute-rocm-dkms-no-npi-1901
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 6 * * 6')])]))
-        stage(urlJobName) {
-            runCI([ubuntu18:['any']], urlJobName)
-        }
+        runCI([ubuntu18:['any']], urlJobName)
     }
 }

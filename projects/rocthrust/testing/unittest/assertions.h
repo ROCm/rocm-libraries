@@ -24,8 +24,14 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/universal_vector.h>
 
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <unittest/exceptions.h>
 #include <unittest/util.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 #define ASSERT_EQUAL_WITH_FILE_AND_LINE(X, Y, FILE_, LINE_)       unittest::assert_equal((X), (Y), FILE_, LINE_)
 #define ASSERT_EQUAL_QUIET_WITH_FILE_AND_LINE(X, Y, FILE_, LINE_) unittest::assert_equal_quiet((X), (Y), FILE_, LINE_)
@@ -121,8 +127,7 @@ double const DEFAULT_ABSOLUTE_TOL = 1e-4;
 template <typename T>
 struct value_type
 {
-  using type = typename THRUST_NS_QUALIFIER::detail::remove_const<
-    typename THRUST_NS_QUALIFIER::detail::remove_reference<T>::type>::type;
+  using type = _THRUST_STD::remove_const_t<_THRUST_STD::remove_reference_t<T>>;
 };
 
 template <typename T>
@@ -313,7 +318,7 @@ void assert_gequal(char a, char b, const std::string& filename = "unknown", int 
   }
 }
 
-// will catch everything implicitly convertable to a double
+// will catch everything implicitly convertible to a double
 bool almost_equal(double a, double b, double a_tol, double r_tol)
 {
   if (std::abs(a - b) > r_tol * (std::abs(a) + std::abs(b)) + a_tol)
@@ -344,7 +349,7 @@ struct is_complex<std::complex<T>> : public THRUST_NS_QUALIFIER::true_type
 } // namespace
 
 template <typename T1, typename T2>
-inline typename THRUST_NS_QUALIFIER::detail::enable_if<is_complex<T1>::value && is_complex<T2>::value, bool>::type
+inline _THRUST_STD::enable_if_t<is_complex<T1>::value && is_complex<T2>::value, bool>
 almost_equal(const T1& a, const T2& b, double a_tol, double r_tol)
 {
   return almost_equal(a.real(), b.real(), a_tol, r_tol) && almost_equal(a.imag(), b.imag(), a_tol, r_tol);
@@ -404,6 +409,17 @@ public:
 ////
 // check sequences
 
+inline int promote_char(char c)
+{
+  return c;
+}
+
+template <typename T>
+T&& promote_char(T&& t)
+{
+  return _THRUST_STD::forward<T>(t);
+}
+
 template <typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
 void assert_equal(
   ForwardIterator1 first1,
@@ -453,16 +469,7 @@ void assert_equal(
 
       if (mismatches <= MAX_OUTPUT_LINES)
       {
-        THRUST_IF_CONSTEXPR (sizeof(InputType) == 1)
-        {
-          f << "  [" << i << "] " << *first1 + InputType() << "  " << *first2 + InputType() << "\n"; // unprintable
-                                                                                                     // chars are a
-                                                                                                     // problem
-        }
-        else
-        {
-          f << "  [" << i << "] " << *first1 << "  " << *first2 << "\n";
-        }
+        f << "  [" << i << "] " << promote_char(*first1) << "  " << promote_char(*first2) << "\n";
       }
     }
 

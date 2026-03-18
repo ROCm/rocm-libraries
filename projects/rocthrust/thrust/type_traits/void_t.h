@@ -22,9 +22,13 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
-#  include <type_traits>
-#endif
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 THRUST_NAMESPACE_BEGIN
 
@@ -39,18 +43,16 @@ THRUST_NAMESPACE_BEGIN
 /*! \brief Utility trait that maps a sequence of any types to the type void.
  */
 template <typename...>
-struct voider
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::void_t") voider
 {
   /*! \brief The resulting type (always void). */
   using type = void;
 };
 
-#if THRUST_CPP_DIALECT >= 2017
-using std::void_t;
-#else
+/*! \brief Utility alias that maps a sequence of types to the type void.
+ */
 template <typename... Ts>
-using void_t = typename voider<Ts...>::type;
-#endif
+using void_t THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::void_t") = void;
 
 /*! \} // type traits
  */

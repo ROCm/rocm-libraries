@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "app.hpp"
+#include "rocsparse_clients_float16.hpp"
 #include "rocsparseio.h"
 #include <algorithm>
 #include <chrono>
@@ -165,12 +166,6 @@ namespace rocsparseio
 inline std::ostream& operator<<(std::ostream& os, const rocsparseio::file_format_t& that_)
 {
     os << that_.to_string();
-    return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, const _Float16& that_)
-{
-    os << (float)that_;
     return os;
 }
 
@@ -711,6 +706,7 @@ rocsparseio_status write_ascii_sparse_coo_dispatch_t(rocsparseio_type t, P... pa
     }
     case rocsparseio_type_int32:
     case rocsparseio_type_int64:
+    case rocsparseio_type_bfloat16:
     {
         return rocsparseio_status_invalid_value;
     }
@@ -733,6 +729,7 @@ rocsparseio_status
     }
     case rocsparseio_type_int8:
     case rocsparseio_type_float16:
+    case rocsparseio_type_bfloat16:
     case rocsparseio_type_float32:
     case rocsparseio_type_float64:
     case rocsparseio_type_complex32:
@@ -759,6 +756,7 @@ rocsparseio_status
     }
     case rocsparseio_type_int8:
     case rocsparseio_type_float16:
+    case rocsparseio_type_bfloat16:
     case rocsparseio_type_float32:
     case rocsparseio_type_float64:
     case rocsparseio_type_complex32:
@@ -805,6 +803,10 @@ rocsparseio_status write_ascii_dense_vector(rocsparseio_type t, P... params)
     case rocsparseio_type_complex64:
     {
         return write_ascii_dense_vector_template<std::complex<double>>(params...);
+    }
+    case rocsparseio_type_bfloat16:
+    {
+        return rocsparseio_status_invalid_value;
     }
     }
 }
@@ -1074,6 +1076,7 @@ rocsparseio_status rocsparseio2csr(const char* ifilename, const char* ofilename)
         }
         case rocsparseio_type_int8:
         case rocsparseio_type_float16:
+        case rocsparseio_type_bfloat16:
         case rocsparseio_type_float32:
         case rocsparseio_type_float64:
         case rocsparseio_type_complex32:
@@ -1104,6 +1107,7 @@ rocsparseio_status rocsparseio2csr(const char* ifilename, const char* ofilename)
         }
         case rocsparseio_type_int8:
         case rocsparseio_type_float16:
+        case rocsparseio_type_bfloat16:
         case rocsparseio_type_float32:
         case rocsparseio_type_float64:
         case rocsparseio_type_complex32:
@@ -1147,6 +1151,7 @@ rocsparseio_status rocsparseio2csr(const char* ifilename, const char* ofilename)
         case rocsparseio_type_int64:
         case rocsparseio_type_complex32:
         case rocsparseio_type_complex64:
+        case rocsparseio_type_bfloat16:
         {
             break;
         }

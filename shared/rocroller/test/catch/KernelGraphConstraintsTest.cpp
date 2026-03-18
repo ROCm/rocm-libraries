@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -206,6 +183,88 @@ SCENARIO("NoDanglingMappings constraint works", "[kernel-graph]")
                                    && ContainsSubstring("Control node 1 does not exist.")
                                    && !ContainsSubstring("coordinate node 1"));
                 }
+            }
+        }
+    }
+}
+
+SCENARIO("WalkableControlGraph constraint works", "[kernel-graph]")
+{
+    using namespace rocRoller;
+    namespace kg = rocRoller::KernelGraph;
+    namespace cg = kg::ControlGraph;
+    using namespace Catch::Matchers;
+
+    GIVEN("A valid control graph")
+    {
+        kg::KernelGraph g;
+
+        auto kernel = g.control.addElement(cg::Kernel());
+
+        auto assign1 = g.control.addElement(cg::Assign{});
+        auto assign2 = g.control.addElement(cg::Assign{});
+
+        auto cond = g.control.addElement(cg::ConditionalOp{});
+
+        auto ifAssign    = g.control.addElement(cg::Assign{});
+        auto elseAssign  = g.control.addElement(cg::Assign{});
+        auto afterAssign = g.control.addElement(cg::Assign{});
+
+        g.control.addElement(cg::Body{}, {kernel}, {assign1});
+        g.control.addElement(cg::Body{}, {kernel}, {assign2});
+        g.control.addElement(cg::Body{}, {kernel}, {cond});
+        g.control.addElement(cg::Body{}, {kernel}, {afterAssign});
+
+        g.control.addElement(cg::Sequence{}, {assign1}, {cond});
+        g.control.addElement(cg::Sequence{}, {cond}, {afterAssign});
+
+        g.control.addElement(cg::Body{}, {cond}, {ifAssign});
+        g.control.addElement(cg::Else{}, {cond}, {elseAssign});
+
+        THEN("The constraint passes.")
+        {
+            auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+            CAPTURE(rv.explanation);
+            CHECK(rv.satisfied);
+        }
+
+        WHEN("An invalid edge is added")
+        {
+            g.control.addElement(cg::Sequence{}, {ifAssign}, {afterAssign});
+
+            THEN("The constraint fails.")
+            {
+                auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+                CAPTURE(rv.explanation);
+                CHECK_FALSE(rv.satisfied);
+            }
+        }
+
+        WHEN("A cycle is added")
+        {
+            g.control.addElement(cg::Sequence{}, {afterAssign}, {assign1});
+
+            THEN("The constraint fails.")
+            {
+                auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+                CAPTURE(rv.explanation);
+                CHECK_FALSE(rv.satisfied);
+            }
+        }
+
+        WHEN("A self cycle is added")
+        {
+            g.control.addElement(cg::Sequence{}, {afterAssign}, {afterAssign});
+
+            THEN("The constraint fails.")
+            {
+                auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+                CAPTURE(rv.explanation);
+                CHECK_FALSE(rv.satisfied);
             }
         }
     }

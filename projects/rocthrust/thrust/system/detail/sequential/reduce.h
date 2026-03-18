@@ -43,7 +43,7 @@ THRUST_HOST_DEVICE OutputType reduce(
   BinaryFunction binary_op)
 {
   // wrap binary_op
-  thrust::detail::wrapped_function<BinaryFunction, OutputType> wrapped_binary_op(binary_op);
+  thrust::detail::wrapped_function<BinaryFunction, OutputType> wrapped_binary_op{binary_op};
 
   // initialize the result
   OutputType result = init;

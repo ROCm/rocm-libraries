@@ -83,6 +83,8 @@ namespace hipblaslt_ext
         hipDataType          type_c; //!< The C matrix datatype.
         hipDataType          type_d; //!< The D matrix datatype.
         hipblasComputeType_t type_compute; //!< The compute datatype.
+        hipblasLtOrder_t     order_a; //!< The A martix data layout order
+        hipblasLtOrder_t     order_b; //!< The B martix data layout order
     };
 
     GemmProblemType::GemmProblemType()
@@ -106,6 +108,11 @@ namespace hipblaslt_ext
         pimpl->type_c       = typeC;
         pimpl->type_d       = typeD;
         pimpl->type_compute = typeCompute;
+
+        // default value of order is COL despite of opA/B,
+        // currently only swizzle cases use the variables
+        pimpl->order_a = HIPBLASLT_ORDER_COL;
+        pimpl->order_b = HIPBLASLT_ORDER_COL;
     }
 
     GemmProblemType::~GemmProblemType() = default;
@@ -170,6 +177,16 @@ namespace hipblaslt_ext
         pimpl->type_compute = type;
     }
 
+    void GemmProblemType::setOrderA(hipblasLtOrder_t order)
+    {
+        pimpl->order_a = order;
+    }
+
+    void GemmProblemType::setOrderB(hipblasLtOrder_t order)
+    {
+        pimpl->order_b = order;
+    }
+
     hipblasOperation_t GemmProblemType::getOpA() const
     {
         return pimpl->op_a;
@@ -205,6 +222,16 @@ namespace hipblaslt_ext
         return pimpl->type_compute;
     }
 
+    hipblasLtOrder_t GemmProblemType::getOrderA() const
+    {
+        return pimpl->order_a;
+    }
+
+    hipblasLtOrder_t GemmProblemType::getOrderB() const
+    {
+        return pimpl->order_b;
+    }
+
     class GemmEpilogue::GemmEpilogueImpl
     {
     public:
@@ -217,6 +244,8 @@ namespace hipblaslt_ext
             = RocblasltContractionProblem::ScalingFormat::None;
         RocblasltContractionProblem::ScalingFormat scaling_b_type
             = RocblasltContractionProblem::ScalingFormat::None;
+        float act0;
+        float act1;
     };
 
     GemmEpilogue::GemmEpilogue()
@@ -303,6 +332,16 @@ namespace hipblaslt_ext
         }
     }
 
+    void GemmEpilogue::setAct0(float act0)
+    {
+        pimpl->act0 = act0;
+    }
+
+    void GemmEpilogue::setAct1(float act1)
+    {
+        pimpl->act1 = act1;
+    }
+
     hipblasLtEpilogue_t GemmEpilogue::getMode() const
     {
         return pimpl->mode;
@@ -356,6 +395,16 @@ namespace hipblaslt_ext
                       << static_cast<int>(pimpl->scaling_b_type) << std::endl;
             throw std::invalid_argument("Unsupported scaling type for B matrix");
         }
+    }
+
+    float GemmEpilogue::getAct0()
+    {
+        return pimpl->act0;
+    }
+
+    float GemmEpilogue::getAct1()
+    {
+        return pimpl->act1;
     }
 
     class GemmTuning::GemmTuningImpl
@@ -749,6 +798,16 @@ namespace hipblaslt_ext
         return exception_to_hipblas_status();
     }
 
+    void GemmInstance::setMaxWorkspaceBytes(size_t workspaceBytes)
+    {
+        m_workspace_bytes = workspaceBytes;
+    }
+
+    const size_t GemmInstance::getMaxWorkspaceBytes() const
+    {
+        return m_workspace_bytes;
+    }
+
     hipblasStatus_t GemmInstance::initialize(const hipblasLtMatmulAlgo_t& algo,
                                              void*                        workspace,
                                              bool                         useUserArgs,
@@ -756,7 +815,7 @@ namespace hipblaslt_ext
     try
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtInitializeCpp");
-        if(m_gemm_count == 0)
+        if((m_gemm_count == 0) || (workspace == nullptr && m_workspace_bytes > 0))
         {
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -770,6 +829,7 @@ namespace hipblaslt_ext
                                                                     *rocalgo,
                                                                     tuning,
                                                                     workspace,
+                                                                    m_workspace_bytes,
                                                                     useUserArgs,
                                                                     stream,
                                                                     m_data));
@@ -789,7 +849,7 @@ namespace hipblaslt_ext
     try
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtInitializeTuningV2Cpp");
-        if(m_gemm_count == 0)
+        if((m_gemm_count == 0) || (workspace == nullptr && m_workspace_bytes > 0))
         {
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -803,6 +863,7 @@ namespace hipblaslt_ext
                                                                     *rocalgo,
                                                                     roctuning,
                                                                     workspace,
+                                                                    m_workspace_bytes,
                                                                     useUserArgs,
                                                                     stream,
                                                                     m_data));
@@ -1352,10 +1413,7 @@ namespace hipblaslt_ext
     int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo)
     {
         int* algo_ptr = (int*)algo.data;
-        if(*algo_ptr < 0)
-        {
-            return -1;
-        }
+
         return *algo_ptr;
     }
 

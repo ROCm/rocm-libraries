@@ -26,6 +26,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <type_traits>
+
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -35,7 +37,7 @@ namespace detail
 {
 template <typename T,
           typename U,
-          std::enable_if_t<thrust::detail::is_integral<T>::value && std::is_unsigned<U>::value, int> = 0>
+          std::enable_if_t<::rocprim::is_integral<T>::value&& ::rocprim::is_unsigned<U>::value, int> = 0>
 THRUST_HOST_DEVICE inline constexpr auto ceiling_div(const T a, const U b)
 {
   return a / b + (a % b > 0 ? 1 : 0);
@@ -55,7 +57,7 @@ THRUST_HOST_DEVICE inline void apply_to_each_in_tuple_impl(Tuple&& t, Function&&
 
 template <class Tuple, class Function>
 THRUST_HOST_DEVICE inline auto apply_to_each_in_tuple(Tuple&& t, Function&& f)
-  -> void_t<tuple_size<std::remove_reference_t<Tuple>>>
+  -> std::void_t<tuple_size<std::remove_reference_t<Tuple>>>
 {
   static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;
   apply_to_each_in_tuple_impl(std::forward<Tuple>(t), std::forward<Function>(f), thrust::make_index_sequence<size>());

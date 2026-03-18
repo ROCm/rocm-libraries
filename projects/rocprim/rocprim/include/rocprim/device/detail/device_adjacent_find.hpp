@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename Config,
-         typename TransformedInputIterator,
+template<typename TransformedInputIterator,
          typename ReduceIndexIterator,
          typename BinaryPred,
          typename OrderedTileIdType>
@@ -52,15 +51,15 @@ struct adjacent_find_impl_kernels
         ordered_tile_id.reset();
     }
 
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
-                                                    .kernel_config.block_size) void
-        block_reduce_kernel(TransformedInputIterator transformed_input,
-                            ReduceIndexIterator      reduce_output,
-                            const std::size_t        size,
-                            BinaryPred               op,
-                            OrderedTileIdType        ordered_tile_id)
+    template<typename TargetConfig>
+    static ROCPRIM_DEVICE
+    void block_reduce_kernel(TransformedInputIterator transformed_input,
+                             ReduceIndexIterator      reduce_output,
+                             const std::size_t        size,
+                             BinaryPred               op,
+                             OrderedTileIdType        ordered_tile_id)
     {
-        static constexpr adjacent_find_config_params params     = device_params<Config>();
+        static constexpr adjacent_find_config_params params     = TargetConfig::params;
         static constexpr unsigned int                block_size = params.kernel_config.block_size;
         static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
         static constexpr unsigned int items_per_tile   = block_size * items_per_thread;
@@ -70,7 +69,10 @@ struct adjacent_find_impl_kernels
         using block_reduce_type = ::rocprim::block_reduce<
             transformed_input_type,
             block_size,
-            block_reduce_algorithm::raking_reduce>; // TODO?: params.block_reduce_method>;
+            block_reduce_algorithm::raking_reduce,
+            1,
+            1,
+            TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
         ROCPRIM_SHARED_MEMORY union
         {

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,6 +111,12 @@ public:
     explicit operator _Float16()
     {
         return random_nan_data<_Float16, uint16_t, 10, 5>();
+    }
+
+    // Random NaN bfloat16
+    explicit operator rocsparse_bfloat16()
+    {
+        return random_nan_data<rocsparse_bfloat16, uint16_t, 7, 8>();
     }
 
     // Random NaN float

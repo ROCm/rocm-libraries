@@ -259,6 +259,7 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
     case HIP_R_16F:
     case HIP_R_16BF:
     case HIP_R_8I:
+    case HIP_R_32I:
         break;
 #if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:

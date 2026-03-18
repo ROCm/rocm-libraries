@@ -28,6 +28,7 @@
 
 #include <miopen/common.hpp>
 #include <miopen/errors.hpp>
+#include <miopen/logger.hpp>
 
 #include <memory>
 #include <typeinfo>
@@ -123,16 +124,22 @@ public:
         return *reinterpret_cast<Actual*>(impl->GetRawPtr());
     }
 
+    template <class Actual>
+    bool IsOfType() const
+    {
+        return impl && impl->CanCastTo(typeid(Actual));
+    }
+
     operator bool() const { return impl != nullptr; }
 
 private:
     struct Interface
     {
     public:
-        Interface(const Interface&) = delete;
-        Interface(Interface&&)      = delete;
+        Interface(const Interface&)            = delete;
+        Interface(Interface&&)                 = delete;
         Interface& operator=(const Interface&) = delete;
-        Interface& operator=(Interface&&) = delete;
+        Interface& operator=(Interface&&)      = delete;
 
         virtual ~Interface(){};
 

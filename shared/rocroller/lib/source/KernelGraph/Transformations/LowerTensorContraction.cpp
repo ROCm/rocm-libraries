@@ -1,33 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
 
@@ -173,8 +151,7 @@ namespace rocRoller
             if(info.loadLDS == -1)
                 return;
 
-            for(auto edge : graph.control.getNeighbours(info.global, Graph::Direction::Upstream)
-                                .to<std::vector>())
+            for(auto edge : graph.control.getNeighbours(info.global, Graph::Direction::Upstream))
                 graph.control.deleteElement(edge);
             graph.control.addElement(Body(), {forLoop}, {info.global});
         }
@@ -416,18 +393,12 @@ namespace rocRoller
         {
             auto [required, path]
                 = findRequiredCoordinates(userTag, Graph::Direction::Downstream, graph);
-            auto macroTileNumbers = filterCoordinates<MacroTileNumber>(required, graph);
-            for(auto mtnTag : macroTileNumbers)
+            auto tileNumbers = filterCoordinates<MacroTileNumber>(required, graph);
+            for(auto tileNumberTag : tileNumbers)
             {
-                for(auto input : graph.coordinates.getInputNodeIndices(
-                        mtnTag, rocRoller::KernelGraph::CoordinateGraph::isEdge<Tile>))
-                {
-                    auto maybeSubDimension = graph.coordinates.get<SubDimension>(input);
-                    if(!maybeSubDimension)
-                        continue;
-                    if(maybeSubDimension->dim == sdim)
-                        return mtnTag;
-                }
+                auto tileNumber = graph.coordinates.get<MacroTileNumber>(tileNumberTag).value();
+                if(tileNumber.dim == sdim)
+                    return tileNumberTag;
             }
             return -1;
         }
@@ -458,6 +429,32 @@ namespace rocRoller
 
             auto scaleModeA = getScaleMode(info.loadAScale);
             auto scaleModeB = getScaleMode(info.loadBScale);
+
+            {
+                bool expectedSkip = false;
+
+                auto contraction = graph.control.get<TensorContraction>(tag).value();
+
+                if(!contraction.scalePreShuffledTileA.empty())
+                {
+                    AssertFatal(
+                        scaleModeA == Operations::ScaleMode::Separate
+                            && scaleModeB == Operations::ScaleMode::Separate
+                            && !contraction.scalePreShuffledTileB.empty(),
+                        "Pre-swizzled inputs must currently be for both A and B or neither.",
+                        ShowValue(scaleModeA),
+                        ShowValue(scaleModeB),
+                        ShowValue(contraction.scalePreShuffledTileB));
+
+                    expectedSkip = true;
+                }
+
+                bool actualSkip
+                    = context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None;
+                AssertFatal(expectedSkip == actualSkip,
+                            ShowValue(context->kernelOptions()->scaleSkipPermlane),
+                            ShowValue(expectedSkip));
+            }
 
             auto accumulationCoordSize = getAccumulationLoopSize(graph, a, info.userA);
 
@@ -704,19 +701,16 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {info.loadBScale->global}, {forWaveTilesX});
 
             // Connect ops after contraction to forK, remove contraction and its incoming edges
-            auto tcOutgoingEdges
-                = graph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>();
+            auto tcOutgoingEdges = graph.control.getNeighbours<Graph::Direction::Downstream>(tag);
             for(auto const e : tcOutgoingEdges)
             {
                 auto elem = graph.control.getElement(e);
-                auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
-                               .to<std::vector>();
+                auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e);
                 graph.control.deleteElement(e);
                 graph.control.addElement(
                     Sequence(), std::vector<int>{forWaveTilesEpilogueYNOP}, dst);
             }
-            auto tcIncomingEdges
-                = graph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>();
+            auto tcIncomingEdges = graph.control.getNeighbours<Graph::Direction::Upstream>(tag);
             for(auto const e : tcIncomingEdges)
                 graph.control.deleteElement(e);
             graph.control.deleteElement(tag);
@@ -725,8 +719,7 @@ namespace rocRoller
             // Add siblings...
             for(auto const index : info.siblingLoads)
             {
-                for(auto e : graph.control.getNeighbours<Graph::Direction::Upstream>(index)
-                                 .to<std::vector>())
+                for(auto e : graph.control.getNeighbours<Graph::Direction::Upstream>(index))
                 {
                     graph.control.deleteElement(e);
                 }
@@ -738,8 +731,9 @@ namespace rocRoller
 
             for(auto const siblingTag : info.siblingOps)
             {
-                for(auto edgeTag :
-                    graph.control.getNeighbours<Graph::Direction::Downstream>(siblingTag))
+                auto edgeTags
+                    = graph.control.getNeighbours<Graph::Direction::Downstream>(siblingTag);
+                for(auto edgeTag : edgeTags)
                 {
                     auto edge = graph.control.getElement(edgeTag);
                     graph.control.deleteElement(edgeTag);
@@ -777,8 +771,6 @@ namespace rocRoller
 
         KernelGraph LowerTensorContraction::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::lowerTensorContraction");
-
             auto contractions = graph.control.getNodes<TensorContraction>().to<std::vector>();
             AssertFatal(contractions.size() <= 1,
                         "More than one TensorContraction not supported yet.");
@@ -807,13 +799,14 @@ namespace rocRoller
 
         ConstraintStatus NoDanglingJammedNumbers(const KernelGraph& graph)
         {
+            TIMER(t, "Constraint::NoDanglingJammedNumbers");
             using GD = rocRoller::Graph::Direction;
 
             ConstraintStatus retval;
             for(auto tag : graph.coordinates.getNodes<JammedWaveTileNumber>())
             {
-                auto noIncoming = empty(graph.coordinates.getNeighbours<GD::Upstream>(tag));
-                auto noOutgoing = empty(graph.coordinates.getNeighbours<GD::Downstream>(tag));
+                auto noIncoming = std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag));
+                auto noOutgoing = std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag));
                 if(noIncoming || noOutgoing)
                 {
                     retval.combine(false, concatenate("Dangling JammedWaveTileNumber: ", tag));

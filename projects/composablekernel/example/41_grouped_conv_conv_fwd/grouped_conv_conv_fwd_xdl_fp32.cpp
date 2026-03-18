@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>
 #include <iostream>
@@ -19,6 +19,10 @@
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_fwd.hpp"
+
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
 
 using In0DataType       = float;
 using Wei0DataType      = float;
@@ -106,4 +110,11 @@ using DeviceBatchedGemmGemmInstance =
 
 #include "run_grouped_conv_conv_fwd_example.inc"
 
-int main(int argc, char* argv[]) { return run_grouped_conv_conv_fwd_example(argc, argv) ? 0 : 1; }
+int main(int argc, char* argv[])
+{
+    if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+    {
+        return 0;
+    }
+    return run_grouped_conv_conv_fwd_example(argc, argv) ? 0 : 1;
+}

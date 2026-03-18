@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddTransposeLoadCT.hpp>
@@ -34,21 +11,19 @@ namespace rocRoller
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
+        using namespace InstructionGenerators;
 
-        bool isTransposableTile(GPUArchitecture const& arch, MacroTile macroTile, DataType type)
+        bool isTransposableTile(GPUArchitecture const& arch, MatrixMultiplySizes mi, DataType type)
         {
-            const auto M = macroTile.subTileSizes[0];
-            const auto N = macroTile.subTileSizes[1];
-            const auto K = macroTile.subTileSizes[2];
-
             auto isF8F6F4TransposableTileLayout
-                = (isUnpackedF8(type) || isUnpackedF6(type) || isUnpackedF4(type))
-                  && (((M == 16) && (N == 16) && (K == 128))
-                      || ((M == 32) && (N == 32) && (K == 64)));
+                = isUnpackedF8F6F4(type)
+                  && (((mi.m == 16) && (mi.n == 16) && (mi.k == 128))
+                      || ((mi.m == 32) && (mi.n == 32) && (mi.k == 64)));
 
-            auto isF16TransposableTileLayout = isUnpackedF16(type)
-                                               && (((M == 16) && (N == 16) && (K == 32))
-                                                   || ((M == 32) && (N == 32) && (K == 16)));
+            auto isF16TransposableTileLayout
+                = isUnpackedF16(type)
+                  && (((mi.m == 16) && (mi.n == 16) && (mi.k == 32))
+                      || ((mi.m == 32) && (mi.n == 32) && (mi.k == 16)));
 
             auto hasTransposeInstructionForType = [&arch](DataType type) {
                 switch(type)
@@ -73,7 +48,7 @@ namespace rocRoller
                    && hasTransposeInstructionForType(type);
         };
 
-        /** @brief Sets isTransposedTile field of LoadTiled/LoadLDSTile ops
+        /** @brief Sets isTransposedTile field of LoadLDSTile op
          * connected to MacroTile @tileTag in Coordinate Graph @graph.
          */
         void setIsTransposedLoad(int tileTag, KernelGraph& graph)
@@ -85,12 +60,7 @@ namespace rocRoller
                         ") is connected to more than 1 operation in control graph!");
             auto opTag = conns[0].control;
             auto e     = graph.control.getElement(opTag);
-            std::visit(rocRoller::overloaded{[&](LoadTiled& op) {
-                                                 auto newLoadTiled(op);
-                                                 newLoadTiled.isTransposedTile = true;
-                                                 graph.control.setElement(opTag, newLoadTiled);
-                                             },
-                                             [&](LoadLDSTile& op) {
+            std::visit(rocRoller::overloaded{[&](LoadLDSTile& op) {
                                                  auto newLoadLDSTile(op);
                                                  newLoadLDSTile.isTransposedTile = true;
                                                  graph.control.setElement(opTag, newLoadLDSTile);
@@ -107,29 +77,42 @@ namespace rocRoller
                        std::get<Operation>(e));
         }
 
-        void addTransposeLoadWaveTileCT(ContextPtr                       context,
-                                        std::vector<DeferredConnection>& connections,
-                                        KernelGraph&                     graph,
-                                        int                              macTileTag,
-                                        int                              iWaveX,
-                                        int                              iWaveY,
-                                        int                              lane,
-                                        int                              element,
-                                        uint                             M,
-                                        uint                             K,
-                                        uint                             bitsPerElement,
-                                        int                              wavefrontSize)
+        template <GPUArchitectureGFX target>
+        void addTransposeLoadWaveTileCTImpl(ContextPtr                       context,
+                                            std::vector<DeferredConnection>& connections,
+                                            KernelGraph&                     graph,
+                                            int                              macTileTag,
+                                            int                              iWaveX,
+                                            int                              iWaveY,
+                                            int                              lane,
+                                            int                              element,
+                                            MatrixMultiplySizes              mi,
+                                            uint                             bitsPerElement,
+                                            int                              wavefrontSize);
 
+        template <>
+        void addTransposeLoadWaveTileCTImpl<GPUArchitectureGFX::GFX950>(
+            ContextPtr                       context,
+            std::vector<DeferredConnection>& connections,
+            KernelGraph&                     graph,
+            int                              macTileTag,
+            int                              iWaveX,
+            int                              iWaveY,
+            int                              lane,
+            int                              element,
+            MatrixMultiplySizes              mi,
+            uint                             bitsPerElement,
+            int                              wavefrontSize)
         {
             const auto simdsInWave    = 4;
             const auto lanesInSIMD    = 16;
-            const auto simdsPerSGroup = M / lanesInSIMD;
+            const auto simdsPerSGroup = mi.m / lanesInSIMD;
 
             const auto& arch                    = context->targetArchitecture();
             const auto  bitsPerTrLoad           = bitsPerTransposeLoad(arch, bitsPerElement);
             const auto  elementsTrLoadedPerLoad = bitsPerTrLoad / bitsPerElement;
             const auto  numTrLoadsPerWave       = 2;
-            const auto  numTrLoads              = (M * K) / wavefrontSize / elementsTrLoadedPerLoad;
+            const auto  numTrLoads = (mi.m * mi.k) / wavefrontSize / elementsTrLoadedPerLoad;
 
             auto simdsPerWave = graph.coordinates.addElement(
                 Adhoc("transpose.simdsPerWave", literal(simdsInWave), nullptr));
@@ -176,8 +159,44 @@ namespace rocRoller
             graph.coordinates.addElement(Flatten(), {simdsPerWave, lanesPerSIMD}, {lane});
             graph.coordinates.addElement(
                 Flatten(), {elementBlockNumber, elementBlockIndex}, {element});
+        }
 
-            setIsTransposedLoad(macTileTag, graph);
+        void addTransposeLoadWaveTileCT(ContextPtr                       context,
+                                        std::vector<DeferredConnection>& connections,
+                                        KernelGraph&                     graph,
+                                        int                              macTileTag,
+                                        int                              iWaveX,
+                                        int                              iWaveY,
+                                        int                              lane,
+                                        int                              element,
+                                        MatrixMultiplySizes              mi,
+                                        uint                             bitsPerElement,
+                                        int                              wavefrontSize)
+        {
+            TIMER(t, "KernelGraph::AddTransposeLoadCT");
+
+            switch(context->targetArchitecture().target().gfx)
+            {
+            case GPUArchitectureGFX::GFX950:
+            {
+                addTransposeLoadWaveTileCTImpl<GPUArchitectureGFX::GFX950>(context,
+                                                                           connections,
+                                                                           graph,
+                                                                           macTileTag,
+                                                                           iWaveX,
+                                                                           iWaveY,
+                                                                           lane,
+                                                                           element,
+                                                                           mi,
+                                                                           bitsPerElement,
+                                                                           wavefrontSize);
+                setIsTransposedLoad(macTileTag, graph);
+            }
+            break;
+            default:
+                Throw<FatalError>("addTransposeLoadWaveTileCT is not implemented for ",
+                                  context->targetArchitecture().target().toString());
+            }
         }
     }
 }

@@ -2,7 +2,7 @@ TestParameters:
   marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
 
 GlobalParameters:
-  MinimumRequiredVersion: 4.14.0
+  MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: 128
   DataInitTypeBeta: 0
@@ -361,7 +361,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - WorkGroupMapping: [0]
+        - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         #- AssertFree0ElementMultiple: [8]
         #- AssertFree1ElementMultiple: [8]

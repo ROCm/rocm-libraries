@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_KN, SmallM)
@@ -122,7 +125,7 @@ TYPED_TEST(TestGemmUniversal_FP16_KM_NK, MidLargeM)
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_KN, PaddK)
 {
-    std::vector<int> Ms{127};
+    std::vector<int> Ms{127, 128};
     constexpr int N = 512;
     constexpr int K = 437;
 
@@ -136,7 +139,7 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_KN, PaddK)
 
 TYPED_TEST(TestGemmUniversal_FP16_MK_NK, PaddK)
 {
-    std::vector<int> Ms{127};
+    std::vector<int> Ms{127, 128};
     constexpr int N = 512;
     constexpr int K = 437;
 
@@ -150,7 +153,7 @@ TYPED_TEST(TestGemmUniversal_FP16_MK_NK, PaddK)
 
 TYPED_TEST(TestGemmUniversal_FP16_KM_KN, PaddK)
 {
-    std::vector<int> Ms{127};
+    std::vector<int> Ms{127, 128};
     constexpr int N = 512;
     constexpr int K = 437;
 
@@ -166,7 +169,7 @@ TYPED_TEST(TestGemmUniversal_FP16_KM_KN, PaddK)
 
 TYPED_TEST(TestGemmUniversal_FP16_KM_NK, PaddK)
 {
-    std::vector<int> Ms{127};
+    std::vector<int> Ms{127, 128};
     constexpr int N = 512;
     constexpr int K = 437;
 

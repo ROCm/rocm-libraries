@@ -11,7 +11,7 @@ The hipSPARSELt library is organized as follows:
 * @ref aux_module
 
 <!-- spellcheck-enable -->
-Note that all hipSPARSELt library functions, unless otherwise stated, are
-non-blocking and are run asynchronously with respect to the host. They may
+**Note:** Unless otherwise stated, all hipSPARSELt library functions are
+non-blocking and run asynchronously with respect to the host. They might
 return before the actual computation has finished. To force synchronization, use
 `hipDeviceSynchronize` or `hipStreamSynchronize`.

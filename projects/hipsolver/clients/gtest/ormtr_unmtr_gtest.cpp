@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -126,7 +126,7 @@ class ORMTR_UNMTR : public ::TestWithParam<ormtr_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>
@@ -156,6 +156,14 @@ class ORMTR_FORTRAN : public ORMTR_UNMTR<API_FORTRAN>
 };
 
 class UNMTR_FORTRAN : public ORMTR_UNMTR<API_FORTRAN>
+{
+};
+
+class ORMTR_COMPAT : public ORMTR_UNMTR<API_COMPAT>
+{
+};
+
+class UNMTR_COMPAT : public ORMTR_UNMTR<API_COMPAT>
 {
 };
 
@@ -201,6 +209,26 @@ TEST_P(UNMTR_FORTRAN, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(ORMTR_COMPAT, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(ORMTR_COMPAT, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(UNMTR_COMPAT, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(UNMTR_COMPAT, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          ORMTR,
 //                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
@@ -231,4 +259,20 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          UNMTR_FORTRAN,
+                         Combine(ValuesIn(size_range), ValuesIn(store_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          ORMTR_COMPAT,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         ORMTR_COMPAT,
+                         Combine(ValuesIn(size_range), ValuesIn(store_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          UNMTR_COMPAT,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         UNMTR_COMPAT,
                          Combine(ValuesIn(size_range), ValuesIn(store_range)));

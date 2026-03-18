@@ -1,33 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/ExpressionTransformations.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
@@ -59,7 +37,7 @@ namespace rocRoller
             LaunchTimeExpressionVisitor(ContextPtr ctx, bool allowNewArgs)
                 : m_context(ctx)
                 , m_allowNewArgs(allowNewArgs)
-                , m_minComplexity(ctx->kernelOptions().minLaunchTimeExpressionComplexity)
+                , m_minComplexity(ctx->kernelOptions()->minLaunchTimeExpressionComplexity)
             {
             }
 
@@ -78,13 +56,13 @@ namespace rocRoller
 
                 auto argName = kernel->uniqueArgName(argumentName(expr));
 
-                Log::debug("LTSE: Adding arg {}: varType {}, expr {}",
+                Log::debug("LTSE: Adding arg {} complexity {}, varType {}, expr {}",
                            argName,
+                           complexity(expr),
                            toString(varType),
                            toString(expr));
 
-                return kernel->addArgument(
-                    {.name = argName, .variableType = varType, .expression = expr});
+                return kernel->addArgument({argName, varType, DataDirection::ReadOnly, expr});
             }
 
             ExpressionPtr maybeLaunchEval(ExpressionPtr expr, bool ignoreComplexity)
@@ -105,11 +83,8 @@ namespace rocRoller
                 if(!m_allowNewArgs)
                     return nullptr;
 
-                LaunchTimeExpressionVisitor sub(m_context, false);
-                auto                        ex2    = sub.call(expr);
-                auto                        myComp = complexity(ex2);
-
-                if(ignoreComplexity || complexity(expr) >= m_minComplexity)
+                if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
+                   || complexity(expr) >= m_minComplexity)
                     return addLaunchEval(expr);
 
                 return nullptr;
@@ -196,6 +171,22 @@ namespace rocRoller
                 }
             }
 
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr)
+            {
+                {
+                    auto launchResult = maybeLaunchEval(expr);
+                    if(launchResult)
+                        return launchResult;
+                }
+
+                {
+                    auto cpy = expr;
+                    std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                    return std::make_shared<Expression>(std::move(cpy));
+                }
+            }
+
             ExpressionPtr operator()(CommandArgumentPtr const& expr)
             {
                 // For a Value, if we still have a CommandArgument, we need to
@@ -264,6 +255,8 @@ namespace rocRoller
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
+                            ShowValue(v0),
+                            ShowValue(v1),
                             ShowValue(v2));
 
                 return v2;

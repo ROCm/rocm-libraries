@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,15 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_segmented_radix_sort_keys.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_segmented_radix_sort_keys.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_data_generation.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #include <rocprim/device/device_segmented_radix_sort.hpp>
 #include <rocprim/types.hpp>
 
@@ -47,7 +45,7 @@
 // This happens partially, because of the algorithm has 4 kernels, and decides at runtime which one to call.
 
 template<typename KeyT>
-void add_benchmarks(benchmark_utils::executor& executor, size_t bytes)
+void add_benchmarks(primbench::executor& executor, size_t bytes)
 {
     constexpr std::array<size_t, 8> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
     constexpr std::array<size_t, 4> segment_lengths{30, 256, 3000, 300000};
@@ -59,35 +57,42 @@ void add_benchmarks(benchmark_utils::executor& executor, size_t bytes)
     {
         for(const auto segment_length : segment_lengths)
         {
-            // This check is also present in device_segmented_radix_sort_keys_benchmark its run()
-            // We need it here to prevent Google Benchmark causing an infinite loop
             const auto number_of_elements = segment_count * segment_length;
             if(number_of_elements < min_size || number_of_elements > max_size)
             {
                 continue;
             }
 
-            executor.queue_instance(
-                device_segmented_radix_sort_keys_benchmark<KeyT>(segment_count, segment_length));
+            executor.queue<device_segmented_radix_sort_keys_benchmark<KeyT>>(segment_count,
+                                                                             segment_length);
         }
     }
 }
 
 int main(int argc, char* argv[])
 {
-    size_t bytes = 128 * benchmark_utils::MiB;
+    size_t bytes = 128 * primbench::MiB;
 
-    benchmark_utils::executor executor(argc, argv, bytes, 10, 5);
+    primbench::settings settings;
+    settings.size = bytes;
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    add_benchmarks<float>(executor, bytes);
-    add_benchmarks<double>(executor, bytes);
-    add_benchmarks<int8_t>(executor, bytes);
-    add_benchmarks<uint8_t>(executor, bytes);
-    add_benchmarks<rocprim::half>(executor, bytes);
-    add_benchmarks<int>(executor, bytes);
+    // Tuned types
     add_benchmarks<rocprim::int128_t>(executor, bytes);
+    add_benchmarks<int64_t>(executor, bytes);
+    add_benchmarks<int32_t>(executor, bytes);
+    add_benchmarks<int16_t>(executor, bytes);
+    add_benchmarks<int8_t>(executor, bytes);
+    add_benchmarks<double>(executor, bytes);
+    add_benchmarks<float>(executor, bytes);
+    add_benchmarks<rocprim::half>(executor, bytes);
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    add_benchmarks<uint8_t>(executor, bytes);
     add_benchmarks<rocprim::uint128_t>(executor, bytes);
+    #endif
 #endif
 
     executor.run();

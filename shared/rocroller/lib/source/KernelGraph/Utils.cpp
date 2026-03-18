@@ -1,48 +1,33 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Utils.hpp>
 
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/KernelOptions.hpp>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace Expression = rocRoller::Expression;
 
         using GD = Graph::Direction;
 
-        using namespace CoordinateGraph;
-        using namespace ControlGraph;
-        using namespace Expression;
+        namespace CG = rocRoller::KernelGraph::ControlGraph;
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
         /***********************************
          * Helpers
          */
+
+        std::string getForLoopName(KernelGraph const& graph, int tag)
+        {
+            auto forLoop = graph.control.get<CG::ForLoopOp>(tag);
+            return forLoop->loopName;
+        }
 
         std::string toString(UnrollColouring const& colouring)
         {
@@ -78,20 +63,19 @@ namespace rocRoller
             if(topOp == -1)
                 topOp = only(graph.control.roots()).value();
 
-            auto bodies = graph.control.getOutputNodeIndices<Body>(topOp).to<std::unordered_set>();
+            auto bodies
+                = graph.control.getOutputNodeIndices<CG::Body>(topOp).to<std::unordered_set>();
 
-            //
             // First, look for SetCoordinate nodes and compute their colour.
-            //
             std::map<int, std::pair<int, int>> setCoordinateColour;
             for(auto bodyTop : bodies)
             {
                 for(auto setCoordTag :
-                    filter(graph.control.isElemType<SetCoordinate>(),
+                    filter(graph.control.isElemType<CG::SetCoordinate>(),
                            graph.control.depthFirstVisit(bodyTop, GD::Downstream)))
                 {
-                    auto setCoord   = graph.control.get<SetCoordinate>(setCoordTag).value();
-                    auto coordinate = graph.mapper.get<Unroll>(setCoordTag);
+                    auto setCoord   = graph.control.get<CG::SetCoordinate>(setCoordTag).value();
+                    auto coordinate = graph.mapper.get<CT::Unroll>(setCoordTag);
                     if(coordinate == -1)
                         continue;
 
@@ -110,15 +94,13 @@ namespace rocRoller
             if(setCoordinateColour.empty())
                 return rv;
 
-            //
             // Next, colour SetCoordinate body operations, and any
             // coordinates that they are mapped to.
-            //
             for(auto [setCoordinate, colouring] : setCoordinateColour)
             {
                 auto [coord, value] = colouring;
                 for(auto op : graph.control.depthFirstVisit(
-                        setCoordinate, graph.control.isElemType<Body>(), GD::Downstream))
+                        setCoordinate, graph.control.isElemType<CG::Body>(), GD::Downstream))
                 {
                     rv.operationColour[op][coord] = value;
 
@@ -130,9 +112,7 @@ namespace rocRoller
                 }
             }
 
-            //
             // Now follow traces and propagate colour
-            //
             auto trace = ControlFlowRWTracer(graph, topOp).coordinatesReadWrite();
             for(auto record : trace)
             {
@@ -178,16 +158,14 @@ namespace rocRoller
                 }
             }
 
-            //
             // Also, propagate colour up SetCoordinate-chains
-            //
             for(auto [setCoordinate, _ignore] : setCoordinateColour)
             {
                 // Go down Body edges
                 int tag = setCoordinate;
                 while(true)
                 {
-                    auto child = only(graph.control.getOutputNodeIndices<Body>(tag));
+                    auto child = only(graph.control.getOutputNodeIndices<CG::Body>(tag));
                     if(!child)
                         break;
                     tag = child.value();
@@ -197,12 +175,10 @@ namespace rocRoller
                     rv.operationColour[setCoordinate][coord] = value;
             }
 
-            //
             // Find Sequence separator edges
-            //
             for(auto [bodyElem, _ignore] : rv.operationColour)
             {
-                for(auto edge : filter(graph.control.isElemType<Sequence>(),
+                for(auto edge : filter(graph.control.isElemType<CG::Sequence>(),
                                        graph.control.getNeighbours<GD::Downstream>(bodyElem)))
                 {
                     auto otherElem
@@ -211,6 +187,148 @@ namespace rocRoller
                     if(rv.operationColour.contains(otherElem)
                        && rv.operationColour[otherElem] != rv.operationColour[bodyElem])
                         rv.separators.insert(edge);
+                }
+            }
+
+            return rv;
+        }
+
+        NaryArgumentColouring colourByNaryArgument(KernelGraph const& graph, int start)
+        {
+            using namespace ControlGraph;
+
+            NaryArgumentColouring rv;
+
+            // Create tracer and build dependencies
+            auto tracer = ControlFlowRWTracer(graph, start);
+            tracer.buildDependencies();
+
+            // Determine starting point
+            std::vector<int> startNodes;
+            if(start == -1)
+            {
+                startNodes = graph.control.roots().to<std::vector>();
+            }
+            else
+            {
+                startNodes = graph.control.getOutputNodeIndices<Body>(start).to<std::vector>();
+            }
+
+            // Find all multiply operations
+            auto multiplyNodes = filter(graph.control.isElemType<Multiply>(),
+                                        graph.control.depthFirstVisit(startNodes, GD::Downstream))
+                                     .to<std::vector>();
+
+            // Helper to colour a coordinate with consistency checking
+            auto colourCoordinate = [&](int coord, NaryArgument arg) {
+                if(!rv.coordinateColour.contains(coord))
+                {
+                    rv.coordinateColour[coord] = arg;
+                }
+                else
+                {
+                    AssertFatal(rv.coordinateColour[coord] == arg,
+                                "Coordinate ",
+                                coord,
+                                " has conflicting NaryArgument colours: ",
+                                toString(rv.coordinateColour[coord]),
+                                " vs ",
+                                toString(arg));
+                }
+            };
+
+            // Helper to colour a control operation with consistency checking
+            auto colourOperation = [&](int control, NaryArgument arg) {
+                int current = control;
+                while(current != -1)
+                {
+                    if(!rv.operationColour.contains(current))
+                    {
+                        rv.operationColour[current] = arg;
+                    }
+                    else
+                    {
+                        AssertFatal(rv.operationColour[current] == arg,
+                                    "Control operation ",
+                                    current,
+                                    " has conflicting NaryArgument colours: ",
+                                    toString(rv.operationColour[current]),
+                                    " vs ",
+                                    toString(arg));
+                    }
+
+                    auto parent = only(graph.control.getInputNodeIndices<CG::Body>(current));
+
+                    current = -1;
+
+                    if(parent)
+                    {
+                        auto maybeSetCoordinate
+                            = graph.control.get<CG::SetCoordinate>(parent.value());
+                        if(maybeSetCoordinate)
+                        {
+                            current = parent.value();
+                        }
+                    }
+                }
+            };
+
+            // Follow Segment and Index edges from a (potentially)
+            // 'thirsty' coordinate to its 'well' coordinate.
+            auto followToWell = [&](int coord, KernelGraph const& graph) -> int {
+                auto followPredicate = [&](auto edge) -> bool {
+                    return CT::isEdge<CT::Index>(edge) || CT::isEdge<CT::Segment>(edge);
+                };
+
+                int  current = coord;
+                auto maybeFollow
+                    = only(graph.coordinates.getOutputNodeIndices(current, followPredicate));
+                while(maybeFollow)
+                {
+                    current = maybeFollow.value();
+                    maybeFollow
+                        = only(graph.coordinates.getOutputNodeIndices(current, followPredicate));
+                }
+
+                return current;
+            };
+
+            // For each multiply operation and each argument
+            for(auto multiplyTag : multiplyNodes)
+            {
+                for(auto arg : {NaryArgument::LHS,
+                                NaryArgument::LHS_SCALE,
+                                NaryArgument::RHS,
+                                NaryArgument::RHS_SCALE})
+                {
+                    // Get the tile coordinate for this argument
+                    auto tileTag = graph.mapper.get(multiplyTag,
+                                                    Connections::typeArgument<CT::MacroTile>(arg));
+
+                    if(tileTag == -1)
+                        continue;
+
+                    tileTag = followToWell(tileTag, graph);
+
+                    // Get all coordinates that this tile depends on
+                    auto tileAndDependencies = tracer.getCoordinateDependencies(tileTag);
+                    tileAndDependencies.insert(tileTag);
+
+                    // Colour the tile and all its dependencies; and operations touching them
+                    for(auto coord : tileAndDependencies)
+                    {
+                        colourCoordinate(coord, arg);
+
+                        auto records = tracer.coordinatesReadWrite(coord);
+                        for(auto const& record : records)
+                        {
+                            if(record.rw == ControlFlowRWTracer::WRITE
+                               || record.rw == ControlFlowRWTracer::READWRITE)
+                            {
+                                colourOperation(record.control, arg);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -229,55 +347,94 @@ namespace rocRoller
             auto sizeDataType
                 = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
 
-            auto unitStride = Expression::literal(1, sizeDataType);
+            auto one = Expression::literal(1, sizeDataType);
 
-            auto rangeK = graph.coordinates.addElement(Linear(size, unitStride));
-
-            int dimK = forLoopCoord;
+            auto iteratorCoord = graph.coordinates.addElement(CT::Linear(size, one));
             if(forLoopCoord <= 0)
-                dimK = graph.coordinates.addElement(ForLoop(size, unitStride));
+                forLoopCoord = graph.coordinates.addElement(CT::ForLoop(size, one));
+            graph.coordinates.addElement(CT::DataFlow(), {iteratorCoord}, {forLoopCoord});
 
-            auto exprK = std::make_shared<Expression::Expression>(
-                DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
+            auto iterator = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{iteratorCoord, Register::Type::Scalar, sizeDataType});
 
-            auto forK  = graph.control.addElement(ForLoopOp{exprK < size, loopName});
-            auto initK = graph.control.addElement(
-                Assign{Register::Type::Scalar, Expression::literal(0, sizeDataType)});
-            auto incrementK
-                = graph.control.addElement(Assign{Register::Type::Scalar, exprK + unitStride});
+            auto forLoop = graph.control.addElement(CG::ForLoopOp{iterator < size, loopName});
+            graph.mapper.connect(forLoop, iteratorCoord, NaryArgument::DEST);
+            graph.mapper.connect<CT::ForLoop>(forLoop, forLoopCoord);
 
-            graph.coordinates.addElement(DataFlow(), {rangeK}, {dimK});
-            graph.control.addElement(Initialize(), {forK}, {initK});
-            graph.control.addElement(ForLoopIncrement(), {forK}, {incrementK});
+            auto initialAssign = graph.control.addElement(
+                CG::Assign{Register::Type::Scalar, Expression::literal(0, sizeDataType)});
+            graph.mapper.connect(initialAssign, iteratorCoord, NaryArgument::DEST);
 
-            graph.mapper.connect(forK, rangeK, NaryArgument::DEST);
-            graph.mapper.connect<ForLoop>(forK, dimK);
-            graph.mapper.connect(initK, rangeK, NaryArgument::DEST);
-            graph.mapper.connect(incrementK, rangeK, NaryArgument::DEST);
+            auto incrementAssign
+                = graph.control.addElement(CG::Assign{Register::Type::Scalar, iterator + one});
+            graph.mapper.connect(incrementAssign, iteratorCoord, NaryArgument::DEST);
 
-            return {dimK, forK};
+            graph.control.addElement(CG::Initialize(), {forLoop}, {initialAssign});
+            graph.control.addElement(CG::ForLoopIncrement(), {forLoop}, {incrementAssign});
+
+            return {forLoopCoord, forLoop};
         }
 
-        int cloneForLoop(KernelGraph& graph, int tag)
+        int cloneForLoop(KernelGraph& graph, int forLoopOpTag, std::optional<std::string> name)
         {
-            auto maybeForLoopOp = graph.control.get<ForLoopOp>(tag);
+            auto maybeForLoopOp = graph.control.get<CG::ForLoopOp>(forLoopOpTag);
             AssertFatal(maybeForLoopOp, "cloneForLoop is being called on a non-ForLoopOp");
 
-            auto forLoopDim = graph.mapper.get<ForLoop>(tag);
+            // Make a range based for loop that is roughly equivalent.
+            // It shares the same ForLoop coordinate as the original
+            // loop.
+            auto forLoopOp       = maybeForLoopOp.value();
+            auto forLoopCoordTag = graph.mapper.get<CT::ForLoop>(forLoopOpTag);
+            auto forLoopSize     = graph.coordinates.get<CT::ForLoop>(forLoopCoordTag)->size;
 
-            auto forLoopSize = graph.coordinates.get<ForLoop>(forLoopDim)->size;
+            auto [loopIterator, loopCondition] = split<Expression::LessThan>(forLoopOp.condition);
 
-            auto clone = rangeFor(
-                graph, forLoopSize, maybeForLoopOp->loopName, DataType::None, forLoopDim);
+            auto [cloneForLoopCoordTag, clonedForLoopOpTag]
+                = rangeFor(graph,
+                           forLoopSize,
+                           name ? *name : forLoopOp.loopName,
+                           DataType::None,
+                           forLoopCoordTag);
 
-            return clone.second;
+            // Reset the condition to match the original loop more
+            // precisely.  This is necessary for, eg, StreamK loops
+            // because their conditions are not simply based on the
+            // size of the original ForLoop coordinate.
+            auto clonedForLoopOp = graph.control.get<CG::ForLoopOp>(clonedForLoopOpTag).value();
+
+            auto [clonedLoopIterator, clonedLoopCondition]
+                = split<Expression::LessThan>(clonedForLoopOp.condition);
+
+            auto newCondition = clonedLoopIterator < loopCondition;
+            copyComment(newCondition, maybeForLoopOp->condition);
+            clonedForLoopOp.condition = newCondition;
+            graph.control.setElement(clonedForLoopOpTag, clonedForLoopOp);
+
+            return clonedForLoopOpTag;
         }
 
         std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)
         {
-            auto range   = kgraph.mapper.get(forLoopOp, NaryArgument::DEST);
-            auto forLoop = kgraph.mapper.get<ForLoop>(forLoopOp);
-            return {forLoop, range};
+            // Coordinate graph for for-loops look like:
+            //
+            //        Linear      <- This is the "iterator"; it can be connected
+            //          |            via DataFlow to multiple ForLoop coordinates.
+            //       DataFlow
+            //          |
+            //       ForLoop      <- This is the ForLoop coordinate, elucidating
+            //                       how a particular path in a coordinate transform
+            //                       depends on a for-loop.
+            //
+            // The iterator is connected to a ForLoopOp via a
+            // NaryArgument::DEST connection.
+            //
+            // The ForLoopCoord is connected to a ForLoopOp via a
+            // TypeAndSubDimension connection.
+            auto forLoopIterator = kgraph.mapper.get(forLoopOp, NaryArgument::DEST);
+            auto forLoopCoord    = kgraph.mapper.get<CT::ForLoop>(forLoopOp);
+            AssertFatal(
+                forLoopIterator != -1, "No iterator connected to ForLoopOp", ShowValue(forLoopOp));
+            return {forLoopCoord, forLoopIterator};
         }
 
         int getDEST(KernelGraph const& kgraph, int assign)
@@ -297,11 +454,11 @@ namespace rocRoller
             // ForLoops coming from Compute Index may have more than one loop increment.
             // The forLoopIncrement that satifies all of the following conditions will be the
             // Increment that actually updates the iterator.
-            auto loopIncrements
-                = graph.control.getOutputNodeIndices<ForLoopIncrement>(forLoop).to<std::vector>();
+            auto loopIncrements = graph.control.getOutputNodeIndices<CG::ForLoopIncrement>(forLoop)
+                                      .to<std::vector>();
             for(auto const& increment : loopIncrements)
             {
-                auto loopIncrementOp = graph.control.getNode<Assign>(increment);
+                auto loopIncrementOp = graph.control.getNode<CG::Assign>(increment);
 
                 //Ensure that the forLoopIncrement has an add expression
                 if(!(std::holds_alternative<Expression::Add>(*loopIncrementOp.expression)))
@@ -327,6 +484,22 @@ namespace rocRoller
             Throw<FatalError>("No forLoopIncrement for supplied forLoop.");
         }
 
+        int followIdentify(int coordinateTag, KernelGraph const& graph)
+        {
+            using namespace CoordinateGraph;
+
+            while(true)
+            {
+                auto other
+                    = only(graph.coordinates.getOutputNodeIndices(coordinateTag, isEdge<Identify>));
+                if(other)
+                    coordinateTag = *other;
+                else
+                    break;
+            }
+            return coordinateTag;
+        }
+
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody)
         {
             auto& ctrl     = graph.control;
@@ -334,15 +507,15 @@ namespace rocRoller
 
             for(auto const& input : location.incoming)
             {
-                auto parent    = *only(ctrl.getNeighbours<Graph::Direction::Upstream>(input));
+                auto parent    = ctrl.getNeighbours<Graph::Direction::Upstream>(input).front();
                 auto edge      = ctrl.getElement(input);
-                auto maybeBody = ctrl.get<Body>(input);
+                auto maybeBody = ctrl.get<CG::Body>(input);
 
                 if(maybeBody)
                 {
                     ctrl.deleteElement(input);
                     auto updatedBodyParents
-                        = ctrl.getInputNodeIndices<Body>(newOp).to<std::unordered_set>();
+                        = ctrl.getInputNodeIndices<CG::Body>(newOp).to<std::unordered_set>();
                     if(!updatedBodyParents.contains(parent))
                     {
                         ctrl.addElement(edge, {parent}, {newOp});
@@ -357,10 +530,10 @@ namespace rocRoller
 
             for(auto const& output : location.outgoing)
             {
-                auto child = *only(ctrl.getNeighbours<Graph::Direction::Downstream>(output));
+                auto child = ctrl.getNeighbours<Graph::Direction::Downstream>(output).front();
                 auto edge  = ctrl.getElement(output);
-                auto maybeSequence = ctrl.get<Sequence>(output);
-                auto maybeBody     = ctrl.get<Body>(output);
+                auto maybeSequence = ctrl.get<CG::Sequence>(output);
+                auto maybeBody     = ctrl.get<CG::Body>(output);
 
                 if(maybeSequence)
                 {
@@ -371,7 +544,7 @@ namespace rocRoller
                 {
                     ctrl.deleteElement(output);
                     auto updatedBodyChildren
-                        = ctrl.getOutputNodeIndices<Body>(newOp).to<std::unordered_set>();
+                        = ctrl.getOutputNodeIndices<CG::Body>(newOp).to<std::unordered_set>();
                     if(!updatedBodyChildren.contains(child))
                         ctrl.addElement(edge, {newOp}, {child});
                 }
@@ -385,18 +558,17 @@ namespace rocRoller
             auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
             {
-                auto edge = graph.control.getElement(input);
-                int  parent
-                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                auto edge  = graph.control.getElement(input);
+                int parent = graph.control.getNeighbours<Graph::Direction::Upstream>(input).front();
                 graph.control.deleteElement(input);
-                if(graph.control.getInputNodeIndices<Body>(top).to<std::unordered_set>().count(
+                if(graph.control.getInputNodeIndices<CG::Body>(top).to<std::unordered_set>().count(
                        parent)
                    == 0)
                 {
                     graph.control.addElement(edge, {parent}, {top});
                 }
             }
-            graph.control.addElement(Sequence(), {bottom}, {op});
+            graph.control.addElement(CG::Sequence(), {bottom}, {op});
         }
 
         void insertAfter(KernelGraph& graph, int op, int top, int bottom)
@@ -404,16 +576,16 @@ namespace rocRoller
             auto location = graph.control.getLocation(op);
             for(auto const& output : location.outgoing)
             {
-                auto maybeBody = graph.control.get<Body>(output);
+                auto maybeBody = graph.control.get<CG::Body>(output);
                 if(maybeBody)
                     continue;
                 auto edge = graph.control.getElement(output);
                 int  child
-                    = *graph.control.getNeighbours<Graph::Direction::Downstream>(output).begin();
+                    = graph.control.getNeighbours<Graph::Direction::Downstream>(output).front();
                 graph.control.deleteElement(output);
                 graph.control.addElement(edge, {bottom}, {child});
             }
-            graph.control.addElement(Sequence(), {op}, {top});
+            graph.control.addElement(CG::Sequence(), {op}, {top});
         }
 
         void insertWithBody(KernelGraph& graph, int op, int newOp)
@@ -421,30 +593,32 @@ namespace rocRoller
             auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
             {
-                auto edge = graph.control.getElement(input);
-                int  parent
-                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                auto edge  = graph.control.getElement(input);
+                int parent = graph.control.getNeighbours<Graph::Direction::Upstream>(input).front();
                 graph.control.deleteElement(input);
-                if(graph.control.getInputNodeIndices<Body>(newOp).to<std::unordered_set>().count(
-                       parent)
+                if(graph.control.getInputNodeIndices<CG::Body>(newOp)
+                       .to<std::unordered_set>()
+                       .count(parent)
                    == 0)
                 {
                     graph.control.addElement(edge, {parent}, {newOp});
                 }
             }
-            graph.control.addElement(Body(), {newOp}, {op});
+            graph.control.addElement(CG::Body(), {newOp}, {op});
         }
 
-        bool needsComputeIndex(Operation const& op)
+        bool needsIndexAssignment(CG::Operation const& op)
         {
-            if(std::holds_alternative<StoreTiled>(op) || std::holds_alternative<StoreLDSTile>(op)
-               || std::holds_alternative<LoadTiled>(op) || std::holds_alternative<LoadLDSTile>(op)
-               || std::holds_alternative<LoadTileDirect2LDS>(op))
+            if(std::holds_alternative<CG::StoreTiled>(op) //
+               || std::holds_alternative<CG::StoreLDSTile>(op) //
+               || std::holds_alternative<CG::LoadTiled>(op) //
+               || std::holds_alternative<CG::LoadLDSTile>(op) //
+               || std::holds_alternative<CG::LoadTileDirect2LDS>(op))
                 return true;
             return false;
         }
 
-        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start)
+        std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start)
         {
             std::vector<int> rv;
 
@@ -453,10 +627,10 @@ namespace rocRoller
                     start,
                     [&](int tag) -> bool {
                         auto elem = kgraph.control.getElement(tag);
-                        if(!std::holds_alternative<Operation>(elem))
+                        if(!std::holds_alternative<CG::Operation>(elem))
                             return false;
-                        auto op = std::get<Operation>(elem);
-                        return needsComputeIndex(op);
+                        auto op = std::get<CG::Operation>(elem);
+                        return needsIndexAssignment(op);
                     },
                     GD::Downstream)
                 .to<std::vector>();
@@ -492,16 +666,17 @@ namespace rocRoller
             // Purge edges if they are DataFlow or PassThrough edges
             for(auto [edgeTag, direction] : purgeCandidates)
             {
-                auto maybePassThrough = kgraph.coordinates.get<PassThrough>(edgeTag);
-                auto maybeDataFlow    = kgraph.coordinates.get<DataFlow>(edgeTag);
+                auto maybePassThrough = kgraph.coordinates.get<CT::PassThrough>(edgeTag);
+                auto maybeDataFlow    = kgraph.coordinates.get<CT::DataFlow>(edgeTag);
                 if(maybePassThrough)
                 {
                     // If it's a PassThrough edge, purge the coordinate
-                    auto coordTag = only(kgraph.coordinates.getNeighbours(edgeTag, direction));
-                    if(coordTag)
+                    auto coordTags = kgraph.coordinates.getNeighbours(edgeTag, direction);
+                    if(!coordTags.empty())
                     {
-                        kgraph.coordinates.deleteElement(*coordTag);
-                        kgraph.mapper.purgeMappingsTo(*coordTag);
+                        auto coordTag = coordTags.front();
+                        kgraph.coordinates.deleteElement(coordTag);
+                        kgraph.mapper.purgeMappingsTo(coordTag);
                     }
                 }
                 if(maybePassThrough || maybeDataFlow)
@@ -527,61 +702,67 @@ namespace rocRoller
 
         bool isHardwareCoordinate(int tag, KernelGraph const& kgraph)
         {
-            return kgraph.coordinates.get<VGPR>(tag) || kgraph.coordinates.get<Workitem>(tag)
-                   || kgraph.coordinates.get<Workgroup>(tag);
+            return kgraph.coordinates.get<CT::VGPR>(tag)
+                   || kgraph.coordinates.get<CT::Workitem>(tag)
+                   || kgraph.coordinates.get<CT::Workgroup>(tag);
         }
 
         bool isLoopishCoordinate(int tag, KernelGraph const& kgraph)
         {
-            return kgraph.coordinates.get<ForLoop>(tag) || kgraph.coordinates.get<Unroll>(tag);
+            return kgraph.coordinates.get<CT::ForLoop>(tag)
+                   || kgraph.coordinates.get<CT::Unroll>(tag);
         }
 
         bool isStorageCoordinate(int tag, KernelGraph const& kgraph)
         {
-            return kgraph.coordinates.get<LDS>(tag) || kgraph.coordinates.get<User>(tag);
+            return kgraph.coordinates.get<CT::LDS>(tag) || kgraph.coordinates.get<CT::User>(tag);
         }
 
-        std::pair<int, Graph::Direction>
-            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS)
+        std::pair<int, Graph::Direction> getOperationTarget(int                tag,
+                                                            KernelGraph const& kgraph,
+                                                            bool isStorePartOfBidirectionalOp)
         {
             auto elem = kgraph.control.getElement(tag);
-            if(isDirect2LDS)
-            {
-                return {kgraph.mapper.get<LDS>(tag), GD::Upstream};
-            }
+
+            using result = std::pair<int, Graph::Direction>;
 
             return std::visit(
                 rocRoller::overloaded{
-                    [&](StoreTiled const& op) -> std::pair<int, Graph::Direction> {
-                        return {kgraph.mapper.get<User>(tag), GD::Upstream};
+                    [&](CIsAnyOf<CG::StoreTiled, CG::StoreVGPR, CG::StoreSGPR> auto const& op)
+                        -> result {
+                        return {kgraph.mapper.get<CT::User>(tag), GD::Upstream};
                     },
-                    [&](LoadTiled const& op) -> std::pair<int, Graph::Direction> {
-                        return {kgraph.mapper.get<User>(tag), GD::Downstream};
+                    [&](CIsAnyOf<CG::LoadTileDirect2LDS> auto const& op) -> result {
+                        if(isStorePartOfBidirectionalOp)
+                        {
+                            return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
+                        }
+                        return {kgraph.mapper.get<CT::User>(tag), GD::Downstream};
                     },
-                    [&](LoadTileDirect2LDS const& op) -> std::pair<int, Graph::Direction> {
-                        return {kgraph.mapper.get<User>(tag), GD::Downstream};
+                    [&](CIsAnyOf<CG::LoadTiled, CG::LoadVGPR, CG::LoadSGPR> auto const& op)
+                        -> result {
+                        return {kgraph.mapper.get<CT::User>(tag), GD::Downstream};
                     },
-                    [&](StoreLDSTile const& op) -> std::pair<int, Graph::Direction> {
-                        return {kgraph.mapper.get<LDS>(tag), GD::Upstream};
+                    [&](CG::StoreLDSTile const& op) -> result {
+                        return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
                     },
-                    [&](LoadLDSTile const& op) -> std::pair<int, Graph::Direction> {
-                        return {kgraph.mapper.get<LDS>(tag), GD::Downstream};
+                    [&](CG::LoadLDSTile const& op) -> result {
+                        return {kgraph.mapper.get<CT::LDS>(tag), GD::Downstream};
                     },
-                    [&](Assign const& op) -> std::pair<int, Graph::Direction> {
+                    [&](CG::Assign const& op) -> result {
                         return {kgraph.mapper.getConnections(tag)[0].coordinate, GD::Downstream};
                     },
-                    [&](auto const& op) -> std::pair<int, Graph::Direction> {
+                    [&](auto const& op) -> result {
                         Throw<FatalError>(
                             "Operation is not a load, store, or assign: ", tag, " ", toString(op));
                         return {0, GD::Downstream};
                     }},
-                std::get<Operation>(elem));
+                std::get<CG::Operation>(elem));
         }
 
         int getTransformTarget(int storageTarget, KernelGraph const& kgraph)
         {
-            namespace CT     = rocRoller::KernelGraph::CoordinateGraph;
-            auto isDuplicate = CT::isEdge<Duplicate>;
+            auto isDuplicate = CT::isEdge<CT::Duplicate>;
             auto outbound    = kgraph.coordinates.getOutputNodeIndices(storageTarget, isDuplicate)
                                 .to<std::vector>();
 
@@ -608,18 +789,16 @@ namespace rocRoller
                                     std::function<bool(int)> fullStop,
                                     KernelGraph const&       kgraph)
         {
-            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
             // TODO: Design a better way of binding storage to coordinates
-            auto maybeLDS = kgraph.coordinates.get<LDS>(target);
+            auto maybeLDS = kgraph.coordinates.get<CT::LDS>(target);
             if(maybeLDS)
             {
                 // If target is LDS; it might be a duplicated LDS
                 // node.  For the purposes of figuring out required
                 // coordinates, use the parent LDS as the target
                 // instead.
-                auto maybeParentLDS
-                    = only(kgraph.coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
+                auto maybeParentLDS = only(
+                    kgraph.coordinates.getOutputNodeIndices(target, CT::isEdge<CT::Duplicate>));
                 if(maybeParentLDS)
                     target = *maybeParentLDS;
             }
@@ -731,8 +910,7 @@ namespace rocRoller
         {
             std::unordered_set<int> required;
 
-            auto [target, direction] = getOperationTarget(tag, graph);
-            Log::debug("{} target: {}", tag, target);
+            auto [target, direction]    = getOperationTarget(tag, graph);
             auto [targetRequired, path] = findRequiredCoordinates(target, direction, graph);
 
             std::copy(targetRequired.cbegin(),
@@ -742,15 +920,36 @@ namespace rocRoller
             return {required, path};
         }
 
-        rocRoller::KernelGraph::CoordinateGraph::User
-            newScratchCoordinate(ExpressionPtr size, VariableType varType, ContextPtr context)
+        std::unordered_set<int> includeEdgeNeighbours(
+            rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& coordinates,
+            Graph::Direction                                                direction,
+            std::unordered_set<int> const&                                  path)
         {
-            auto currentOffset = context->getScratchAmount();
-            auto newCoordinate = User(size, currentOffset);
+            std::unordered_set<int> rv = path;
+
+            for(auto elem : path)
+            {
+                if(coordinates.getElementType(elem) != Graph::ElementType::Edge)
+                    continue;
+
+                for(auto const node : coordinates.getNeighbours(elem, direction))
+                    rv.insert(node);
+            }
+            return rv;
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(Expression::ExpressionPtr size,
+                                 VariableType              varType,
+                                 Operations::ScratchPolicy policy,
+                                 ContextPtr                context)
+        {
             // TODO Audit bytes/bits
             // Can we move size inside the CeilDivide?
-            context->allocateScratch(
-                size * literal(CeilDivide(DataTypeInfo::Get(varType).elementBits, 8u)));
+            auto currentOffset = context->allocateScratch(
+                policy,
+                size * Expression::literal(CeilDivide(DataTypeInfo::Get(varType).elementBits, 8u)));
+            auto newCoordinate = CT::User(size, currentOffset, getScratchName(policy));
 
             return newCoordinate;
         }
@@ -780,19 +979,17 @@ namespace rocRoller
 
             std::optional<int> rv;
 
-            auto forNeighbours
-                = kgraph.coordinates.getNeighbours<GD::Upstream>(forLoopCoord).to<std::vector>();
+            auto forNeighbours = kgraph.coordinates.getNeighbours<GD::Upstream>(forLoopCoord);
             for(auto forNeighbour : forNeighbours)
             {
-                auto split = kgraph.coordinates.get<Split>(forNeighbour);
+                auto split = kgraph.coordinates.get<CT::Split>(forNeighbour);
                 if(split)
                 {
                     auto splitNeighbours
-                        = kgraph.coordinates.getNeighbours<GD::Downstream>(forNeighbour)
-                              .to<std::vector>();
+                        = kgraph.coordinates.getNeighbours<GD::Downstream>(forNeighbour);
                     for(auto splitNeighbour : splitNeighbours)
                     {
-                        auto unroll = kgraph.coordinates.get<Unroll>(splitNeighbour);
+                        auto unroll = kgraph.coordinates.get<CT::Unroll>(splitNeighbour);
                         if(unroll)
                         {
                             AssertFatal(!rv || rv == splitNeighbour,
@@ -808,12 +1005,13 @@ namespace rocRoller
 
         void duplicateMacroTile(KernelGraph& graph, int load)
         {
-            auto original = graph.mapper.get<MacroTile>(load);
+            TIMER(t, "duplicateMacroTile");
+            auto original = graph.mapper.get<CT::MacroTile>(load);
             auto newMacroTile
                 = graph.coordinates.addElement(graph.coordinates.getElement(original));
-            graph.coordinates.addElement(Duplicate(), {newMacroTile}, {original});
-            graph.mapper.disconnect<MacroTile>(load, original);
-            graph.mapper.connect<MacroTile>(load, newMacroTile);
+            graph.coordinates.addElement(CT::Duplicate(), {newMacroTile}, {original});
+            graph.mapper.disconnect<CT::MacroTile>(load, original);
+            graph.mapper.connect<CT::MacroTile>(load, newMacroTile);
         }
 
         int duplicateControlNode(KernelGraph& graph, int tag)
@@ -827,15 +1025,40 @@ namespace rocRoller
             return op;
         }
 
+        void deleteControlNode(KernelGraph& graph, int nodeIdx)
+        {
+            using namespace rocRoller::KernelGraph::ControlGraph;
+
+            {
+                auto incomingNodes
+                    = graph.control.getInputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
+                for(auto inc : incomingNodes)
+                    graph.control.deleteElement(graph.control.findEdge(inc, nodeIdx).value());
+            }
+
+            {
+                auto outgoingNodes
+                    = graph.control.getOutputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
+                for(auto out : outgoingNodes)
+                    graph.control.deleteElement(graph.control.findEdge(nodeIdx, out).value());
+            }
+
+            graph.control.deleteElement(nodeIdx);
+            graph.mapper.purge(nodeIdx);
+        }
+
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,
                                            uint macTileFastMovingDimSize,
-                                           int  numDwordsPerElement)
+                                           int  numDwordsPerElement,
+                                           bool avoidDWordX2)
         {
             auto numDwordsPerWorkitem = t_m * numDwordsPerElement;
 
             std::vector<int> potentialFactors = {4, 3, 2, 1};
+            if(avoidDWordX2)
+                potentialFactors = {4, 3, 1};
 
             auto start = potentialFactors.begin();
             auto end   = potentialFactors.end();
@@ -864,17 +1087,17 @@ namespace rocRoller
 
             while(true)
             {
-                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                auto parent = only(graph.control.getInputNodeIndices<CG::Body>(tag));
                 if(!parent)
                     break;
 
-                auto setCoord = graph.control.get<SetCoordinate>(*parent);
+                auto setCoord = graph.control.get<CG::SetCoordinate>(*parent);
                 if(!setCoord)
                     break;
 
                 tag = *parent;
 
-                AssertFatal(graph.mapper.get<Unroll>(tag) > 0,
+                AssertFatal(graph.mapper.get<CT::Unroll>(tag) > 0,
                             "SetCoordinate needs Unroll dimension");
 
                 result.insert(tag);
@@ -885,21 +1108,22 @@ namespace rocRoller
 
         int getTopSetCoordinate(KernelGraph const& graph, int load)
         {
+            TIMER(t, "getTopSetCoordinate");
             int tag = load;
 
             while(true)
             {
-                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                auto parent = only(graph.control.getInputNodeIndices<CG::Body>(tag));
                 if(!parent)
                     break;
 
-                auto setCoord = graph.control.get<SetCoordinate>(*parent);
+                auto setCoord = graph.control.get<CG::SetCoordinate>(*parent);
                 if(setCoord)
                     tag = *parent;
                 else
                     break;
 
-                AssertFatal(graph.mapper.get<Unroll>(tag) > 0,
+                AssertFatal(graph.mapper.get<CT::Unroll>(tag) > 0,
                             "SetCoordinate needs Unroll dimension");
             }
             return tag;
@@ -921,13 +1145,13 @@ namespace rocRoller
 
             while(true)
             {
-                auto parent = findContainingOperation<SetCoordinate>(tag, graph);
+                auto parent = findContainingOperation<CG::SetCoordinate>(tag, graph);
                 AssertFatal(
                     parent, "Could not find a containing SetCoordinate for ", ShowValue(tag));
 
                 tag = *parent;
 
-                auto unroll = graph.mapper.get<Unroll>(tag);
+                auto unroll = graph.mapper.get<CT::Unroll>(tag);
                 AssertFatal(unroll > 0, "SetCoordinate needs Unroll dimension");
 
                 if(unroll == dim)
@@ -942,18 +1166,20 @@ namespace rocRoller
 
             while(true)
             {
-                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                auto parent = only(graph.control.getInputNodeIndices<CG::Body>(tag));
                 if(!parent)
                     return false;
 
                 tag           = parent.value();
-                auto setCoord = graph.control.get<SetCoordinate>(tag);
+                auto setCoord = graph.control.get<CG::SetCoordinate>(tag);
                 if(!setCoord)
                     return false;
 
                 auto valueExpr = setCoord.value().value;
                 AssertFatal(evaluationTimes(valueExpr)[Expression::EvaluationTime::Translate],
-                            "SetCoordinate::value should be a literal.");
+                            "SetCoordinate::value should be a literal for SetCoordinate(",
+                            tag,
+                            ")");
 
                 if(getUnsignedInt(evaluate(valueExpr)) == coordValue)
                 {
@@ -969,7 +1195,7 @@ namespace rocRoller
         unsigned int getUnrollValueForOp(KernelGraph const& graph, int unrollDim, int op)
         {
             auto setCoordTag = getSetCoordinateForDim(graph, unrollDim, op);
-            auto setCoord    = graph.control.get<SetCoordinate>(setCoordTag);
+            auto setCoord    = graph.control.get<CG::SetCoordinate>(setCoordTag);
 
             auto valueExpr = setCoord.value().value;
 
@@ -993,70 +1219,68 @@ namespace rocRoller
             for(auto const& opTag : ops)
             {
                 auto element = graph.control.getElement(opTag);
-                visit(
-                    rocRoller::overloaded{
-                        [&](StoreTiled store) {
-                            auto macroTile = graph.mapper.get<MacroTile>(opTag);
-                            if(macroTile == oldMacTileTag)
-                            {
-                                graph.mapper.disconnect<MacroTile>(opTag, oldMacTileTag);
-                                graph.mapper.connect<MacroTile>(opTag, newMacTileTag);
-
-                                // update the data flow in the coordinate graph
-                                auto dstTag = graph.mapper.get<User>(opTag);
-                                auto df     = *only(
-                                    graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
-                                        dstTag));
-                                graph.coordinates.deleteElement(df);
-                                graph.coordinates.addElement(DataFlow(),
-                                                             std::vector<int>{newMacTileTag},
-                                                             std::vector<int>{dstTag});
-                            }
-                        },
-                        [&](Assign assign) {
-                            GraphReindexer reindexer;
-                            reindexer.coordinates.emplace(oldMacTileTag, newMacTileTag);
-                            reindexExpressions(graph, opTag, reindexer);
+                auto visitor = rocRoller::overloaded{
+                    [&](CG::StoreTiled store) {
+                        auto macroTile = graph.mapper.get<CT::MacroTile>(opTag);
+                        if(macroTile == oldMacTileTag)
+                        {
+                            graph.mapper.disconnect<CT::MacroTile>(opTag, oldMacTileTag);
+                            graph.mapper.connect<CT::MacroTile>(opTag, newMacTileTag);
 
                             // update the data flow in the coordinate graph
-                            auto assignConnection = only(graph.mapper.getConnections(opTag));
-                            AssertFatal(assignConnection,
-                                        "There should be exactly one connection for an assignment");
-                            auto             dstTag = assignConnection->coordinate;
-                            std::vector<int> srcTags;
-                            for(auto const& edgeTag :
-                                graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dstTag))
-                            {
-                                auto df = graph.coordinates.get<DataFlow>(edgeTag);
-                                if(!df)
-                                    continue;
-                                auto srcs
-                                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
-                                        edgeTag);
-                                for(auto const src : srcs)
-                                {
-                                    if(src == oldMacTileTag)
-                                        srcTags.push_back(newMacTileTag);
-                                    else
-                                        srcTags.push_back(src);
-                                }
-                                graph.coordinates.deleteElement(edgeTag);
-                            }
-                            graph.coordinates.addElement(
-                                DataFlow(),
-                                srcTags,
-                                std::vector<int>{dstTag == oldMacTileTag ? newMacTileTag : dstTag});
+                            auto dstTag = graph.mapper.get<CT::User>(opTag);
+                            auto df
+                                = *only(graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
+                                    dstTag));
+                            graph.coordinates.deleteElement(df);
+                            graph.coordinates.addElement(CT::DataFlow(),
+                                                         std::vector<int>{newMacTileTag},
+                                                         std::vector<int>{dstTag});
+                        }
+                    },
+                    [&](CG::Assign assign) {
+                        GraphReindexer reindexer;
+                        reindexer.coordinates.emplace(oldMacTileTag, newMacTileTag);
+                        reindexExpressions(graph, opTag, reindexer);
 
-                            if(dstTag == oldMacTileTag)
+                        // update the data flow in the coordinate graph
+                        auto assignConnection = only(graph.mapper.getConnections(opTag));
+                        AssertFatal(assignConnection,
+                                    "There should be exactly one connection for an assignment");
+                        auto             dstTag = assignConnection->coordinate;
+                        std::vector<int> srcTags;
+                        for(auto const& edgeTag :
+                            graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dstTag))
+                        {
+                            auto df = graph.coordinates.get<CT::DataFlow>(edgeTag);
+                            if(!df)
+                                continue;
+                            auto srcs = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
+                                edgeTag);
+                            for(auto const src : srcs)
                             {
-                                graph.mapper.disconnect(opTag,
-                                                        assignConnection->coordinate,
-                                                        assignConnection->connection);
-                                graph.mapper.connect(opTag, newMacTileTag, NaryArgument::DEST);
+                                if(src == oldMacTileTag)
+                                    srcTags.push_back(newMacTileTag);
+                                else
+                                    srcTags.push_back(src);
                             }
-                        },
-                        [&](auto op) { Throw<FatalError>("Not handled yet."); }},
-                    std::get<Operation>(element));
+                            graph.coordinates.deleteElement(edgeTag);
+                        }
+                        graph.coordinates.addElement(
+                            CT::DataFlow(),
+                            srcTags,
+                            std::vector<int>{dstTag == oldMacTileTag ? newMacTileTag : dstTag});
+
+                        if(dstTag == oldMacTileTag)
+                        {
+                            graph.mapper.disconnect(
+                                opTag, assignConnection->coordinate, assignConnection->connection);
+                            graph.mapper.connect(opTag, newMacTileTag, NaryArgument::DEST);
+                        }
+                    },
+                    [&](auto op) { Throw<FatalError>("Not handled yet."); }};
+
+                std::visit(visitor, std::get<CG::Operation>(element));
             }
         }
 
@@ -1068,7 +1292,7 @@ namespace rocRoller
             for(auto& c : kgraph.mapper.getConnections(op))
             {
                 auto curConnection = c.connection;
-                auto maybeLDSTile  = kgraph.coordinates.get<LDS>(c.coordinate);
+                auto maybeLDSTile  = kgraph.coordinates.get<CT::LDS>(c.coordinate);
                 if(maybeLDSTile || subdimStride == 0)
                 {
                     kgraph.mapper.connect(newOp, c.coordinate, c.connection);
@@ -1089,28 +1313,28 @@ namespace rocRoller
             }
         }
 
-        ExpressionPtr tileCeilDivide(ExpressionPtr sdSize, int tileSize)
+        Expression::ExpressionPtr tileCeilDivide(Expression::ExpressionPtr sdSize, int tileSize)
         {
-            auto tileSizeExpr = literal(static_cast<uint>(tileSize));
-            auto one          = literal(1u);
+            auto tileSizeExpr = std::has_single_bit(static_cast<uint>(tileSize))
+                                    ? Expression::literal(static_cast<uint>(tileSize))
+                                    : Expression::literal(static_cast<int64_t>(tileSize));
+
+            auto one = Expression::literal(1u);
 
             return (sdSize + tileSizeExpr - one) / tileSizeExpr;
         }
 
         bool hasDeallocate(const KernelGraph& graph, int registerTag)
         {
-            auto connections = [&]() -> Generator<int> {
-                for(const auto& connection : graph.mapper.getCoordinateConnections(registerTag))
-                    co_yield connection.control;
-            };
-
-            for(const auto& deallocateTag :
-                filter(graph.control.isElemType<Deallocate>(), connections()))
+            for(auto const& connection : graph.mapper.getCoordinateConnections(registerTag))
             {
-                auto dimTag = graph.mapper.get<Dimension>(deallocateTag);
-                if(dimTag == registerTag)
+                if(std::holds_alternative<CG::Deallocate>(
+                       graph.control.getNode(connection.control)))
+                {
                     return true;
+                }
             }
+
             return false;
         }
 
@@ -1118,20 +1342,18 @@ namespace rocRoller
                               std::set<std::pair<int, int>> const& pairs,
                               bool                                 ordered)
         {
-            LastRWTracer tracer(graph);
-
             std::map<int, std::deque<int>> traces;
             for(auto pair : pairs)
             {
-                traces[pair.first]  = tracer.controlStack(pair.first);
-                traces[pair.second] = tracer.controlStack(pair.second);
+                traces[pair.first]  = controlStack(pair.first, graph);
+                traces[pair.second] = controlStack(pair.second, graph);
             }
             for(auto pair : pairs)
             {
                 if(pair.first != pair.second
                    && graph.control.compareNodes(
                           rocRoller::UseCacheIfAvailable, pair.first, pair.second)
-                          == NodeOrdering::Undefined)
+                          == CG::NodeOrdering::Undefined)
                 {
                     graph.control.orderMemoryNodes(
                         traces.at(pair.first), traces.at(pair.second), ordered);
@@ -1167,11 +1389,10 @@ namespace rocRoller
 
         int getLDSOperationTarget(KernelGraph const& k, int opTag)
         {
-            namespace CT             = rocRoller::KernelGraph::CoordinateGraph;
             auto [target, direction] = getOperationTarget(opTag, k);
 
             // TODO: Design a better way of binding storage to coordinates
-            auto maybeLDS = k.coordinates.get<LDS>(target);
+            auto maybeLDS = k.coordinates.get<CT::LDS>(target);
             if(maybeLDS)
             {
                 // If target is LDS; it might be a duplicated LDS
@@ -1179,13 +1400,13 @@ namespace rocRoller
                 // coordinates, use the parent LDS as the target
                 // instead.
                 auto maybeParentLDS
-                    = only(k.coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
+                    = only(k.coordinates.getOutputNodeIndices(target, CT::isEdge<CT::Duplicate>));
                 if(maybeParentLDS)
                     target = *maybeParentLDS;
             }
 
             auto isDataFlow
-                = [&](int tag) -> bool { return k.coordinates.get<DataFlow>(tag).has_value(); };
+                = [&](int tag) -> bool { return k.coordinates.get<CT::DataFlow>(tag).has_value(); };
 
             while(true)
             {
@@ -1208,42 +1429,110 @@ namespace rocRoller
         {
             if(unroll == -1)
                 return 1u;
-            AssertFatal(graph.coordinates.get<Unroll>(unroll).has_value(),
+            AssertFatal(graph.coordinates.get<CT::Unroll>(unroll).has_value(),
                         "The argument is not an Unroll coordinate");
 
-            Dimension unrollDim = graph.coordinates.get<Unroll>(unroll).value();
+            CT::Dimension unrollDim = graph.coordinates.get<CT::Unroll>(unroll).value();
             return getUnsignedInt(evaluate(getSize(unrollDim)));
         }
 
-        /**
-        * @brief Get coordinates required by the code-generator.
-        */
-        std::vector<int>
-            getCodeGeneratorCoordinates(KernelGraph const& graph, int tag, bool isDirect2LDS)
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag)
         {
-            auto [tileTag, tile] = graph.getDimension<MacroTile>(tag);
-            if(isDirect2LDS)
+            auto maybeParentLDS
+                = only(graph.coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<CT::Duplicate>));
+            if(maybeParentLDS)
+                ldsTag = *maybeParentLDS;
+
+            int rv = 0;
+
+            auto flattenedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
+                std::vector<uint> sizes;
+                sizes.reserve(tags.size());
+                for(auto tag : tags)
+                {
+                    auto node = graph.coordinates.getNode(tag);
+                    sizes.push_back(getUnsignedInt(evaluate(getSize(node))));
+                }
+                return sizes;
+            };
+
+            auto joinedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
+                std::vector<uint> sizes;
+                sizes.reserve(tags.size());
+                for(auto tag : tags)
+                {
+                    auto node   = graph.coordinates.getNode(tag);
+                    auto size   = getUnsignedInt(evaluate(getSize(node)));
+                    auto stride = getUnsignedInt(evaluate(getStride(node)));
+                    sizes.push_back(size * stride);
+                }
+                return sizes;
+            };
+
+            // If LDS is Flattened
+            auto incoming = graph.coordinates.getInputNodeIndices(ldsTag, CT::isEdge<CT::Flatten>)
+                                .to<std::vector>();
+
+            if(not incoming.empty())
             {
-                return {graph.mapper.get<ElementNumber>(tag, 2),
-                        graph.mapper.get<ElementNumber>(tag, 3)};
+                rv = product(flattenedSizes(incoming));
+                Log::debug("KernelGraph::getNumLDSElements(ldsTag: {}): "
+                           "Flattened LDS with size: {}",
+                           ldsTag,
+                           rv);
             }
-            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT)
+
+            // If LDS is Joined
+            incoming = graph.coordinates.getInputNodeIndices(ldsTag, CT::isEdge<CT::Join>)
+                           .to<std::vector>();
+
+            if(not incoming.empty())
             {
-                return {graph.mapper.get<ElementNumber>(tag, 0),
-                        graph.mapper.get<ElementNumber>(tag, 1)};
+                auto sizes = joinedSizes(incoming);
+                rv         = *std::max_element(sizes.cbegin(), sizes.cend());
+                Log::debug("KernelGraph::getNumLDSElements(ldsTag: {}): "
+                           "Joined LDS with size: {}",
+                           ldsTag,
+                           rv);
+            }
+
+            AssertFatal(rv > 0, "Unable to determine LDS size");
+            return rv;
+        }
+
+        /**
+         * @brief Get coordinates required by the code-generator.
+         */
+        std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
+                                                     int                tag,
+                                                     bool               isStorePartOfGlobalToLDSOp)
+        {
+            auto [tileTag, tile] = graph.getDimension<CT::MacroTile>(tag);
+            if(isStorePartOfGlobalToLDSOp)
+            {
+                return {graph.mapper.get<CT::ElementNumber>(tag, 2),
+                        graph.mapper.get<CT::ElementNumber>(tag, 3)};
+            }
+            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT
+               || tile.memoryType == MemoryType::WAVE_Direct2LDS)
+            {
+                return {graph.mapper.get<CT::ElementNumber>(tag, 0),
+                        graph.mapper.get<CT::ElementNumber>(tag, 1)};
             }
             if(tile.layoutType == LayoutType::MATRIX_A)
             {
-                return {graph.mapper.get<WaveTileNumber>(tag, 1), graph.mapper.get<VGPR>(tag)};
+                return {graph.mapper.get<CT::WaveTileNumber>(tag, 1),
+                        graph.mapper.get<CT::VGPR>(tag)};
             }
             if(tile.layoutType == LayoutType::MATRIX_B)
             {
-                return {graph.mapper.get<WaveTileNumber>(tag, 0), graph.mapper.get<VGPR>(tag)};
+                return {graph.mapper.get<CT::WaveTileNumber>(tag, 0),
+                        graph.mapper.get<CT::VGPR>(tag)};
             }
             if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
             {
-                return {graph.mapper.get<VGPRBlockNumber>(tag),
-                        graph.mapper.get<VGPRBlockIndex>(tag)};
+                return {graph.mapper.get<CT::VGPRBlockNumber>(tag),
+                        graph.mapper.get<CT::VGPRBlockIndex>(tag)};
             }
 
             Throw<FatalError>("getCodeGeneratorCoordinates tile type not implemented yet.");
@@ -1254,14 +1543,13 @@ namespace rocRoller
          */
         bool static isRedundantBodyEdge(KernelGraph const& graph, int edge)
         {
-            namespace CF = rocRoller::KernelGraph::ControlGraph;
 
             auto tail = *only(graph.control.getNeighbours<GD::Upstream>(edge));
             auto head = *only(graph.control.getNeighbours<GD::Downstream>(edge));
 
             auto onlyFollowDifferentBodyEdges = [&](int x) -> bool {
                 auto isSame = x == edge;
-                auto isBody = CF::isEdge<Body>(graph.control.getElement(x));
+                auto isBody = CG::isEdge<CG::Body>(graph.control.getElement(x));
                 return !isSame && isBody;
             };
 
@@ -1276,14 +1564,15 @@ namespace rocRoller
                     return true;
             }
 
-            auto otherBodies = graph.control.getOutputNodeIndices<Body>(tail).filter(
+            auto otherBodies = graph.control.getOutputNodeIndices<CG::Body>(tail).filter(
                 [head](int x) { return x != head; });
 
             for(auto top : otherBodies)
             {
                 auto reachable = !graph.control
-                                      .depthFirstVisit(
-                                          top, graph.control.isElemType<Sequence>(), GD::Downstream)
+                                      .depthFirstVisit(top,
+                                                       graph.control.isElemType<CG::Sequence>(),
+                                                       GD::Downstream)
                                       .filter([head](int x) { return x == head; })
                                       .empty();
 
@@ -1300,7 +1589,7 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph)
         {
             auto edges = graph.control.getEdges()
-                             .filter(graph.control.isElemType<Body>())
+                             .filter(graph.control.isElemType<CG::Body>())
                              .to<std::vector>();
             for(auto edge : edges)
             {
@@ -1310,6 +1599,109 @@ namespace rocRoller
                     graph.control.deleteElement(edge);
                 }
             }
+        }
+
+        Generator<int> bodyParents(int control, KernelGraph const& graph)
+        {
+            return bodyParents(control, graph.control);
+        }
+
+        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph)
+        {
+            std::unordered_set<int> visitedNodes = {control};
+
+            // Walk up the first edge we find until we have found a root (which
+            // should be the only root). Any time we find an edge that is not a
+            // Sequence edge, we have found a new body-parent. This should hold for
+            // any valid (walkable) control graph.
+
+            auto neighbours = graph.getNeighbours<Graph::Direction::Upstream>(control);
+            while(!neighbours.empty())
+            {
+                auto edge  = neighbours.front();
+                auto nodes = graph.getNeighbours<Graph::Direction::Upstream>(edge);
+                AssertFatal(!nodes.empty(), "Edge does not connect two nodes!");
+                auto node = nodes.front();
+                AssertFatal(!visitedNodes.contains(node), "Graph contains cycle!");
+                visitedNodes.insert(node);
+
+                auto isContaining
+                    = !std::holds_alternative<ControlGraph::Sequence>(graph.getEdge(edge));
+                if(isContaining)
+                    co_yield node;
+
+                neighbours = graph.getNeighbours<Graph::Direction::Upstream>(node);
+            }
+        }
+
+        std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph)
+        {
+            TIMER(t, "controlStack");
+            std::deque<int> rv = {control};
+
+            for(auto parent : bodyParents(control, graph))
+            {
+                rv.push_front(parent);
+            }
+
+            return rv;
+        }
+
+        std::deque<int> controlStack(int control, KernelGraph const& graph)
+        {
+            return controlStack(control, graph.control);
+        }
+
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag)
+        {
+            bool const isUpstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag).empty();
+            bool const isDownstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(tag).empty();
+
+            if(isUpstreamEmpty == isDownstreamEmpty)
+            {
+                // Not dangling if both directions are empty or not empty.
+                return std::nullopt;
+            }
+
+            return isUpstreamEmpty ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+        }
+
+        bool isGlobalToLDSOp(KernelGraph const& graph, int op)
+        {
+            return graph.control.get<ControlGraph::LoadTileDirect2LDS>(op).has_value();
+        }
+
+        std::optional<int>
+            getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
+        {
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            namespace CF = rocRoller::KernelGraph::ControlGraph;
+
+            auto coordPredicate = [](auto const& edge) {
+                return CT::isEdge<CT::Segment>(edge) || CT::isEdge<CT::Index>(edge);
+            };
+
+            auto isExchangePredicate = [&graph](int operation) -> bool {
+                return graph.control.get<CF::Exchange>(operation).has_value();
+            };
+
+            int scale
+                = graph.mapper.get(multiplyTag, Connections::typeArgument<CT::MacroTile>(arg));
+            if(scale == -1)
+                return {};
+
+            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, coordPredicate));
+            if(not tileTag)
+                return {};
+
+            auto connections = graph.mapper.getCoordinateConnections(tileTag.value());
+            for(auto connection : connections)
+                if(isExchangePredicate(connection.control))
+                    return connection.control;
+
+            return {};
         }
     }
 }

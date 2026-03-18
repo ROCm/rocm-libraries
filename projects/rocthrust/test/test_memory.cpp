@@ -26,7 +26,8 @@
 
 #include <cstddef>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TEST(HipThrustMemory, VoidMalloc)
 {
@@ -311,6 +312,17 @@ get_temporary_buffer(my_memory_system& system, std::ptrdiff_t size)
   thrust::pair<thrust::pointer<T, thrust::device_system_tag>, std::ptrdiff_t> result =
     thrust::get_temporary_buffer<T>(device_sys, size);
   return thrust::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
+}
+
+template <typename Pointer>
+void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t n)
+{
+  system.validate_dispatch();
+
+  thrust::device_system_tag device_sys;
+  thrust::pointer<typename thrust::iterator_traits<Pointer>::value_type, 
+                           thrust::device_system_tag> device_ptr(p.get());
+  thrust::return_temporary_buffer(device_sys, device_ptr, n);
 }
 
 TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)

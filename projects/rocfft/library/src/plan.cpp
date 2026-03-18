@@ -25,6 +25,7 @@
 #include "../../shared/environment.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
+#include "../../shared/rocfft_params.h"
 #include "assignment_policy.h"
 #include "enum_printer.h"
 #include "function_pool.h"
@@ -33,16 +34,19 @@
 #include "node_factory.h"
 #include "rocfft/rocfft-version.h"
 #include "rocfft/rocfft.h"
+#include "rocfft_current_function.h"
 #include "rocfft_exception.h"
 #include "rocfft_mpi.h"
 #include "rocfft_ostream.hpp"
 #include "rtc_kernel.h"
 #include "solution_map.h"
+#include "tree_node.h"
 #include "tuning_helper.h"
 #include "tuning_plan_tuner.h"
 
 #include <algorithm>
 #include <assert.h>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -50,6 +54,8 @@
 #include <numeric>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 #ifdef ROCFFT_MPI_ENABLE
@@ -61,10 +67,10 @@
 #define TO_STR(x) TO_STR2(x)
 
 // clang-format off
-#define ROCFFT_VERSION_STRING (TO_STR(rocfft_version_major) "." \
-                               TO_STR(rocfft_version_minor) "." \
-                               TO_STR(rocfft_version_patch) "." \
-                               TO_STR(rocfft_version_tweak) )
+const char* ROCFFT_VERSION_STRING = (TO_STR(rocfft_version_major) "." \
+                                     TO_STR(rocfft_version_minor) "." \
+                                     TO_STR(rocfft_version_patch) "." \
+                                     TO_STR(rocfft_version_tweak) );
 // clang-format on
 
 rocfft_status rocfft_plan_description_set_scale_factor(rocfft_plan_description description,
@@ -90,118 +96,6 @@ static size_t offset_count(rocfft_array_type type)
                : 1;
 }
 
-void rocfft_plan_description_t::init_defaults(rocfft_transform_type      transformType,
-                                              rocfft_result_placement    placement,
-                                              const std::vector<size_t>& lengths,
-                                              const std::vector<size_t>& outputLengths)
-{
-    const size_t rank = lengths.size();
-
-    // assume interleaved data
-    if(inArrayType == rocfft_array_type_unset)
-    {
-        switch(transformType)
-        {
-        case rocfft_transform_type_complex_forward:
-        case rocfft_transform_type_complex_inverse:
-            inArrayType = rocfft_array_type_complex_interleaved;
-            break;
-        case rocfft_transform_type_real_inverse:
-            inArrayType = rocfft_array_type_hermitian_interleaved;
-            break;
-        case rocfft_transform_type_real_forward:
-            inArrayType = rocfft_array_type_real;
-            break;
-        }
-    }
-    if(outArrayType == rocfft_array_type_unset)
-    {
-        switch(transformType)
-        {
-        case rocfft_transform_type_complex_forward:
-        case rocfft_transform_type_complex_inverse:
-            outArrayType = rocfft_array_type_complex_interleaved;
-            break;
-        case rocfft_transform_type_real_forward:
-            outArrayType = rocfft_array_type_hermitian_interleaved;
-            break;
-        case rocfft_transform_type_real_inverse:
-            outArrayType = rocfft_array_type_real;
-            break;
-        }
-    }
-
-    // Set inStrides, if not specified
-    if(inStrides.empty())
-    {
-        inStrides.push_back(1);
-
-        if((transformType == rocfft_transform_type_real_forward)
-           && (placement == rocfft_placement_inplace))
-        {
-            // real-to-complex in-place
-            size_t dist = 2 * outputLengths[0];
-
-            for(size_t i = 1; i < rank; i++)
-            {
-                inStrides.push_back(dist);
-                dist *= lengths[i];
-            }
-        }
-        else
-        {
-            // Set the inStrides to deal with contiguous data
-            for(size_t i = 1; i < rank; i++)
-                inStrides.push_back(lengths[i - 1] * inStrides[i - 1]);
-        }
-    }
-
-    // Set outStrides, if not specified
-    if(outStrides.empty())
-    {
-        outStrides.push_back(1);
-
-        if((transformType == rocfft_transform_type_real_inverse)
-           && (placement == rocfft_placement_inplace))
-        {
-            // complex-to-real in-place
-            size_t dist = 2 * lengths[0];
-
-            for(size_t i = 1; i < rank; i++)
-            {
-                outStrides.push_back(dist);
-                dist *= lengths[i];
-            }
-        }
-        else
-        {
-            // Set the outStrides to deal with contiguous data
-            for(size_t i = 1; i < rank; i++)
-                outStrides.push_back(outputLengths[i - 1] * outStrides[i - 1]);
-        }
-    }
-
-    // Set in and out Distances, if not specified
-    if(inDist == 0)
-    {
-        // In-place 1D transforms need extra dist.
-        if(transformType == rocfft_transform_type_real_forward && lengths.size() == 1
-           && placement == rocfft_placement_inplace)
-            inDist = 2 * (lengths[0] / 2 + 1) * inStrides[0];
-        else
-            inDist = lengths[rank - 1] * inStrides[rank - 1];
-    }
-    if(outDist == 0)
-    {
-        // In-place 1D transforms need extra dist.
-        if(transformType == rocfft_transform_type_real_inverse && lengths.size() == 1
-           && placement == rocfft_placement_inplace)
-            outDist = 2 * lengths[0] * outStrides[0];
-        else
-            outDist = outputLengths[rank - 1] * outStrides[rank - 1];
-    }
-}
-
 bool rocfft_plan_description_t::multiple_devices_in_rank(const rocfft_field_t& field)
 {
     // map ranks to a set of distinct devices
@@ -223,103 +117,16 @@ bool rocfft_plan_description_t::multiple_devices_in_rank(const rocfft_field_t& f
     return false;
 }
 
-void rocfft_plan_t::sort()
-{
-    // copy the lengths + strides separately, and then sort them
-    // fastest to slowest.
-    struct rocfft_iodim
-    {
-        size_t length;
-        size_t olength;
-        size_t istride;
-        size_t ostride;
-    };
-
-    // complex-complex transforms can be freely reordered starting from
-    // the fastest dimension.  real-complex has to leave the fastest
-    // dimension alone
-    const size_t start_dim = (transformType == rocfft_transform_type_complex_forward
-                              || transformType == rocfft_transform_type_complex_inverse)
-                                 ? 0
-                                 : 1;
-
-    std::vector<rocfft_iodim> iodims;
-    for(size_t dim = start_dim; dim < rank; ++dim)
-        iodims.push_back(rocfft_iodim{
-            lengths[dim], outputLengths[dim], desc.inStrides[dim], desc.outStrides[dim]});
-    if(iodims.empty())
-        return;
-
-    bool sort_on_istride = true;
-    auto sorter          = [sort_on_istride](const rocfft_iodim& a, const rocfft_iodim& b) {
-        // move any lengths of 1 to the end
-        if(a.length == 1 && b.length != 1)
-            return false;
-        if(b.length == 1 && a.length != 1)
-            return true;
-        return sort_on_istride ? (a.istride < b.istride) : (a.ostride < b.ostride);
-    };
-
-    // sort on istride first
-    std::sort(iodims.begin(), iodims.end(), sorter);
-
-    // if that means ostride is no longer sorted, then don't bother
-    // changing anything - the user is asking for some kind of
-    // transposed FFT so let's just assume they know what they're doing
-    sort_on_istride = false;
-    if(!std::is_sorted(iodims.begin(), iodims.end(), sorter))
-        return;
-
-    // chop off any lengths of 1 from the end
-    while(iodims.size() > 1 && iodims.back().length == 1)
-    {
-        --rank;
-        iodims.pop_back();
-    }
-    // copy back the sorted lengths + strides
-    for(size_t dim = start_dim; dim < rank; ++dim)
-    {
-        lengths[dim]         = iodims[dim - start_dim].length;
-        outputLengths[dim]   = iodims[dim - start_dim].olength;
-        desc.inStrides[dim]  = iodims[dim - start_dim].istride;
-        desc.outStrides[dim] = iodims[dim - start_dim].ostride;
-    }
-}
-
-bool rocfft_plan_t::is_contiguous(const std::vector<size_t>& length,
-                                  const std::vector<size_t>& stride,
-                                  size_t                     dist)
-{
-    size_t expected_stride = 1;
-    auto   stride_it       = stride.begin();
-    auto   length_it       = length.begin();
-    for(; stride_it != stride.end() && length_it != length.end(); ++stride_it, ++length_it)
-    {
-        if(*stride_it != expected_stride)
-            return false;
-        expected_stride *= *length_it;
-    }
-    return expected_stride == dist;
-}
-
-bool rocfft_plan_t::is_contiguous_input()
-{
-    return is_contiguous(lengths, desc.inStrides, desc.inDist);
-}
-bool rocfft_plan_t::is_contiguous_output()
-{
-    return is_contiguous(lengths, desc.outStrides, desc.outDist);
-}
-
 size_t rocfft_plan_t::AddMultiPlanItem(std::unique_ptr<MultiPlanItem>&& item,
                                        const std::vector<size_t>&       antecedents)
 {
     // ensure antecedents all exist
-    if(std::any_of(
-           antecedents.begin(), antecedents.end(), [=](size_t i) { return i >= multiPlan.size(); }))
+    if(std::any_of(antecedents.begin(), antecedents.end(), [=, this](size_t i) {
+           return i >= multiPlan.size();
+       }))
         throw std::runtime_error("antecedent does not exist");
 
-    item->local_comm_rank = get_local_comm_rank();
+    item->local_comm_rank = desc.get_local_comm_rank();
 
     multiPlan.emplace_back(std::move(item));
     multiPlanAntecedents.emplace_back(antecedents);
@@ -365,7 +172,7 @@ try
     log_trace(
         __func__, "description", description, "comm_type", comm_type, "comm_handle", comm_handle);
 
-    // If you give say that you're going to give is a communicator, please don't give us a null
+    // If you say that you're going to give us a communicator, please don't give us a null
     // pointer.
     if(comm_type != rocfft_comm_none && comm_handle == nullptr)
     {
@@ -386,6 +193,8 @@ try
 #ifdef ROCFFT_MPI_ENABLE
     case rocfft_comm_mpi:
     {
+        // duplicate the user-provided MPI communicator and set
+        // our own error policy on it
         description->mpi_comm.duplicate(*static_cast<MPI_Comm*>(comm_handle));
         auto mpiret = MPI_Comm_set_errhandler(description->mpi_comm, MPI_ERRORS_RETURN);
         if(mpiret != MPI_SUCCESS)
@@ -436,46 +245,51 @@ try
               "out_distance",
               out_distance);
 
-    description->inArrayType  = in_array_type;
-    description->outArrayType = out_array_type;
-
-    if(in_offsets != nullptr)
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
-        description->inOffset[0] = in_offsets[0];
-        if((in_array_type == rocfft_array_type_complex_planar)
-           || (in_array_type == rocfft_array_type_hermitian_planar))
-            description->inOffset[1] = in_offsets[1];
+        // object's I/O members to (re)set
+        auto& desc_io_array_type
+            = io == io_data_label::INPUT ? description->inArrayType : description->outArrayType;
+        auto& desc_io_offsets
+            = io == io_data_label::INPUT ? description->inOffset : description->outOffset;
+        auto& desc_io_layout
+            = io == io_data_label::INPUT ? description->input_layout : description->output_layout;
+        // user's setting
+        const auto& user_io_array_type
+            = io == io_data_label::INPUT ? in_array_type : out_array_type;
+        const auto& user_io_offsets = io == io_data_label::INPUT ? in_offsets : out_offsets;
+        const auto& user_io_strides_sz
+            = io == io_data_label::INPUT ? in_strides_size : out_strides_size;
+        const auto& user_io_strides = io == io_data_label::INPUT ? in_strides : out_strides;
+        const auto& user_io_dist    = io == io_data_label::INPUT ? in_distance : out_distance;
+        // -------------------------------
+        // Set/Reset description's members
+        // -------------------------------
+        // array type
+        desc_io_array_type = user_io_array_type;
+        // offsets
+        desc_io_offsets[0] = desc_io_offsets[1] = 0; // default if unspecified
+        if(user_io_offsets != nullptr)
+        {
+            desc_io_offsets[0] = user_io_offsets[0];
+            if(array_type_is_planar(desc_io_array_type))
+                desc_io_offsets[1] = user_io_offsets[1];
+        }
+        // layout parameters: implicit default strides (resp. distances) to be determined
+        // at plan creation if strides are unspecified here (resp. distances are 0)
+        desc_io_layout.clear();
+        if(user_io_strides)
+        {
+            desc_io_layout.len_axes.resize(user_io_strides_sz);
+            for(size_t dim = 0; dim < user_io_strides_sz; dim++)
+                desc_io_layout.len_axes[dim].inbuffer_stride = user_io_strides[dim];
+        }
+        if(user_io_dist != 0)
+        {
+            desc_io_layout.batch_axes.resize(1);
+            desc_io_layout.batch_axes[0].inbuffer_stride = user_io_dist;
+        }
     }
-
-    if(out_offsets != nullptr)
-    {
-        description->outOffset[0] = out_offsets[0];
-        if((out_array_type == rocfft_array_type_complex_planar)
-           || (out_array_type == rocfft_array_type_hermitian_planar))
-            description->outOffset[1] = out_offsets[1];
-    }
-
-    if(in_strides != nullptr)
-    {
-        description->inStrides.clear();
-        std::copy(
-            in_strides, in_strides + in_strides_size, std::back_inserter(description->inStrides));
-    }
-
-    if(in_distance != 0)
-        description->inDist = in_distance;
-
-    if(out_strides != nullptr)
-    {
-        description->outStrides.clear();
-        std::copy(out_strides,
-                  out_strides + out_strides_size,
-                  std::back_inserter(description->outStrides));
-    }
-
-    if(out_distance != 0)
-        description->outDist = out_distance;
-
     return rocfft_status_success;
 }
 catch(...)
@@ -535,138 +349,33 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-bool rocfft_brick_t::empty() const
-{
-    auto len = length();
-    return std::any_of(len.begin(), len.end(), [](int l) { return l == 0; });
-}
-
-size_t rocfft_brick_t::count_elems() const
-{
-    auto len = length();
-    return product(len.begin(), len.end());
-}
-
-std::vector<size_t> rocfft_brick_t::contiguous_strides() const
-{
-    std::vector<size_t> ret;
-    size_t              dist = 1;
-
-    auto len = length();
-    for(size_t i = 0; i < len.size(); ++i)
-    {
-        ret.push_back(dist);
-        dist *= len[i];
-    }
-    return ret;
-}
-
-bool rocfft_brick_t::is_contiguous() const
-{
-    auto contiguous = contiguous_strides();
-
-    auto len = length();
-    // only care about dimensions whose length is greater than 1
-    for(size_t i = 1; i < len.size(); ++i)
-    {
-        if(len[i] > 1)
-        {
-            if(contiguous[i] != stride[i])
-                return false;
-        }
-    }
-    return true;
-}
-
-bool rocfft_brick_t::is_contiguous_in_field(const std::vector<size_t>& field_length,
-                                            const std::vector<size_t>& field_stride) const
-{
-    const auto brick_len = length();
-
-    // a contiguous brick in a field is shorter than field length
-    // only on the highest dimension, ignoring dimensions of
-    // length-1, and strides must match the field for all those
-    // dimensions.
-    size_t shortDim       = std::numeric_limits<size_t>::max();
-    size_t highestNot1Dim = std::numeric_limits<size_t>::max();
-    for(size_t i = 0; i < brick_len.size(); ++i)
-    {
-        if(field_length[i] == 1)
-            continue;
-
-        highestNot1Dim = i;
-        if(brick_len[i] < field_length[i])
-        {
-            // another dim is already short?  this isn't contiguous
-            if(shortDim != std::numeric_limits<size_t>::max())
-                return false;
-            shortDim = i;
-        }
-    }
-
-    return shortDim == highestNot1Dim;
-}
-
-rocfft_brick_t rocfft_brick_t::intersect(const rocfft_brick_t& other) const
-{
-    rocfft_brick_t ret;
-
-    for(size_t i = 0; i < lower.size(); ++i)
-        ret.lower.push_back(std::max(lower[i], other.lower[i]));
-
-    for(size_t i = 0; i < upper.size(); ++i)
-        ret.upper.push_back(std::min(upper[i], other.upper[i]));
-
-    return ret;
-}
-
-bool rocfft_brick_t::equal_coords(const rocfft_brick_t& other) const
-{
-    return this->lower == other.lower && this->upper == other.upper;
-}
-
-size_t rocfft_brick_t::offset_in_field(const std::vector<size_t>& fieldStride) const
-{
-    return std::inner_product(lower.begin(), lower.end(), fieldStride.begin(), 0);
-}
-
 std::string rocfft_brick_t::str() const
 {
-    std::string ret;
-    ret += "lower ";
-    for(auto i : lower)
-    {
-        ret += " ";
-        ret += std::to_string(i);
-    }
-
-    ret += " upper ";
-    for(auto i : upper)
-    {
-        ret += " ";
-        ret += std::to_string(i);
-    }
-
-    ret += " stride ";
-    for(auto i : stride)
-    {
-        ret += " ";
-        ret += std::to_string(i);
-    }
-    ret += " comm rank ";
-    ret += std::to_string(location.comm_rank);
-    ret += " device ";
-    ret += std::to_string(location.device);
-    return ret;
+    return layout.str() + " " + location.str();
 }
 
+// internal brick-adding API
+static void rocfft_field_add_brick_internal(rocfft_field_t& field, const rocfft_brick_t& brick)
+{
+    if(!field.bricks.empty()
+       && !brick.layout.is_dimensionally_consistent_with(field.bricks[0].layout))
+    {
+        // could motivate a new "rocfft_status_invalid_brick{_dimensions}" error code
+        throw std::runtime_error(
+            "Brick to be added is not dimensionally consistent with other brick(s) in field.");
+    }
+
+    field.bricks.emplace_back(brick);
+}
+
+// public brick-adding API that logs
 rocfft_status rocfft_field_add_brick(rocfft_field field, rocfft_brick brick)
 try
 {
     log_trace(__func__, "field", field, "brick", brick);
     if(!field || !brick)
         return rocfft_status_invalid_arg_value;
-    field->bricks.emplace_back(*brick);
+    rocfft_field_add_brick_internal(*field, *brick);
     return rocfft_status_success;
 }
 catch(...)
@@ -674,6 +383,7 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+// public brick-creating API that logs calls
 rocfft_status rocfft_brick_create(rocfft_brick* brick,
                                   const size_t* field_lower,
                                   const size_t* field_upper,
@@ -698,13 +408,22 @@ try
     if(!brick)
         return rocfft_status_invalid_arg_value;
 
-    auto brick_ptr = std::make_unique<rocfft_brick_t>();
-    std::copy_n(field_lower, dim, std::back_inserter(brick_ptr->lower));
-    std::copy_n(field_upper, dim, std::back_inserter(brick_ptr->upper));
-    std::copy_n(brick_stride, dim, std::back_inserter(brick_ptr->stride));
+    if(dim < 2 || dim > 4) // {1,2,3} length dimensions + 1 batch dimension
+        return rocfft_status_invalid_dimensions;
 
-    brick_ptr->location.device = deviceID;
-    *brick                     = brick_ptr.release();
+    if(!field_lower || !field_upper || !brick_stride)
+        return rocfft_status_invalid_arg_value;
+
+    // Assume comm rank 0, as we don't have a communicator at
+    // this point.  If this is actually an MPI transform, these
+    // bricks will be recreated with correct rank when we gather all
+    // of the brick data at plan creation time.
+    auto brick_ptr
+        = std::make_unique<rocfft_brick_t>(std::vector<size_t>{field_lower, field_lower + dim},
+                                           std::vector<size_t>{field_upper, field_upper + dim},
+                                           std::vector<size_t>{brick_stride, brick_stride + dim},
+                                           rocfft_location_t{0, deviceID});
+    *brick = brick_ptr.release();
     return rocfft_status_success;
 }
 catch(...)
@@ -754,106 +473,97 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-std::string rocfft_bench_command(rocfft_plan plan)
+std::vector<size_t> rocfft_plan_t::get_user_facing_lengths() const
 {
+    if(transformType == rocfft_transform_type_complex_forward
+       || transformType == rocfft_transform_type_real_forward)
+    {
+        return desc.input_layout.lengths();
+    }
+    return desc.output_layout.lengths();
+}
+
+std::string rocfft_bench_command(const rocfft_plan& plan)
+{
+    rocfft_params params;
+
+    params.nbatch         = plan->desc.batch();
+    params.placement      = fft_result_placement_from_rocfft_result_placement(plan->placement);
+    params.transform_type = fft_transform_type_from_rocfft_transform_type(plan->transformType);
+    params.precision      = fft_precision_from_rocfft_precision(plan->precision);
+    params.itype          = fft_array_type_from_rocfft_array_type(plan->desc.inArrayType);
+    params.otype          = fft_array_type_from_rocfft_array_type(plan->desc.outArrayType);
+    params.idist          = plan->desc.input_layout.distance();
+    params.odist          = plan->desc.output_layout.distance();
+    params.scale_factor   = plan->desc.storeOps.scale_factor;
+
+    // reverse-copy lengths and strides (col-major to row-major)
+    const auto lengths  = plan->get_user_facing_lengths();
+    const auto istrides = plan->desc.input_layout.strides();
+    const auto ostrides = plan->desc.output_layout.strides();
+    params.length.assign(lengths.rbegin(), lengths.rend());
+    params.istride.assign(istrides.rbegin(), istrides.rend());
+    params.ostride.assign(ostrides.rbegin(), ostrides.rend());
+    // copy offsets
+    params.ioffset.assign(plan->desc.inOffset.begin(), plan->desc.inOffset.end());
+    params.ooffset.assign(plan->desc.outOffset.begin(), plan->desc.outOffset.end());
+    // fields:
+    auto copy_fields_to_params
+        = [&](std::vector<fft_params::fft_field>& dest, const std::vector<rocfft_field_t>& src) {
+              dest.resize(src.size());
+              for(size_t fidx = 0; fidx < src.size(); ++fidx)
+              {
+                  dest[fidx].bricks.resize(src[fidx].bricks.size());
+                  for(size_t bidx = 0; bidx < src[fidx].bricks.size(); ++bidx)
+                  {
+                      fft_params::fft_brick& dest_brick = dest[fidx].bricks[bidx];
+                      const rocfft_brick_t&  src_brick  = src[fidx].bricks[bidx];
+                      // reverse-copy bricks' coordinates and strides (col-major to row-major)
+                      const auto& src_layout = src_brick.layout;
+                      const auto  lower_cm   = src_layout.lower();
+                      const auto  upper_cm   = src_layout.upper();
+                      const auto  strides_cm = src_layout.strides_and_distances();
+                      dest_brick.lower.assign(lower_cm.rbegin(), lower_cm.rend());
+                      dest_brick.upper.assign(upper_cm.rbegin(), upper_cm.rend());
+                      dest_brick.stride.assign(strides_cm.rbegin(), strides_cm.rend());
+                      dest_brick.rank   = src_brick.location.comm_rank;
+                      dest_brick.device = src_brick.location.device;
+                  }
+              }
+          };
+    copy_fields_to_params(params.ifields, plan->desc.inFields);
+    copy_fields_to_params(params.ofields, plan->desc.outFields);
+
     std::stringstream bench;
-    bench << "rocfft-bench --length ";
-    std::ostream_iterator<size_t> bench_iter(bench, " ");
-    std::copy(plan->lengths.rbegin(), plan->lengths.rend(), bench_iter);
-    bench << "-b " << plan->batch << " ";
+    bench << "rocfft-bench --token ";
+    bench << params.token();
 
-    if(plan->placement == rocfft_placement_notinplace)
-        bench << "-o ";
-
-    bench << "-t " << plan->transformType << " ";
-
-    bench << "--precision ";
-    bench << precision_name(plan->precision) << " ";
-    bench << "--itype " << plan->desc.inArrayType << " ";
-    bench << "--otype " << plan->desc.outArrayType << " ";
-    bench << "--istride ";
-    std::copy(plan->desc.inStrides.rbegin(), plan->desc.inStrides.rend(), bench_iter);
-    bench << "--ostride ";
-    std::copy(plan->desc.outStrides.rbegin(), plan->desc.outStrides.rend(), bench_iter);
-    bench << "--idist " << plan->desc.inDist << " ";
-    bench << "--odist " << plan->desc.outDist << " ";
-    bench << "--ioffset ";
-    std::copy(plan->desc.inOffset.begin(), plan->desc.inOffset.end(), bench_iter);
-    bench << "--ooffset ";
-    std::copy(plan->desc.outOffset.begin(), plan->desc.outOffset.end(), bench_iter);
     return bench.str();
 }
 
-// Verify that the transform type, array type, and placement are coherent.
-rocfft_status check_array_type_validity(const rocfft_plan plan)
+rocfft_location_t rocfft_plan_description_t::get_current_location() const
 {
-    switch(plan->transformType)
-    {
-    case rocfft_transform_type_complex_forward:
-    case rocfft_transform_type_complex_inverse:
-        // We need complex input data
-        if(!((plan->desc.inArrayType == rocfft_array_type_complex_interleaved)
-             || (plan->desc.inArrayType == rocfft_array_type_complex_planar)))
-            return rocfft_status_invalid_array_type;
-        // We need complex output data
-        if(!((plan->desc.outArrayType == rocfft_array_type_complex_interleaved)
-             || (plan->desc.outArrayType == rocfft_array_type_complex_planar)))
-            return rocfft_status_invalid_array_type;
-        // In-place transform requires that the input and output
-        // format be identical
-        if(plan->placement == rocfft_placement_inplace)
-        {
-            if(plan->desc.inArrayType != plan->desc.outArrayType)
-                return rocfft_status_invalid_array_type;
-        }
-        break;
-    case rocfft_transform_type_real_forward:
-        // Input must be real
-        if(plan->desc.inArrayType != rocfft_array_type_real)
-            return rocfft_status_invalid_array_type;
-        // Output must be Hermitian
-        if(!((plan->desc.outArrayType == rocfft_array_type_hermitian_interleaved)
-             || (plan->desc.outArrayType == rocfft_array_type_hermitian_planar)))
-            return rocfft_status_invalid_array_type;
-        // In-place transform must output to interleaved format
-        if((plan->placement == rocfft_placement_inplace)
-           && (plan->desc.outArrayType != rocfft_array_type_hermitian_interleaved))
-            return rocfft_status_invalid_array_type;
-        break;
-    case rocfft_transform_type_real_inverse:
-        // Output must be real
-        if(plan->desc.outArrayType != rocfft_array_type_real)
-            return rocfft_status_invalid_array_type;
-        // Input must be Hermitian
-        if(!((plan->desc.inArrayType == rocfft_array_type_hermitian_interleaved)
-             || (plan->desc.inArrayType == rocfft_array_type_hermitian_planar)))
-            return rocfft_status_invalid_array_type;
-        // In-place transform must have interleaved input
-        if((plan->placement == rocfft_placement_inplace)
-           && (plan->desc.inArrayType != rocfft_array_type_hermitian_interleaved))
-            return rocfft_status_invalid_array_type;
-        break;
-    }
-    return rocfft_status_success;
+    rocfft_location_t current_loc;
+    current_loc.comm_rank = get_local_comm_rank();
+    current_loc.device    = hipInvalidDeviceId;
+    if(hipGetDevice(&current_loc.device) != hipSuccess || current_loc.device == hipInvalidDeviceId)
+        throw std::runtime_error("hipGetDevice failed");
+    return current_loc;
 }
 
 // Given a rocfft_plan with validated parameters, set the transform parameters for the root of the
 // tree plan.
 void set_rootplan_params(const rocfft_plan plan, NodeMetaData& planData)
 {
-    planData.dimension = plan->rank;
-    planData.batch     = plan->batch;
-    for(size_t i = 0; i < plan->rank; i++)
-    {
-        planData.length.push_back(plan->lengths[i]);
-        planData.outputLength.push_back(plan->outputLengths[i]);
-
-        planData.inStride.push_back(plan->desc.inStrides[i]);
-        planData.outStride.push_back(plan->desc.outStrides[i]);
-    }
-    planData.iDist     = plan->desc.inDist;
-    planData.oDist     = plan->desc.outDist;
-    planData.placement = plan->placement;
+    planData.dimension    = plan->desc.rank();
+    planData.batch        = plan->desc.batch();
+    planData.length       = plan->desc.input_layout.lengths();
+    planData.outputLength = plan->desc.output_layout.lengths();
+    planData.inStride     = plan->desc.input_layout.strides();
+    planData.outStride    = plan->desc.output_layout.strides();
+    planData.iDist        = plan->desc.input_layout.distance();
+    planData.oDist        = plan->desc.output_layout.distance();
+    planData.placement    = plan->placement;
 
     // If in+out fields are specified, currently that means we're
     // gathering the data to one device and doing FFT there.  So
@@ -889,7 +599,7 @@ void set_rootplan_params(const rocfft_plan plan, NodeMetaData& planData)
     {
         // If output is contiguous and this is c2c then we can
         // gather to the output buf and do an inplace FFT.
-        if(plan->is_contiguous_output()
+        if(plan->desc.output_layout.is_contiguous()
            && (plan->transformType == rocfft_transform_type_complex_forward
                || plan->transformType == rocfft_transform_type_complex_inverse))
             planData.placement = rocfft_placement_inplace;
@@ -922,16 +632,12 @@ void set_bluestein_strides(const rocfft_plan plan, NodeMetaData& planData)
 
     const auto precision     = plan->precision;
     const auto transformType = plan->transformType;
-    const auto rank          = plan->rank;
-    const auto lengths       = plan->lengths;
+    const auto rank          = plan->desc.rank();
+    const auto fftLength     = plan->get_user_facing_lengths();
     const auto placement     = plan->placement;
     const auto dimension     = planData.dimension;
 
     assert(rank == dimension);
-
-    // for real inverse transforms we need to look at the complex length
-    auto fftLength
-        = transformType == rocfft_transform_type_real_inverse ? plan->outputLengths : plan->lengths;
 
     lengthsBlue[0] = NodeFactory::SupportedLength(pool, precision, fftLength[0])
                          ? fftLength[0]
@@ -1139,6 +845,393 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
     return execPlanMultiItem;
 }
 
+size_t rocfft_plan_description_t::rank() const
+{
+    const auto ret = input_layout.get_len_rank();
+    if(ret != output_layout.get_len_rank())
+        throw std::logic_error("Inconsistent ranks between input and output layouts detected by "
+                               + ROCFFT_CURRENT_FUNCTION);
+
+    return ret;
+}
+
+size_t rocfft_plan_description_t::batch() const
+{
+    if(input_layout.get_batch_rank() != 1 || output_layout.get_batch_rank() != 1)
+        throw std::logic_error(
+            "Unexpected number of batch dimensions detected in input or output layout by "
+            + ROCFFT_CURRENT_FUNCTION);
+    const auto ret = input_layout.batch();
+    if(ret != output_layout.batch())
+        throw std::logic_error(
+            "Inconsistent batch values between input and output layouts detected by "
+            + ROCFFT_CURRENT_FUNCTION);
+
+    return ret;
+}
+
+data_layout_t rocfft_field_t::get_full_data_range() const
+{
+    if(bricks.empty())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " cannot operate on empty fields");
+    data_layout_t ret;
+    ret.len_axes.resize(bricks[0].layout.get_len_rank());
+    ret.batch_axes.resize(bricks[0].layout.get_batch_rank());
+    for(const auto& brick : bricks)
+    {
+        if(!brick.layout.is_dimensionally_consistent_with(ret))
+        {
+            throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                                   + " detected a pair of dimensionally-inconsistent bricks");
+        }
+        for(size_t dim = 0; dim < ret.get_full_rank(); dim++)
+            ret[dim].upper = std::max(ret[dim].upper, brick.layout[dim].upper);
+    }
+    // finalize: set contiguous strides and mark all layout's axes as full
+    for(size_t dim = 0; dim < ret.get_full_rank(); dim++)
+    {
+        ret[dim].is_partial = false;
+        if(dim == 0)
+            ret[dim].inbuffer_stride = 1;
+        else
+            ret[dim].inbuffer_stride = ret[dim - 1].inbuffer_stride * ret[dim - 1].logical_span();
+    }
+    return ret;
+}
+
+void rocfft_field_t::finalize()
+{
+    const auto full_data_range = get_full_data_range();
+
+    // make sure bricks are sorted by increasing ranks (without modifying
+    // brick ordering within ranks)
+    std::stable_sort(
+        bricks.begin(), bricks.end(), [](const rocfft_brick_t& a, const rocfft_brick_t& b) {
+            return a.location.comm_rank < b.location.comm_rank;
+        });
+
+    // Set the `is_partial` flags for all dimensions of the bricks' layouts, according to
+    // the given full range of logical indices
+    std::for_each(bricks.begin(), bricks.end(), [&full_data_range](auto& brick) {
+        for(size_t dim = 0; dim < brick.layout.get_full_rank(); dim++)
+        {
+            brick.layout[dim].is_partial
+                = !brick.layout[dim].has_same_logical_range_as(full_data_range[dim]);
+        }
+    });
+}
+
+bool rocfft_field_t::has_valid_tessellation() const
+{
+    size_t total_brick_logical_count = 0;
+    for(auto brickI = bricks.begin(); brickI != bricks.end(); ++brickI)
+    {
+        for(auto brickJ = brickI + 1; brickJ != bricks.end(); ++brickJ)
+        {
+            const auto ij_intersection
+                = data_layout_t::make_contiguous_intersection_of(brickI->layout, brickJ->layout);
+            if(!ij_intersection.is_empty())
+                return false;
+        }
+        // Add up the brick's logical count
+        total_brick_logical_count += brickI->layout.logical_count();
+    }
+
+    const auto full_data_range = get_full_data_range();
+    // The bricks cover the whole index space iff their total number of
+    // logical elements is the same as the full data layout
+    return full_data_range.logical_count() == total_brick_logical_count;
+}
+
+rocfft_status
+    rocfft_plan_description_t::finalize_and_validate_for(rocfft_transform_type   dft_type,
+                                                         rocfft_result_placement placement,
+                                                         const size_t*           user_lengths,
+                                                         const size_t            len_rank,
+                                                         const size_t number_of_transforms)
+{
+    // -------------------------------------
+    //   Finalize and validate I/O layouts
+    // -------------------------------------
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+    {
+        const bool is_real_domain
+            = (dft_type == rocfft_transform_type_real_forward && io == io_data_label::INPUT)
+              || (dft_type == rocfft_transform_type_real_inverse && io == io_data_label::OUTPUT);
+        const bool is_hermitian_domain
+            = (dft_type == rocfft_transform_type_real_forward && io == io_data_label::OUTPUT)
+              || (dft_type == rocfft_transform_type_real_inverse && io == io_data_label::INPUT);
+        // Finalize the I/O layouts with the user-provided lengths
+        auto&               io_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+        std::vector<size_t> io_lengths(user_lengths, user_lengths + len_rank);
+        if(is_hermitian_domain)
+            io_lengths[0] = user_lengths[0] / 2 + 1;
+        else
+            io_lengths[0] = user_lengths[0];
+        const auto current_strides = io_layout.strides();
+        // Current strides may be empty (if unset by user for implicit default)
+        // If not, users must have set len_rank of them
+        if(!current_strides.empty() && current_strides.size() != len_rank)
+        {
+            return rocfft_status_invalid_strides;
+        }
+        const auto current_distances = io_layout.distances();
+        // Current distances may be empty (if 0-initialized by the user for implicit default)
+        // If not, users cannot possibly have set more than 1 (multi-dimensional batches not
+        // exposed to users)
+        if(!current_distances.empty() && current_distances.size() != 1)
+        {
+            // cannot happen, theoretically
+            throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                                   + " detected an unexpected batch rank in a plan description");
+        }
+        io_layout.full_range_reset(io_lengths,
+                                   current_strides /* default strides set if empty */,
+                                   {number_of_transforms},
+                                   current_distances /* default distances if empty */,
+                                   is_real_domain && placement == rocfft_placement_inplace);
+    }
+    // -------------------------------------------
+    //   Finalize and validate I/O fields if any
+    // -------------------------------------------
+#ifdef ROCFFT_MPI_ENABLE
+    const auto rc_mpi = allgather_brick_params_mpi();
+    if(rc_mpi != rocfft_status_success)
+        return rc_mpi;
+#endif
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+    {
+        const auto& expected_full_range = io == io_data_label::INPUT ? input_layout : output_layout;
+        auto&       io_fields           = io == io_data_label::INPUT ? inFields : outFields;
+        std::for_each(
+            io_fields.begin(), io_fields.end(), [](auto& io_field) { io_field.finalize(); });
+        if(std::any_of(io_fields.begin(), io_fields.end(), [&expected_full_range](auto& io_field) {
+               const auto field_full_range = io_field.get_full_data_range();
+               return !expected_full_range.is_dimensionally_consistent_with(field_full_range)
+                      || !expected_full_range.has_same_logical_range_as(field_full_range);
+           }))
+        {
+            // This would warrant a dedicated error code. For now, throw an std::runtime_error so
+            // that ROCFFT_LAYER reports something insightful
+            throw std::runtime_error("Inconsistent full data range detected for an " + to_str(io)
+                                     + " field");
+        }
+        if(io_fields.empty() && comm_type != rocfft_comm_none)
+        {
+            // This would warrant a dedicated error code. For now, throw an std::runtime_error so
+            // that ROCFFT_LAYER reports something insightful
+            throw std::runtime_error(
+                "Multi-process transforms require both input and output fields to be specified");
+        }
+        if(std::any_of(io_fields.begin(), io_fields.end(), [](auto& field) {
+               return !field.has_valid_tessellation();
+           }))
+        {
+            throw std::runtime_error("Invalid tessellation detected for an " + to_str(io)
+                                     + " field");
+        }
+    }
+
+    // -------------------------------------------------------------------------------
+    // Remove trivial axes of unit lengths from layouts (and from all bricks' layouts,
+    // too) and sort length axes by increasing strides (in corresponding bricks, too)
+    // if that can be done consistently across ALL (full AND partial) data layouts at
+    // play.
+    // -------------------------------------------------------------------------------
+
+    if(rank() > 1)
+    {
+        auto may_erase_length_dimension = [this](size_t len_dim, io_data_label io) -> bool {
+            const auto& io_full_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+            const auto& io_fields      = io == io_data_label::INPUT ? inFields : outFields;
+            return len_dim < io_full_layout.get_len_rank()
+                   && io_full_layout[len_dim].logical_span() == 1
+                   && std::all_of(
+                       io_fields.begin(), io_fields.end(), [&len_dim](const auto& field) {
+                           return std::all_of(field.bricks.begin(),
+                                              field.bricks.end(),
+                                              [&len_dim](const auto& brick) {
+                                                  return len_dim < brick.layout.get_len_rank()
+                                                         && brick.layout[len_dim].logical_span()
+                                                                == 1;
+                                              });
+                       });
+        };
+
+        // 0th length dimension must not be modified for real DFTs
+        const bool is_real_dft = dft_type == rocfft_transform_type_real_forward
+                                 || dft_type == rocfft_transform_type_real_inverse;
+        size_t len_dim = is_real_dft ? 1 : 0;
+        while(len_dim < rank() && 1 < rank())
+        {
+            if(may_erase_length_dimension(len_dim, io_data_label::INPUT)
+               && may_erase_length_dimension(len_dim, io_data_label::OUTPUT))
+            {
+                for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+                {
+                    auto& io_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+                    auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+                    io_layout.len_axes.erase(io_layout.len_axes.begin() + len_dim);
+                    std::for_each(io_fields.begin(), io_fields.end(), [&len_dim](auto& field) {
+                        std::for_each(
+                            field.bricks.begin(), field.bricks.end(), [&len_dim](auto& brick) {
+                                brick.layout.len_axes.erase(brick.layout.len_axes.begin()
+                                                            + len_dim);
+                            });
+                    });
+                }
+                // no incrementing of len_dim
+            }
+            else
+                len_dim++;
+        }
+        if(rank() > (is_real_dft ? 2 : 1))
+        {
+            // Sort qualifying dimensions by increasing strides, if that can be done
+            // consistently across all relevant layouts at play
+            auto bricks_have_consistent_stride_ordering
+                = [this, is_real_dft](io_data_label io) -> bool {
+                const auto& io_full_layout
+                    = io == io_data_label::INPUT ? input_layout : output_layout;
+                const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+                return std::all_of(
+                    io_fields.begin(),
+                    io_fields.end(),
+                    [&io_full_layout, is_real_dft](const auto& field) {
+                        return std::all_of(
+                            field.bricks.begin(),
+                            field.bricks.end(),
+                            [&io_full_layout, is_real_dft](const auto& brick) {
+                                return io_full_layout.length_axes_by_increasing_strides(is_real_dft)
+                                       == brick.layout.length_axes_by_increasing_strides(
+                                           is_real_dft);
+                            });
+                    });
+            };
+
+            if(input_layout.length_axes_by_increasing_strides(is_real_dft)
+                   == output_layout.length_axes_by_increasing_strides(is_real_dft)
+               && bricks_have_consistent_stride_ordering(io_data_label::INPUT)
+               && bricks_have_consistent_stride_ordering(io_data_label::OUTPUT))
+            {
+                const auto reordered_length_axes
+                    = input_layout.length_axes_by_increasing_strides(is_real_dft);
+                for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+                {
+                    auto& io_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+                    auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+                    io_layout.reorder_length_axes(reordered_length_axes);
+                    std::for_each(
+                        io_fields.begin(), io_fields.end(), [&reordered_length_axes](auto& field) {
+                            std::for_each(field.bricks.begin(),
+                                          field.bricks.end(),
+                                          [&reordered_length_axes](auto& brick) {
+                                              brick.layout.reorder_length_axes(
+                                                  reordered_length_axes);
+                                          });
+                        });
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------
+    //   Finalize and validate I/O array types
+    // -----------------------------------------
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+    {
+        auto&      io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
+        const bool is_real_domain
+            = (dft_type == rocfft_transform_type_real_forward && io == io_data_label::INPUT)
+              || (dft_type == rocfft_transform_type_real_inverse && io == io_data_label::OUTPUT);
+        const bool is_hermitian_domain
+            = (dft_type == rocfft_transform_type_real_forward && io == io_data_label::OUTPUT)
+              || (dft_type == rocfft_transform_type_real_inverse && io == io_data_label::INPUT);
+
+        if(io_array_type == rocfft_array_type_unset)
+        {
+            switch(dft_type)
+            {
+            case rocfft_transform_type_complex_forward:
+            case rocfft_transform_type_complex_inverse:
+                io_array_type = rocfft_array_type_complex_interleaved;
+                break;
+            case rocfft_transform_type_real_forward:
+            case rocfft_transform_type_real_inverse:
+                io_array_type = is_real_domain ? rocfft_array_type_real
+                                               : rocfft_array_type_hermitian_interleaved;
+                break;
+            default:
+                throw std::invalid_argument("Unexpected type of transform given to "
+                                            + ROCFFT_CURRENT_FUNCTION);
+            }
+        }
+
+        // planar array types only supported with empty fields
+        const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+        if(array_type_is_planar(io_array_type) && !io_fields.empty())
+            return rocfft_status_invalid_array_type;
+
+        switch(dft_type)
+        {
+        case rocfft_transform_type_complex_forward:
+        case rocfft_transform_type_complex_inverse:
+            if(!array_type_is_complex_but_not_hermitian(io_array_type))
+                return rocfft_status_invalid_array_type;
+            break;
+        case rocfft_transform_type_real_forward:
+        case rocfft_transform_type_real_inverse:
+            if((is_real_domain && !array_type_is_real(io_array_type))
+               || (is_hermitian_domain && !array_type_is_hermitian(io_array_type)))
+                return rocfft_status_invalid_array_type;
+            break;
+        default:
+            throw std::invalid_argument("Unexpected type of transform given to "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        }
+    }
+    // -----------------------------------------
+    //        In-place specific validations
+    // -----------------------------------------
+    if(placement == rocfft_placement_inplace)
+    {
+        // ----------------------------------------------------
+        //      Validate array types for in-place operations
+        // ----------------------------------------------------
+        switch(dft_type)
+        {
+        case rocfft_transform_type_complex_forward:
+        case rocfft_transform_type_complex_inverse:
+            // We need same array type for input and output
+            if(inArrayType != outArrayType)
+                return rocfft_status_invalid_array_type;
+            break;
+        case rocfft_transform_type_real_forward:
+        case rocfft_transform_type_real_inverse:
+        {
+            // Hermitian array must be interleaved
+            const auto hermitian_array_type
+                = dft_type == rocfft_transform_type_real_forward ? outArrayType : inArrayType;
+            if(!array_type_is_interleaved(hermitian_array_type))
+                return rocfft_status_invalid_array_type;
+        }
+        break;
+        default:
+            throw std::invalid_argument("Unexpected type of transform given to "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        }
+        // MORE TO BE DONE:
+        // - layout consistency requirements for single-device usage (including
+        //   offset values, if not ignored)
+        // - identical locations for I/O data buffers if fields are not empty
+        // - ...
+        // Will be integrated when more unifying logic is added (e.g., when
+        // unifying code paths between empty-fields usage and
+        // single-io-fields-with-lone-bricks-on-current-device usage)
+    }
+    return rocfft_status_success;
+}
+
 // RAII struct to 'lease' a temp buffer from a multimap of per-device
 // buffers.  When this struct is destroyed, the buffer is returned to
 // the map for reuse.
@@ -1217,7 +1310,7 @@ void rocfft_plan_t::AllocateInternalTempBuffers()
 {
     for(auto& t : tempBuffers)
     {
-        if(t.first.comm_rank != get_local_comm_rank())
+        if(t.first.comm_rank != desc.get_local_comm_rank())
             continue;
 
         t.second->alloc(t.first.device);
@@ -1265,7 +1358,7 @@ static std::vector<BufferPtr> GatherUserBuffers(BufferPtrConstruct              
         }
     };
 
-    // In a multi-process enviroment, we've gathered the bricks on
+    // In a multi-process environment, we've gathered the bricks on
     // multiple ranks into the field.  Bricks from the same rank should
     // appear together in the field.  Assert that this is the case,
     // since the code below depends on it.
@@ -1296,8 +1389,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                        const std::vector<rocfft_brick_t>& bricks,
                                                        rocfft_precision                   precision,
                                                        rocfft_array_type                  arrayType,
-                                                       const std::vector<size_t>& field_length,
-                                                       const std::vector<size_t>& field_stride,
+                                                       const data_layout_t&       gathering_layout,
                                                        BufferPtr                  output,
                                                        const std::vector<size_t>& antecedents,
                                                        size_t                     elem_size)
@@ -1306,26 +1398,25 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     std::vector<TempBufferLease>   gatherPackBufs;
     std::optional<TempBufferLease> gatherDestBuf;
 
-    std::vector<BufferPtr> outputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
+    std::vector<BufferPtr> inputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     BufferPtr  gatherDest;
     const bool gatherToTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& brick) {
-              return !brick.is_contiguous()
-                     || !brick.is_contiguous_in_field(field_length, field_stride);
+              return !brick.layout.is_contiguous()
+                     || !brick.layout.is_continuous_in(gathering_layout);
           });
     if(gatherToTemp)
     {
         // this is from source-rank to source-rank, before MPI comm.
-        gatherDestBuf
-            = std::make_optional<TempBufferLease>(tempBuffers,
-                                                  local_comm_rank,
-                                                  currentLocation,
-                                                  product(field_length.begin(), field_length.end()),
-                                                  elem_size);
-        gatherDest = BufferPtr::temp(gatherDestBuf->data());
+        gatherDestBuf = std::make_optional<TempBufferLease>(tempBuffers,
+                                                            local_comm_rank,
+                                                            currentLocation,
+                                                            gathering_layout.logical_count(),
+                                                            elem_size);
+        gatherDest    = BufferPtr::temp(gatherDestBuf->data());
     }
     else
     {
@@ -1357,33 +1448,40 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
         size_t& packOffset
             = packOffsets.emplace(brick.location, static_cast<size_t>(0)).first->second;
 
-        if(brick.is_contiguous())
+        if(brick.layout.is_contiguous())
         {
             // Contiguous brick, just copy the data
             gather->AddOperation(
                 local_comm_rank,
-                {brick.location, outputBufs[brickIdx], 0, gatherOffset, brick.count_elems()});
+                {brick.location,
+                 inputBufs[brickIdx],
+                 0,
+                 gatherToTemp ? gatherOffset : brick.layout.offset_in(gathering_layout),
+                 brick.layout.logical_count()});
         }
         else
         {
             // Allocate temp memory for the pack
-            gatherPackBufs.emplace_back(
-                tempBuffers, local_comm_rank, brick.location, brick.count_elems(), elem_size);
+            gatherPackBufs.emplace_back(tempBuffers,
+                                        local_comm_rank,
+                                        brick.location,
+                                        brick.layout.logical_count(),
+                                        elem_size);
 
             // Brick is not contiguous, insert a pack node on the brick's device
             std::string description = "pack brick " + std::to_string(brickIdx) + " before gather";
             auto        packIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
                                                    brick.location,
-                                                   brick.length(),
+                                                   brick.layout.lengths_and_batches(),
                                                    precision,
                                                    arrayType,
-                                                   outputBufs[brickIdx],
+                                                   inputBufs[brickIdx],
                                                    0,
-                                                   brick.stride,
+                                                   brick.layout.strides_and_distances(),
                                                    BufferPtr::temp(gatherPackBufs.back().data()),
                                                    packOffset,
-                                                   brick.contiguous_strides(),
+                                                   brick.layout.contiguous_strides_and_distances(),
                                                    std::move(description)),
                                    antecedents);
             AddAntecedent(gatherIdx, packIdx);
@@ -1393,34 +1491,34 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                   BufferPtr::temp(gatherPackBufs.back().data()),
                                   0,
                                   gatherOffset,
-                                  brick.count_elems()});
+                                  brick.layout.logical_count()});
         }
 
         // if brick is not contiguous in the field, it was packed to
         // be contiguous for communication.  unpack it so it's
         // contiguous in the field.
-        if(!brick.is_contiguous() || !brick.is_contiguous_in_field(field_length, field_stride))
+        if(!brick.layout.is_contiguous() || !brick.layout.is_continuous_in(gathering_layout))
         {
             std::string description = "unpack brick " + std::to_string(brickIdx) + " after gather";
 
             outputPlanItems.push_back(
                 AddMultiPlanItem(transpose_brick(local_comm_rank,
                                                  currentLocation,
-                                                 brick.length(),
+                                                 brick.layout.lengths_and_batches(),
                                                  precision,
                                                  arrayType,
                                                  BufferPtr::temp(gatherDestBuf->data()),
                                                  gatherOffset,
-                                                 brick.contiguous_strides(),
+                                                 brick.layout.contiguous_strides_and_distances(),
                                                  output,
-                                                 brick.offset_in_field(field_stride),
-                                                 field_stride,
+                                                 brick.layout.offset_in(gathering_layout),
+                                                 gathering_layout.strides_and_distances(),
                                                  std::move(description)),
                                  {gatherIdx}));
         }
 
-        packOffset += brick.count_elems();
-        gatherOffset += brick.count_elems();
+        packOffset += brick.layout.logical_count();
+        gatherOffset += brick.layout.logical_count();
     }
 
     if(outputPlanItems.empty())
@@ -1431,12 +1529,11 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     return outputPlanItems;
 }
 
-std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t          currentLocation,
-                                                        BufferPtr                  input,
-                                                        rocfft_precision           precision,
-                                                        rocfft_array_type          arrayType,
-                                                        const std::vector<size_t>& field_length,
-                                                        const std::vector<size_t>& field_stride,
+std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t    currentLocation,
+                                                        BufferPtr            input,
+                                                        rocfft_precision     precision,
+                                                        rocfft_array_type    arrayType,
+                                                        const data_layout_t& layout_to_scatter,
                                                         const std::vector<rocfft_brick_t>& bricks,
                                                         const std::vector<size_t>& antecedents,
                                                         size_t                     elem_size)
@@ -1447,22 +1544,21 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
 
     std::vector<BufferPtr> outputBufs = GatherUserBuffers(BufferPtr::user_output, bricks);
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     BufferPtr  scatterSrc;
     const bool scatterFromTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& b) {
-              return !b.is_contiguous_in_field(field_length, field_stride);
+              return !b.layout.is_contiguous() || !b.layout.is_continuous_in(layout_to_scatter);
           });
     if(scatterFromTemp)
     {
-        scatterSrcBuf
-            = std::make_optional<TempBufferLease>(tempBuffers,
-                                                  local_comm_rank,
-                                                  currentLocation,
-                                                  product(field_length.begin(), field_length.end()),
-                                                  elem_size);
-        scatterSrc = BufferPtr::temp(scatterSrcBuf->data());
+        scatterSrcBuf = std::make_optional<TempBufferLease>(tempBuffers,
+                                                            local_comm_rank,
+                                                            currentLocation,
+                                                            layout_to_scatter.logical_count(),
+                                                            elem_size);
+        scatterSrc    = BufferPtr::temp(scatterSrcBuf->data());
     }
     else
     {
@@ -1486,47 +1582,57 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
     {
         const auto& brick = bricks[brickIdx];
 
-        if(brick.is_contiguous_in_field(field_length, field_stride))
+        if(brick.layout.is_contiguous() && brick.layout.is_continuous_in(layout_to_scatter))
         {
             // contiguous brick, just copy the data
             scatter->AddOperation(
                 local_comm_rank,
-                {brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems()});
+                {brick.location,
+                 outputBufs[brickIdx],
+                 scatterFromTemp ? scatterOffset : brick.layout.offset_in(layout_to_scatter),
+                 0,
+                 brick.layout.logical_count()});
         }
         else
         {
             // pack data to be contiguous
             std::string description = "pack brick " + std::to_string(brickIdx) + " before scatter";
 
-            const auto brickLen = brick.length();
-            auto       packIdx  = AddMultiPlanItem(transpose_brick(local_comm_rank,
-                                                            currentLocation,
-                                                            brick.length(),
-                                                            precision,
-                                                            arrayType,
-                                                            input,
-                                                            brick.offset_in_field(field_stride),
-                                                            field_stride,
-                                                            BufferPtr::temp(scatterSrcBuf->data()),
-                                                            scatterOffset,
-                                                            brick.contiguous_strides(),
-                                                            std::move(description)),
-                                            antecedents);
+            auto packIdx
+                = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                   currentLocation,
+                                                   brick.layout.lengths_and_batches(),
+                                                   precision,
+                                                   arrayType,
+                                                   input,
+                                                   brick.layout.offset_in(layout_to_scatter),
+                                                   layout_to_scatter.strides_and_distances(),
+                                                   BufferPtr::temp(scatterSrcBuf->data()),
+                                                   scatterOffset,
+                                                   brick.layout.contiguous_strides_and_distances(),
+                                                   std::move(description)),
+                                   antecedents);
             AddAntecedent(scatterIdx, packIdx);
 
             // Bricks are packed to be contiguous - if output is the
             // same shape, then there's no need for unpacking
-            if(brick.is_contiguous())
+            if(brick.layout.is_contiguous())
             {
-                scatter->AddOperation(
-                    local_comm_rank,
-                    {brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems()});
+                scatter->AddOperation(local_comm_rank,
+                                      {brick.location,
+                                       outputBufs[brickIdx],
+                                       scatterOffset,
+                                       0,
+                                       brick.layout.logical_count()});
             }
             else
             {
                 // allocate memory for packed data
-                scatterPackBufs.emplace_back(
-                    tempBuffers, local_comm_rank, brick.location, brick.count_elems(), elem_size);
+                scatterPackBufs.emplace_back(tempBuffers,
+                                             local_comm_rank,
+                                             brick.location,
+                                             brick.layout.logical_count(),
+                                             elem_size);
 
                 // send the data
                 scatter->AddOperation(local_comm_rank,
@@ -1534,28 +1640,28 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                                        BufferPtr::temp(scatterPackBufs.back().data()),
                                        scatterOffset,
                                        0,
-                                       brick.count_elems()});
+                                       brick.layout.logical_count()});
 
                 // unpack data after sending
                 description = "unpack brick " + std::to_string(brickIdx) + " after scatter";
 
-                outputPlanItems.push_back(
-                    AddMultiPlanItem(transpose_brick(local_comm_rank,
-                                                     brick.location,
-                                                     brick.length(),
-                                                     precision,
-                                                     arrayType,
-                                                     BufferPtr::temp(scatterPackBufs.back().data()),
-                                                     0,
-                                                     brick.contiguous_strides(),
-                                                     outputBufs[brickIdx],
-                                                     0,
-                                                     brick.stride,
-                                                     std::move(description)),
-                                     {scatterIdx}));
+                outputPlanItems.push_back(AddMultiPlanItem(
+                    transpose_brick(local_comm_rank,
+                                    brick.location,
+                                    brick.layout.lengths_and_batches(),
+                                    precision,
+                                    arrayType,
+                                    BufferPtr::temp(scatterPackBufs.back().data()),
+                                    0,
+                                    brick.layout.contiguous_strides_and_distances(),
+                                    outputBufs[brickIdx],
+                                    0,
+                                    brick.layout.strides_and_distances(),
+                                    std::move(description)),
+                    {scatterIdx}));
             }
         }
-        scatterOffset += brick.count_elems();
+        scatterOffset += brick.layout.logical_count();
     }
 
     // following items in the plan just depend on the scatter
@@ -1573,7 +1679,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
 static bool DimensionSplitInField(size_t length, size_t dimIdx, const rocfft_field_t& field)
 {
     for(const auto& b : field.bricks)
-        if(b.length()[dimIdx] != length)
+        if(b.layout.lengths_and_batches()[dimIdx] != length)
             return true;
     return false;
 }
@@ -1608,22 +1714,22 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
     const auto in_elem_size = element_size(precision, desc.inArrayType);
     // We do in-place transforms here, so allocate a buffer for the
     // complex side of real-complex transforms, since it's bigger.
-    const size_t in_elem_count = compute_ptrdiff(lengths, desc.inStrides, batch, desc.inDist);
+    const size_t in_elem_count = desc.input_layout.buffer_element_count();
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // May need buffer(s) to do the actual FFT
     std::shared_ptr<TempBufferLease> fftBuf;
     std::shared_ptr<TempBufferLease> fftOutBuf;
 
-    // Gather to temp buf if infields were specified and output is not contiguous or is also a field
     BufferPtr gatherBuf;
     {
-        if(!desc.inFields.empty() && (!is_contiguous_output() || !desc.outFields.empty()))
+        if(!desc.inFields.empty() && desc.outFields.empty() && desc.output_layout.is_contiguous()
+           && execPlan->rootPlan->placement == rocfft_placement_inplace)
         {
-            fftBuf = std::make_shared<TempBufferLease>(
-                tempBuffers, local_comm_rank, execPlanPtr->location, in_elem_count, in_elem_size);
-            gatherBuf = BufferPtr::temp(fftBuf->data());
+            // We can gather directly to the output buffer and will operate in-place
+            // thereafter
+            gatherBuf = BufferPtr::user_output(0, 0);
         }
         else if(desc.inFields.empty())
         {
@@ -1631,19 +1737,19 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
         }
         else
         {
-            // Else, we can gather directly to the output buffer
-            gatherBuf = BufferPtr::user_output(0, 0);
+            fftBuf = std::make_shared<TempBufferLease>(
+                tempBuffers, local_comm_rank, execPlanPtr->location, in_elem_count, in_elem_size);
+            gatherBuf = BufferPtr::temp(fftBuf->data());
         }
     }
 
     // Allocate another temp buf if FFT is not-in-place and outfield was specified
     // TODO: this only needs to be done if there are multiple bricks in the output field.
-    if(placement == rocfft_placement_notinplace && !desc.outFields.empty())
+    if(execPlan->rootPlan->placement == rocfft_placement_notinplace && !desc.outFields.empty())
     {
         const auto   out_elem_size  = element_size(precision, desc.outArrayType);
-        const size_t out_elem_count = compute_ptrdiff(
-            execPlan->rootPlan->GetOutputLength(), desc.outStrides, batch, desc.outDist);
-        fftOutBuf = std::make_shared<TempBufferLease>(
+        const size_t out_elem_count = desc.output_layout.buffer_element_count();
+        fftOutBuf                   = std::make_shared<TempBufferLease>(
             tempBuffers, local_comm_rank, execPlanPtr->location, out_elem_count, out_elem_size);
     }
 
@@ -1651,19 +1757,11 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
     {
         for(const auto& inField : desc.inFields)
         {
-            // brick indexes include batch so create a set of comparable field strides
-            auto fieldStrideWithBatch = desc.inStrides;
-            fieldStrideWithBatch.push_back(desc.inDist);
-
-            auto fieldLengthWithBatch = lengths;
-            fieldLengthWithBatch.push_back(batch);
-
             auto curIndexes = GatherBricksToField(execPlan->location,
                                                   inField.bricks,
                                                   precision,
                                                   desc.inArrayType,
-                                                  fieldLengthWithBatch,
-                                                  fieldStrideWithBatch,
+                                                  desc.input_layout,
                                                   gatherBuf,
                                                   {},
                                                   element_size(precision, desc.inArrayType));
@@ -1687,12 +1785,6 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
     for(const auto& outField : desc.outFields)
     {
         // brick indexes include batch so create a set of comparable field strides
-        auto fieldStrideWithBatch = desc.outStrides;
-        fieldStrideWithBatch.push_back(desc.outDist);
-
-        auto fieldLengthWithBatch = lengths;
-        fieldLengthWithBatch.push_back(batch);
-
         auto scatterSrcBuf = execPlan->rootPlan->placement == rocfft_placement_notinplace
                                  ? fftOutBuf->data()
                                  : fftBuf->data();
@@ -1701,8 +1793,7 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
                              BufferPtr::temp(scatterSrcBuf),
                              execPlan->rootPlan->precision,
                              execPlan->rootPlan->outArrayType,
-                             fieldLengthWithBatch,
-                             fieldStrideWithBatch,
+                             desc.output_layout,
                              outField.bricks,
                              {fftIdx},
                              element_size(precision, execPlan->rootPlan->outArrayType));
@@ -1715,9 +1806,9 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
                                                        int                   local_comm_rank,
                                                        rocfft_location_t     location,
                                                        rocfft_transform_type transformType,
-                                                       LoadOps&              loadOps,
-                                                       StoreOps&             storeOps,
-                                                       bool                  partOfMultiPlan)
+                                                       const std::optional<LoadOps>&  loadOps,
+                                                       const std::optional<StoreOps>& storeOps,
+                                                       bool partOfMultiPlan)
 {
     rocfft_scoped_device dev(location.device);
 
@@ -1728,21 +1819,43 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         execPlan.deviceProp = rootPlanData.deviceProp;
         execPlan.rootPlan   = NodeFactory::CreateExplicitNode(rootPlanData, nullptr);
 
-        // TODO: some solutions require the problems to be unit_stride, otherwise the
-        //   scheme-tree may not be applicable. In this case, we can't apply the solutions.
-        //   Currently, it happens on Real3DEven with REAL_2D_SINGLE kernels. This needs to
-        //   be detected.
-
-        // If we are doing tuning initialzing now, we shouldn't apply any solution,
+        // If we are doing tuning initializing now, we shouldn't apply any solution,
         // since we are trying enumerating solutions now
         if(TuningBenchmarker::GetSingleton().IsInitializingTuning() == false)
         {
-            execPlan.rootScheme = ApplySolution(execPlan);
-            if(execPlan.rootScheme)
+            // Solutions do not consider strides.  Even-length real
+            // transforms need special consideration, since the
+            // even-length optimization is only valid for stride-1 on
+            // the fastest dimension.  So only apply a solution if
+            // we're not doing even-length real, or if fastest dim
+            // stride is 1.
+            const auto& realLength     = transformType == rocfft_transform_type_real_forward
+                                             ? execPlan.rootPlan->length
+                                             : execPlan.rootPlan->outputLength;
+            const bool  evenLengthReal = (transformType == rocfft_transform_type_real_forward
+                                         || transformType == rocfft_transform_type_real_inverse)
+                                        && realLength.front() % 2 == 0;
+            const bool stride1 = execPlan.rootPlan->inStride.front() == 1
+                                 && execPlan.rootPlan->outStride.front() == 1;
+            if(evenLengthReal && !stride1)
             {
-                execPlan.rootPlan = nullptr;
-                execPlan.rootPlan = NodeFactory::CreateExplicitNode(
-                    rootPlanData, nullptr, execPlan.rootScheme->curScheme);
+                if(LOG_TRACE_ENABLED())
+                {
+                    (*LogSingleton::GetInstance().GetTraceOS())
+                        << "transform is even-length real but not stride-1, not applying solution "
+                           "map"
+                        << std::endl;
+                }
+            }
+            else
+            {
+                execPlan.rootScheme = ApplySolution(execPlan);
+                if(execPlan.rootScheme)
+                {
+                    execPlan.rootPlan = nullptr;
+                    execPlan.rootPlan = NodeFactory::CreateExplicitNode(
+                        rootPlanData, nullptr, execPlan.rootScheme->curScheme);
+                }
             }
         }
 
@@ -1755,9 +1868,9 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         execPlan.rootPlan->outStrideUnit = BufferIsUnitStride(execPlan, OB_USER_OUT);
 
         // set load/store ops on the root plan
-        if(loadOps.enabled())
+        if(loadOps)
             execPlan.rootPlan->loadOps = loadOps;
-        if(storeOps.enabled())
+        if(storeOps)
             execPlan.rootPlan->storeOps = storeOps;
 
         // only allocate kernels, twiddles, etc if plan will run on this rank
@@ -1817,14 +1930,16 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
 // new item will begin execution.
 //
 // NOTE: lengths and stride include batch dimension
-static size_t C2CBrickOneDimension(rocfft_plan_t&             plan,
-                                   size_t                     dimIdx,
-                                   rocfft_location_t          location,
-                                   const std::vector<size_t>& lengths,
-                                   const std::vector<size_t>& stride,
-                                   BufferPtr                  input,
-                                   BufferPtr                  output,
-                                   const std::vector<size_t>& antecedents)
+static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
+                                   size_t                         dimIdx,
+                                   rocfft_location_t              location,
+                                   const std::vector<size_t>&     lengths,
+                                   const std::vector<size_t>&     stride,
+                                   BufferPtr                      input,
+                                   BufferPtr                      output,
+                                   const std::optional<LoadOps>&  loadOps,
+                                   const std::optional<StoreOps>& storeOps,
+                                   const std::vector<size_t>&     antecedents)
 {
     auto transformLengths = lengths;
     auto transformStride  = stride;
@@ -1857,11 +1972,11 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&             plan,
     rootPlanData.deviceProp   = get_curr_device_prop();
 
     auto singlePlan       = BuildSingleDevicePlan(rootPlanData,
-                                            plan.get_local_comm_rank(),
+                                            plan.desc.get_local_comm_rank(),
                                             location,
                                             plan.transformType,
-                                            plan.desc.loadOps,
-                                            plan.desc.storeOps,
+                                            loadOps,
+                                            storeOps,
                                             true);
     singlePlan->mgpuPlan  = true;
     singlePlan->inputPtr  = input;
@@ -1869,12 +1984,14 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&             plan,
     return plan.AddMultiPlanItem(std::move(singlePlan), antecedents);
 }
 
-void rocfft_plan_t::C2CField(const rocfft_field_t&      field,
-                             const std::vector<size_t>& fftDims,
-                             std::vector<BufferPtr>&    input,
-                             std::vector<BufferPtr>&    output,
-                             const std::vector<size_t>& inputAntecedents,
-                             std::vector<size_t>&       outputItems)
+void rocfft_plan_t::C2CField(const rocfft_field_t&          field,
+                             const std::vector<size_t>&     fftDims,
+                             std::vector<BufferPtr>&        input,
+                             std::vector<BufferPtr>&        output,
+                             const std::optional<LoadOps>&  loadOps,
+                             const std::optional<StoreOps>& storeOps,
+                             const std::vector<size_t>&     inputAntecedents,
+                             std::vector<size_t>&           outputItems)
 {
     outputItems.resize(field.bricks.size());
 
@@ -1892,13 +2009,21 @@ void rocfft_plan_t::C2CField(const rocfft_field_t&      field,
 
         for(auto dimIdx : fftDims)
         {
+            // apply load ops to first dimension we transform and store ops to the last
+            std::optional<LoadOps> appliedLoadOps
+                = dimIdx == fftDims.front() ? loadOps : std::nullopt;
+            std::optional<StoreOps> appliedStoreOps
+                = dimIdx == fftDims.back() ? storeOps : std::nullopt;
+
             auto transformItem              = C2CBrickOneDimension(*this,
                                                       dimIdx,
                                                       inBrick.location,
-                                                      inBrick.length(),
-                                                      inBrick.stride,
+                                                      inBrick.layout.lengths_and_batches(),
+                                                      inBrick.layout.strides_and_distances(),
                                                       fftInput,
                                                       output[i],
+                                                      appliedLoadOps,
+                                                      appliedStoreOps,
                                                       antecedents);
             multiPlan[transformItem]->group = "fft_dim_" + std::to_string(dimIdx);
             multiPlan[transformItem]->description
@@ -1933,40 +2058,40 @@ static rocfft_field_t MakeFieldDimContiguous(const rocfft_field_t&      field,
     if(!splitDim)
         throw std::runtime_error("not enough lengths to split to make dim contiguous");
 
+    std::vector<size_t> brick_lower(length.size()), brick_upper(length.size()),
+        brick_strides(length.size());
     for(size_t i = 0; i < out.bricks.size(); ++i)
     {
-        auto& outBrick = out.bricks[i];
-
-        // start lower and upper at origin and max, respectively
-        std::fill(outBrick.lower.begin(), outBrick.lower.end(), 0);
-        outBrick.upper = length;
+        // reset lower and upper to origin and max
+        std::fill(brick_lower.begin(), brick_lower.end(), 0);
+        std::copy(length.begin(), length.end(), brick_upper.begin());
 
         // divide up the split dim
-        outBrick.lower[*splitDim] = length[*splitDim] / out.bricks.size() * i;
+        brick_lower[*splitDim] = length[*splitDim] / out.bricks.size() * i;
         // last brick needs to include the whole length
         if(i == out.bricks.size() - 1)
-            outBrick.upper[*splitDim] = length[*splitDim];
+            brick_upper[*splitDim] = length[*splitDim];
         else
-            outBrick.upper[*splitDim] = length[*splitDim] / out.bricks.size() * (i + 1);
-
-        auto brickLength = outBrick.length();
-
+            brick_upper[*splitDim] = length[*splitDim] / out.bricks.size() * (i + 1);
         // set strides - contiguous dim has stride 1
-        size_t dist             = 1;
-        outBrick.stride[dimIdx] = dist;
-        dist *= brickLength[dimIdx];
+        size_t dist           = 1;
+        brick_strides[dimIdx] = dist;
+        dist *= (brick_upper[dimIdx] - brick_lower[dimIdx]);
         // split dim is contiguous after that
-        outBrick.stride[*splitDim] = dist;
-        dist *= brickLength[*splitDim];
+        brick_strides[*splitDim] = dist;
+        dist *= (brick_upper[*splitDim] - brick_lower[*splitDim]);
         // fill in remaining strides
-        for(size_t s = 0; s < outBrick.stride.size(); ++s)
+        for(size_t s = 0; s < brick_strides.size(); ++s)
         {
             if(s == dimIdx || s == *splitDim)
                 continue;
-            outBrick.stride[s] = dist;
-            dist *= brickLength[s];
+            brick_strides[s] = dist;
+            dist *= (brick_upper[s] - brick_lower[s]);
         }
+
+        out.bricks[i].layout = data_layout_t{brick_lower, brick_upper, brick_strides};
     }
+    out.finalize();
     return out;
 }
 
@@ -1998,7 +2123,7 @@ void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
     else
     {
         // GlobalTransposeA2A will use MPI_Ialltoall when possible,
-        // falling back to MPI_Ialltoallv otherwise.
+        // falling back to MPI_Ialltoallv otherwise
         GlobalTransposeA2A(
             elem_size, inField, outField, input, output, inputAntecedents, outputItems, itemGroup);
     }
@@ -2015,7 +2140,7 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
 {
     std::vector<TempBufferLease> packBufs;
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // loop over each input brick, finding the intersection of it with
     // every output brick
@@ -2026,38 +2151,36 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
         {
             const auto& outBrick = outField.bricks[outBrickIdx];
 
-            auto intersection = inBrick.intersect(outBrick);
-            if(intersection.empty())
+            const auto intersection
+                = data_layout_t::make_contiguous_intersection_of(inBrick.layout, outBrick.layout);
+            if(intersection.is_empty())
                 continue;
-            intersection.stride = intersection.contiguous_strides();
 
             // pack data for communication
             packBufs.reserve(packBufs.size() + 2);
-            TempBufferLease& pack = packBufs.emplace_back(tempBuffers,
+            TempBufferLease& pack     = packBufs.emplace_back(tempBuffers,
                                                           local_comm_rank,
                                                           inBrick.location,
-                                                          intersection.count_elems(),
+                                                          intersection.logical_count(),
                                                           elem_size);
-            TempBufferLease& recv = packBufs.emplace_back(tempBuffers,
+            TempBufferLease& recv     = packBufs.emplace_back(tempBuffers,
                                                           local_comm_rank,
                                                           outBrick.location,
-                                                          intersection.count_elems(),
+                                                          intersection.logical_count(),
                                                           elem_size);
-            auto             packIdx
-                = AddMultiPlanItem(transpose_brick(local_comm_rank,
-                                                   inBrick.location,
-                                                   intersection.length(),
-                                                   precision,
-                                                   desc.inArrayType,
-                                                   input[inBrickIdx],
-                                                   intersection.offset_in_field(inBrick.stride)
-                                                       - inBrick.offset_in_field(inBrick.stride),
-                                                   inBrick.stride,
-                                                   BufferPtr::temp(pack.data()),
-                                                   0,
-                                                   intersection.stride,
-                                                   "pack brick for global transpose"),
-                                   {inputAntecedents[inBrickIdx]});
+            auto             packIdx  = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                            inBrick.location,
+                                                            intersection.lengths_and_batches(),
+                                                            precision,
+                                                            desc.inArrayType,
+                                                            input[inBrickIdx],
+                                                            intersection.offset_in(inBrick.layout),
+                                                            inBrick.layout.strides_and_distances(),
+                                                            BufferPtr::temp(pack.data()),
+                                                            0,
+                                                            intersection.strides_and_distances(),
+                                                            "pack brick for global transpose"),
+                                            {inputAntecedents[inBrickIdx]});
             multiPlan[packIdx]->group = itemGroup;
             multiPlan[packIdx]->description
                 = "pack " + std::to_string(inBrickIdx) + " + " + std::to_string(outBrickIdx);
@@ -2066,7 +2189,7 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
             auto sendOp = std::make_unique<CommPointToPoint>(local_comm_rank,
                                                              precision,
                                                              desc.inArrayType,
-                                                             intersection.count_elems(),
+                                                             intersection.logical_count(),
                                                              inBrick.location,
                                                              BufferPtr::temp(pack.data()),
                                                              0,
@@ -2083,16 +2206,15 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
             auto unpackIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
                                                    outBrick.location,
-                                                   intersection.length(),
+                                                   intersection.lengths_and_batches(),
                                                    precision,
                                                    desc.inArrayType,
                                                    BufferPtr::temp(recv.data()),
                                                    0,
-                                                   intersection.stride,
+                                                   intersection.strides_and_distances(),
                                                    output[outBrickIdx],
-                                                   intersection.offset_in_field(outBrick.stride)
-                                                       - outBrick.offset_in_field(outBrick.stride),
-                                                   outBrick.stride,
+                                                   intersection.offset_in(outBrick.layout),
+                                                   outBrick.layout.strides_and_distances(),
                                                    "unpack brick for global transpose"),
                                    {sendIdx});
             multiPlan[unpackIdx]->group = itemGroup;
@@ -2103,6 +2225,65 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
     }
 }
 
+// Helper to compute disjoint sets of ranks that need to collectively
+// communicate (e.g. during an all-to-all operation).  This
+// information can be used to partition the global communicator into
+// sub-communicators.
+struct ConnectedRanks
+{
+    // Initialize parent array - each rank begins as its own parent
+    ConnectedRanks(int comm_size)
+        : parent(comm_size)
+    {
+        std::iota(parent.begin(), parent.end(), 0);
+    }
+    std::vector<int> parent;
+
+    // Get the root parent of a rank
+    int get_root(int rank)
+    {
+        // If rank is its own parent, that's the root.
+        // Otherwise, follow the links until we get to the root
+        if(parent[rank] != rank)
+            parent[rank] = get_root(parent[rank]);
+        return parent[rank];
+    }
+
+    // Add a connection between rankA and rankB
+    void add_connection(int rankA, int rankB)
+    {
+        // A and B are now part of the same set, so give them the same
+        // root
+        auto rootA = get_root(rankA);
+        auto rootB = get_root(rankB);
+        if(rootA != rootB)
+            parent[rootA] = parent[rootB];
+    }
+
+    // Get the set of ranks that's connected to a specified rank.
+    // MPI requires that the ranks in a sub-communicator be listed in
+    // the same order on all ranks in that sub-communicator, so a
+    // std::set helps ensure this ordering.
+    std::set<int> get_connected(int rank)
+    {
+        // Compress the paths in the parent array so that each rank
+        // points to its root parent
+        for(int i = 0; i < static_cast<int>(parent.size()); ++i)
+        {
+            parent[i] = get_root(i);
+        }
+
+        // Return ranks that have the same parent
+        std::set<int> ret;
+        for(int i = 0; i < static_cast<int>(parent.size()); ++i)
+        {
+            if(parent[i] == parent[rank])
+                ret.insert(i);
+        }
+        return ret;
+    }
+};
+
 void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
                                        const rocfft_field_t&      inField,
                                        const rocfft_field_t&      outField,
@@ -2112,8 +2293,8 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
                                        std::vector<size_t>&       outputItems,
                                        const std::string&         itemGroup)
 {
-    const auto local_comm_rank = get_local_comm_rank();
-    const auto local_comm_size = get_local_comm_size();
+    const auto local_comm_rank = desc.get_local_comm_rank();
+    const auto local_comm_size = desc.get_local_comm_size();
 
     // for us to be attempting an AlltoAll, bricks send/received
     // from/to the local rank should be on only one device
@@ -2136,6 +2317,8 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
     // unpack operations after the all-to-all communication
     std::vector<size_t> unpack_ops;
 
+    ConnectedRanks conn(local_comm_size);
+
     // loop over each input brick, finding the intersection of it with
     // every output brick
     for(size_t inBrickIdx = 0; inBrickIdx < inField.bricks.size(); ++inBrickIdx)
@@ -2147,11 +2330,14 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
             const auto& outBrick = outField.bricks[outBrickIdx];
             const auto  outRank  = outBrick.location.comm_rank;
 
-            auto intersection = inBrick.intersect(outBrick);
-            if(intersection.empty())
+            const auto intersection
+                = data_layout_t::make_contiguous_intersection_of(inBrick.layout, outBrick.layout);
+            if(intersection.is_empty())
                 continue;
 
-            const auto elems = intersection.count_elems();
+            conn.add_connection(inRank, outRank);
+
+            const auto elems = intersection.logical_count();
 
             if(inRank == local_comm_rank)
             {
@@ -2207,10 +2393,10 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
             const auto& outBrick = outField.bricks[outBrickIdx];
             const auto  outRank  = outBrick.location.comm_rank;
 
-            auto intersection = inBrick.intersect(outBrick);
-            if(intersection.empty())
+            const auto intersection
+                = data_layout_t::make_contiguous_intersection_of(inBrick.layout, outBrick.layout);
+            if(intersection.is_empty())
                 continue;
-            intersection.stride = intersection.contiguous_strides();
 
             // this transpose will only actually run if inRank ==
             // local_comm_rank, but adding it to the plan so all
@@ -2218,21 +2404,20 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
             //
             // if(inRank == local_comm_rank)
             {
-                auto pack_op = AddMultiPlanItem(
-                    transpose_brick(local_comm_rank,
-                                    inBrick.location,
-                                    intersection.length(),
-                                    precision,
-                                    desc.inArrayType,
-                                    input[inBrickIdx],
-                                    intersection.offset_in_field(inBrick.stride)
-                                        - inBrick.offset_in_field(inBrick.stride),
-                                    inBrick.stride,
-                                    BufferPtr::temp(send_buf.data()),
-                                    send_offsets[outRank],
-                                    intersection.stride,
-                                    "pack brick for global transpose"),
-                    inputAntecedents);
+                auto pack_op
+                    = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                       inBrick.location,
+                                                       intersection.lengths_and_batches(),
+                                                       precision,
+                                                       desc.inArrayType,
+                                                       input[inBrickIdx],
+                                                       intersection.offset_in(inBrick.layout),
+                                                       inBrick.layout.strides_and_distances(),
+                                                       BufferPtr::temp(send_buf.data()),
+                                                       send_offsets[outRank],
+                                                       intersection.strides_and_distances(),
+                                                       "pack brick for global transpose"),
+                                       inputAntecedents);
                 multiPlan[pack_op]->group = itemGroup;
                 multiPlan[pack_op]->description
                     = "pack " + std::to_string(inBrickIdx) + " + " + std::to_string(outBrickIdx);
@@ -2245,21 +2430,20 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
             //
             // if(outRank == local_comm_rank)
             {
-                auto unpack_op = AddMultiPlanItem(
-                    transpose_brick(local_comm_rank,
-                                    outBrick.location,
-                                    intersection.length(),
-                                    precision,
-                                    desc.inArrayType,
-                                    BufferPtr::temp(recv_buf.data()),
-                                    recv_offsets[inRank],
-                                    intersection.stride,
-                                    output[outBrickIdx],
-                                    intersection.offset_in_field(outBrick.stride)
-                                        - outBrick.offset_in_field(outBrick.stride),
-                                    outBrick.stride,
-                                    "unpack brick for global transpose"),
-                    {});
+                auto unpack_op
+                    = AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                       outBrick.location,
+                                                       intersection.lengths_and_batches(),
+                                                       precision,
+                                                       desc.inArrayType,
+                                                       BufferPtr::temp(recv_buf.data()),
+                                                       recv_offsets[inRank],
+                                                       intersection.strides_and_distances(),
+                                                       output[outBrickIdx],
+                                                       intersection.offset_in(outBrick.layout),
+                                                       outBrick.layout.strides_and_distances(),
+                                                       "unpack brick for global transpose"),
+                                       {});
                 multiPlan[unpack_op]->group = itemGroup;
                 multiPlan[unpack_op]->description
                     = "unpack " + std::to_string(inBrickIdx) + " + " + std::to_string(outBrickIdx);
@@ -2268,15 +2452,47 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
         }
     }
 
+    // get the set of ranks that this rank needs to communicate with
+    std::set<int> comm_ranks = conn.get_connected(local_comm_rank);
+
+    // if the set of ranks we need to communicate with is a subset,
+    // narrow the AllToAll to just that set
+    std::optional<MPI_Comm_wrapper_t> subcomm;
+#ifdef ROCFFT_MPI_ENABLE
+    if(comm_ranks.size() < static_cast<size_t>(local_comm_size))
+    {
+        // go backwards through the ranks
+        for(int i = local_comm_size - 1; i >= 0; --i)
+        {
+            if(comm_ranks.find(i) == comm_ranks.end())
+            {
+                send_counts.erase(send_counts.begin() + i);
+                send_offsets.erase(send_offsets.begin() + i);
+                recv_counts.erase(recv_counts.begin() + i);
+                recv_offsets.erase(recv_offsets.begin() + i);
+            }
+        }
+
+        // create a subcommunicator with this subset - preserve order
+        // enforced by the std::set so that all ranks see the same
+        // ordering
+        std::vector<int> comm_ranks_vec;
+        std::copy(comm_ranks.begin(), comm_ranks.end(), std::back_inserter(comm_ranks_vec));
+        subcomm = make_subcommunicator(desc.mpi_comm, comm_ranks_vec);
+    }
+#endif
+
     // add the all-to-all op itself, which depends on pack ops
-    auto alltoall_ptr                   = std::make_unique<CommAllToAll>(precision,
+    auto alltoall_ptr = std::make_unique<CommAllToAll>(precision,
                                                        desc.inArrayType,
                                                        send_offsets,
                                                        send_counts,
                                                        recv_offsets,
                                                        recv_counts,
                                                        BufferPtr::temp(send_buf.data()),
-                                                       BufferPtr::temp(recv_buf.data()));
+                                                       BufferPtr::temp(recv_buf.data()),
+                                                       std::move(subcomm));
+
     auto alltoall_op                    = AddMultiPlanItem(std::move(alltoall_ptr), pack_ops);
     multiPlan[alltoall_op]->group       = itemGroup;
     multiPlan[alltoall_op]->description = "all-to-all communication";
@@ -2291,9 +2507,215 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
     outputItems = unpack_ops;
 }
 
+// geometry handling helpers for brick and field manipulation
+inline std::array<int, 3> infer_grid_from_bricks(const std::vector<rocfft_brick_t>& bricks)
+{
+    std::set<size_t> xset, yset, zset;
+    for(const auto& b : bricks)
+    {
+        const auto brick_lower = b.layout.lower();
+        if(brick_lower.size() >= 1)
+            xset.insert(brick_lower[0]);
+        if(brick_lower.size() >= 2)
+            yset.insert(brick_lower[1]);
+        if(brick_lower.size() >= 3)
+            zset.insert(brick_lower[2]);
+    }
+    int nx = std::max(1, static_cast<int>(xset.size()));
+    int ny = std::max(1, static_cast<int>(yset.size()));
+    int nz = std::max(1, static_cast<int>(zset.size()));
+    return {nx, ny, nz};
+}
+
+// construct a pencil-decomposed field using a base shape
+rocfft_field_t MakeFieldWithPencilSplit(const rocfft_field_t&      currentField,
+                                        const std::vector<size_t>& lengthsWithBatch,
+                                        const std::vector<int>&    split_axes,
+                                        const std::vector<int>&    split_sizes)
+{
+    assert(split_axes.size() == 2 && split_sizes.size() == 2);
+
+    int P = split_sizes[0], Q = split_sizes[1];
+    int n_bricks = P * Q;
+
+    rocfft_field_t out;
+    out.bricks.reserve(n_bricks);
+
+    const int           ndim = static_cast<int>(lengthsWithBatch.size());
+    std::vector<size_t> brick_lower(ndim), brick_upper(ndim), brick_strides(ndim);
+    for(int i = 0; i < 2; ++i)
+    {
+        int ax = split_axes[i];
+        int sz = split_sizes[i];
+        if(ax < 0 || ax >= ndim)
+            throw std::out_of_range("split_axes[" + std::to_string(i) + "] value "
+                                    + std::to_string(ax)
+                                    + " is out of range for ndim=" + std::to_string(ndim));
+        if(sz <= 0 || static_cast<size_t>(sz) > lengthsWithBatch[ax])
+            throw std::invalid_argument("split_sizes[" + std::to_string(i) + "] ("
+                                        + std::to_string(sz)
+                                        + ") must be positive and not exceed axis length ("
+                                        + std::to_string(lengthsWithBatch[ax]) + ")");
+    }
+
+    // distribute location/device assignments round-robin
+    for(int i = 0; i < n_bricks; ++i)
+    {
+        // compute 2D (p, q) indices for this brick
+        int p = i / Q;
+        int q = i % Q;
+
+        // set bounds for each axis
+        std::fill(brick_lower.begin(), brick_lower.end(), 0);
+        std::copy(lengthsWithBatch.begin(), lengthsWithBatch.end(), brick_upper.begin());
+
+        int axis_p = split_axes[0];
+        int axis_q = split_axes[1];
+
+        int len_p           = lengthsWithBatch[axis_p];
+        int len_q           = lengthsWithBatch[axis_q];
+        brick_lower[axis_p] = len_p * p / P;
+        brick_upper[axis_p] = len_p * (p + 1) / P;
+        brick_lower[axis_q] = len_q * q / Q;
+        brick_upper[axis_q] = len_q * (q + 1) / Q;
+
+        // contiguous strides
+        int dist = 1;
+        for(size_t s = 0; s < brick_strides.size(); ++s)
+        {
+            brick_strides[s] = dist;
+            dist *= brick_upper[s] - brick_lower[s];
+        }
+
+        // assign device/rank in a round-robin fashion
+        const auto& ref_brick = currentField.bricks[i % currentField.bricks.size()];
+        out.bricks.emplace_back(brick_lower, brick_upper, brick_strides, ref_brick.location);
+    }
+    out.finalize();
+
+    return out;
+}
+
+// get transpose plan structure
+inline grid_layout grid_kind(const std::array<int, 3>& grid)
+{
+    const int n_ones = std::count(grid.begin(), grid.end(), 1);
+    if(n_ones == 2)
+        return grid_layout::slab;
+    if(n_ones == 1)
+        return grid_layout::pencil;
+    if(n_ones == 0)
+        return grid_layout::brick;
+    return grid_layout::invalid;
+}
+
+inline transpose_type get_transpose_type(const std::array<int, 3>& from,
+                                         const std::array<int, 3>& to)
+{
+    return std::make_pair(grid_kind(from), grid_kind(to));
+}
+
+inline std::string grid_layout_str(grid_layout l)
+{
+    switch(l)
+    {
+    case grid_layout::slab:
+        return "slab";
+    case grid_layout::pencil:
+        return "pencil";
+    case grid_layout::brick:
+        return "brick";
+    default:
+        return "invalid";
+    }
+}
+
+inline std::string transpose_type_str(transpose_type t)
+{
+    return grid_layout_str(t.first) + "_to_" + grid_layout_str(t.second);
+}
+
+// heuristic method to create a processor grid
+std::pair<int, int> get_most_balanced_proc_pair(int prod, int limit_a, int limit_b)
+{
+    int best_a = -1, best_b = -1, min_diff = prod;
+    for(int a = 1; a <= prod; ++a)
+    {
+        if(prod % a == 0)
+        {
+            int b = prod / a;
+            if(a <= limit_a && b <= limit_b)
+            {
+                int diff = std::abs(a - b);
+                if(diff < min_diff)
+                {
+                    best_a   = a;
+                    best_b   = b;
+                    min_diff = diff;
+                }
+            }
+        }
+    }
+    if(best_a == -1 || best_b == -1)
+    {
+        throw std::runtime_error(
+            "get_most_balanced_proc_pair: Cannot decompose prod=" + std::to_string(prod)
+            + " within given limits: limit_a=" + std::to_string(limit_a)
+            + ", limit_b=" + std::to_string(limit_b)
+            + " (limit_a * limit_b = " + std::to_string(limit_a * limit_b) + ")");
+    }
+    return {best_a, best_b};
+}
+
+void get_transpose_plan(const std::array<int, 3>&        input_grid,
+                        const std::array<int, 3>&        output_grid,
+                        const std::array<size_t, 3>&     global_lengths,
+                        std::vector<std::array<int, 3>>& transpose_plan,
+                        std::vector<transpose_type>&     transpose_types)
+{
+    transpose_plan.clear();
+    transpose_types.clear();
+
+    int                          prod = input_grid[0] * input_grid[1] * input_grid[2];
+    std::set<std::array<int, 3>> pencils;
+
+    // for each axis, generate the pencil with 1 in that axis, as balanced as possible
+    for(int pos = 0; pos < 3; ++pos)
+    {
+        // the two axes to split (not the pencil axis)
+        int split_a = (pos + 1) % 3;
+        int split_b = (pos + 2) % 3;
+
+        // find the best factorization that does not exceed axis lengths
+        auto [best_a, best_b]
+            = get_most_balanced_proc_pair(prod,
+                                          static_cast<int>(global_lengths[split_a]),
+                                          static_cast<int>(global_lengths[split_b]));
+
+        // assign axes explicitly to avoid confusion
+        std::array<int, 3> grid = {0, 0, 0};
+        grid[pos]               = 1; // Pencil axis
+        grid[split_a]           = best_a; // First split axis
+        grid[split_b]           = best_b; // Second split axis
+
+        if((grid != input_grid) && (grid != output_grid))
+            pencils.insert(grid); // direct insert, no duplicate check needed
+    }
+
+    // full transpose plan is: input -> [all pencils] -> output
+    transpose_plan.push_back(input_grid);
+    for(const auto& g : pencils)
+        transpose_plan.push_back(g);
+    transpose_plan.push_back(output_grid);
+
+    // generate transpose type sequence as pairs of grid_layouts
+    for(size_t i = 1; i < transpose_plan.size(); ++i)
+        transpose_types.push_back(get_transpose_type(transpose_plan[i - 1], transpose_plan[i]));
+}
+
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
 {
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // keep track of how many transposes we've done so we can log
     // distinct messages about each one
@@ -2309,6 +2731,7 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     if(placement == rocfft_placement_inplace)
         return false;
 
+    // input/output Fields must not be empty
     if(desc.inFields.empty() || desc.outFields.empty())
         return false;
 
@@ -2316,11 +2739,12 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     std::vector<size_t> contiguousInputDims;
     std::vector<size_t> contiguousOutputDims;
     std::vector<size_t> nonContiguousDims;
-    for(size_t dimIdx = 0; dimIdx < rank; ++dimIdx)
+    const auto          input_lengths = desc.input_layout.lengths();
+    for(size_t dimIdx = 0; dimIdx < desc.rank(); ++dimIdx)
     {
-        if(!DimensionSplitInField(lengths[dimIdx], dimIdx, desc.inFields.front()))
+        if(!DimensionSplitInField(input_lengths[dimIdx], dimIdx, desc.inFields.front()))
             contiguousInputDims.push_back(dimIdx);
-        else if(!DimensionSplitInField(lengths[dimIdx], dimIdx, desc.outFields.front()))
+        else if(!DimensionSplitInField(input_lengths[dimIdx], dimIdx, desc.outFields.front()))
             contiguousOutputDims.push_back(dimIdx);
         else
             nonContiguousDims.push_back(dimIdx);
@@ -2347,102 +2771,283 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     for(size_t inBrickIdx = 0; inBrickIdx < desc.inFields.front().bricks.size(); ++inBrickIdx)
     {
         const auto& inBrick = desc.inFields.front().bricks[inBrickIdx];
-        inputTemp.emplace_back(
-            tempBuffers, local_comm_rank, inBrick.location, inBrick.count_elems(), elem_size);
+        inputTemp.emplace_back(tempBuffers,
+                               local_comm_rank,
+                               inBrick.location,
+                               inBrick.layout.logical_count(),
+                               elem_size);
         inputFFTBufs.emplace_back(BufferPtr::temp(inputTemp.back().data()));
     }
-    std::vector<size_t> inputFFTItems;
-    C2CField(
-        desc.inFields.front(), contiguousInputDims, inputBufs, inputFFTBufs, {}, inputFFTItems);
 
-    // now transpose non-contiguous dims to be contiguous and
-    // transform them too
-    std::vector<BufferPtr>       transposeInputBufs = inputFFTBufs;
-    std::vector<TempBufferLease> transposeOutputTemp;
-    std::vector<BufferPtr>       transposeOutputBufs;
-    auto                         transposeInputAntecedents = inputFFTItems;
-    std::vector<size_t>          midFFTItems               = inputFFTItems;
-    rocfft_field_t               transposedField;
-
-    auto lengthsWithBatch = lengths;
-    lengthsWithBatch.push_back(batch);
-    for(auto dimIdx : nonContiguousDims)
-    {
-        // transpose so this dim is contiguous
-        transposedField = MakeFieldDimContiguous(desc.inFields.front(), lengthsWithBatch, dimIdx);
-
-        // allocate bricks to store the transposed data
-        for(auto& b : transposedField.bricks)
-        {
-            transposeOutputTemp.emplace_back(
-                tempBuffers, local_comm_rank, b.location, b.count_elems(), elem_size);
-            transposeOutputBufs.emplace_back(BufferPtr::temp(transposeOutputTemp.back().data()));
-        }
-
-        std::vector<size_t> transposeItems;
-        GlobalTranspose(elem_size,
-                        desc.inFields.front(),
-                        transposedField,
-                        transposeInputBufs,
-                        transposeOutputBufs,
-                        transposeInputAntecedents,
-                        transposeItems,
-                        transposeNumber++);
-
-        // now dimIdx dimension is contiguous on all bricks
-        midFFTItems.clear();
-        C2CField(transposedField,
-                 {dimIdx},
-                 transposeOutputBufs,
-                 transposeOutputBufs,
-                 transposeItems,
-                 midFFTItems);
-
-        // next iteration of loop will depend on these fft items and
-        // work on the output we just produced
-        transposeInputAntecedents = midFFTItems;
-        transposeInputBufs        = transposeOutputBufs;
-        std::swap(transposeOutputTemp, inputTemp);
-        transposeOutputTemp.clear();
-        transposeOutputBufs.clear();
-    }
-
-    // transpose data to output layout and transform along remaining dimensions
     std::vector<BufferPtr> outputBufs
         = GatherUserBuffers(BufferPtr::user_output, desc.outFields.front().bricks);
-    std::vector<size_t> finalTransposeItems;
-    std::vector<size_t> finalFFTItems;
-    GlobalTranspose(elem_size,
-                    transposedField.bricks.empty() ? desc.inFields.front() : transposedField,
-                    desc.outFields.front(),
-                    transposeInputBufs,
-                    outputBufs,
-                    midFFTItems,
-                    finalTransposeItems,
-                    transposeNumber++);
-    C2CField(desc.outFields.front(),
-             contiguousOutputDims,
-             outputBufs,
-             outputBufs,
-             finalTransposeItems,
-             finalFFTItems);
+
+    // plan FFTs along already contiguous dimensions
+    std::vector<size_t> inputFFTItems;
+    // first FFT needs to apply user-specified load callback
+    C2CField(desc.inFields.front(),
+             contiguousInputDims,
+             inputBufs,
+             inputFFTBufs,
+             desc.loadOps,
+             std::nullopt,
+             {},
+             inputFFTItems);
+
+    auto lengthsWithBatch = input_lengths;
+    lengthsWithBatch.push_back(desc.batch());
+
+    // track which dimensions have already been FFTed
+    std::vector<int> fft_done(desc.rank(), 0);
+    for(auto d : contiguousInputDims)
+        fft_done[d] = 1;
+
+    // get processor grid from bricks for input and output
+    std::array<int, 3> in_grid  = infer_grid_from_bricks(desc.inFields[0].bricks);
+    std::array<int, 3> out_grid = infer_grid_from_bricks(desc.outFields[0].bricks);
+
+    // count number of split dims in input and output grids
+    const int num_split_dims_in
+        = std::count_if(in_grid.begin(), in_grid.end(), [](int n) { return n > 1; });
+    const int num_split_dims_out
+        = std::count_if(out_grid.begin(), out_grid.end(), [](int n) { return n > 1; });
+
+    // get transpose grids sequence for pencil and brick decompositions, from input to output
+    std::vector<std::array<int, 3>> grids_sequence;
+    std::vector<transpose_type>     transpose_sequence;
+
+    bool pencil_to_pencil = false;
+    // plan transposition steps
+    if(num_split_dims_in >= 2 && num_split_dims_out >= 2 && desc.rank() == 3)
+    {
+        get_transpose_plan(in_grid,
+                           out_grid,
+                           {input_lengths[0], input_lengths[1], input_lengths[2]},
+                           grids_sequence,
+                           transpose_sequence);
+
+        pencil_to_pencil = std::all_of(
+            transpose_sequence.begin(), transpose_sequence.end(), [](transpose_type t) {
+                return t == std::make_pair(grid_layout::pencil, grid_layout::pencil);
+            });
+    }
+
+    rocfft_field_t         currentField       = desc.inFields.front();
+    std::vector<BufferPtr> currentBufs        = inputFFTBufs;
+    std::vector<size_t>    currentAntecedents = inputFFTItems;
+
+    // using MPI sub-communicators for optimized pencil-to-pencil
+    if(pencil_to_pencil)
+    {
+        // This vector holds leases from an earlier iteration of the
+        // loop below, and is cleared when we are sure the leases can
+        // be reused.
+        std::vector<TempBufferLease> prevTempLeases;
+
+        // plan global transposes and local FFTs
+        for(size_t i = 0; i < transpose_sequence.size(); ++i)
+        {
+            // get next grid, note that transpose_sequence size is one less than grids_sequence
+            std::array<int, 3> grid = grids_sequence[i + 1];
+
+            // find pencil_axis (where grid==1), and split axes (where grid > 1)
+            int              pencil_axis;
+            std::vector<int> split_axes;
+            std::vector<int> split_sizes;
+            for(size_t d = 0; d < grid.size(); ++d)
+            {
+                if(grid[d] == 1)
+                    pencil_axis = d;
+                else
+                {
+                    split_axes.push_back(d);
+                    split_sizes.push_back(grid[d]);
+                }
+            }
+
+            // if this axis is already done, move to the next one
+            if(fft_done[pencil_axis])
+                continue;
+
+            // create the next field by splitting using a heuristic approach
+            rocfft_field_t nextField;
+            bool           writeToUserOutput = i == transpose_sequence.size() - 1;
+            if(writeToUserOutput)
+                nextField = desc.outFields.front();
+            else
+                nextField = MakeFieldWithPencilSplit(
+                    currentField, lengthsWithBatch, split_axes, split_sizes);
+
+            // allocate temp buffers for nextField, though we only
+            // need to do this if we're in the middle of the
+            // transpose sequence (last one will write to output, not
+            // temp)
+            std::vector<TempBufferLease> tempLeases;
+            std::vector<BufferPtr>       tempBufs(nextField.bricks.size());
+
+            if(!writeToUserOutput)
+            {
+                for(size_t b = 0; b < nextField.bricks.size(); ++b)
+                {
+                    // Allocate a buffer only if this global rank owns the brick.
+                    if(nextField.bricks[b].location.comm_rank == local_comm_rank)
+                    {
+                        tempLeases.emplace_back(tempBuffers,
+                                                local_comm_rank,
+                                                nextField.bricks[b].location,
+                                                nextField.bricks[b].layout.logical_count(),
+                                                elem_size);
+                        tempBufs[b] = BufferPtr::temp(tempLeases.back().data());
+                    }
+                    else
+                    {
+                        tempBufs[b] = BufferPtr();
+                    }
+                }
+            }
+
+            // plan transpose from currentField to nextField
+            std::vector<size_t> transposeItems;
+            GlobalTranspose(elem_size,
+                            currentField,
+                            nextField,
+                            currentBufs,
+                            writeToUserOutput ? outputBufs : tempBufs,
+                            currentAntecedents,
+                            transposeItems,
+                            transposeNumber++);
+
+            currentField       = nextField;
+            currentBufs        = tempBufs;
+            currentAntecedents = transposeItems;
+
+            // leases allocated in this iteration need to live
+            // through next loop iteration, since they will be passed
+            // as input to the next GlobalTranspose.
+            prevTempLeases.swap(tempLeases);
+
+            // once data is transposed, plan intermediate FFT
+
+            // user output needs to apply store operations
+            std::vector<size_t> fftItems;
+            C2CField(currentField,
+                     {static_cast<size_t>(pencil_axis)},
+                     writeToUserOutput ? outputBufs : currentBufs,
+                     writeToUserOutput ? outputBufs : currentBufs,
+                     std::nullopt,
+                     writeToUserOutput ? std::optional<StoreOps>{desc.storeOps} : std::nullopt,
+                     currentAntecedents,
+                     fftItems);
+            fft_done[pencil_axis] = 1;
+            currentAntecedents    = fftItems;
+        }
+    }
+    // default general decomposition without sub-communicators
+    else
+    {
+        // transpose non-contiguous dims to be contiguous and
+        // transform them too
+        std::vector<BufferPtr>       transposeInputBufs = inputFFTBufs;
+        std::vector<TempBufferLease> transposeOutputTemp;
+        std::vector<BufferPtr>       transposeOutputBufs;
+        auto                         transposeInputAntecedents = inputFFTItems;
+        std::vector<size_t>          midFFTItems               = inputFFTItems;
+        rocfft_field_t               transposedField;
+
+        for(auto dimIdx : nonContiguousDims)
+        {
+            // transpose so this dim is contiguous
+            transposedField
+                = MakeFieldDimContiguous(desc.inFields.front(), lengthsWithBatch, dimIdx);
+
+            // allocate bricks to store the transposed data
+            for(auto& b : transposedField.bricks)
+            {
+                transposeOutputTemp.emplace_back(
+                    tempBuffers, local_comm_rank, b.location, b.layout.logical_count(), elem_size);
+                transposeOutputBufs.emplace_back(
+                    BufferPtr::temp(transposeOutputTemp.back().data()));
+            }
+
+            std::vector<size_t> transposeItems;
+            GlobalTranspose(elem_size,
+                            desc.inFields.front(),
+                            transposedField,
+                            transposeInputBufs,
+                            transposeOutputBufs,
+                            transposeInputAntecedents,
+                            transposeItems,
+                            transposeNumber++);
+
+            // now dimIdx dimension is contiguous on all bricks
+            midFFTItems.clear();
+            // first transform needs to apply load operations
+            const std::optional<LoadOps> loadOps = dimIdx == nonContiguousDims.front()
+                                                       ? std::optional<LoadOps>{desc.loadOps}
+                                                       : std::nullopt;
+            C2CField(transposedField,
+                     {dimIdx},
+                     transposeOutputBufs,
+                     transposeOutputBufs,
+                     loadOps,
+                     std::nullopt,
+                     transposeItems,
+                     midFFTItems);
+
+            // next iteration of loop will depend on these fft items and
+            // work on the output we just produced
+            transposeInputAntecedents = midFFTItems;
+            transposeInputBufs        = transposeOutputBufs;
+            std::swap(transposeOutputTemp, inputTemp);
+            transposeOutputTemp.clear();
+            transposeOutputBufs.clear();
+        }
+
+        // transpose data to output layout and transform along remaining dimensions
+        std::vector<size_t> finalTransposeItems;
+        std::vector<size_t> finalFFTItems;
+        GlobalTranspose(elem_size,
+                        transposedField.bricks.empty() ? desc.inFields.front() : transposedField,
+                        desc.outFields.front(),
+                        transposeInputBufs,
+                        outputBufs,
+                        midFFTItems,
+                        finalTransposeItems,
+                        transposeNumber++);
+        // apply store operations to last dimension
+        C2CField(desc.outFields.front(),
+                 contiguousOutputDims,
+                 outputBufs,
+                 outputBufs,
+                 std::nullopt,
+                 desc.storeOps,
+                 finalTransposeItems,
+                 finalFFTItems);
+    }
+
     return true;
 }
 
 // All-gather all of the brick parameters for a given field.
-rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
-                                             rocfft_field_t& field,
-                                             const size_t    global_brick_length)
+#ifdef ROCFFT_MPI_ENABLE
+rocfft_status
+    rocfft_plan_description_t::allgather_brick_params_lus_mpi(rocfft_field_t& field,
+                                                              const size_t    global_brick_length)
 {
-#if !defined ROCFFT_MPI_ENABLE
-    return rocfft_status_failure;
-#else
+    if(comm_type == rocfft_comm_none)
+        return rocfft_status_success;
+    if(!mpi_comm)
+    {
+        // If the comm type is MPI, but the comm pointer is null, then return an error.
+        return rocfft_status_failure;
+    }
+
     auto rcmpi = MPI_SUCCESS;
 
     // TODO: make async.
 
     // First, compute the number of bricks per field.
-    std::vector<int> global_brick_count(plan->get_local_comm_size());
+    std::vector<int>                                 global_brick_count(get_local_comm_size());
     typeof(decltype(global_brick_count)::value_type) local_brick_count = field.bricks.size();
     {
         // OpenMPI has a runtime error if this is const, so make sure it isn't.
@@ -2453,7 +3058,7 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
                               global_brick_count.data(),
                               1,
                               type_to_mpi_type<typeof(decltype(global_brick_count)::value_type)>(),
-                              plan->desc.mpi_comm);
+                              mpi_comm);
         if(rcmpi != MPI_SUCCESS)
         {
             throw std::runtime_error("MPI_Allgather failed: " + std::to_string(rcmpi));
@@ -2461,7 +3066,7 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
     }
 
     // We need the displacments (as an int[]) for MPI_Allgatherv:
-    typeof(global_brick_count) displacements(plan->get_local_comm_size());
+    typeof(global_brick_count) displacements(get_local_comm_size());
     displacements[0] = 0;
     std::partial_sum(
         global_brick_count.begin(), global_brick_count.end() - 1, displacements.begin() + 1);
@@ -2475,35 +3080,38 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
     const auto num_global_bricks = std::accumulate(
         global_brick_count.begin(), global_brick_count.end(), static_cast<size_t>(0));
 
-    std::vector<typeof(decltype(rocfft_brick_t::lower)::value_type)> global_lowers(
-        num_global_bricks * global_brick_length);
-    std::vector<typeof(decltype(rocfft_brick_t::upper)::value_type)> global_uppers(
-        num_global_bricks * global_brick_length);
-    std::vector<typeof(decltype(rocfft_brick_t::stride)::value_type)> global_strides(
-        num_global_bricks * global_brick_length);
+    std::vector<size_t> global_lowers(num_global_bricks * global_brick_length);
+    std::vector<size_t> global_uppers(num_global_bricks * global_brick_length);
+    std::vector<size_t> global_strides(num_global_bricks * global_brick_length);
     std::vector<decltype(rocfft_location_t::device)>    global_devices(num_global_bricks);
     std::vector<decltype(rocfft_location_t::comm_rank)> global_comm_ranks(num_global_bricks);
 
     // Make a contiguous copy for the MPI routine:
-    std::vector<typeof(decltype(rocfft_brick_t::lower)::value_type)>  local_lowers;
-    std::vector<typeof(decltype(rocfft_brick_t::upper)::value_type)>  local_uppers;
-    std::vector<typeof(decltype(rocfft_brick_t::stride)::value_type)> local_strides;
-    std::vector<int>                                                  local_devices;
-    std::vector<int>                                                  local_comm_ranks;
+    decltype(global_lowers)     local_lowers;
+    decltype(global_uppers)     local_uppers;
+    decltype(global_strides)    local_strides;
+    decltype(global_devices)    local_devices;
+    decltype(global_comm_ranks) local_comm_ranks;
     local_lowers.reserve(local_brick_count * global_brick_length);
     local_uppers.reserve(local_brick_count * global_brick_length);
     local_strides.reserve(local_brick_count * global_brick_length);
     for(const auto& brick : field.bricks)
     {
-        for(auto v : brick.lower)
+        static_assert(std::is_same_v<decltype(brick.layout.lower())::value_type,
+                                     decltype(local_lowers)::value_type>);
+        static_assert(std::is_same_v<decltype(brick.layout.upper())::value_type,
+                                     decltype(local_uppers)::value_type>);
+        static_assert(std::is_same_v<decltype(brick.layout.strides_and_distances())::value_type,
+                                     decltype(local_strides)::value_type>);
+        for(auto v : brick.layout.lower())
         {
             local_lowers.push_back(v);
         }
-        for(auto v : brick.upper)
+        for(auto v : brick.layout.upper())
         {
             local_uppers.push_back(v);
         }
-        for(auto v : brick.stride)
+        for(auto v : brick.layout.strides_and_distances())
         {
             local_strides.push_back(v);
         }
@@ -2521,86 +3129,86 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
     static_assert(std::is_same_v<std::underlying_type<typeof(decltype(recvcount)::value_type)>,
                                  std::underlying_type<int>>);
 
-    // We must send and recieve the same type:
+    // We must send and receive the same type:
     static_assert(
         std::is_same_v<std::underlying_type<typeof(decltype(local_lowers)::value_type)>,
                        std::underlying_type<typeof(decltype(global_lowers)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_lowers.data(),
-                           recvcount[plan->get_local_comm_rank()],
+                           recvcount[get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_lowers)::value_type)>(),
                            global_lowers.data(),
                            recvcount.data(),
                            displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_lowers)::value_type)>(),
-                           plan->desc.mpi_comm);
+                           mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
     }
 
-    // We must send and recieve the same type:
+    // We must send and receive the same type:
     static_assert(
         std::is_same_v<std::underlying_type<typeof(decltype(local_uppers)::value_type)>,
                        std::underlying_type<typeof(decltype(global_uppers)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_uppers.data(),
-                           recvcount[plan->get_local_comm_rank()],
+                           recvcount[get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_uppers)::value_type)>(),
                            global_uppers.data(),
                            recvcount.data(),
                            displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_uppers)::value_type)>(),
-                           plan->desc.mpi_comm);
+                           mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
     }
 
-    // We must send and recieve the same type:
+    // We must send and receive the same type:
     static_assert(
         std::is_same_v<std::underlying_type<typeof(decltype(local_strides)::value_type)>,
                        std::underlying_type<typeof(decltype(global_strides)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_strides.data(),
-                           recvcount[plan->get_local_comm_rank()],
+                           recvcount[get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_strides)::value_type)>(),
                            global_strides.data(),
                            recvcount.data(),
                            displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_strides)::value_type)>(),
-                           plan->desc.mpi_comm);
+                           mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
     }
 
-    // We must send and recieve the same type:
+    // We must send and receive the same type:
     static_assert(
         std::is_same_v<std::underlying_type<typeof(decltype(local_devices)::value_type)>,
                        std::underlying_type<typeof(decltype(global_devices)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_devices.data(),
-                           global_brick_count[plan->get_local_comm_rank()],
+                           global_brick_count[get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_devices)::value_type)>(),
                            global_devices.data(),
                            global_brick_count.data(),
                            scalar_displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_devices)::value_type)>(),
-                           plan->desc.mpi_comm);
+                           mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
     }
 
-    // We must send and recieve the same type:
+    // We must send and receive the same type:
     static_assert(
         std::is_same_v<std::underlying_type<typeof(decltype(local_comm_ranks)::value_type)>,
                        std::underlying_type<typeof(decltype(global_comm_ranks)::value_type)>>);
     rcmpi = MPI_Allgatherv(local_comm_ranks.data(),
-                           global_brick_count[plan->get_local_comm_rank()],
+                           global_brick_count[get_local_comm_rank()],
                            type_to_mpi_type<typeof(decltype(local_comm_ranks)::value_type)>(),
                            global_comm_ranks.data(),
                            global_brick_count.data(),
                            scalar_displacements.data(),
                            type_to_mpi_type<typeof(decltype(global_comm_ranks)::value_type)>(),
-                           plan->desc.mpi_comm);
+                           mpi_comm);
     if(rcmpi != MPI_SUCCESS)
     {
         throw std::runtime_error("MPI_Allgatherv failed: " + std::to_string(rcmpi));
@@ -2608,32 +3216,29 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
 
     field.bricks.clear();
     field.bricks.reserve(num_global_bricks);
+    std::vector<size_t> brick_lower(global_brick_length);
+    std::vector<size_t> brick_upper(global_brick_length);
+    std::vector<size_t> brick_strides(global_brick_length);
     for(std::remove_const_t<decltype(num_global_bricks)> ibrick = 0; ibrick < num_global_bricks;
         ++ibrick)
     {
+        brick_lower.assign(global_lowers.data() + ibrick * global_brick_length,
+                           global_lowers.data() + (ibrick + 1) * global_brick_length);
+        brick_upper.assign(global_uppers.data() + ibrick * global_brick_length,
+                           global_uppers.data() + (ibrick + 1) * global_brick_length);
+        brick_strides.assign(global_strides.data() + ibrick * global_brick_length,
+                             global_strides.data() + (ibrick + 1) * global_brick_length);
         // Add bricks one by one.
-        rocfft_brick brick = nullptr;
-        auto         rcfft = rocfft_brick_create(&brick,
-                                         global_lowers.data() + ibrick * global_brick_length,
-                                         global_uppers.data() + ibrick * global_brick_length,
-                                         global_strides.data() + ibrick * global_brick_length,
-                                         global_brick_length,
-                                         global_devices[ibrick]); // device id
-        if(rcfft != rocfft_status_success)
-        {
-            return rcfft;
-        }
-        // It should be possible to get the brick comm rank from global_brick_count, but for now we
-        // can just communicate it and set it.
-        brick->location.comm_rank = global_comm_ranks[ibrick];
-        rocfft_field_add_brick(&field, brick);
-        rocfft_brick_destroy(brick);
-        brick = nullptr;
+        rocfft_brick_t brick{brick_lower,
+                             brick_upper,
+                             brick_strides,
+                             {global_comm_ranks[ibrick], global_devices[ibrick]}};
+        rocfft_field_add_brick_internal(field, brick);
     }
 
     return rocfft_status_success;
-#endif
 }
+#endif
 
 #if defined ROCFFT_MPI_ENABLE
 // Helper function to check that all of the values of a scalar are identical on all MPI ranks.
@@ -2657,12 +3262,12 @@ bool all_mpi_ranks_same_scalar(const Tval val, MPI_Comm comm)
 }
 #endif
 
-rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
+#ifdef ROCFFT_MPI_ENABLE
+rocfft_status rocfft_plan_description_t::allgather_brick_params_mpi()
 {
-#if !defined ROCFFT_MPI_ENABLE
-    return rocfft_status_failure;
-#else
-    if(!plan->desc.mpi_comm)
+    if(comm_type == rocfft_comm_none)
+        return rocfft_status_success;
+    if(!mpi_comm)
     {
         // If the comm type is MPI, but the comm pointer is null, then return an error.
         return rocfft_status_failure;
@@ -2676,36 +3281,36 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
 
     // Get the local brick array length.  If there are no bricks, this is zero.
     size_t local_bricklength = 0;
-    for(auto& ifield : plan->desc.inFields)
+    for(auto& ifield : inFields)
     {
         for(auto& ibrick : ifield.bricks)
         {
-            ibrick.location.comm_rank = plan->get_local_comm_rank();
+            ibrick.location.comm_rank = get_local_comm_rank();
             if(local_bricklength == 0)
             {
-                local_bricklength = ibrick.lower.size();
+                local_bricklength = ibrick.layout.get_full_rank();
             }
             else
             {
-                if(local_bricklength != ibrick.lower.size())
+                if(local_bricklength != ibrick.layout.get_full_rank())
                 {
                     return rocfft_status_failure;
                 }
             }
         }
     }
-    for(auto& ofield : plan->desc.outFields)
+    for(auto& ofield : outFields)
     {
         for(auto& obrick : ofield.bricks)
         {
-            obrick.location.comm_rank = plan->get_local_comm_rank();
+            obrick.location.comm_rank = get_local_comm_rank();
             if(local_bricklength == 0)
             {
-                local_bricklength = obrick.lower.size();
+                local_bricklength = obrick.layout.get_full_rank();
             }
             else
             {
-                if(local_bricklength != obrick.lower.size())
+                if(local_bricklength != obrick.layout.get_full_rank())
                 {
                     return rocfft_status_failure;
                 }
@@ -2719,14 +3324,14 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     // which is ok.  However, it should not build its house out of straw.
     size_t global_brick_length = 0;
     {
-        std::vector<decltype(local_bricklength)> all_brick_lengths(plan->get_local_comm_size());
+        std::vector<decltype(local_bricklength)> all_brick_lengths(get_local_comm_size());
         rcmpi = MPI_Allgather(&local_bricklength,
                               1,
                               type_to_mpi_type<typeof(local_bricklength)>(),
                               all_brick_lengths.data(),
                               1,
                               type_to_mpi_type<typeof(decltype(all_brick_lengths)::value_type)>(),
-                              plan->desc.mpi_comm);
+                              mpi_comm);
         if(rcmpi != MPI_SUCCESS)
         {
             throw std::runtime_error("MPI_Allgather failed: " + std::to_string(rcmpi));
@@ -2753,9 +3358,9 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     // Verify that all ranks have the same number of input and output fields.
     try
     {
-        if(!all_mpi_ranks_same_scalar(plan->desc.inFields.size(), plan->desc.mpi_comm))
+        if(!all_mpi_ranks_same_scalar(inFields.size(), mpi_comm))
             return rocfft_status_failure;
-        if(!all_mpi_ranks_same_scalar(plan->desc.outFields.size(), plan->desc.mpi_comm))
+        if(!all_mpi_ranks_same_scalar(outFields.size(), mpi_comm))
             return rocfft_status_failure;
     }
     catch(std::exception& e)
@@ -2768,17 +3373,17 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     }
 
     // Communicate the brick info so that all ranks know about all the bricks.
-    for(auto& field : plan->desc.inFields)
+    for(auto& field : inFields)
     {
-        const auto rcfft = allgather_brick_params_lus_mpi(plan, field, global_brick_length);
+        const auto rcfft = allgather_brick_params_lus_mpi(field, global_brick_length);
         if(rcfft != rocfft_status_success)
         {
             return rcfft;
         }
     }
-    for(auto& field : plan->desc.outFields)
+    for(auto& field : outFields)
     {
-        const auto rcfft = allgather_brick_params_lus_mpi(plan, field, global_brick_length);
+        const auto rcfft = allgather_brick_params_lus_mpi(field, global_brick_length);
         if(rcfft != rocfft_status_success)
         {
             return rcfft;
@@ -2789,84 +3394,17 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
     // sub-communicator.  Need to figure out how to deal with completion though.
 
     return rocfft_status_success;
+}
 #endif
-}
 
-void rocfft_plan_t::ValidateFields() const
-{
-    auto validateField = [](const char*                type,
-                            const std::vector<size_t>& lengths,
-                            size_t                     batch,
-                            const rocfft_field_t&      field) {
-        // make sure all bricks have enough dimensions (FFT + batch dimensions)
-        for(const auto& b : field.bricks)
-        {
-            if(b.lower.size() != lengths.size() + 1 || b.upper.size() != lengths.size() + 1
-               || b.stride.size() != lengths.size() + 1)
-                throw std::runtime_error(std::string(type)
-                                         + " brick has wrong number of dimensions, expected "
-                                         + std::to_string(lengths.size() + 1));
-        }
-
-        // construct a brick that covers the whole field
-        rocfft_brick_t whole_field;
-        whole_field.lower.resize(lengths.size() + 1);
-        whole_field.upper = lengths;
-        whole_field.upper.push_back(batch);
-
-        // ensure no bricks in the field overlap - check each brick
-        // against each other brick
-        for(auto brickI = field.bricks.begin(); brickI != field.bricks.end(); ++brickI)
-        {
-            for(auto brickJ = brickI + 1; brickJ != field.bricks.end(); ++brickJ)
-            {
-                if(!brickI->intersect(*brickJ).empty())
-                {
-                    throw std::runtime_error(std::string(type) + " brick " + brickI->str()
-                                             + " overlaps with brick " + brickJ->str());
-                }
-            }
-
-            // ensure each brick is within the field
-            if(!brickI->equal_coords(brickI->intersect(whole_field)))
-                throw std::runtime_error(std::string(type) + " brick " + brickI->str()
-                                         + " is not within field");
-        }
-
-        // check that the bricks cover the whole index space
-        const size_t whole_field_elems = whole_field.count_elems();
-
-        // add up total number of elements in all bricks,
-        // should be the same since we know there are no
-        // overlaps
-        size_t total_brick_elems = 0;
-        for(const auto& b : field.bricks)
-            total_brick_elems += b.count_elems();
-        if(whole_field_elems != total_brick_elems)
-            throw std::runtime_error(std::string(type) + " field has "
-                                     + std::to_string(whole_field_elems) + " elems but bricks have "
-                                     + std::to_string(total_brick_elems) + " elems");
-    };
-
-    if(!desc.inFields.empty())
-        validateField("input", lengths, batch, desc.inFields.front());
-    if(!desc.outFields.empty())
-        validateField("output", outputLengths, batch, desc.outFields.front());
-
-    // multi-process transforms must use fields for both input and output
-    if(desc.comm_type != rocfft_comm_none && (desc.inFields.empty() || desc.outFields.empty()))
-        throw std::runtime_error(
-            "multi-process transforms require both input and output fields to be specified");
-}
-
-int rocfft_plan_t::get_local_comm_rank() const
+int rocfft_plan_description_t::get_local_comm_rank() const
 {
 #ifdef ROCFFT_MPI_ENABLE
-    if(desc.comm_type == rocfft_comm_none || !desc.mpi_comm)
+    if(comm_type == rocfft_comm_none || !mpi_comm)
         return 0;
 
     int  mpi_rank = 0;
-    auto rcmpi    = MPI_Comm_rank(desc.mpi_comm, &mpi_rank);
+    auto rcmpi    = MPI_Comm_rank(mpi_comm, &mpi_rank);
     if(rcmpi != MPI_SUCCESS)
         throw std::runtime_error("MPI_Comm_rank failed: " + std::to_string(rcmpi));
     return mpi_rank;
@@ -2875,14 +3413,14 @@ int rocfft_plan_t::get_local_comm_rank() const
 #endif
 }
 
-int rocfft_plan_t::get_local_comm_size() const
+int rocfft_plan_description_t::get_local_comm_size() const
 {
 #ifdef ROCFFT_MPI_ENABLE
-    if(desc.comm_type == rocfft_comm_none || !desc.mpi_comm)
+    if(comm_type == rocfft_comm_none || !mpi_comm)
         return 1;
 
     int  mpi_size = 0;
-    auto rcmpi    = MPI_Comm_size(desc.mpi_comm, &mpi_size);
+    auto rcmpi    = MPI_Comm_size(mpi_comm, &mpi_size);
     if(rcmpi != MPI_SUCCESS)
         throw std::runtime_error("MPI_Comm_rank failed: " + std::to_string(rcmpi));
     return mpi_size;
@@ -2900,49 +3438,24 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
                                           const size_t                  number_of_transforms,
                                           const rocfft_plan_description description)
 {
+#ifdef ROCFFT_MPI_ENABLE
+// TODO allgather for placement, transform_type, precision, dimensions, {lengths}, and
+// number_of_transforms and validate that all ranks' args are identical, before proceeding
+#endif
     if(dimensions > 3)
         return rocfft_status_invalid_dimensions;
-
     try
     {
-        plan->rank = dimensions;
-        std::copy(lengths, lengths + dimensions, std::back_inserter(plan->lengths));
-        plan->batch         = number_of_transforms;
         plan->placement     = placement;
         plan->precision     = precision;
         plan->transformType = transform_type;
 
-        plan->outputLengths = plan->lengths;
-        if(transform_type == rocfft_transform_type_real_forward
-           || transform_type == rocfft_transform_type_real_inverse)
-        {
-            plan->outputLengths.front() = plan->outputLengths.front() / 2 + 1;
-        }
-        if(transform_type == rocfft_transform_type_real_inverse)
-            std::swap(plan->outputLengths, plan->lengths);
-
-        if(description != nullptr)
+        if(description)
         {
             plan->desc = *description;
         }
-        plan->desc.init_defaults(
-            plan->transformType, plan->placement, plan->lengths, plan->outputLengths);
-
-        auto rcfft = rocfft_status_success;
-
-        if(plan->desc.comm_type == rocfft_comm_mpi)
-        {
-            // Each rank needs to know the global data distribution for plan generation, so we
-            // gather all the brick information here.
-            rcfft = allgather_brick_params_mpi(plan);
-            if(rcfft != rocfft_status_success)
-                throw std::runtime_error("gather brick params failed");
-        }
-
-        // Sort the parameters to be row major, in case they're not
-        plan->sort();
-
-        rcfft = check_array_type_validity(plan);
+        const auto rcfft = plan->desc.finalize_and_validate_for(
+            transform_type, placement, lengths, dimensions, number_of_transforms);
         if(rcfft != rocfft_status_success)
             return rcfft;
 
@@ -2950,11 +3463,8 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
 
         // Construct the plan
 
-        // Build an optimized multi-device plan, if possible
-        plan->ValidateFields();
-
         // If we have no input/output fields, then the single ExecPlan is
-        // exactly what we need to do/
+        // exactly what we need to do.
         // FIXME: this check should actually be single-brick/no bricks.
         if(plan->desc.inFields.empty() && plan->desc.outFields.empty())
         {
@@ -3186,13 +3696,14 @@ try
     rocfft_cout << std::endl;
     rocfft_cout << std::endl;
 
-    rocfft_cout << "dimensions: " << plan->rank << std::endl;
+    rocfft_cout << "dimensions: " << plan->desc.rank() << std::endl;
 
-    rocfft_cout << "lengths: " << plan->lengths[0];
-    for(size_t i = 1; i < plan->rank; i++)
-        rocfft_cout << ", " << plan->lengths[i];
+    const auto lengths = plan->get_user_facing_lengths();
+    rocfft_cout << "lengths: " << lengths[0];
+    for(size_t i = 1; i < plan->desc.rank(); i++)
+        rocfft_cout << ", " << lengths[i];
     rocfft_cout << std::endl;
-    rocfft_cout << "batch size: " << plan->batch << std::endl;
+    rocfft_cout << "batch size: " << plan->desc.batch() << std::endl;
     rocfft_cout << std::endl;
 
     rocfft_cout << "input offset: " << plan->desc.inOffset[0];
@@ -3208,18 +3719,22 @@ try
     rocfft_cout << std::endl;
     rocfft_cout << std::endl;
 
-    rocfft_cout << "input strides: " << plan->desc.inStrides[0];
-    for(size_t i = 1; i < plan->rank; i++)
-        rocfft_cout << ", " << plan->desc.inStrides[i];
+    const auto input_strides = plan->desc.input_layout.strides();
+    if(!input_strides.empty())
+        rocfft_cout << "input strides: " << input_strides[0];
+    for(size_t i = 1; i < input_strides.size(); i++)
+        rocfft_cout << ", " << input_strides[i];
     rocfft_cout << std::endl;
 
-    rocfft_cout << "output strides: " << plan->desc.outStrides[0];
-    for(size_t i = 1; i < plan->rank; i++)
-        rocfft_cout << ", " << plan->desc.outStrides[i];
+    const auto output_strides = plan->desc.output_layout.strides();
+    if(!output_strides.empty())
+        rocfft_cout << "output strides: " << output_strides[0];
+    for(size_t i = 1; i < output_strides.size(); i++)
+        rocfft_cout << ", " << output_strides[i];
     rocfft_cout << std::endl;
 
-    rocfft_cout << "input distance: " << plan->desc.inDist << std::endl;
-    rocfft_cout << "output distance: " << plan->desc.outDist << std::endl;
+    rocfft_cout << "input distance: " << plan->desc.input_layout.distance() << std::endl;
+    rocfft_cout << "output distance: " << plan->desc.output_layout.distance() << std::endl;
     rocfft_cout << std::endl;
 
     plan->desc.loadOps.print(rocfft_cout, {});
@@ -3237,12 +3752,13 @@ ROCFFT_EXPORT rocfft_status rocfft_get_version_string(char* buf, const size_t le
 try
 {
     log_trace(__func__, "buf", static_cast<void*>(buf), "len", len);
-    static constexpr char v[] = ROCFFT_VERSION_STRING;
+    // include nul terminator
+    const auto version_len = std::strlen(ROCFFT_VERSION_STRING) + 1;
     if(!buf)
         return rocfft_status_failure;
-    if(len < sizeof(v))
+    if(len < version_len)
         return rocfft_status_invalid_arg_value;
-    memcpy(buf, v, sizeof(v));
+    std::memcpy(buf, ROCFFT_VERSION_STRING, version_len);
     return rocfft_status_success;
 }
 catch(...)
@@ -3313,24 +3829,23 @@ void TreeNode::CopyNodeData(const TreeNode& srcNode)
     length    = srcNode.length;
     if(!srcNode.outputLength.empty())
         outputLength = srcNode.outputLength;
-    inStride         = srcNode.inStride;
-    inStrideBlue     = srcNode.inStrideBlue;
-    outStride        = srcNode.outStride;
-    outStrideBlue    = srcNode.outStrideBlue;
-    iDist            = srcNode.iDist;
-    iDistBlue        = srcNode.iDistBlue;
-    oDist            = srcNode.oDist;
-    oDistBlue        = srcNode.oDistBlue;
-    iOffset          = srcNode.iOffset;
-    oOffset          = srcNode.oOffset;
-    placement        = srcNode.placement;
-    precision        = srcNode.precision;
-    applyPartialPass = srcNode.applyPartialPass;
-    direction        = srcNode.direction;
-    inArrayType      = srcNode.inArrayType;
-    outArrayType     = srcNode.outArrayType;
-    allowInplace     = srcNode.allowInplace;
-    allowOutofplace  = srcNode.allowOutofplace;
+    inStride        = srcNode.inStride;
+    inStrideBlue    = srcNode.inStrideBlue;
+    outStride       = srcNode.outStride;
+    outStrideBlue   = srcNode.outStrideBlue;
+    iDist           = srcNode.iDist;
+    iDistBlue       = srcNode.iDistBlue;
+    oDist           = srcNode.oDist;
+    oDistBlue       = srcNode.oDistBlue;
+    iOffset         = srcNode.iOffset;
+    oOffset         = srcNode.oOffset;
+    placement       = srcNode.placement;
+    precision       = srcNode.precision;
+    direction       = srcNode.direction;
+    inArrayType     = srcNode.inArrayType;
+    outArrayType    = srcNode.outArrayType;
+    allowInplace    = srcNode.allowInplace;
+    allowOutofplace = srcNode.allowOutofplace;
 
     // conditional
     large1D        = srcNode.large1D;
@@ -3361,22 +3876,21 @@ void TreeNode::CopyNodeData(const NodeMetaData& data)
     length    = data.length;
     if(!data.outputLength.empty())
         outputLength = data.outputLength;
-    inStride         = data.inStride;
-    inStrideBlue     = data.inStrideBlue;
-    outStride        = data.outStride;
-    outStrideBlue    = data.outStrideBlue;
-    iDist            = data.iDist;
-    iDistBlue        = data.iDistBlue;
-    oDist            = data.oDist;
-    oDistBlue        = data.oDistBlue;
-    iOffset          = data.iOffset;
-    oOffset          = data.oOffset;
-    placement        = data.placement;
-    precision        = data.precision;
-    applyPartialPass = data.applyPartialPass;
-    direction        = data.direction;
-    inArrayType      = data.inArrayType;
-    outArrayType     = data.outArrayType;
+    inStride      = data.inStride;
+    inStrideBlue  = data.inStrideBlue;
+    outStride     = data.outStride;
+    outStrideBlue = data.outStrideBlue;
+    iDist         = data.iDist;
+    iDistBlue     = data.iDistBlue;
+    oDist         = data.oDist;
+    oDistBlue     = data.oDistBlue;
+    iOffset       = data.iOffset;
+    oOffset       = data.oOffset;
+    placement     = data.placement;
+    precision     = data.precision;
+    direction     = data.direction;
+    inArrayType   = data.inArrayType;
+    outArrayType  = data.outArrayType;
 }
 
 bool TreeNode::isPlacementAllowed(rocfft_result_placement test_placement) const
@@ -3434,7 +3948,7 @@ void TreeNode::RecursiveBuildTree(SchemeTree* solution_scheme)
     SchemeTreeVec& child_scheme
         = (solution_scheme) ? solution_scheme->children : EmptySchemeTreeVec;
 
-    // overriden by each derived class
+    // overridden by each derived class
     BuildTree_internal(child_scheme);
 }
 
@@ -3551,7 +4065,7 @@ void TreeNode::ApplyFusion()
             this->RecursiveInsertNode(firstFusedNode, fused);
 
             // iterate from first to last to remove old nodes
-            fuse->ForEachNode([=](TreeNode* node) { this->RecursiveRemoveNode(node); });
+            fuse->ForEachNode([=, this](TreeNode* node) { this->RecursiveRemoveNode(node); });
         }
     }
 
@@ -3861,8 +4375,10 @@ void TreeNode::Print(rocfft_ostream& os, const int indent) const
 
     os << indentStr << "Direct_to_from_Reg: " << PrintDirectToFromRegMode(dir2regMode);
     os << "\n";
-    loadOps.print(os, indentStr);
-    storeOps.print(os, indentStr);
+    if(loadOps)
+        loadOps->print(os, indentStr);
+    if(storeOps)
+        storeOps->print(os, indentStr);
 
     os << indentStr << PrintOperatingBuffer(obIn) << " -> " << PrintOperatingBuffer(obOut) << "\n";
     os << indentStr << PrintOperatingBufferCode(obIn) << " -> " << PrintOperatingBufferCode(obOut)
@@ -3970,6 +4486,17 @@ TreeNode* TreeNode::GetRealEvenAncestor()
 
     // Otherwise keep looking up the tree
     return parent->GetRealEvenAncestor();
+}
+
+TreeNode* TreeNode::GetPartialPassAncestor() const
+{
+    if(!parent)
+        return nullptr;
+
+    if(parent->scheme == CS_3D_PP)
+        return parent;
+
+    return parent->GetPartialPassAncestor();
 }
 
 bool TreeNode::IsRootPlanC2CTransform()
@@ -4231,7 +4758,7 @@ std::unique_ptr<SchemeTree>
         size_t       kernel_option  = sol_node.solution_childnodes[0].child_option;
         bool         tunable_kernel = (kernel_token != solution_map::KERNEL_TOKEN_BUILTIN_KERNEL);
 
-        // When tuning, we're runing through each bench
+        // When tuning, we're running through each bench
         // so we use the elaborated token (_leafnode_id_phase_id)
         if(TuningBenchmarker::GetSingleton().IsProcessingTuning() && tunable_kernel)
         {
@@ -4272,7 +4799,7 @@ std::unique_ptr<SchemeTree>
         execPlan.solution_kernels.push_back(kernel_node.kernel_key);
         curScheme->numKernels = 1;
 
-        // Keep the references, and after buffer-assignment and colapse-batch-dim,
+        // Keep the references, and after buffer-assignment and collapse-batch-dim,
         // we can save some info back to the kernel-configurations
         if(TuningBenchmarker::GetSingleton().IsProcessingTuning())
         {
@@ -4393,7 +4920,7 @@ void ProcessNode(ExecPlan& execPlan)
     {
         // When SanityCheck fails,
         // if solution_kernels is empty or rootScheme is nullptr,
-        // means this is nothing to do with solution map. Throw to terminate
+        // means this has nothing to do with solution map. Throw to terminate
         if(execPlan.solution_kernels.empty() || rootScheme == nullptr)
             throw;
         else
@@ -4413,7 +4940,7 @@ void ProcessNode(ExecPlan& execPlan)
     size_t chirpSize        = 0;
     execPlan.rootPlan->DetermineBufferMemory(tmpBufSize, cmplxForRealSize, blueSize, chirpSize);
 
-    if(execPlan.rootPlan->loadOps.enabled())
+    if(execPlan.rootPlan->loadOps && execPlan.rootPlan->loadOps->enabled())
     {
         // Load ops happen on first node that reads input
         auto load_node = std::find_if(
@@ -4423,7 +4950,7 @@ void ProcessNode(ExecPlan& execPlan)
         (*load_node)->loadOps = execPlan.rootPlan->loadOps;
     }
 
-    if(execPlan.rootPlan->storeOps.enabled())
+    if(execPlan.rootPlan->storeOps && execPlan.rootPlan->storeOps->enabled())
     {
         // Store ops happen on last node of the plan that writes
         // output

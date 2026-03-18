@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "internal/level2/rocsparse_csritsv.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csritsv.hpp"
+#include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
 extern "C" rocsparse_status rocsparse_csritsv_zero_pivot(rocsparse_handle          handle,
@@ -47,73 +48,43 @@ try
     ROCSPARSE_CHECKARG_POINTER(3, position);
 
     // Stream
-    hipStream_t stream = handle->stream;
+    auto       csritsv_info = info->csritsv_info;
+    const auto indextype    = rocsparse::get_indextype<rocsparse_int>();
 
-    // If m == 0 || nnz == 0 it can happen, that info structure is not created.
-    // In this case, always return -1.
-    if(info->zero_pivot == nullptr)
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
+        handle, 1, csritsv_info, nullptr, nullptr, handle->pointer_mode, indextype, position));
+    switch(indextype)
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, 0xFF, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            *position = -1;
-        }
-
-        return rocsparse_status_success;
-    }
-
-    // Differentiate between pointer modes
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
+    case rocsparse_indextype_i32:
     {
-        // rocsparse_pointer_mode_device
-        rocsparse_int zero_pivot;
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &zero_pivot, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-
-        // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        if(zero_pivot == std::numeric_limits<rocsparse_int>::max())
-        {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, 0xFF, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(position,
-                                               info->zero_pivot,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
-
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
-    }
-    else
-    {
-        // rocsparse_pointer_mode_host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(position,
-                                           info->zero_pivot,
-                                           sizeof(rocsparse_int),
-                                           hipMemcpyDeviceToHost,
-                                           handle->stream));
+        int32_t p;
+        RETURN_IF_HIP_ERROR(
+            hipMemcpyAsync(&p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
-
-        // If no zero pivot is found, set -1
-        if(*position == std::numeric_limits<rocsparse_int>::max())
+        if(p != -1)
         {
-
-            *position = -1;
+            return rocsparse_status_zero_pivot;
         }
-        else
+        break;
+    }
+    case rocsparse_indextype_i64:
+    {
+        int64_t p;
+        RETURN_IF_HIP_ERROR(
+            hipMemcpyAsync(&p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        if(p != -1)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
+            return rocsparse_status_zero_pivot;
         }
+        break;
     }
 
+    case rocsparse_indextype_u16:
+    {
+        break;
+    }
+    }
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -140,8 +111,11 @@ try
         handle, "rocsparse_csritsv_clear", (const void*&)descr, (const void*&)info);
 
     // Clear csritsv meta data (this includes lower, upper and their transposed equivalents
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csritsv_info(info->csritsv_info));
-    info->csritsv_info = nullptr;
+    if(info->csritsv_info != nullptr)
+    {
+        delete info->csritsv_info;
+        info->csritsv_info = nullptr;
+    }
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

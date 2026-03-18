@@ -30,7 +30,7 @@ to query for the storage buffer size, for example, :cpp:func:`rocsparse_scsrsv_b
 Library source code organization
 ================================
 
-This section discusses the structure of the rocSPARSE library in the `rocSPARSE GitHub repository <https://github.com/ROCm/rocSPARSE>`_.
+This section discusses the structure of the rocSPARSE library in the `rocSPARSE GitHub repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_.
 
 The library/include directory
 -----------------------------
@@ -185,32 +185,6 @@ and ``<subroutine>_device.h``.
        if(handle == nullptr)
        {
            return rocsparse_status_invalid_handle;
-       }
-
-       // Logging
-       if(handle->pointer_mode == rocsparse_pointer_mode_host)
-       {
-           log_trace(handle,
-                     rocsparse::replaceX<T>("rocsparse_Xsubroutine"),
-                     m,
-                     *alpha,
-                     (const void*&)val);
-
-           log_bench(handle,
-                     "./rocsparse-bench -f subroutine -r",
-                     rocsparse::replaceX<T>("X"),
-                     "-m",
-                     m,
-                     "--alpha",
-                     *alpha);
-       }
-       else
-       {
-           log_trace(handle,
-                     rocsparse::replaceX<T>("rocsparse_Xsubroutine"),
-                     m,
-                     (const void*&)alpha,
-                     (const void*&)val);
        }
 
        // Check size
@@ -426,6 +400,7 @@ Command-line option      Description
 ``col-blockdimA``        Specify the ``col-blockdimA`` parameter, for example, the column block dimension in GEBSR matrices.
 ``row-blockdimB``        Specify the ``row-blockdimB`` parameter, for example, the row block dimension in GEBSR matrices.
 ``col-blockdimB``        Specify the ``col-blockdimB`` parameter, for example, the column block dimension in GEBSR matrices.
+``slicesize``            Specify the ``slicesize`` parameter for sliced ELL matrices.
 ``mtx``                  Read from `MatrixMarket (.mtx) format <https://math.nist.gov/MatrixMarket/formats.html>`_. This overrides parameters ``m``, ``n``, and ``z``.
 ``rocalution``           Read from `rocALUTION format <https://github.com/ROCm/rocALUTION>`_. This overrides parameters ``m``, ``n``, ``z``, ``mtx``, and ``laplacian-dim``.
 ``laplacian-dim``        Assemble a 2D/3D Laplacian matrix with dimensions ``dimx``, ``dimy``, and ``dimz``. ``dimz`` is optional. This overrides parameters ``m``, ``n``, ``z``, and ``mtx``.

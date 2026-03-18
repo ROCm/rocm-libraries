@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,6 +41,7 @@
 
 #include "fmt_rocblas_types.hpp"
 #include "rocblas_utility.hpp"
+#include "rocsolver_datatype2string.hpp"
 
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_BEGIN_NAMESPACE
@@ -100,6 +101,12 @@ double get_time_us_sync(hipStream_t stream);
 /*! \brief  CPU Timer(in microsecond): no GPU synchronization and return wall
  * time */
 double get_time_us_no_sync();
+
+/* =============================================================================================== */
+/* Device query functions.                                                                         */
+
+/*! \brief Get warp size of the current device */
+int get_device_warp_size();
 
 /* =============================================================================================== */
 /* Print functions.                                                                                */

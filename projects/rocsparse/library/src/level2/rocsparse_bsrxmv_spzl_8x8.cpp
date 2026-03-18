@@ -48,8 +48,21 @@ namespace rocsparse
         int const local_j = threadIdx.x / block_size;
 
         int row = blockIdx.x * blockDim.y + threadIdx.y;
-        if(bsr_mask_ptr != nullptr)
+
+        // Do not run out of bounds
+        if(bsr_mask_ptr == nullptr)
         {
+            if(row >= mb)
+            {
+                return;
+            }
+        }
+        else
+        {
+            if(row >= size_of_mask)
+            {
+                return;
+            }
             row = bsr_mask_ptr[row] - idx_base;
         }
 
@@ -93,7 +106,7 @@ namespace rocsparse
             float f1 = fk;
 #pragma unroll 7
             for(int s = 1; s < 8; ++s)
-                f1 = f1 + __shfl(fk, local_i + s * block_size, 64);
+                f1 = f1 + rocsparse::shfl(fk, local_i + s * block_size, 64);
 
             f1 = beta * y[global_row] + alpha * f1;
             if(local_j == 0)
@@ -561,6 +574,18 @@ INSTANTIATE_MIXED(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(
+    float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(
+    float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE_MIXED(rocsparse_float_complex,
                   int32_t,
                   int32_t,

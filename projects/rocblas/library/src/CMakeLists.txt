@@ -162,6 +162,10 @@ set(rocblas_ex_source_no_tensile
     blas_ex/rocblas_trsv_ex.cpp
     blas_ex/rocblas_trsv_strided_batched_ex.cpp
     blas_ex/rocblas_trsv_batched_ex.cpp
+    blas_ex/rocblas_syrk_ex.cpp
+    blas_ex/rocblas_syrk_ex_kernels.cpp
+    blas_ex/rocblas_herk_ex.cpp
+    blas_ex/rocblas_herk_ex_kernels.cpp
 )
 
 set( rocblas_blas3_source_no_tensile
@@ -690,13 +694,7 @@ if( BUILD_WITH_TENSILE )
   endif()
 
   if(BUILD_WITH_HIPBLASLT)
-    target_include_directories( rocblas
-      SYSTEM BEFORE PRIVATE
-        $<BUILD_INTERFACE:${HIPBLASLT_INCLUDE_DIR}>
-    )
-    if( BUILD_SHARED_LIBS )
-      target_link_libraries( rocblas PRIVATE roc::hipblaslt )
-    endif()
+    target_link_libraries( rocblas PRIVATE roc::hipblaslt )
   endif()
 
   if( NOT BUILD_SHARED_LIBS )
@@ -758,7 +756,7 @@ file( GLOB rocblas_prototype_inputs
 )
 set( ROCBLAS_PROTO_TEMPLATES "${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-exported-proto.hpp" )
 add_custom_command(OUTPUT ${ROCBLAS_PROTO_TEMPLATES}
-  COMMAND ${python} template-proto.py ${CMAKE_CURRENT_SOURCE_DIR}/include/ ${CMAKE_CURRENT_SOURCE_DIR}/blas3/Tensile/ ${CMAKE_CURRENT_SOURCE_DIR}/blas3/ ${CMAKE_CURRENT_SOURCE_DIR}/blas2/ ${CMAKE_CURRENT_SOURCE_DIR}/blas1/ ${CMAKE_CURRENT_SOURCE_DIR}/src64/blas3/ ${CMAKE_CURRENT_SOURCE_DIR}/src64/blas2/ ${CMAKE_CURRENT_SOURCE_DIR}/src64/blas1/ > ${ROCBLAS_PROTO_TEMPLATES}
+  COMMAND ${Python3_EXECUTABLE} template-proto.py ${CMAKE_CURRENT_SOURCE_DIR}/include/ ${CMAKE_CURRENT_SOURCE_DIR}/blas3/Tensile/ ${CMAKE_CURRENT_SOURCE_DIR}/blas3/ ${CMAKE_CURRENT_SOURCE_DIR}/blas2/ ${CMAKE_CURRENT_SOURCE_DIR}/blas1/ ${CMAKE_CURRENT_SOURCE_DIR}/src64/blas3/ ${CMAKE_CURRENT_SOURCE_DIR}/src64/blas2/ ${CMAKE_CURRENT_SOURCE_DIR}/src64/blas1/ > ${ROCBLAS_PROTO_TEMPLATES}
   #DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/blas3/Tensile/ ${CMAKE_CURRENT_SOURCE_DIR}/blas3/ ${CMAKE_CURRENT_SOURCE_DIR}/blas2/ ${CMAKE_CURRENT_SOURCE_DIR}/blas1/
   DEPENDS ${rocblas_prototype_inputs}
   COMMENT "Generating prototypes from ${CMAKE_CURRENT_SOURCE_DIR}."
@@ -788,7 +786,7 @@ if( NOT BUILD_SHARED_LIBS )
   if( BUILD_WITH_TENSILE )
     add_custom_command( TARGET rocblas POST_BUILD
       COMMAND
-        ${python} ${CMAKE_CURRENT_SOURCE_DIR}/merge_archives.py
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/merge_archives.py
       ARGS
         -v
         -o "$<TARGET_LINKER_FILE:rocblas>"

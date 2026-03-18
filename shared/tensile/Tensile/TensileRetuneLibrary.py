@@ -23,7 +23,6 @@
 ################################################################################
 
 from . import BenchmarkProblems
-from . import ClientExecutable
 from . import ClientWriter
 from . import LibraryIO
 from . import LibraryLogic
@@ -80,7 +79,7 @@ def parseCurrentLibrary(libPath, skipRK, sizePath):
 def runBenchmarking(solutions, problemSizes, outPath, update):
     # TODO some copy-pasting from BenchmarkProblems.benchmarkProblemType
     # could use a refactor to elimate duplicated code
-    ClientExecutable.getClientExecutable()
+    ClientWriter.getClientExecutablePath()
 
     shortName = "benchmark"
     benchmarkDir = os.path.join(outPath, shortName)
@@ -135,7 +134,7 @@ def TensileRetuneLibrary(userArgs):
     argParser.add_argument("SizeFile", type=os.path.realpath, nargs="?",
                            help="Yaml file with sizes to tune; same format as the 'ProblemSizes' "
                            "section of a regular Tensile config "
-                           "(https://github.com/ROCmSoftwarePlatform/Tensile/wiki/Benchmark-Protocol)",
+                           "(https://github.com/ROCm/Tensile/wiki/Benchmark-Protocol)",
                            default=None)
     argParser.add_argument("--update-method", "-u", dest="updateMethod",
                            choices=["remake", "update", "both"], default="remake",

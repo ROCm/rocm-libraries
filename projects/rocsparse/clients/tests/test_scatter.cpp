@@ -26,7 +26,7 @@
 
 TEST_ROUTINE_WITH_CONFIG(scatter,
                          level1,
-                         rocsparse_test_config_it_plus_int8_float16,
+                         rocsparse_test_config_it_gather_scatter,
                          arg.M,
                          arg.nnz,
                          arg.baseA,

@@ -79,7 +79,7 @@ void testing_gemm_bad_arg(const Arguments& arg)
     device_matrix<T> dC(M, N, ldc);
 
     device_vector<T> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts               h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
+    Ts               h_alpha{1.0f}, h_beta{2.0f}, h_one{1.0f}, h_zero{0.0f};
 
     if constexpr(std::is_same_v<T, hipblasHalf>)
         h_one = float_to_half(1.0f);
@@ -319,7 +319,7 @@ void testing_gemm(const Arguments& arg)
         return;
     }
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Naming: `h` is in CPU (host) memory(eg hA), `d` is in GPU (device) memory (eg dA).
     // Allocate host memory
@@ -430,9 +430,9 @@ void testing_gemm(const Arguments& arg)
         if(arg.norm_check)
         {
             hipblas_error_host
-                = hipblas_abs(norm_check_general<T>('F', M, N, ldc, hC_cpu, hC_host));
-            hipblas_error_device
-                = hipblas_abs(norm_check_general<T>('F', M, N, ldc, hC_cpu, hC_device));
+                = hipblas_abs(norm_check_general<T>('F', M, N, ldc, hC_cpu.data(), hC_host.data()));
+            hipblas_error_device = hipblas_abs(
+                norm_check_general<T>('F', M, N, ldc, hC_cpu.data(), hC_device.data()));
         }
 
     } // end of if unit/norm check

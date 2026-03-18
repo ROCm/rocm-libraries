@@ -45,11 +45,19 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
+#if __has_include(<valgrind/valgrind.h>)
+    #include <valgrind/valgrind.h>
+    #define HAS_VALGRIND_H 1
+#else
+    #define HAS_VALGRIND_H 0
+#endif
+
 #define HIP_CHECK_MEMORY(condition)                                                         \
     {                                                                                       \
         hipError_t error = condition;                                                       \
         if(error == hipErrorOutOfMemory)                                                    \
         {                                                                                   \
+            (void) hipGetLastError();                                                       \
             std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
             break;                                                                          \
         }                                                                                   \

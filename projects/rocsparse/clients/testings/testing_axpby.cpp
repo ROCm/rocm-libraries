@@ -64,8 +64,8 @@ void testing_axpby(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, size + base);
-    rocsparse_init<X>(hx_val, 1, nnz, 1);
-    rocsparse_init<Y>(hy_1, 1, size, 1);
+    rocsparse_init<X>(hx_val, 1, nnz, 1, arg.convert_to_int);
+    rocsparse_init<Y>(hy_1, 1, size, 1, arg.convert_to_int);
     hy_2    = hy_1;
     hy_gold = hy_1;
 
@@ -151,11 +151,13 @@ void testing_axpby(const Arguments& arg)
     template void testing_axpby_bad_arg<ITYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg); \
     template void testing_axpby<ITYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg)
 
+INSTANTIATE(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, _Float16, _Float16, float);
 INSTANTIATE(int32_t, float, float, float);
 INSTANTIATE(int32_t, double, double, double);
 INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex, rocsparse_double_complex);
+INSTANTIATE(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(int64_t, _Float16, _Float16, float);
 INSTANTIATE(int64_t, float, float, float);
 INSTANTIATE(int64_t, double, double, double);

@@ -9,6 +9,7 @@ Installing and building rocSPARSE for Linux
 ********************************************************************
 
 This topic describes how to install or build rocSPARSE on Linux by using prebuilt packages or building from source.
+For information on installing and building rocSPARSE on Microsoft Windows, see :doc:`rocSPARSE for Windows <./Windows_Install_Guide>`.
 
 Prerequisites
 =============
@@ -59,8 +60,8 @@ Building rocSPARSE from source also requires the following components and depend
 
 *  `git <https://git-scm.com/>`_
 *  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
-*  `rocPRIM <https://github.com/ROCm/rocPRIM>`_
-*  `rocBLAS <https://github.com/ROCm/rocBLAS>`_ (Optional: for the library)
+*  `rocPRIM <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim>`_
+*  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Optional: for the library)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 *  `Python <https://www.python.org/>`_
 *  `PyYAML <https://pypi.org/project/PyYAML/>`_
@@ -75,13 +76,38 @@ rocPRIM, such as 3.1.0, is not supported.
 Downloading rocSPARSE
 ----------------------
 
-The rocSPARSE source code is available from the `rocSPARSE GitHub <https://github.com/ROCm/rocSPARSE>`_.
-Download the develop branch using these commands:
+The rocSPARSE source code is available from the `rocSPARSE folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
+
+To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+.. note::
+
+   To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
 
 .. code-block:: shell
 
-   git clone -b develop https://github.com/ROCm/rocSPARSE.git
-   cd rocSPARSE
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocsparse
+   git checkout develop # or use the branch you want to work with
+
+To download the develop branch for all projects in rocm-libraries, use these commands. This process takes
+longer but is recommended for those working with a large number of libraries.
+
+.. code-block:: shell
+
+   git clone -b develop https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocsparse
+
+.. note::
+
+   To build ROCm 6.4.3 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building rocSPARSE using the install script
 -------------------------------------------
@@ -89,10 +115,20 @@ Building rocSPARSE using the install script
 It's recommended to use the ``install.sh`` script to install rocSPARSE.
 Here are the steps required to build different packages of the library, including the dependencies and clients.
 
+.. note::
+
+   You can run the ``install.sh`` script from the ``projects/rocsparse`` directory.
+
 Using install.sh to build rocSPARSE with dependencies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The following table lists the common ways to use ``install.sh`` to build the rocSPARSE dependencies and library.
+
+.. note::
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``install.sh`` script, use the ``no-rocblas`` option. 
 
 .. csv-table::
    :header: "Command","Description"
@@ -121,6 +157,7 @@ the library, dependencies, and clients are listed in the table below.
    "``./install.sh -ic``", "Build the library and client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -idc -a gfx908``", "Build the library specifically for the gfx908 architecture, build the dependencies and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic -a gfx908``", "Build the library specifically for the gfx908 architecture, build the client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
+   "``./install.sh -o``", "Build the client executables using an already installed version of the library."
 
 Building rocSPARSE using individual make commands
 -------------------------------------------------
@@ -129,6 +166,10 @@ The rocSPARSE library contains both host and device code, therefore, the HIP com
 must be specified during the CMake configuration process.
 
 You can build rocSPARSE using the following commands:
+
+.. note::
+
+   Run these commands from the ``projects/rocsparse`` directory.
 
 .. note::
 
@@ -192,7 +233,33 @@ after successfully compiling the library with the clients.
 .. code-block:: shell
 
       # Navigate to clients binary directory
-      cd rocSPARSE/build/release/clients/staging
+      cd build/release/clients/staging
 
       # Execute rocSPARSE example
       ./example_csrmv 1000
+
+For more comprehensive testing, you can run the entire unit test suite using the command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test
+
+For more focused testing, you can run a specific test by running the following command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test --gtest_filter=TestName
+
+.. warning::
+
+   The unit test suite is a comprehensive test of the rocSPARSE library and takes multiple hours to finish. Consider running 
+   more focused tests for quicker feedback.
+

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,7 +47,6 @@ namespace rocsparse
     template <rocsparse_int BLOCK_SIZE,
               rocsparse_int SEGMENTS_PER_BLOCK,
               rocsparse_int SEGMENT_SIZE,
-              rocsparse_int WF_SIZE,
               typename T>
     ROCSPARSE_DEVICE_ILF void nnz_compress_device(rocsparse_int        m,
                                                   rocsparse_index_base idx_base_A,
@@ -72,8 +71,7 @@ namespace rocsparse
             for(rocsparse_int i = start_A + segment_lane_id; i < end_A; i += SEGMENT_SIZE)
             {
                 const T value = csr_val_A[i];
-                if(rocsparse::abs(value) > rocsparse::real(tol)
-                   && rocsparse::abs(value) > std::numeric_limits<float>::min())
+                if(rocsparse::abs(value) > rocsparse::real(tol))
                 {
                     count++;
                 }
@@ -82,10 +80,11 @@ namespace rocsparse
             // last thread in segment will contain the total count after this call
             count = rocsparse::wfreduce_sum<SEGMENT_SIZE>(count);
 
-            // broadcast count from last thread in segment to all threads in segment
-            count = __shfl(count, SEGMENT_SIZE - 1, SEGMENT_SIZE);
-
-            nnz_per_row[row_index] = count;
+            // Only the last thread in segment writes to avoid redundant memory traffic
+            if(segment_lane_id == (SEGMENT_SIZE - 1))
+            {
+                nnz_per_row[row_index] = count;
+            }
         }
     }
 }

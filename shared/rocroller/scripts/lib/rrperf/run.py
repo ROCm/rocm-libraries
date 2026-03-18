@@ -1,108 +1,21 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Run a benchmark suite."""
 
 import argparse
 import datetime
+import importlib.util
 import os
 import subprocess
-import importlib.util
-
 from dataclasses import fields
 from itertools import chain
 from pathlib import Path
-from typing import Dict, Tuple
 
 import pandas as pd
 import rrperf
-import rrperf.args as args
-import rrperf.utils as utils
+import rrperf.dump_csv
 import yaml
-
-
-def empty():
-    yield from ()
-
-
-def load_suite(suite: str):
-    """Load performance suite from rrsuites.py."""
-    return getattr(rrperf.rrsuites, suite)()
-
-
-def first_problem_from_suite(suite: str):
-    for problem in load_suite(suite):
-        return problem
-    raise RuntimeError(f"Suite {suite} has no problems.")
-
-
-def try_getting_commit(repo):
-    if repo is not None:
-        try:
-            return rrperf.git.short_hash(repo)
-        except Exception:
-            pass
-    return None
-
-
-def get_commit(rundir: str = None, build_dir: Path = None) -> str:
-    commit = try_getting_commit(build_dir)
-    if commit is None:
-        commit = try_getting_commit(rundir)
-    if commit is None:
-        commit = try_getting_commit(".")
-    if commit is None:
-        commit = try_getting_commit(Path(__file__).resolve().parent)
-    if commit is None:
-        commit = "NO_COMMIT"
-    return commit
-
-
-def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
-    """Return a new work directory path."""
-
-    date = datetime.date.today().strftime("%Y-%m-%d")
-    root = "."
-    commit = get_commit(rundir, build_dir)
-
-    if rundir is not None:
-        root = Path(rundir)
-
-    serial = len(list(Path(root).glob(f"{date}-{commit}-*")))
-    return root / Path(f"{date}-{commit}-{serial:03d}")
-
-
-def get_build_dir() -> Path:
-    varname = "ROCROLLER_BUILD_DIR"
-    if varname in os.environ:
-        return Path(os.environ[varname])
-    default = rrperf.git.top() / "build"
-    if default.is_dir():
-        return default
-
-    raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
 
 
 def submit_directory(suite: str, wrkdir: Path, ptsdir: Path) -> None:
@@ -125,7 +38,12 @@ def from_token(token: str):
 
 
 def run_problems(
-    generator, build_dir: Path, work_dir: Path, env: Dict[str, str]
+    generator,
+    build_dir: Path,
+    work_dir: Path,
+    env: dict[str, str],
+    id_filter: list[str],
+    l2: bool,
 ) -> bool:
 
     SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -135,25 +53,39 @@ def run_problems(
     failed = []
 
     for i, problem in enumerate(generator):
-        if filter is not None:
-            pass
+        if id_filter is not None and not any(
+            problem.id.startswith(filt) for filt in id_filter
+        ):
+            continue
 
         if problem in already_run:
             continue
 
+        id = getattr(problem, "id", None)
         yaml = (work_dir / f"{problem.group}-{i:06d}.yaml").resolve()
         problem.set_output(yaml)
         cmd = problem.command()
-        scmd = " ".join(cmd)
         log = yaml.with_suffix(".log")
         rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}
         rr_env_str = " ".join([f"{k}={v}" for k, v in rr_env.items()])
 
+        if l2:
+            counters = str(yaml.resolve().parent / yaml.stem)
+            cmd = [
+                "rocprofv3",
+                "--pmc=TCC_HIT,TCC_MISS",
+                "--output-file=" + counters,
+                "--output-format=json",
+                "--",
+            ] + cmd
+
         with log.open("w") as f:
+            scmd = " ".join(cmd)
             print(f"# env: {rr_env_str}", file=f, flush=True)
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
+            print(f"  id: {id}")
             print(f"  command: {scmd}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
@@ -162,7 +94,7 @@ def run_problems(
             if p.returncode == 0:
                 status = "ok"
             elif p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
-                status = "skipped (not supported on " + utils.rocm_gfx() + ")"
+                status = "skipped (not supported on " + rrperf.utils.rocm_gfx() + ")"
             else:
                 status = "error"
                 result = False
@@ -172,12 +104,49 @@ def run_problems(
         already_run.add(problem)
 
     if len(failed) > 0:
+        ids = [getattr(problem, "id", None) for i, problem in failed]
+        print("")
+        print(f"Failed {len(failed)} problems ids:")
+        print(" ".join([str(id) for id in ids]))
+        print("")
         print(f"Failed {len(failed)} problems:")
         for i, problem in failed:
             cmd = list(map(str, problem.command()))
             print(f"{i}: {' '.join(cmd)}")
 
     return result
+
+
+def generate_missing_attr_value(run, attr):
+    """Generate value for an option missing in previous rrperf version."""
+    match attr:
+        case "workgroupMapping":
+            wgm_dim = getattr(run, "workgroupMappingDim")
+            wgm_value = getattr(run, "workgroupMappingValue")
+            return (wgm_dim, wgm_value)
+        case "matchMemoryAccess":
+            return True
+        case "unroll_x" | "unroll_y":
+            return 0
+        case "storeLDS_D":
+            store = getattr(run, "store")
+            return "LDS" in store
+        case "streamK":
+            # Old version used bool, new version uses str
+            streamK = getattr(run, "streamK", "None")
+            if isinstance(streamK, str):
+                return streamK != "None"
+            return streamK
+        case "streamKTwoTile":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTile"
+        case "streamKTwoTileDPFirst":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTileDPFirst"
+        case _:
+            raise RuntimeError(
+                f"Cannot handle attribute missing in previous rrperf version: {attr}"
+            )
 
 
 def backcast(generator, build_dir):
@@ -191,15 +160,23 @@ def backcast(generator, build_dir):
         backClass = getattr(module, className, None)
         if backClass is not None:
             backObj = backClass(
-                **{f.name: getattr(run, f.name) for f in fields(backClass)}
+                **{
+                    f.name: (
+                        getattr(run, f.name)
+                        if hasattr(run, f.name)
+                        else generate_missing_attr_value(run, f.name)
+                    )
+                    for f in fields(backClass)
+                }
             )
             yield backObj
 
 
 def get_args(parser: argparse.ArgumentParser):
     common_args = [
-        args.rundir,
-        args.suite,
+        rrperf.args.rundir,
+        rrperf.args.suite,
+        rrperf.args.id_filter,
     ]
     for arg in common_args:
         arg(parser)
@@ -211,7 +188,6 @@ def get_args(parser: argparse.ArgumentParser):
         default=False,
     )
     parser.add_argument("--token", help="Benchmark token to run.")
-    parser.add_argument("--filter", help="Filter benchmarks...")
     parser.add_argument(
         "--rocm_smi",
         default="rocm-smi",
@@ -222,6 +198,17 @@ def get_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Pin clocks before launching benchmark clients.",
     )
+    parser.add_argument(
+        "--l2",
+        action="store_true",
+        help="Collect L2 performance counters (TCC_HIT and TCC_MISS).",
+    )
+    parser.add_argument(
+        "--dump_csv",
+        help="Dump benchmark CSV with included headers.",
+        action="store_true",
+        default=False,
+    )
 
 
 def run(args):
@@ -229,18 +216,19 @@ def run(args):
     run_cli(**args.__dict__)
 
 
-def run_cli(
+def run_cli(  # noqa: C901
     token: str = None,
     suite: str = None,
     submit: bool = False,
-    filter: str = None,
+    id_filter: list[str] = None,
     rundir: str = None,
     build_dir: str = None,
     rocm_smi: str = "rocm-smi",
     pin_clocks: bool = False,
     recast: bool = False,
+    l2: bool = False,
     **kwargs,
-) -> Tuple[bool, Path]:
+) -> tuple[bool, Path]:
     """Run benchmarks!
 
     Implements the CLI 'run' subcommand.
@@ -250,25 +238,29 @@ def run_cli(
         rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
-        suite = "all_gfx120X" if utils.rocm_gfx().startswith("gfx120") else "all"
+        if rrperf.utils.rocm_gfx().startswith("gfx120"):
+            suite = "all_gfx120X"
+        else:
+            suite = "all"
 
-    generator = empty()
+    generator = rrperf.utils.empty()
     if suite is not None:
-        generator = chain(generator, load_suite(suite))
+        generator = chain(generator, rrperf.utils.load_suite(suite))
     if token is not None:
         generator = chain(generator, from_token(token))
     if recast:
         generator = backcast(generator, build_dir)
 
     if build_dir is None:
-        build_dir = get_build_dir()
+        build_dir = rrperf.utils.get_build_dir()
     else:
         build_dir = Path(build_dir)
 
     env = dict(os.environ)
     env["ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS"] = "1"
+    env["ROCROLLER_AUDIT_CONTROL_TRACERS"] = "1"
 
-    rundir = get_work_dir(rundir, build_dir)
+    rundir = rrperf.utils.get_work_dir(rundir, build_dir)
     rundir.mkdir(parents=True, exist_ok=True)
 
     # pts.create_git_info(str(wrkdir / "git-commit.txt"))
@@ -285,7 +277,7 @@ def run_cli(
     timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    result = run_problems(generator, build_dir, rundir, env)
+    result = run_problems(generator, build_dir, rundir, env, id_filter, l2)
 
     if submit:
         ptsdir = rundir / "rocRoller"
@@ -293,12 +285,7 @@ def run_cli(
         # XXX if running single token, suite might be None
         submit_directory(suite, rundir, ptsdir)
 
+    if kwargs.get("dump_csv", False):
+        rrperf.dump_csv.dump_csv(suite, rundir)
+
     return result, rundir
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    get_args(parser)
-
-    parsed_args = parser.parse_args()
-    run(parsed_args)

@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,15 +58,19 @@ struct threefry_device_engine : public BaseType
     static inline constexpr unsigned int vector_dim
         = static_cast<unsigned int>(cpp_utils::vector_size_v<vector_type>);
 
-    __forceinline__ __device__ __host__ threefry_device_engine() {}
+    __forceinline__ __device__ __host__
+    threefry_device_engine()
+    {}
 
-    __forceinline__ __device__ __host__ threefry_device_engine(const unsigned long long seed,
-                                                               const unsigned long long subsequence,
-                                                               const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    threefry_device_engine(const unsigned long long seed,
+                           const unsigned long long subsequence,
+                           const unsigned long long offset)
         : base_type(seed, subsequence, offset)
     {}
 
-    __forceinline__ __device__ __host__ vector_type next_leap(unsigned int leap)
+    __forceinline__ __device__ __host__
+    vector_type next_leap(unsigned int leap)
     {
         vector_type ret = this->m_state.result;
         if(this->m_state.substate > 0)
@@ -85,119 +89,125 @@ struct threefry_device_engine : public BaseType
 };
 
 template<class Engine, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_threefry(dim3         block_idx,
-                                                           dim3         thread_idx,
-                                                           dim3         grid_dim,
-                                                           dim3         block_dim,
-                                                           Engine       engine,
-                                                           T*           data,
-                                                           const size_t n,
-                                                           Distribution distribution)
+struct generate_threefry
 {
-    using engine_scalar_type = typename Engine::scalar_type;
-
-    constexpr unsigned int input_width  = Distribution::input_width;
-    constexpr unsigned int output_width = Distribution::output_width;
-    constexpr unsigned int vector_dim   = Engine::vector_dim;
-
-    static_assert(vector_dim % input_width == 0 && input_width <= vector_dim,
-                  "Incorrect input_width");
-    constexpr unsigned int output_per_thread = vector_dim / input_width;
-    constexpr unsigned int full_output_width = output_per_thread * output_width;
-
-    using vec_type = aligned_vec_type<T, output_per_thread * output_width>;
-
-    const unsigned int thread_id = block_idx.x * block_dim.x + thread_idx.x;
-    const unsigned int stride    = grid_dim.x * block_dim.x;
-
-    engine_scalar_type input[input_width];
-    T                  output[output_per_thread][output_width];
-
-    const uintptr_t uintptr = reinterpret_cast<uintptr_t>(data);
-    const size_t    misalignment
-        = (full_output_width - uintptr / sizeof(T) % full_output_width) % full_output_width;
-    const unsigned int head_size = cpp_utils::min(n, misalignment);
-    const unsigned int tail_size = (n - head_size) % full_output_width;
-    const size_t       vec_n     = (n - head_size) / full_output_width;
-
-    const unsigned int engine_offset
-        = vector_dim * thread_id + (thread_id == 0 ? 0 : head_size / output_width * input_width);
-    engine.discard(engine_offset);
-
-    // If data is not aligned by sizeof(vec_type)
-    if(thread_id == 0 && head_size > 0)
+    template<host::target_arch Arch = host::target_arch::unknown>
+    __host__ __device__ __forceinline__
+    static void generate(dim3         block_idx,
+                         dim3         thread_idx,
+                         dim3         grid_dim,
+                         dim3         block_dim,
+                         Engine       engine,
+                         T*           data,
+                         const size_t n,
+                         Distribution distribution)
     {
-        for(unsigned int s = 0; s < output_per_thread; ++s)
+        using engine_scalar_type = typename Engine::scalar_type;
+
+        constexpr unsigned int input_width  = Distribution::input_width;
+        constexpr unsigned int output_width = Distribution::output_width;
+        constexpr unsigned int vector_dim   = Engine::vector_dim;
+
+        static_assert(vector_dim % input_width == 0 && input_width <= vector_dim,
+                      "Incorrect input_width");
+        constexpr unsigned int output_per_thread = vector_dim / input_width;
+        constexpr unsigned int full_output_width = output_per_thread * output_width;
+
+        using vec_type = aligned_vec_type<T, output_per_thread * output_width>;
+
+        const unsigned int thread_id = block_idx.x * block_dim.x + thread_idx.x;
+        const unsigned int stride    = grid_dim.x * block_dim.x;
+
+        engine_scalar_type input[input_width];
+        T                  output[output_per_thread][output_width];
+
+        const uintptr_t uintptr = reinterpret_cast<uintptr_t>(data);
+        const size_t    misalignment
+            = (full_output_width - uintptr / sizeof(T) % full_output_width) % full_output_width;
+        const unsigned int head_size = cpp_utils::min(n, misalignment);
+        const unsigned int tail_size = (n - head_size) % full_output_width;
+        const size_t       vec_n     = (n - head_size) / full_output_width;
+
+        const unsigned int engine_offset
+            = vector_dim * thread_id
+              + (thread_id == 0 ? 0 : head_size / output_width * input_width);
+        engine.discard(engine_offset);
+
+        // If data is not aligned by sizeof(vec_type)
+        if(thread_id == 0 && head_size > 0)
         {
-            if(s * output_width >= head_size)
+            for(unsigned int s = 0; s < output_per_thread; ++s)
             {
-                break;
-            }
-
-            for(unsigned int i = 0; i < input_width; ++i)
-            {
-                input[i] = engine();
-            }
-            distribution(input, output[s]);
-
-            for(unsigned int o = 0; o < output_width; ++o)
-            {
-                if(s * output_width + o < head_size)
+                if(s * output_width >= head_size)
                 {
-                    data[s * output_width + o] = output[s][o];
+                    break;
+                }
+
+                for(unsigned int i = 0; i < input_width; ++i)
+                {
+                    input[i] = engine();
+                }
+                distribution(input, output[s]);
+
+                for(unsigned int o = 0; o < output_width; ++o)
+                {
+                    if(s * output_width + o < head_size)
+                    {
+                        data[s * output_width + o] = output[s][o];
+                    }
+                }
+            }
+        }
+
+        // Save multiple values as one vec_type
+        vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
+        size_t    index    = thread_id;
+        while(index < vec_n)
+        {
+            const auto             v = engine.next_leap(stride);
+            cpp_utils::vec_wrapper vs(v);
+            for(unsigned int s = 0; s < output_per_thread; s++)
+            {
+                for(unsigned int i = 0; i < input_width; i++)
+                {
+                    input[i] = vs[s * input_width + i];
+                }
+                distribution(input, output[s]);
+            }
+            vec_data[index] = *reinterpret_cast<vec_type*>(output);
+            // Next position
+            index += stride;
+        }
+
+        // Check if we need to save tail.
+        // Those numbers should be generated by the thread that would
+        // save next vec_type.
+        if(index == vec_n && tail_size > 0)
+        {
+            for(unsigned int s = 0; s < output_per_thread; ++s)
+            {
+                if(s * output_width >= tail_size)
+                {
+                    break;
+                }
+
+                for(unsigned int i = 0; i < input_width; ++i)
+                {
+                    input[i] = engine();
+                }
+                distribution(input, output[s]);
+
+                for(unsigned int o = 0; o < output_width; ++o)
+                {
+                    if(s * output_width + o < tail_size)
+                    {
+                        data[n - tail_size + s * output_width + o] = output[s][o];
+                    }
                 }
             }
         }
     }
-
-    // Save multiple values as one vec_type
-    vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
-    size_t    index    = thread_id;
-    while(index < vec_n)
-    {
-        const auto             v = engine.next_leap(stride);
-        cpp_utils::vec_wrapper vs(v);
-        for(unsigned int s = 0; s < output_per_thread; s++)
-        {
-            for(unsigned int i = 0; i < input_width; i++)
-            {
-                input[i] = vs[s * input_width + i];
-            }
-            distribution(input, output[s]);
-        }
-        vec_data[index] = *reinterpret_cast<vec_type*>(output);
-        // Next position
-        index += stride;
-    }
-
-    // Check if we need to save tail.
-    // Those numbers should be generated by the thread that would
-    // save next vec_type.
-    if(index == vec_n && tail_size > 0)
-    {
-        for(unsigned int s = 0; s < output_per_thread; ++s)
-        {
-            if(s * output_width >= tail_size)
-            {
-                break;
-            }
-
-            for(unsigned int i = 0; i < input_width; ++i)
-            {
-                input[i] = engine();
-            }
-            distribution(input, output[s]);
-
-            for(unsigned int o = 0; o < output_width; ++o)
-            {
-                if(s * output_width + o < tail_size)
-                {
-                    data[n - tail_size + s * output_width + o] = output[s][o];
-                }
-            }
-        }
-    }
-}
+};
 
 template<class System, class Engine, class ConfigProvider>
 class threefry_generator_template : public generator_impl_base
@@ -280,6 +290,8 @@ public:
         {
             return ROCRAND_STATUS_OUT_OF_RANGE;
         }
+        // Set order type. Only executed for valid order types.
+        m_order = order;
         reset();
         return ROCRAND_STATUS_SUCCESS;
     }
@@ -331,8 +343,8 @@ public:
                 return status;
             }
 
-            generator_config                       config;
-            const hipError_t                       error
+            generator_config config;
+            const hipError_t error
                 = ConfigProvider::template host_config<T>(m_stream, m_order, config);
             if(error != hipSuccess)
             {
@@ -344,6 +356,13 @@ public:
                 return ROCRAND_STATUS_SUCCESS;
             }
 
+            host::target_arch target_arch;
+            hipError_t        result = host::get_device_arch(m_stream, target_arch);
+            if(result != hipSuccess)
+            {
+                return ROCRAND_STATUS_INTERNAL_ERROR;
+            }
+
             status = dynamic_dispatch(m_order,
                                       [&, this](auto is_dynamic)
                                       {
@@ -351,7 +370,8 @@ public:
                                               generate_threefry<engine_type, T, Distribution>,
                                               ConfigProvider,
                                               T,
-                                              is_dynamic>(dim3(config.blocks),
+                                              is_dynamic>(target_arch,
+                                                          dim3(config.blocks),
                                                           dim3(config.threads),
                                                           0,
                                                           m_stream,
@@ -376,7 +396,7 @@ public:
 
             return ROCRAND_STATUS_SUCCESS;
         }
-    }
+    };
 
     rocrand_status generate(unsigned long long int* data, size_t data_size)
     {

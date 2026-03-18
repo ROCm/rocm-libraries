@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <catch2/catch_get_random_seed.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -37,6 +14,7 @@
 #include "TestContext.hpp"
 #include "common/SourceMatcher.hpp"
 #include <common/CommonGraphs.hpp>
+#include <common/Utilities.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Transforms/AliasDataFlowTags_detail.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
@@ -55,15 +33,6 @@ namespace std
 }
 namespace AliasDataFlowTagsTest
 {
-
-    template <typename Transform, typename... Args>
-    rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
-                                                  Args... args)
-    {
-        auto xform = std::make_shared<Transform>(std::forward<Args>(args)...);
-        return graph.transform(xform);
-    }
-
     TEST_CASE("AliasDataFlowTags transformation works.", "[kernel-graph][graph-transforms]")
     {
         using namespace rocRoller::KernelGraph;
@@ -80,8 +49,6 @@ namespace AliasDataFlowTagsTest
         example.setTileSize(256, 64, macK);
         example.setMFMA(32, 32, waveK, 1);
         example.setUseLDS(true, true, false);
-        example.setUnroll(2, 2);
-
         example.setPrefetch(true, 2, 2, false);
 
         auto graph  = example.getKernelGraph();
@@ -98,19 +65,20 @@ namespace AliasDataFlowTagsTest
 
         graph = transform<ConstantPropagation>(graph);
         graph = transform<FuseExpressions>(graph);
-        graph = transform<ConnectWorkgroups>(graph, params, context.get());
+        graph = transform<ConnectWorkgroups>(graph, context.get());
+        graph = transform<WorkgroupRemapXCC>(graph, context.get(), params->workgroupRemapXCC);
         graph = transform<UnrollLoops>(graph, params, context.get());
         graph = transform<FuseLoops>(graph);
         graph = transform<RemoveDuplicates>(graph);
         graph = transform<OrderEpilogueBlocks>(graph);
         graph = transform<CleanLoops>(graph);
         graph = transform<AddPrefetch>(graph, params, context.get());
-        graph = transform<AddComputeIndex>(graph);
         graph = transform<AddPRNG>(graph, context.get());
         graph = transform<UpdateWavefrontParameters>(graph, params);
+        graph = transform<AssignIndexExpressions>(graph, context.get(), example.getCommand());
         graph = transform<LoadPacked>(graph, context.get());
         graph = transform<AddConvert>(graph);
-        graph = transform<AddDeallocate>(graph);
+        graph = transform<AddDeallocateDataFlow>(graph);
         graph = transform<InlineIncrements>(graph);
         graph = transform<Simplify>(graph);
 

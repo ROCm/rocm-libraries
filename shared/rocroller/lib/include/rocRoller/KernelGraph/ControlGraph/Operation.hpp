@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -36,6 +13,7 @@
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -218,6 +196,10 @@ namespace rocRoller
             // (valueCount / variableType.packing) registers will be allocated.
             std::optional<VariableType> variableType = std::nullopt;
 
+            // If the destination coordinate is Stride then
+            // set the register expression attributes
+            std::optional<RegisterExpressionAttributes> strideExpressionAttributes = std::nullopt;
+
             std::string name() const;
             std::string toString() const;
         };
@@ -229,40 +211,15 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Barrier);
 
         /**
-         * @brief Computes offsets and strides between coordinates.
-         *
-         * Offsets and strides into the `target` dimension, based on
-         * incrementing the `increment` dimension.
-         *
-         * Introduced to prevent recomputation (e.g. of an address)
-         *
-         * @param target Target dimension.
-         * @param increment Increment dimension
-         * @param base
+         * @brief Deallocates a register tag.
          */
-        struct ComputeIndex
+        struct Deallocate
         {
-            // TODO: might be nicer to have UInt32 for strides; need
-            // to allow user to specify stride types instead of
-            // forcing size_t.
-            ComputeIndex();
-            ComputeIndex(bool     forward,
-                         DataType valueType,
-                         DataType offsetType = DataType::UInt64,
-                         DataType strideType = DataType::UInt64);
-
-            bool     forward    = false;
-            DataType valueType  = DataType::Count;
-            DataType offsetType = DataType::Count;
-            DataType strideType = DataType::Count;
+            std::vector<std::string> arguments;
 
             std::string name() const;
+            std::string toString() const;
         };
-
-        /**
-         * @brief Deallocates a register.
-         */
-        RR_EMPTY_STRUCT_WITH_NAME(Deallocate);
 
         /**
          * LoadLinear - Load linear dimension.
@@ -291,13 +248,9 @@ namespace rocRoller
         struct LoadTiled
         {
             LoadTiled();
-            explicit LoadTiled(VariableType const varType,
-                               bool const         isTransposedTile = false,
-                               bool const         isDirect2LDS     = false);
+            explicit LoadTiled(VariableType const varType);
 
             VariableType varType;
-            bool         isTransposedTile;
-            bool         isDirect2LDS;
 
             std::string name() const;
         };
@@ -448,6 +401,8 @@ namespace rocRoller
             Operations::ScaleMode scaleModeB = Operations::ScaleMode::None;
             std::vector<size_t>   scaleStridesA;
             std::vector<size_t>   scaleStridesB;
+            std::vector<size_t>   scalePreShuffledTileA;
+            std::vector<size_t>   scalePreShuffledTileB;
             VariableType          accType = DataType::Float;
 
             std::string name() const;

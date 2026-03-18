@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*
  * When analysing when registers are modified, we construct a
@@ -68,7 +45,10 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::KernelGraph
@@ -82,32 +62,58 @@ namespace rocRoller::KernelGraph
         return std::min(a.size(), b.size()) - 1;
     }
 
-    std::deque<int> LastRWTracer::controlStack(int control) const
+    std::unordered_map<std::string, std::set<int>>
+        LastRWTracer::lastArgLocations(ControlFlowArgumentTracer const& argTracer) const
     {
-        std::deque<int> rv = {control};
-        while(m_bodyParent.contains(control))
+        std::unordered_map<std::string, std::vector<std::deque<int>>> controlStacks;
+
+        for(auto const& [controlNode, args] : argTracer.referencedArguments())
         {
-            control = m_bodyParent.at(control);
-            rv.push_front(control);
+            auto stack = rocRoller::KernelGraph::controlStack(controlNode, m_graph);
+            for(auto const& arg : args)
+            {
+                controlStacks[arg].push_back(stack);
+            }
         }
-        return rv;
+
+        return getLastLocationsFromControlStacks(controlStacks);
     }
 
-    std::map<int, std::set<int>> LastRWTracer::lastRWLocations() const
+    std::unordered_map<int, std::set<int>> LastRWTracer::lastRWLocations() const
     {
+        TIMER(t, "lastRWLocations");
+
         // Precompute all stacks
-        std::map<int, std::vector<std::deque<int>>> controlStacks;
+        std::unordered_map<int, std::vector<std::deque<int>>> controlStacksByCoord;
+
+        std::unordered_map<int, std::deque<int>> controlStacksByControl;
+
         for(auto const& x : m_trace)
         {
-            controlStacks[x.coordinate].push_back(controlStack(x.control));
+            auto iter = controlStacksByControl.find(x.control);
+            if(iter == controlStacksByControl.end())
+            {
+                controlStacksByControl[x.control] = controlStack(x.control, m_graph);
+
+                iter = controlStacksByControl.find(x.control);
+            }
+
+            controlStacksByCoord[x.coordinate].push_back(iter->second);
         }
 
-        std::map<int, std::set<int>> rv;
-        for(auto const& [coordinate, stacks] : controlStacks)
+        return getLastLocationsFromControlStacks(controlStacksByCoord);
+    }
+
+    template <typename Key>
+    std::unordered_map<Key, std::set<int>> LastRWTracer::getLastLocationsFromControlStacks(
+        std::unordered_map<Key, std::vector<ControlStack>> const& controlStacks) const
+    {
+        std::unordered_map<Key, std::set<int>> rv;
+        for(auto const& [key, stacks] : controlStacks)
         {
             if(stacks.size() == 1)
             {
-                rv[coordinate].insert(stacks.back().back());
+                rv[key].insert(stacks.back().back());
                 continue;
             }
 
@@ -130,7 +136,7 @@ namespace rocRoller::KernelGraph
             {
                 AssertFatal(c + 1 < stack.size(),
                             "LastRWTracer::lastRWLocations: Stacks are identical");
-                rv[coordinate].insert(stack.at(c + 1));
+                rv[key].insert(stack.at(c + 1));
             }
         }
 

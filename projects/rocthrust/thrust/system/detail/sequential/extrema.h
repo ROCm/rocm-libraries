@@ -40,7 +40,7 @@ THRUST_HOST_DEVICE ForwardIterator min_element(
   sequential::execution_policy<DerivedPolicy>&, ForwardIterator first, ForwardIterator last, BinaryPredicate comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp{comp};
 
   ForwardIterator imin = first;
 
@@ -61,7 +61,7 @@ THRUST_HOST_DEVICE ForwardIterator max_element(
   sequential::execution_policy<DerivedPolicy>&, ForwardIterator first, ForwardIterator last, BinaryPredicate comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp{comp};
 
   ForwardIterator imax = first;
 
@@ -82,7 +82,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element
   sequential::execution_policy<DerivedPolicy>&, ForwardIterator first, ForwardIterator last, BinaryPredicate comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp{comp};
 
   ForwardIterator imin = first;
   ForwardIterator imax = first;

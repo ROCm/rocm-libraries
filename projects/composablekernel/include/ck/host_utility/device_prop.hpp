@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -52,10 +52,55 @@ inline std::string get_device_name()
     }
 }
 
+inline bool is_gfx12_supported()
+{
+    return ck::get_device_name() == "gfx1200" || ck::get_device_name() == "gfx1201";
+}
+
+inline bool is_gfx11_supported()
+{
+    return ck::get_device_name() == "gfx1100" || ck::get_device_name() == "gfx1101" ||
+           ck::get_device_name() == "gfx1102" || ck::get_device_name() == "gfx1103" ||
+           ck::get_device_name() == "gfx1150" || ck::get_device_name() == "gfx1151" ||
+           ck::get_device_name() == "gfx1152" || ck::get_device_name() == "gfx1153";
+}
+
 inline bool is_xdl_supported()
 {
     return ck::get_device_name() == "gfx908" || ck::get_device_name() == "gfx90a" ||
-           ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950";
+           ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950" ||
+           is_gfx12_supported() || is_gfx11_supported();
+}
+
+template <typename ADataType,
+          typename BDataType,
+          index_t MPerXDL64,
+          index_t NPerXDL64,
+          index_t MPerXDL32 = MPerXDL64,
+          index_t NPerXDL32 = NPerXDL64>
+inline bool is_xdl_wmma_supported()
+{
+    if(ck::get_device_name() == "gfx908" || ck::get_device_name() == "gfx90a" ||
+       ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950")
+    {
+        return true;
+    }
+    else if(is_gfx12_supported() || is_gfx11_supported())
+    {
+        if constexpr((MPerXDL32 != 16) || (NPerXDL32 != 16))
+        {
+            return false;
+        }
+        if constexpr(sizeof(ADataType) > 2 || sizeof(BDataType) > 2)
+        {
+            return false;
+        }
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 inline bool is_lds_direct_load_supported()
@@ -67,7 +112,8 @@ inline bool is_lds_direct_load_supported()
 
 inline bool is_bf16_atomic_supported()
 {
-    return ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950";
+    return ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950" ||
+           is_gfx12_supported();
 }
 
 inline bool is_gfx101_supported()
@@ -83,17 +129,31 @@ inline bool is_gfx103_supported()
            ck::get_device_name() == "gfx1035" || ck::get_device_name() == "gfx1036";
 }
 
-inline bool is_gfx11_supported()
+inline bool is_wmma_supported()
 {
-    return ck::get_device_name() == "gfx1100" || ck::get_device_name() == "gfx1101" ||
-           ck::get_device_name() == "gfx1102" || ck::get_device_name() == "gfx1103" ||
-           ck::get_device_name() == "gfx1150" || ck::get_device_name() == "gfx1151" ||
-           ck::get_device_name() == "gfx1152";
+    return is_gfx103_supported() || is_gfx11_supported() || is_gfx12_supported();
 }
 
-inline bool is_gfx12_supported()
+inline bool is_tf32_supported()
 {
-    return ck::get_device_name() == "gfx1200" || ck::get_device_name() == "gfx1201";
+    return ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950";
+}
+
+inline int __host__ get_lds_size()
+{
+    int device  = 0;
+    int result  = 0;
+    auto status = hipGetDevice(&device);
+    if(status == hipSuccess)
+    {
+        status = hipDeviceGetAttribute(&result, hipDeviceAttributeMaxSharedMemoryPerBlock, device);
+        if(status == hipSuccess)
+        {
+            return result;
+        }
+    }
+
+    return 64 * 1024;
 }
 
 } // namespace ck

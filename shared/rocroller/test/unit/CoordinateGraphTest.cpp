@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
@@ -32,6 +9,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Serialization/Variant.hpp>
 
 using namespace rocRoller;
@@ -465,9 +443,9 @@ namespace rocRollerTest
                            {u},
                            {wg, thread, unroll});
         sexpr = Expression::toString(fastArith(exprs[0]));
-        EXPECT_EQ(sexpr,
-                  "{Split: ShiftL({Tile: Add(ShiftL(Convert(v0:I)U32, 2:U32)U32, "
-                  "514:I)U32}, 1:U32)U32}");
+        EXPECT_EQ(
+            sexpr,
+            "{Split: ShiftL({Tile: ShiftLAdd(Convert(v0:I)U32, 2:U32, 514:I)U32}, 1:U32)U32}");
     }
 
     TEST_F(CoordinateGraphTest, TensorTile2DLoadStore01)
@@ -1130,6 +1108,42 @@ namespace rocRollerTest
         EXPECT_FALSE(coords.hasPath({i}, true));
     }
 
+    TEST_F(CoordinateGraphTest, IncludeEdgeNeighbours)
+    {
+        auto ct = CoordinateGraph();
+
+        auto size  = Expression::literal(1024u);
+        auto sizeI = Expression::literal(512u);
+        auto sizeJ = Expression::literal(2u);
+
+        auto tileNumber       = ct.addElement(MacroTileNumber(0, sizeI, nullptr));
+        auto tileNumberIgnore = ct.addElement(MacroTileNumber(0, sizeJ, nullptr));
+        auto tileNumberI      = ct.addElement(MacroTileNumber(0, sizeI, nullptr));
+        auto tileNumberJ      = ct.addElement(MacroTileNumber(1, sizeJ, nullptr));
+        auto tileNumberF      = ct.addElement(MacroTileNumber(0, size, nullptr));
+        auto linear           = ct.addElement(Linear(size, nullptr));
+
+        ct.addElement(PassThrough(), {tileNumber}, {tileNumberI});
+        ct.addElement(PassThrough(), {tileNumberIgnore}, {tileNumberJ});
+        ct.addElement(Flatten(), {tileNumberI, tileNumberJ}, {tileNumberF});
+        ct.addElement(PassThrough(), {tileNumberF}, {linear});
+
+        auto path0 = ct.path<Graph::Direction::Upstream>(std::vector<int>{linear},
+                                                         std::vector<int>{tileNumber})
+                         .to<std::unordered_set>();
+
+        // We should never get tileNumberIgnore
+        EXPECT_FALSE(path0.contains(tileNumberIgnore));
+        // We should not yet get tileNumberJ
+        EXPECT_FALSE(path0.contains(tileNumberJ));
+
+        auto path1
+            = rocRoller::KernelGraph::includeEdgeNeighbours(ct, Graph::Direction::Upstream, path0);
+        // We should now get tileNumberJ
+        EXPECT_TRUE(path1.contains(tileNumberJ));
+        EXPECT_TRUE(path0.size() == path1.size() - 1);
+    }
+
     class ARCH_CoordinateGraphTest : public GPUContextFixture
     {
     };
@@ -1174,6 +1188,7 @@ namespace rocRollerTest
         auto k = m_context->kernel();
         k->setKernelName("TensorTile2DLoadStore04");
         k->setKernelDimensions(2);
+
         m_context->schedule(k->preamble());
 
         auto coords = Transformer(&ct, nullptr);
@@ -1189,14 +1204,14 @@ namespace rocRollerTest
             EXPECT_EQ(sexpr,
                       "{Split: Add(Multiply({Tile: Add(Multiply({Workgroup Index X: ttmp9:U32}, "
                       "16:U32)U32, 33:U32)U32}, 300:I)U32, Multiply({Tile: Add(Multiply({Workgroup "
-                      "Index Y: s2:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
+                      "Index Y: s0:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
         }
         else
         {
             EXPECT_EQ(sexpr,
-                      "{Split: Add(Multiply({Tile: Add(Multiply({Workgroup Index X: s2:U32}, "
+                      "{Split: Add(Multiply({Tile: Add(Multiply({Workgroup Index X: s0:U32}, "
                       "16:U32)U32, 33:U32)U32}, 300:I)U32, Multiply({Tile: Add(Multiply({Workgroup "
-                      "Index Y: s3:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
+                      "Index Y: s1:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
         }
     }
 

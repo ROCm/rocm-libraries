@@ -1,9 +1,11 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "gtest/gtest.h"
 #include "ck/library/utility/device_memory.hpp"
 #include "ck/utility/scaled_type_convert.hpp"
+
+using ::ck::DeviceMem;
 
 using ck::e8m0_bexp_t;
 using ck::float16_t;
@@ -212,8 +214,8 @@ TEST(MXFP4, HostScaledConvert)
     auto i = 256 * 16;
 
     // f4x2 -> f32x2
-    EXPECT_EQ(out[i++], 1.0f);
     EXPECT_EQ(out[i++], -4.0f);
+    EXPECT_EQ(out[i++], 1.0f);
 
     // f32x2 -> f4x2
     // RNE
@@ -240,7 +242,6 @@ TEST(MXFP4, HostScaledConvert)
     EXPECT_EQ(test_size, i);
 }
 
-#if !CK_TEMP_DISABLE_FP4_TESTS
 __global__ void test_mx_fp4_device_scaled_convert(uint64_t N, float* p_test, uint64_t* p_completed)
 {
     test_mx_fp4_scaled_convert(N, p_test, p_completed);
@@ -297,8 +298,8 @@ TEST(MXFP4, DeviceScaledConvert)
     auto i = 256 * 16;
 
     // f4x2 -> f32x2
-    EXPECT_EQ(out[i++], 1.0f);
     EXPECT_EQ(out[i++], -4.0f);
+    EXPECT_EQ(out[i++], 1.0f);
 
     // f32x2 -> f4x2
     // RNE
@@ -540,4 +541,3 @@ TEST(MXFP4, DeviceF4x32ToF32x32ScaledConvert)
     EXPECT_EQ(N, completed);
     EXPECT_EQ(N, i);
 }
-#endif // CK_TEMP_DISABLE_FP4_TESTS

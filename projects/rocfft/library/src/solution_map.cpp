@@ -358,7 +358,7 @@ void solution_map::generate_link_info()
 //////////////////////
 void solution_map::setup(const std::string& arch_name)
 {
-    // if we have speicified an explicit file-path, then read from it,
+    // if we have specified an explicit file-path, then read from it,
     std::string explict_read_path_str = rocfft_getenv("ROCFFT_READ_EXPLICIT_SOL_MAP_FILE");
     if(!explict_read_path_str.empty())
     {
@@ -583,7 +583,7 @@ bool solution_map::get_solution_map_version(const fs::path& sol_map_in_path)
 
     if(LOG_TRACE_ENABLED())
         (*LogSingleton::GetInstance().GetTraceOS())
-            << "reading solution map data from: " << sol_map_in_path.c_str() << std::endl;
+            << "reading solution map data from: " << sol_map_in_path << std::endl;
 
     if(fs::exists(sol_map_in_path))
     {
@@ -613,7 +613,7 @@ bool solution_map::read_solution_map_data(const fs::path& sol_map_in_path, bool 
 
     if(LOG_TRACE_ENABLED())
         (*LogSingleton::GetInstance().GetTraceOS())
-            << "reading solution map data from: " << sol_map_in_path.c_str() << std::endl;
+            << "reading solution map data from: " << sol_map_in_path << std::endl;
 
     // Read text from the file. If file not found, do nothing
     std::string solution_map_text = "";
@@ -727,7 +727,7 @@ bool solution_map::write_solution_map_data(const fs::path& sol_map_out_path,
 {
     if(LOG_TUNING_ENABLED())
         (*LogSingleton::GetInstance().GetTuningOS())
-            << "writing solution map data to: " << sol_map_out_path.c_str() << std::endl;
+            << "writing solution map data to: " << sol_map_out_path << std::endl;
 
     std::ofstream outfile;
     outfile.open(sol_map_out_path.c_str(), (std::ios::out | std::ios::trunc));

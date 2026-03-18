@@ -1,31 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -33,6 +11,35 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        void KernelGraph::setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
+                                                    int                           forLoopOp)
+        {
+            auto loopIncrTag = mapper.get(forLoopOp, NaryArgument::DEST);
+            auto expr = std::make_shared<Expression::Expression>(rocRoller::Expression::DataFlowTag{
+                loopIncrTag, Register::Type::Scalar, rocRoller::DataType::Int32});
+            auto loopDims
+                = coordinates.getOutputNodeIndices<CoordinateGraph::DataFlowEdge>(loopIncrTag);
+            for(auto const& dim : loopDims | std::views::filter([&](int dim) {
+                                      return !transformer.hasCoordinate(dim);
+                                  }))
+            {
+                transformer.setCoordinate(dim, expr);
+            }
+        }
+
+        void KernelGraph::setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
+                                                        int setCoordinateOp)
+        {
+            auto connections = mapper.getConnections(setCoordinateOp);
+            if(not transformer.hasCoordinate(connections[0].coordinate))
+            {
+                auto setCoordinate
+                    = control.get<ControlGraph::SetCoordinate>(setCoordinateOp).value();
+
+                transformer.setCoordinate(connections[0].coordinate, setCoordinate.value);
+            }
+        }
+
         std::string KernelGraph::toDOT(bool drawMappings, std::string title) const
         {
             std::stringstream ss;
@@ -71,6 +78,61 @@ namespace rocRoller
             return retval;
         }
 
+        void KernelGraph::initializeTransformersForCodeGen(
+            Expression::ExpressionTransducer transducer)
+        {
+            for(auto& p : m_transformers)
+            {
+                p.second.setCoordinateGraph(&coordinates);
+                p.second.setTransducer(transducer);
+            }
+        }
+
+        void KernelGraph::updateTransformer(int op, int coord, Expression::ExpressionPtr expr)
+        {
+            AssertFatal(m_transformers.contains(op), "Transformer does not exist");
+            m_transformers.at(op).setCoordinate(coord, expr);
+        }
+
+        void KernelGraph::buildAllTransformers()
+        {
+            for(auto const& node : control.getNodes())
+                buildTransformer(node, IgnoreCache);
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::Transformer KernelGraph::buildTransformer(int op)
+        {
+            if(not m_transformers.contains(op))
+                return buildTransformer(op, IgnoreCache);
+            return m_transformers.at(op);
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::Transformer
+            KernelGraph::buildTransformer(int op, IgnoreCachePolicy const)
+        {
+            auto [iter, _] = m_transformers.insert_or_assign(op, &coordinates);
+
+            auto const stk = controlStack(op, control);
+
+            for(int index : stk | std::views::reverse)
+            {
+                std::visit(
+                    [&](auto&& node) {
+                        using OpType = std::decay_t<decltype(node)>;
+                        if constexpr(std::is_same_v<OpType, ControlGraph::SetCoordinate>)
+                        {
+                            setTransformerBySetCoordinate(iter->second, index);
+                        }
+                        else if constexpr(std::is_same_v<OpType, ControlGraph::ForLoopOp>)
+                        {
+                            setTransformerByForLoopOp(iter->second, index);
+                        }
+                    },
+                    control.getNode(index));
+            }
+            return iter->second;
+        }
+
         ConstraintStatus KernelGraph::checkConstraints() const
         {
             return checkConstraints(m_constraints);
@@ -98,7 +160,10 @@ namespace rocRoller
                             concatenate(transformString, " PreCheck: \n", check.explanation));
             }
 
-            KernelGraph newGraph = transformation->apply(*this);
+            KernelGraph newGraph = [&]() {
+                TIMER(t, "KernelGraph::Transformation::" + transformation->name());
+                return transformation->apply(*this);
+            }();
 
             bool drawMappings = Settings::getInstance()->get(Settings::LogGraphMapperConnections);
 

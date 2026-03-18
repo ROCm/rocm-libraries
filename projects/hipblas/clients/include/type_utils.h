@@ -30,7 +30,9 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#if defined(__x86_64__) || defined(__i386__)
 #include <immintrin.h>
+#endif
 #include <iostream>
 #include <random>
 #include <type_traits>
@@ -191,13 +193,13 @@ inline int64_t hipblas_abs(const int64_t& x)
 /* =============================================================================================== */
 /* Complex / real helpers.                                                                         */
 template <typename T>
-static constexpr bool is_complex = false;
+inline constexpr bool is_complex = false;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr bool is_complex<std::complex<float>> = true;
+inline constexpr bool is_complex<std::complex<float>> = true;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr bool is_complex<std::complex<double>> = true;
+inline constexpr bool is_complex<std::complex<double>> = true;
 
 // Get base types from complex types.
 template <typename T>

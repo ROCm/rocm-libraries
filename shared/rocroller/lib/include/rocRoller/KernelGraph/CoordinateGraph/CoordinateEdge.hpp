@@ -1,35 +1,13 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <string>
 
-#include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge_fwd.hpp>
+
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -94,6 +72,21 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Alias);
 
         /**
+         * Identify - connects coordinates that can be identified with
+         * another coordinate.
+         *
+         * This is a variant of `DataFlowEdge`; and therefore they are
+         * not traversed during coordinate transforms.
+         *
+         * Primarily used in StreamK kernels to connect streaming
+         * Unroll coordinates to their associated ForLoop coordinate
+         * deeper in the coordinate transform.
+         *
+         * See `rocRoller::KernelGraph::followIdentify()`.
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Identify);
+
+        /**
          * Index - denotes that the source will index the register
          * allocation from the dest.
          */
@@ -119,6 +112,33 @@ namespace rocRoller
             }
         };
 
+        struct Segment
+        {
+            int index = -1;
+
+            Segment() = default;
+
+            Segment(int const index)
+                : index(index)
+            {
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "Segment";
+            }
+        };
+
+        /**
+         * BaseAddress - denotes base address for Global instructions
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(BaseAddress);
+
         /**
          * Buffer - denotes SRD for MUBUF instructions
          */
@@ -128,7 +148,7 @@ namespace rocRoller
          * Offset - denotes offset between target/increment
          * dimensions.
          *
-         * See ComputeIndex.
+         * See AssignIndexExpressions.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Offset);
 
@@ -136,7 +156,7 @@ namespace rocRoller
          * Stride - denotes stride between target/increment
          * dimensions.
          *
-         * See ComputeIndex.
+         * See AssignIndexExpressions.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Stride);
 
@@ -275,12 +295,12 @@ namespace rocRoller
 
             PiecewiseAffineJoin() = default;
 
-            PiecewiseAffineJoin(ExpressionPtr                  condition,
-                                ExpressionPtrVectorPair const& strides,
-                                ExpressionPtrPair const&       initialValues)
-                : condition(condition)
-                , strides(strides)
-                , initialValues(initialValues)
+            PiecewiseAffineJoin(ExpressionPtr           condition,
+                                ExpressionPtrVectorPair strides,
+                                ExpressionPtrPair       initialValues)
+                : condition(std::move(condition))
+                , strides(std::move(strides))
+                , initialValues(std::move(initialValues))
             {
                 AssertFatal(strides.first.size() == strides.second.size());
             }

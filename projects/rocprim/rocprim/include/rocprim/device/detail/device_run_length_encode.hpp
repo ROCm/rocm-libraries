@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,16 +23,18 @@
 
 #include "device_partition.hpp"
 #include "lookback_scan_state.hpp"
+#include "ordered_block_id.hpp"
 
+#include "../../config.hpp"
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../detail/various.hpp"
 #include "../../functional.hpp"
+#include "../../intrinsics/arch.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../thread/thread_reduce.hpp"
 #include "../../thread/thread_scan.hpp"
 #include "../../type_traits.hpp"
 #include "../../warp/warp_scan.hpp"
-#include "rocprim/intrinsics/arch.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -45,12 +47,14 @@ template<typename OffsetType, typename CountType>
 using offset_count_pair_type_t = ::rocprim::tuple<OffsetType, CountType>;
 
 template<typename InputType,
-         unsigned int      BlockSize,
-         unsigned int      ItemsPerThread,
-         block_load_method load_input_method>
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         block_load_method       load_input_method,
+         arch::wavefront::target TargetWaveSize>
 struct load_helper
 {
-    using block_load_input = block_load<InputType, BlockSize, ItemsPerThread, load_input_method>;
+    using block_load_input
+        = block_load<InputType, BlockSize, ItemsPerThread, load_input_method, 1, 1, TargetWaveSize>;
     union storage_type
     {
         typename block_load_input::storage_type input;
@@ -123,8 +127,7 @@ struct discontinuity_helper
         }
         else
         {
-            auto not_equal
-                = ::rocprim::detail::inequality_wrapper<CompareFunction>(CompareFunction());
+            auto not_equal = ::rocprim::inequality_wrapper<CompareFunction>(CompareFunction());
 
             constexpr unsigned int block_size      = BlockSize * ItemsPerThread;
             const InputType        block_successor = block_input[block_size];
@@ -155,14 +158,16 @@ struct discontinuity_helper
 
 /// Custom warp_exchange class with extra check in scatter_to_striped for out-of-bound accesses.
 template<class T,
-         unsigned int ItemsPerThread,
-         unsigned int WarpSize = ::rocprim::arch::wavefront::min_size()>
+         unsigned int                       ItemsPerThread,
+         unsigned int                       WarpSize = ::rocprim::arch::wavefront::min_size(),
+         ::rocprim::arch::wavefront::target TargetWaveSize
+         = ::rocprim::arch::wavefront::get_target()>
 class custom_warp_exchange
 {
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::arch::wavefront::min_size(),
+        WarpSize <= ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>(),
         "Logical warp size cannot be larger than physical warp size.");
 
     static constexpr unsigned int warp_items = WarpSize * ItemsPerThread;
@@ -414,10 +419,13 @@ template<typename InputType,
          typename OffsetType,
          typename CountType,
          typename OffsetCountPairType,
-         unsigned int         BlockSize,
-         unsigned int         ItemsPerThread,
-         block_load_method    load_input_method,
-         block_scan_algorithm scan_algorithm>
+         unsigned int                       BlockSize,
+         unsigned int                       ItemsPerThread,
+         block_load_method                  load_input_method,
+         block_scan_algorithm               scan_algorithm,
+         ::rocprim::arch::wavefront::target TargetWaveSize
+         = ::rocprim::arch::wavefront::get_target(),
+         typename Enabled = void>
 class block_helper
 {
 private:
@@ -425,15 +433,15 @@ private:
     using prefix_op_factory = detail::offset_lookback_scan_factory<OffsetCountPairType>;
 
     // Helper class for loading input values.
-    using load_type
-        = run_length_encode::load_helper<InputType, BlockSize, ItemsPerThread, load_input_method>;
+    using load_type = run_length_encode::
+        load_helper<InputType, BlockSize, ItemsPerThread, load_input_method, TargetWaveSize>;
     // Helper class for flagging the heads and tails of the input values.
     using discontinuity_type
         = run_length_encode::discontinuity_helper<InputType, equal_op, BlockSize>;
 
     // Warp size.
-    static constexpr unsigned int warp_size
-        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
+    static constexpr unsigned int warp_size = detail::get_min_warp_size(
+        BlockSize, ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>());
     // Number of warps in block.
     static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 
@@ -446,9 +454,9 @@ private:
     // warp_exchange primitives that will be used to perform warp-level scatter_to_striped
     // on offsets and counts.
     using warp_exchange_offsets_type
-        = custom_warp_exchange<OffsetType, ItemsPerThread, /*logical_*/ warp_size>;
+        = custom_warp_exchange<OffsetType, ItemsPerThread, /*logical_*/ warp_size, TargetWaveSize>;
     using warp_exchange_counts_type
-        = custom_warp_exchange<CountType, ItemsPerThread, /*logical_*/ warp_size>;
+        = custom_warp_exchange<CountType, ItemsPerThread, /*logical_*/ warp_size, TargetWaveSize>;
     // Helper class for scattering offsets and counts.
     using warp_scatter_type = run_length_encode::scatter_helper<warp_exchange_offsets_type,
                                                                 warp_exchange_counts_type,
@@ -496,10 +504,8 @@ public:
                                      const unsigned int    block_id,
                                      const std::size_t     grid_size,
                                      const std::size_t     size,
-                                     storage_type_&        storage_)
+                                     storage_type&        storage)
     {
-        storage_type& storage = storage_.get();
-
         static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
         const std::size_t             block_offset    = block_id * items_per_block;
 
@@ -758,13 +764,70 @@ public:
     }
 };
 
-template<typename Config,
+template<typename InputType,
+         typename OffsetType,
+         typename CountType,
+         typename OffsetCountPairType,
+         unsigned int         BlockSize,
+         unsigned int         ItemsPerThread,
+         block_load_method    load_input_method,
+         block_scan_algorithm scan_algorithm>
+class block_helper<InputType,
+                   OffsetType,
+                   CountType,
+                   OffsetCountPairType,
+                   BlockSize,
+                   ItemsPerThread,
+                   load_input_method,
+                   scan_algorithm,
+                   ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using block_helper_wave32 = block_helper<InputType,
+                                             OffsetType,
+                                             CountType,
+                                             OffsetCountPairType,
+                                             BlockSize,
+                                             ItemsPerThread,
+                                             load_input_method,
+                                             scan_algorithm,
+                                             ::rocprim::arch::wavefront::target::size32>;
+    using block_helper_wave64 = block_helper<InputType,
+                                             OffsetType,
+                                             CountType,
+                                             OffsetCountPairType,
+                                             BlockSize,
+                                             ItemsPerThread,
+                                             load_input_method,
+                                             scan_algorithm,
+                                             ::rocprim::arch::wavefront::target::size64>;
+
+    using dispatch = detail::dispatch_wave_size<block_helper_wave32, block_helper_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+    using storage_type_ = detail::raw_storage<storage_type>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto process_block(Args&&... args)
+    {
+        return dispatch{}([](auto impl, auto&&... args) { return impl.process_block(args...); },
+                          args...);
+    }
+};
+
+template<typename TargetConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     non_trivial_kernel_impl(InputIterator,
                             const OffsetsOutputIterator,
@@ -772,30 +835,33 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const RunsCountOutputIterator,
                             const LookbackScanState,
                             const size_t,
-                            const size_t)
+                            const size_t,
+                            BlockIdWrapper)
         -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<typename Config,
+template<typename TargetConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
-    non_trivial_kernel_impl(InputIterator                  input,
-                            const OffsetsOutputIterator    offsets_output,
-                            const CountsOutputIterator     counts_output,
-                            const RunsCountOutputIterator  runs_count_output,
-                            const LookbackScanState        scan_state,
-                            const size_t              grid_size,
-                            const size_t              size)
+    non_trivial_kernel_impl(InputIterator                 input,
+                            const OffsetsOutputIterator   offsets_output,
+                            const CountsOutputIterator    counts_output,
+                            const RunsCountOutputIterator runs_count_output,
+                            const LookbackScanState       scan_state,
+                            const size_t                  grid_size,
+                            const size_t                  size,
+                            BlockIdWrapper                ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr non_trivial_runs_config_params params     = device_params<Config>();
+    static constexpr non_trivial_runs_config_params params     = TargetConfig::params;
     static constexpr unsigned int                   block_size = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread  = params.kernel_config.items_per_thread;
     static constexpr block_load_method    load_input_method = params.load_input_method;
@@ -815,9 +881,16 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                          load_input_method,
                                          scan_algorithm>;
 
-    ROCPRIM_SHARED_MEMORY typename block_processor::storage_type_ storage;
+    ROCPRIM_SHARED_MEMORY union
+    {
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+        typename detail::raw_storage<typename block_processor::storage_type>
+            block_processor_storage;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+        typename BlockIdWrapper::storage_type ordered_bid_storage;
+    } storage;
 
-    const size_t block_id = flat_block_id<block_size, 1, 1>();
+    const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), storage.ordered_bid_storage);
 
     const size_t        block_offset = block_id * items_per_block;
     const InputIterator block_input  = input + block_offset;
@@ -834,18 +907,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                         block_id,
                                         grid_size,
                                         size,
-                                        storage);
+                                        storage.block_processor_storage.get());
     }
     else if(valid_in_last_block > 0)
     {
-        OffsetCountPairType total = block_processor{}.process_block(block_input,
-                                                                    offsets_output,
-                                                                    counts_output,
-                                                                    scan_state,
-                                                                    block_id,
-                                                                    grid_size,
-                                                                    size,
-                                                                    storage);
+        OffsetCountPairType total
+            = block_processor{}.process_block(block_input,
+                                              offsets_output,
+                                              counts_output,
+                                              scan_state,
+                                              block_id,
+                                              grid_size,
+                                              size,
+                                              storage.block_processor_storage.get());
         // First thread of last block sets the total number of non-trivial runs found and updates
         // the counts with the last run's length if necessary.
         if(threadIdx.x == 0)

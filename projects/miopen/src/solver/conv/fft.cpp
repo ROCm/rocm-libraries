@@ -31,9 +31,8 @@
 #include <miopen/conv_solution.hpp>
 #include <miopen/convolution_fft.hpp>
 #include <miopen/env.hpp>
+#include <miopen/kernel_build_params.hpp>
 #include <miopen/tensor.hpp>
-
-#include <boost/any.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_FFT)
 
@@ -121,6 +120,9 @@ bool fft::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& pr
     if(!problem.IsLayoutDefault())
         return false;
 
+    if(problem.HasNonPackedTensors())
+        return false;
+
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
@@ -152,6 +154,10 @@ bool fft::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& pr
        (std::tie(in_h, in_w) != std::make_tuple(27, 27)) &&
        (std::tie(in_h, in_w) != std::make_tuple(14, 14)) &&
        (std::tie(in_h, in_w) != std::make_tuple(7, 7)))
+        return false;
+
+    // TODO: These cases produce incorrect results. Fix if possible. For now don't allow to run them
+    if(!is_fwd && std::tie(in_h, in_w) == std::make_tuple(7, 7) && wei_k < 16)
         return false;
 
     const auto cparam = std::make_tuple(conv.GetConvPads()[0],
@@ -334,61 +340,50 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
 
     cgemm_grid(global_work_size[4], local_work_size[4], cgemm_choice, N, out_c, out_n);
 
-    std::string parms;
+    auto build_params = KernelBuildParameters{
+        {"CFF_IMG_H", in_h},
+        {"CFF_IMG_W", in_w},
+        {"CFF_BATCH", in_n},
+        {"CFF_NFILTER", out_c},
+        {"CFF_CHANNELS", in_c},
+        {"CFF_BACKWARD", problem.IsDirectionForward() ? 0 : 1},
+    };
 
     if(in_tranpose_choice == 0)
-        parms += " -DCFF_TRANSP_IN_MOD16=1";
+        build_params.Define("CFF_TRANSP_IN_MOD16", 1);
     if(wt_tranpose_choice == 0)
-        parms += " -DCFF_TRANSP_WT_MOD16=1";
+        build_params.Define("CFF_TRANSP_WT_MOD16", 1);
     if(ot_tranpose_choice == 0)
-        parms += " -DCFF_TRANSP_OT_MOD16=1";
+        build_params.Define("CFF_TRANSP_OT_MOD16", 1);
 
     switch(cgemm_choice)
     {
-    case 1: parms += " -DCFF_CGEMM_CHOICE_1=1"; break;
-    case 2: parms += " -DCFF_CGEMM_CHOICE_2=1"; break;
-    default: parms += " -DCFF_CGEMM_CHOICE_0=1"; break;
+    case 1: build_params.Define("CFF_CGEMM_CHOICE_1", 1); break;
+    case 2: build_params.Define("CFF_CGEMM_CHOICE_2", 1); break;
+    default: build_params.Define("CFF_CGEMM_CHOICE_0", 1); break;
     }
 
     if((in_h == 28) && (in_w == 28))
     {
-        parms += " -DCFF_IMG_SZ_28_28";
+        build_params.Define("CFF_IMG_SZ_28_28", 1);
     }
     else if((in_h == 27) && (in_w == 27))
     {
-        parms += " -DCFF_IMG_SZ_27_27";
+        build_params.Define("CFF_IMG_SZ_27_27", 1);
     }
     else if((in_h == 14) && (in_w == 14))
     {
-        parms += " -DCFF_IMG_SZ_14_14";
+        build_params.Define("CFF_IMG_SZ_14_14", 1);
     }
     else if((in_h == 7) && (in_w == 7))
     {
-        parms += " -DCFF_IMG_SZ_7_7";
-    }
-
-    const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
-
-    parms += " -DCFF_IMG_H=";
-    parms += std::to_string(in_h);
-    parms += " -DCFF_IMG_W=";
-    parms += std::to_string(in_w);
-    parms += " -DCFF_BATCH=";
-    parms += std::to_string(in_n);
-    parms += " -DCFF_NFILTER=";
-    parms += std::to_string(out_c);
-    parms += " -DCFF_CHANNELS=";
-    parms += std::to_string(in_c);
-    parms += " -DCFF_HALFW=";
-    parms += std::to_string(workSpaceSize / (sizeof(float) * 2 * 2));
-
-    if(!problem.IsDirectionForward())
-    {
-        parms += " -DCFF_BACKWARD";
+        build_params.Define("CFF_IMG_SZ_7_7", 1);
     }
 
     const std::string algorithm    = "miopenConvolutionFwdAlgoFFT";
-    const std::string program_name = "MIOpenConvFFT.cl";
+    const std::string program_name = "MIOpenConvFFT.cpp";
+
+    const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
 
     auto sol         = ConvSolution{miopenStatusSuccess};
     sol.workspace_sz = workSpaceSize;
@@ -429,14 +424,13 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
         auto kernel         = KernelInfo{};
         kernel.kernel_file  = program_name;
         kernel.kernel_name  = kernel_name;
-        kernel.comp_options = parms;
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
         kernel.g_wk         = vgd;
         kernel.l_wk         = vld;
         sol.construction_params.push_back(kernel);
     }
 
     sol.invoker_factory = [=](const std::vector<Kernel>& kernels) {
-        int halfw = static_cast<int>(workSpaceSize) / (2 * 2 * static_cast<int>(sizeof(float)));
         const int padding = FFTConvParams::TransposePadding;
 
         return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
@@ -450,6 +444,9 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
                              std::to_string(params.workSpaceSize));
             }
 
+            void* workSpace0 = params.workSpace;
+            void* workSpace1 = reinterpret_cast<char*>(params.workSpace) + workSpaceSize / 2;
+
             float time_fft = 0;
             int kernel_id  = 0;
             for(int ik = 0; ik < NumKernels; ik++)
@@ -461,13 +458,13 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
 
                 switch(ik)
                 {
-                case 0: k(tensors.in, params.workSpace); break;
-                case 1: k(tensors.w, params.workSpace); break;
+                case 0: k(tensors.in, skip_front_transposes ? workSpace1 : workSpace0); break;
+                case 1: k(tensors.w, skip_front_transposes ? workSpace1 : workSpace0); break;
                 case 4: {
-                    k(params.workSpace,
-                      0,
-                      halfw + N * (in_n * in_c + padding),
-                      halfw + 0,
+                    k(workSpace0,
+                      reinterpret_cast<const char*>(workSpace1) +
+                          sizeof(float) * 2 * N * (in_n * in_c + padding),
+                      workSpace1,
                       out_c,
                       out_n * out_c + padding,
                       in_c,
@@ -480,10 +477,10 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
                       in_c);
                     break;
                 }
-                case 6: k(params.workSpace, tensors.out); break;
+                case 6: k(workSpace1, tensors.out); break;
                 case 2:
                 case 3:
-                case 5: k(params.workSpace); break;
+                case 5: k(workSpace0, workSpace1); break;
                 default: assert(false);
                 }
 

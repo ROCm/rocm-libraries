@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Scheduling/Costs/Cost.hpp>
@@ -85,7 +62,7 @@ namespace rocRollerTest
             co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
         };
         auto generator_one = [&]() -> Generator<Instruction> {
-            co_yield_(Instruction("unrelated_op_2", {}, {}, {}, ""));
+            co_yield_(Instruction("s_add_u32", {}, {}, {}, ""));
             co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
         };
         auto generator_two = [&]() -> Generator<Instruction> {
@@ -172,7 +149,7 @@ namespace rocRollerTest
             co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
         };
         auto generator_one = [&]() -> Generator<Instruction> {
-            co_yield_(Instruction("unrelated_op_2", {}, {}, {}, ""));
+            co_yield_(Instruction("s_add_u32", {}, {}, {}, ""));
             co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
         };
         auto generator_two = [&]() -> Generator<Instruction> {
@@ -213,6 +190,14 @@ namespace rocRollerTest
         EXPECT_THROW(cost
                      = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::None, m_context),
                      FatalError);
+    }
+
+    TEST_F(CostTest, LinearWeightedSimple)
+    {
+        Component::ComponentFactoryBase::ClearAllCaches();
+        EXPECT_NE(Component::Get<Scheduling::Cost>(Scheduling::CostFunction::LinearWeightedSimple,
+                                                   m_context),
+                  nullptr);
     }
 
     TEST_F(CostTest, NonexistentSchedulerWeightsFile)

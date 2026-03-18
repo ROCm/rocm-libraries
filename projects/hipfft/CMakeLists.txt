@@ -23,8 +23,8 @@
 # CMake version according to latest ROCm platform requirements
 cmake_minimum_required( VERSION 3.17 )
 
-# We use C++17 features, this will add compile option: -std=c++17
-set( CMAKE_CXX_STANDARD 17 )
+# We use C++20 features, this will add compile option: -std=c++20
+set( CMAKE_CXX_STANDARD 20 )
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Consider removing this in the future
@@ -36,11 +36,6 @@ else()
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
 endif()
-
-
-# Workarounds..
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
-list( APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake )
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
@@ -89,7 +84,10 @@ set(DEFAULT_GPUS
   gfx1100
   gfx1101
   gfx1102
+  gfx1150
   gfx1151
+  gfx1152
+  gfx1153
   gfx1200
   gfx1201)
 
@@ -124,7 +122,7 @@ string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
-  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wno-unknown-pragmas)
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-unknown-pragmas)
   if( WERROR )
     set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
   endif()
@@ -164,14 +162,8 @@ if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set( WARNING_FLAGS ${NVCC_WARNING_FLAGS} )
 
 else()
-  # Define GPU targets
-  if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
-    message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
-  endif()
-  set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined. (Deprecated, prefer GPU_TARGETS)")
-  rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
-  # Don't force, users should be able to override GPU_TARGETS at the command line if desired
-  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+  # Check support for the GPU target(s)
+  rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   if( BUILD_WITH_COMPILER STREQUAL "HIP-CLANG" )
     set( HIP_PLATFORM "amd" )
     set( HIP_COMPILER "clang" )
@@ -181,20 +173,10 @@ endif()
 # Show the actual compiler(internal option)
 message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 
-# FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
-endif()
-
 # Version
-set( VERSION_STRING "1.0.20" )
+set( VERSION_STRING "1.0.23" )
 set( hipfft_SOVERSION 0.1 )
+set( hipfftw_SOVERSION 0.1 )
 
 if( ROCmCMakeBuildTools_FOUND )
   rocm_setup_version( VERSION ${VERSION_STRING} )
@@ -228,7 +210,6 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
   if(CLIENTS_OS STREQUAL "sles")
     set(FFTW_RPM "libfftw3-3")
   elseif(CLIENTS_OS STREQUAL "mariner")
-    set(BOOST_RPM RPM "boost = ${Boost_VERSION_MAJOR}_${Boost_VERSION_MINOR}_${Boost_VERSION_PATCH}")
     set(FFTW_RPM "fftw-libs")
   else()
     set(FFTW_RPM "fftw-libs")

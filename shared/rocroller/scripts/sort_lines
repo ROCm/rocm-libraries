@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""
+Sorts a list of paths by directory and then by filename. Useful for sorting the
+file paths in CMake files.
+"""
+
+import collections
+import os.path
+import sys
+
+if __name__ == "__main__":
+    for arg in sys.argv[1:]:
+        if "help" in arg or "-h in arg":
+            print(__doc__)
+            exit()
+
+    dirs = collections.defaultdict(list)
+
+    for line in sorted(sys.stdin):
+        if line.strip() != "":
+            path, name = os.path.split(line)
+            dirs[path].append(name)
+
+    first = True
+    for path in sorted(dirs.keys()):
+        if not first:
+            print()
+
+        for name in sorted(set(dirs[path])):
+            print(os.path.join(path, name), end="")
+
+        first = False

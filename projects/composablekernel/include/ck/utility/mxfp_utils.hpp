@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -213,7 +213,7 @@ __host__ __device__ inline T convert_to_type(float value)
     {
         // closer to 0
         if(std::abs(value) <= std::abs(min_subnorm - value))
-            return 0;
+            return sign << (NumericUtils<T>::exp + NumericUtils<T>::mant);
         else
             return 1 | (sign << (NumericUtils<T>::exp + NumericUtils<T>::mant));
     }
@@ -249,7 +249,7 @@ __host__ __device__ inline T convert_to_type(float value)
 
     if(out_exponent == 0 && mantissa == 0)
     {
-        return 0;
+        return sign << (NumericUtils<T>::exp + NumericUtils<T>::mant);
     }
 
     mantissa &= (1UL << NumericUtils<T>::mant) - 1;

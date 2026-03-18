@@ -33,6 +33,9 @@
 #define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
+#ifdef __cplusplus
+#include <array>
+#endif
 #ifndef LEGACY_HIPBLAS_DIRECT
 #include <hipblas-common/hipblas-common.h>
 #else
@@ -168,20 +171,29 @@ typedef int32_t rocblasltInt32;
  */
 typedef enum rocblaslt_epilogue_
 {
-    ROCBLASLT_EPILOGUE_DEFAULT        = 1,
-    ROCBLASLT_EPILOGUE_RELU           = 2,
-    ROCBLASLT_EPILOGUE_BIAS           = 4,
-    ROCBLASLT_EPILOGUE_RELU_BIAS      = 6,
-    ROCBLASLT_EPILOGUE_GELU           = 32,
-    ROCBLASLT_EPILOGUE_GELU_BIAS      = 36,
-    ROCBLASLT_EPILOGUE_GELU_AUX       = 160,
-    ROCBLASLT_EPILOGUE_GELU_AUX_BIAS  = 164,
-    ROCBLASLT_EPILOGUE_DGELU          = 192,
-    ROCBLASLT_EPILOGUE_DGELU_BGRAD    = 208,
-    ROCBLASLT_EPILOGUE_BGRADA         = 256,
-    ROCBLASLT_EPILOGUE_BGRADB         = 512,
-    ROCBLASLT_EPILOGUE_SWISH_EXT      = 65536,
-    ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,
+    ROCBLASLT_EPILOGUE_DEFAULT            = 1,
+    ROCBLASLT_EPILOGUE_RELU               = 2,
+    ROCBLASLT_EPILOGUE_BIAS               = 4,
+    ROCBLASLT_EPILOGUE_RELU_BIAS          = 6,
+    ROCBLASLT_EPILOGUE_GELU               = 32,
+    ROCBLASLT_EPILOGUE_GELU_BIAS          = 36,
+    ROCBLASLT_EPILOGUE_RELU_AUX           = 130,
+    ROCBLASLT_EPILOGUE_RELU_AUX_BIAS      = 134,
+    ROCBLASLT_EPILOGUE_DRELU              = 136,
+    ROCBLASLT_EPILOGUE_DRELU_BGRAD        = 152,
+    ROCBLASLT_EPILOGUE_GELU_AUX           = 160,
+    ROCBLASLT_EPILOGUE_GELU_AUX_BIAS      = 164,
+    ROCBLASLT_EPILOGUE_DGELU              = 192,
+    ROCBLASLT_EPILOGUE_DGELU_BGRAD        = 208,
+    ROCBLASLT_EPILOGUE_BGRADA             = 256,
+    ROCBLASLT_EPILOGUE_BGRADB             = 512,
+    ROCBLASLT_EPILOGUE_SIGMOID            = 1024,
+    ROCBLASLT_EPILOGUE_SWISH_EXT          = 65536,
+    ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT     = 65540,
+    ROCBLASLT_EPILOGUE_CLAMP_EXT          = 131072,
+    ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT     = 131076,
+    ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT      = 131200,
+    ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT = 131204,
 } rocblaslt_epilogue;
 
 /*! \ingroup types_module
@@ -364,8 +376,8 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
-    ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT,
-    ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT,
+    ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
+    ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -458,7 +470,8 @@ struct RocblasltContractionProblem
         None = 0,
         Scalar,
         Vector,
-        Block
+        Block_32_UE8M0,
+        Block_32_UE8M0_32_8_EXT,
     };
 
     hipblasOperation_t trans_a;
@@ -473,6 +486,12 @@ struct RocblasltContractionProblem
     size_t k;
 
     const void* alpha;
+    // When certain features (e.g., scaleAlphaVec) require overriding alpha to a constant 1.0,
+    // we must ensure the backing storage outlives the scope that constructs the problem.
+    // ASAN caught a stack-use-after-return where alpha pointed to a stack-local buffer.
+    // This owned buffer is used to hold such overridden alpha values.
+    // NOTE: sized to 16 bytes to hold any supported scalar type representation.
+    std::array<int8_t, 16> alpha_owned = {0};
 
     hipDataType        a_type;
     const void*        A;
@@ -528,16 +547,14 @@ struct RocblasltContractionProblem
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 
-    size_t             scaleABlockRowSize;
-    size_t             scaleABlockColSize;
-    size_t             scaleBBlockRowSize;
-    size_t             scaleBBlockColSize;
     hipDataType        bias_type;
     hipDataType        aux_type;
     rocblaslt_epilogue epilogue;
     void*              amaxD;
     void*              workspace;
     size_t             workspaceSize;
+    float              act0;
+    float              act1;
 
     hipStream_t stream;
     void*       Synchronizer;
@@ -592,16 +609,14 @@ struct RocblasltContractionProblem
                                 const void*            scaleAlphaVec,
                                 ScalingFormat          scaleAType,
                                 ScalingFormat          scaleBType,
-                                size_t                 scaleABlockRowSize,
-                                size_t                 scaleABlockColSize,
-                                size_t                 scaleBBlockRowSize,
-                                size_t                 scaleBBlockColSize,
                                 hipDataType            bias_type,
                                 hipDataType            aux_type,
                                 rocblaslt_epilogue     epilogue,
                                 void*                  amaxD,
                                 void*                  workspace,
                                 size_t                 workspaceSize,
+                                float                  act0,
+                                float                  act1,
                                 hipStream_t            stream,
                                 void*                  Synchronizer,
                                 bool                   swizzleA,
@@ -628,6 +643,8 @@ namespace rocblaslt
         hipDataType            type_c;
         hipDataType            type_d;
         rocblaslt_compute_type type_compute;
+        hipblasLtOrder_t       order_a;
+        hipblasLtOrder_t       order_b;
     };
 
     class RocGemmEpilogueV2
@@ -642,6 +659,8 @@ namespace rocblaslt
             = RocblasltContractionProblem::ScalingFormat::None;
         RocblasltContractionProblem::ScalingFormat scaling_b_type
             = RocblasltContractionProblem::ScalingFormat::None;
+        float act0 = 0.f;
+        float act1 = 0.f;
     };
 
     class RocTuningV2

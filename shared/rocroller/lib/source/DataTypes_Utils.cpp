@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -465,6 +442,11 @@ namespace rocRoller
         return type == DataType::FP4;
     }
 
+    bool isUnpackedF8F6F4(DataType type)
+    {
+        return isUnpackedF8(type) || isUnpackedF6(type) || isUnpackedF4(type);
+    }
+
     uint packingFactorForDataType(DataType type)
     {
         auto packing = DataTypeInfo::Get(type).packing;
@@ -479,15 +461,40 @@ namespace rocRoller
         return packing;
     }
 
-    bool isScaleType(DataType type)
+    uint8_t floatToScale(DataType scaleType, float value)
     {
-        switch(type)
+        AssertFatal(isScaleType(scaleType));
+
+        uint8_t scale = 0;
+        switch(scaleType)
         {
         case DataType::E8M0:
-        case DataType::E8M0x4:
-            return true;
+            scale = static_cast<uint8_t>(floatToScale<E8M0>(value));
+            break;
         default:
-            return false;
-        };
+            AssertFatal(
+                false, "floatToScale is unimplemented for scale type: ", ShowValue(scaleType));
+        }
+
+        return scale;
     }
+
+    float scaleToFloat(DataType scaleType, uint8_t scale)
+    {
+        AssertFatal(isScaleType(scaleType));
+
+        float value = 0;
+        switch(scaleType)
+        {
+        case DataType::E8M0:
+            value = scaleToFloat<E8M0>(static_cast<E8M0>(scale));
+            break;
+        default:
+            AssertFatal(
+                false, "scaleToFloat is unimplemented for scale type: ", ShowValue(scaleType));
+        }
+
+        return value;
+    }
+
 };

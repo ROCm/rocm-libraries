@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ target_link_libraries( stockham_gen PRIVATE generator )
 
 foreach( target stockham_gen generator )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON

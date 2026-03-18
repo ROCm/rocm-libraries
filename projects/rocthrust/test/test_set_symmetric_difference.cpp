@@ -21,9 +21,9 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include <iostream>
-
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(SetSymmetricDifferenceTests, FullTestsParams);
 TESTS_DEFINE(SetSymmetricDifferencePrimitiveTests, NumericalTestsParams);
@@ -76,35 +76,18 @@ TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchImplicit)
 TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a(4), b(5);
+  Vector a{0, 2, 4, 6}, b{0, 3, 3, 4, 7};
 
-  a[0] = 0;
-  a[1] = 2;
-  a[2] = 4;
-  a[3] = 6;
-  b[0] = 0;
-  b[1] = 3;
-  b[2] = 3;
-  b[3] = 4;
-  b[4] = 7;
-
-  Vector ref(5);
-  ref[0] = 2;
-  ref[1] = 3;
-  ref[2] = 3;
-  ref[3] = 6;
-  ref[4] = 7;
-
+  Vector ref{2, 3, 3, 6, 7};
   Vector result(5);
 
-  Iterator end = thrust::set_symmetric_difference(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
+  Iterator end = thrust::set_symmetric_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin());
 
-  EXPECT_EQ(result.end(), end);
+  ASSERT_EQ_QUIET(result.end(), end);
   ASSERT_EQ(ref, result);
 }
 
@@ -121,42 +104,37 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifference)
     size_t expanded_sizes[]   = {0, 1, size / 2, size, size + 1, 2 * size};
     size_t num_expanded_sizes = sizeof(expanded_sizes) / sizeof(size_t);
 
-    for (auto seed : get_seeds())
+    thrust::host_vector<T> random =
+      random_integers<int8_t>(size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes));
+
+    thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
+    thrust::host_vector<T> h_b(random.begin() + size, random.end());
+
+    thrust::stable_sort(h_a.begin(), h_a.end());
+    thrust::stable_sort(h_b.begin(), h_b.end());
+
+    thrust::device_vector<T> d_a = h_a;
+    thrust::device_vector<T> d_b = h_b;
+
+    for (size_t i = 0; i < num_expanded_sizes; i++)
     {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      size_t expanded_size = expanded_sizes[i];
 
-      thrust::host_vector<T> random = get_random_data<unsigned short int>(
-        size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes), 0, 255, seed);
+      thrust::host_vector<T> h_result(size + expanded_size);
+      thrust::device_vector<T> d_result(size + expanded_size);
 
-      thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
-      thrust::host_vector<T> h_b(random.begin() + size, random.end());
+      typename thrust::host_vector<T>::iterator h_end;
+      typename thrust::device_vector<T>::iterator d_end;
 
-      thrust::stable_sort(h_a.begin(), h_a.end());
-      thrust::stable_sort(h_b.begin(), h_b.end());
+      h_end = thrust::set_symmetric_difference(
+        h_a.begin(), h_a.end(), h_b.begin(), h_b.begin() + expanded_size, h_result.begin());
+      h_result.resize(h_end - h_result.begin());
 
-      thrust::device_vector<T> d_a = h_a;
-      thrust::device_vector<T> d_b = h_b;
+      d_end = thrust::set_symmetric_difference(
+        d_a.begin(), d_a.end(), d_b.begin(), d_b.begin() + expanded_size, d_result.begin());
+      d_result.resize(d_end - d_result.begin());
 
-      for (size_t i = 0; i < num_expanded_sizes; i++)
-      {
-        size_t expanded_size = expanded_sizes[i];
-
-        thrust::host_vector<T> h_result(size + expanded_size);
-        thrust::device_vector<T> d_result(size + expanded_size);
-
-        typename thrust::host_vector<T>::iterator h_end;
-        typename thrust::device_vector<T>::iterator d_end;
-
-        h_end = thrust::set_symmetric_difference(
-          h_a.begin(), h_a.end(), h_b.begin(), h_b.begin() + expanded_size, h_result.begin());
-        h_result.resize(h_end - h_result.begin());
-
-        d_end = thrust::set_symmetric_difference(
-          d_a.begin(), d_a.end(), d_b.begin(), d_b.begin() + expanded_size, d_result.begin());
-        d_result.resize(d_end - d_result.begin());
-
-        ASSERT_EQ(h_result, d_result);
-      }
+      ASSERT_EQ(h_result, d_result);
     }
   }
 }
@@ -177,7 +155,6 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquiv
 
       thrust::host_vector<T> temp =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a = temp;
       thrust::sort(h_a.begin(), h_a.end());
       thrust::host_vector<T> h_b = h_a;
@@ -216,19 +193,19 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> temp =
-        get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> vec =
+        get_random_data<int>(2 * size, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
 
       // restrict elements to [min,13)
-      for (typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+      for (typename thrust::host_vector<T>::iterator i = vec.begin(); i != vec.end(); ++i)
       {
         int temp = static_cast<int>(*i);
         temp %= 13;
         *i = temp;
       }
 
-      thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
-      thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
+      thrust::host_vector<T> h_a(vec.begin(), vec.begin() + size);
+      thrust::host_vector<T> h_b(vec.begin() + size, vec.end());
 
       thrust::sort(h_a.begin(), h_a.end());
       thrust::sort(h_b.begin(), h_b.end());
@@ -248,7 +225,7 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
       d_end = thrust::set_difference(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
       d_result.erase(d_end, d_result.end());
 
-      ASSERT_EQ_QUIET(h_result, d_result);
+      ASSERT_EQ(h_result, d_result);
     }
   }
 }
@@ -282,15 +259,7 @@ TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValu
       for (size_t i = 0; i < size; ++i)
       {
         h_a[i] = T(h_keys_a[i], h_values_a[i]);
-
-        if (i % 2 == 1)
-        {
-          h_b[i] = T(h_keys_b[i], h_values_b[i]);
-        }
-        else
-        {
-          h_b[i] = T(h_keys_a[i], h_values_a[i]);
-        }
+        h_b[i] = T(h_keys_b[i], h_values_b[i]);
       }
 
       thrust::stable_sort(h_a.begin(), h_a.end());

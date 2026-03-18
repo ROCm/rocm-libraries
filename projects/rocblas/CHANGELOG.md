@@ -3,23 +3,68 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## (Unreleased) rocBLAS 5.0.0
+## rocBLAS 5.3.0
+
+### Added
+* Level 3 `herk_ex` function for both C and FORTRAN but without support for the ILP64 API.
+
+### Changed
+* Client build system now automatically builds AOCL 5.2 (AMD Optimizing CPU Libraries) from source on Linux for improved CPU BLAS performance. New `--skip-aocl` and `--clean-deps` flags added to `install.sh` for build control. New `LINK_BLIS` CMake option to control AOCL BLAS linking in client binaries.
+* amd-smi replaces the deprecated rocm-smi dependency for `rocblas-bench` client functionality for clock frequency monitoring, for example, `ROCBLAS_BENCH_FREQ`.
+* `trsv` function no longer internally calls `hipSetDevice` if a different device is current in the calling thread.  The calling thread's current device should be consistent with the one set in the `rocblas_handle`, the same as was true for all other rocBLAS functions.
+
+### Optimized
+* Improved the performance of Level 2 trsv batched for the problem sizes where `batch_count > 16*n` and `n < 128`.
+* Improved the performance of Level 3 trsm batched for the problem sizes where `side == left` and `n == 1` and `batch_count > 16*m` and `m < 128`.
+
+## rocBLAS 5.2.0 for ROCm 7.2
+
+### Added
+* Level 3 `syrk_ex` function for both C and FORTRAN but without support for the ILP64 API.
+
+### Optimized
+* Level 2 `tpmv` and `sbmv` functions.
+
+### Resolved issues
+* Corrected client memory use counts for the `ROCBLAS_CLIENT_RAM_GB_LIMIT` environment variable.
+* Fix to avoid false Clang static analysis warnings.
+
+## rocBLAS 5.1.1 for ROCm 7.1.1
+
+### Changed
+
+* By default, rocBLAS will not use stream order allocation for its internal workspace. To enable this behavior, set the `ROCBLAS_STREAM_ORDER_ALLOC` environment variable.
+
+## rocBLAS 5.1.0 for ROCm 7.1
+
+### Added
+* Sample for clients using OpenMP threads calling rocBLAS functions.
+* gfx1103, gfx1150, and gfx1151 enabled.
+
+### Changed
+* By default, the Tensile build is no longer based on `tensile_tag.txt` but uses the same commit from shared/tensile in the rocm-libraries repository. The rmake or install `-t` option can build from another local path with a different commit.
+
+### Optimized
+
+* Improved the performance of Level 2 gemv transposed (`TransA != N`) for the problem sizes where `m` is small and `n` is large on gfx90a and gfx942.
+
+## rocBLAS 5.0.0 for ROCm 7.0
 
 ### Added
 
 * gfx950 support
 * `ROCBLAS_LAYER = 8` internal API logging for `gemm` debugging
-* Support for AOCL 5.0 gcc build as a client reference library 
-* Allow `PkgConfig` for client reference library fallback detection 
+* Support for AOCL 5.0 gcc build as a client reference library
+* Allow `PkgConfig` for client reference library fallback detection
 
 ### Changed
 
-* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build 
+* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build
 * Change default atomics mode from `allowed` to `not allowed`
 
 ### Removed
 
-* Support code for non-production gfx targets 
+* Support code for non-production gfx targets
 * `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
 * Use of `warpSize` as a constexpr
 * Use of deprecated behavior of `hipPeekLastError`
@@ -29,8 +74,8 @@ rocBLAS documentation is available at
 
 ### Optimized
 
-* Optimized `gemm` by using `gemv` kernels when applicable 
-* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942 
+* Optimized `gemm` by using `gemv` kernels when applicable
+* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942
 * Improved the performance of Level 1 `dot` for all precisions and variants when `N > 100000000` on gfx942
 * Improved the performance of Level 1 `asum` and `nrm2` for all precisions and variants on gfx942
 * Improved the performance of Level 2 `sger` (single precision) on gfx942
@@ -38,17 +83,18 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
-* Fixed environment variable path-based logging to append multiple handle output to the same file 
-* Support numerics when `trsm` is running with `rocblas_status_perf_degraded` 
+* Fixed environment variable path-based logging to append multiple handle output to the same file
+* Support numerics when `trsm` is running with `rocblas_status_perf_degraded`
 * Fixed the build dependency installation of `joblib` on some operating systems
-* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer 
+* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer
 * Reduced the default verbosity level for internal GEMM backend information
 * Updated from the deprecated rocm-cmake to ROCmCMakeBuildTools
 * Corrected AlmaLinux gfortran package dependencies
+* Included upgrade of `packaging` in addition to `pip` in Tensile Virtual Environment to stabilize `setuptools` from failures
 
 ### Upcoming changes
 
-* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index` 
+* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index`
 
 ## rocBLAS 4.4.0 for ROCm 6.4
 
@@ -125,7 +171,7 @@ rocBLAS documentation is available at
 * Level 2 functions and level 3 trsm have additional ILP64 API for both C and FORTRAN (_64 name suffix) with int64_t function arguments
 * Cache flush timing for gemm_batched_ex, gemm_strided_batched_ex, axpy
 * Benchmark class for common timing code
-* An environment variable "ROCBLAS_DEFAULT_ATOMICS_MODE" to set default atomics mode during creation of 'rocblas_handle'
+* An environment variable "ROCBLAS_DEFAULT_ATOMICS_MODE" to set default atomics mode during creation of `rocblas_handle`
 * Extended dot_ex to support single-precision (fp32_r) input and double-precision (fp64_r) output and compute types
 
 ### Optimized
@@ -692,4 +738,3 @@ rocBLAS documentation is available at
 When using the install.sh script for "all" GPU Targets, which is the default, you must first set an environment variable `HCC_AMDGPU_TARGET` listing the GPU targets, e.g.  `HCC_AMDGPU_TARGET=gfx803,gfx900,gfx906,gfx908`
 If building for a specific architecture(s) using the  `-a` | --architecture flag, you should also set the environment variable `HCC_AMDGPU_TARGET` to match.
 Mismatching the environment variable to the `-a` flag architectures creates builds that may result in `SEGFAULTS` when running on GPUs which weren't specified.
-

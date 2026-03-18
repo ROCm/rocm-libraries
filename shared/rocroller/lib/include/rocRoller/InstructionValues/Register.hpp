@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -59,6 +36,9 @@ namespace rocRoller
             auto        operator<=>(RegisterId const&) const = default;
             std::string toString() const;
         };
+
+        std::string toString(std::vector<Register::RegisterId> const& regs);
+
         struct RegisterIdHash
         {
             size_t operator()(RegisterId const& regId) const noexcept
@@ -297,6 +277,7 @@ namespace rocRoller
             Generator<RegisterId> getRegisterIds() const;
 
             std::string getLiteral() const;
+            std::string getConstant() const;
 
             /**
              * Return a literal's actual value.
@@ -336,7 +317,7 @@ namespace rocRoller
              *  - bitWidth is zero or greater than number of bits in a register; and/or
              *  - the bitfield would cross register boundaries.
              */
-            ValuePtr bitfield(uint8_t bitOffset, uint8_t bitWidth) const;
+            ValuePtr bitfield(int bitOffset, int bitWidth) const;
 
             /**
              * Return contiguous segments of a packed datatype denotated by indices.
@@ -358,13 +339,13 @@ namespace rocRoller
              * Returns the bit offset of this bitfield Value.
              * Throws FatalError if this is not a bitfield Value.
              */
-            uint8_t getBitOffset() const;
+            int getBitOffset() const;
 
             /**
              * Returns the bit width (length in bits) of this bitfield.
              * Throws FatalError if this is not a bitfield Value.
              */
-            uint8_t getBitWidth() const;
+            int getBitWidth() const;
 
         private:
             /**
@@ -405,8 +386,8 @@ namespace rocRoller
              * Offset and bit-width of the bitfielf in the 32-bit register represented by this value.
              * Multi-register values must have empty bitOffset & bitWidth, otherwise they are invalid.
              */
-            std::optional<uint8_t> m_bitOffset;
-            std::optional<uint8_t> m_bitWidth;
+            std::optional<int> m_bitOffset;
+            std::optional<int> m_bitWidth;
 
             /**
              * Pulls values from the allocation
@@ -458,6 +439,7 @@ namespace rocRoller
 
             int               registerCount() const;
             AllocationOptions options() const;
+            void              setOptions(AllocationOptions options = {});
 
             std::vector<int> const& registerIndices() const;
 

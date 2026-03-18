@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,10 @@
 
 #include "lib_device_helpers.hpp"
 #include "lib_macros.hpp"
+#include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_logger.hpp"
+#include "rocsolver_run_specialized_kernels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -619,7 +622,16 @@ __device__ void lasrt_increasing(const rocblas_int n, T* D, rocblas_int* stack)
 
 /** IAMAX finds the maximum element of a given vector.
     MAX_THDS should be 128, 256, 512, or 1024, and sval should
-    be a shared array of size MAX_THDS. **/
+    be a shared array of size MAX_THDS.
+
+    NOTE: Suppose we consider an element a vector of the form [Re(.), Im(.)],
+    IAMAX finds element of maximum |Re(.)| + |Im(.)| (this is like the inf-norm of an element)
+    IMAX1 finds element of maximum absolute value (this is like the 2-norm of an element).
+
+    The absolute value is sqrt( Re(.)^2 + Im(.)^2 ).
+    IAMAX and IMAX1 behave the same for real numbers.
+
+   TODO: Test and update IAMAX and IMAX1 for NaN and Inf propagation **/
 template <int MAX_THDS, typename T, typename I, typename S>
 __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval)
 {
@@ -802,8 +814,193 @@ __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval, I* si
     // after the reduction, the maximum of the elements is in sval[0] and sidx[0]
 }
 
+/** IMAX1 finds the maximum element of a given vector.
+    MAX_THDS should be 128, 256, 512, or 1024, and sval should
+    be a shared array of size MAX_THDS. **/
+template <int MAX_THDS, typename T, typename I, typename S>
+__device__ void imax1(const I tid, const I n, T* A, const I incA, S* sval)
+{
+    // local memory setup
+    S val1, val2;
+
+    // read into shared memory while doing initial step
+    // (each thread reduce as many elements as needed to cover the original array)
+    val1 = 0;
+    for(I i = tid; i < n; i += MAX_THDS)
+    {
+        val2 = rocblas_abs(A[i * incA]);
+        if(val1 < val2)
+            val1 = val2;
+    }
+    sval[tid] = val1;
+    __syncthreads();
+
+    if(n <= 1)
+        return;
+
+        /** <========= Next do the reduction on the shared memory array =========>
+        (We halve the number of active threads at each step
+        reducing two elements in the shared array. **/
+
+#pragma unroll
+    for(I i = MAX_THDS / 2; i > warpSize; i /= 2)
+    {
+        if(tid < i)
+        {
+            val2 = sval[tid + i];
+            if(val1 < val2)
+                sval[tid] = val1 = val2;
+        }
+        __syncthreads();
+    }
+
+    // from this point, as all the active threads will form a single wavefront
+    // and work in lock-step, there is no need for synchronizations and barriers
+    if(tid < warpSize)
+    {
+        if(warpSize >= 64)
+        {
+            val2 = sval[tid + 64];
+            if(val1 < val2)
+                sval[tid] = val1 = val2;
+        }
+        val2 = sval[tid + 32];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 16];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 8];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 4];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 2];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 1];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+    }
+
+    // after the reduction, the maximum of the elements is in sval[0]
+}
+
+/** IMAX1 finds the maximum element of a given vector and its index.
+    MAX_THDS should be 64, 128, 256, 512, or 1024, and sval and sidx should
+    be shared arrays of size MAX_THDS. **/
+template <int MAX_THDS, typename T, typename I, typename S>
+__device__ void imax1(const I tid, const I n, T* A, const I incA, S* sval, I* sidx)
+{
+    // local memory setup
+    S val1, val2;
+    I idx1, idx2;
+
+    // read into shared memory while doing initial step
+    // (each thread reduce as many elements as needed to cover the original array)
+    val1 = 0;
+    idx1 = INT_MAX;
+    for(I i = tid; i < n; i += MAX_THDS)
+    {
+        val2 = rocblas_abs(A[i * incA]);
+        idx2 = i + 1; // add one to make it 1-based index
+        if(val1 < val2 || idx1 == INT_MAX)
+        {
+            val1 = val2;
+            idx1 = idx2;
+        }
+    }
+    sval[tid] = val1;
+    sidx[tid] = idx1;
+    __syncthreads();
+
+    if(n <= 1)
+        return;
+
+        /** <========= Next do the reduction on the shared memory array =========>
+        (We halve the number of active threads at each step
+        reducing two elements in the shared array. **/
+
+#pragma unroll
+    for(I i = MAX_THDS / 2; i > warpSize; i /= 2)
+    {
+        if(tid < i)
+        {
+            val2 = sval[tid + i];
+            idx2 = sidx[tid + i];
+            if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+            {
+                sval[tid] = val1 = val2;
+                sidx[tid] = idx1 = idx2;
+            }
+        }
+        __syncthreads();
+    }
+
+    // from this point, as all the active threads will form a single wavefront
+    // and work in lock-step, there is no need for synchronizations and barriers
+    if(tid < warpSize)
+    {
+        if(warpSize >= 64 && MAX_THDS >= 128)
+        {
+            val2 = sval[tid + 64];
+            idx2 = sidx[tid + 64];
+            if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+            {
+                sval[tid] = val1 = val2;
+                sidx[tid] = idx1 = idx2;
+            }
+        }
+        val2 = sval[tid + 32];
+        idx2 = sidx[tid + 32];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 16];
+        idx2 = sidx[tid + 16];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 8];
+        idx2 = sidx[tid + 8];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 4];
+        idx2 = sidx[tid + 4];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 2];
+        idx2 = sidx[tid + 2];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 1];
+        idx2 = sidx[tid + 1];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+    }
+
+    // after the reduction, the maximum of the elements is in sval[0] and sidx[0]
+}
+
 /** NRM2 finds the euclidean norm of a given vector.
-    MAX_THDS should be 64, 128, 256, 512, or 1024, and sval should
+    MAX_THDS should be 128, 256, 512, or 1024, and sval should
     be a shared array of size MAX_THDS. **/
 template <int MAX_THDS, typename T>
 __device__ void nrm2(const rocblas_int tid, const rocblas_int n, T* A, const rocblas_int incA, T* sval)
@@ -887,48 +1084,32 @@ __device__ void dot(const rocblas_int tid,
     // (each thread reduce as many elements as needed to cover the original array)
     for(int i = tid; i < n; i += MAX_THDS)
         val = val + x[i * incX] * (CONJY ? conj(y[i * incY]) : y[i * incY]);
-    sval[tid] = val;
-    __syncthreads();
 
     if(n <= 1)
-        return;
-
-        /** <========= Next do the reduction on the shared memory array =========>
-        (We halve the number of active threads at each step
-        reducing two elements in the shared array. **/
-
-#pragma unroll
-    for(int i = MAX_THDS / 2; i > warpSize; i /= 2)
     {
-        if(tid < i)
-            val = val + sval[tid + i];
-        __syncthreads();
-        if(tid < i)
-            sval[tid] = val;
-        __syncthreads();
+        if(tid == 0)
+            sval[0] = val;
+        return;
     }
 
-    // from this point, as all the active threads will form a single wavefront
-    // and work in lock-step, there is no need for synchronizations and barriers
-    if(tid < warpSize)
+    /** <========= Next do the reduction on the shared memory array =========> **/
+
+    val += shift_left(val, 1);
+    val += shift_left(val, 2);
+    val += shift_left(val, 4);
+    val += shift_left(val, 8);
+    val += shift_left(val, 16);
+    if(warpSize > 32)
+        val += shift_left(val, 32);
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = val;
+    __syncthreads();
+    if(tid == 0)
     {
-        if(warpSize >= 64 && MAX_THDS >= 128)
-        {
-            sval[tid] = sval[tid] + sval[tid + 64];
-            __threadfence();
-        }
-        sval[tid] = sval[tid] + sval[tid + 32];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 16];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 8];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 4];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 2];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 1];
-        __threadfence();
+        for(int k = 1; k < MAX_THDS / warpSize; k++)
+            val += sval[k];
+
+        sval[0] = val;
     }
 
     // after the reduction, the dot product is in sval[0]
@@ -1185,6 +1366,2441 @@ ROCSOLVER_KERNEL void scal_kernel(I const n, S const da, T* const x, I const inc
             auto const ix = i * static_cast<int64_t>(incx);
             x[ix] = da * x[ix];
         }
+    }
+}
+
+template <typename S, typename I>
+__device__ I slaed6(I kniter,
+                    bool orgati,
+                    S rho,
+                    S* d,
+                    S* z,
+                    S finit,
+                    S& tau,
+                    S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                    S ssfmin = std::numeric_limits<S>::min(),
+                    I MAXIT = 50)
+{
+    auto lam_abs = [](auto x) -> auto
+    {
+        return std::abs(x);
+    };
+    auto lam_sqrt = [](auto x) -> auto
+    {
+        return std::sqrt(x);
+    };
+    auto lam_max = [](auto x, auto y, auto z) -> auto
+    {
+        return std::max(std::max(x, y), z);
+    };
+    auto lam_min = [](auto x, auto y) -> auto
+    {
+        return std::min(x, y);
+    };
+
+    S dscale[3]{}, zscale[3]{};
+    struct X_t
+    {
+        S* x_;
+        __device__ X_t(S* x)
+            : x_(x)
+        {
+        }
+
+        __device__ S& operator()(int j)
+        {
+            return x_[j - 1];
+        }
+
+    } D(d), Z(z), DSCALE(dscale), ZSCALE(zscale);
+
+    bool scale;
+
+    S a, b, c, ddf, df, erretm, eta, f, fc, sclfac, sclinv, temp, temp1, temp2, temp3, temp4, lbd,
+        ubd;
+
+    I iter, niter;
+
+    I info = 0;
+
+    if(orgati)
+    {
+        lbd = D(2);
+        ubd = D(3);
+    }
+    else
+    {
+        lbd = D(1);
+        ubd = D(2);
+    }
+
+    if(finit < S(0.))
+    {
+        lbd = S(0.);
+    }
+    else
+    {
+        ubd = S(0.);
+    }
+
+    niter = 1;
+    tau = S(0.);
+    if(kniter == 2)
+    {
+        if(orgati)
+        {
+            temp = (D(3) - D(2)) / S(2.);
+            c = rho + Z(1) / ((D(1) - D(2)) - temp);
+            a = c * (D(2) + D(3)) + Z(2) + Z(3);
+            b = c * D(2) * D(3) + Z(2) * D(3) + Z(3) * D(2);
+        }
+        else
+        {
+            temp = (D(1) - D(2)) / S(2.);
+            c = rho + Z(3) / ((D(3) - D(2)) - temp);
+            a = c * (D(1) + D(2)) + Z(1) + Z(2);
+            b = c * D(1) * D(2) + Z(1) * D(2) + Z(2) * D(1);
+        }
+
+        temp = lam_max(lam_abs(a), lam_abs(b), lam_abs(c));
+        a = a / temp;
+        b = b / temp;
+        c = c / temp;
+        if(c == S(0.))
+        {
+            tau = b / a;
+        }
+        else if(a <= S(0.))
+        {
+            tau = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+        }
+        else
+        {
+            tau = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+        }
+
+        if(tau < lbd || tau > ubd)
+        {
+            tau = (lbd + ubd) / S(2.);
+        }
+        if(D(1) == tau || D(2) == tau || D(3) == tau)
+        {
+            tau = S(0.);
+        }
+        else
+        {
+            temp = finit + tau * Z(1) / (D(1) * (D(1) - tau)) + tau * Z(2) / (D(2) * (D(2) - tau))
+                + tau * Z(3) / (D(3) * (D(3) - tau));
+            if(temp <= S(0.))
+            {
+                lbd = tau;
+            }
+            else
+            {
+                ubd = tau;
+            }
+
+            if(lam_abs(finit) <= lam_abs(temp))
+            {
+                tau = S(0.);
+            }
+        }
+    }
+    //
+    //     get machine parameters for possible scaling to avoid overflow
+    //
+    const S small1 = std::pow(S(2.), (std::log(ssfmin) / std::log(S(2.))) / S(3.));
+    const S sminv1 = S(1.) / small1;
+    const S small2 = small1 * small1;
+    const S sminv2 = sminv1 * sminv1;
+    //
+    //     Determine if scaling of inputs necessary to avoid overflow
+    //     when computing 1/temp**3
+    //
+    if(orgati)
+    {
+        temp = lam_min(lam_abs(D(2) - tau), lam_abs(D(3) - tau));
+    }
+    else
+    {
+        temp = lam_min(lam_abs(D(1) - tau), lam_abs(D(2) - tau));
+    }
+
+    scale = false;
+    if(temp <= small1)
+    {
+        scale = true;
+        if(temp <= small2)
+        {
+            //
+            //        Scale up by power of radix nearest 1/SAFMIN**(2/3)
+            //
+            sclfac = sminv2;
+            sclinv = small2;
+        }
+        else
+        {
+            //
+            //        Scale up by power of radix nearest 1/SAFMIN**(1/3)
+            //
+            sclfac = sminv1;
+            sclinv = small1;
+        }
+        //
+        //        Scaling up safe because D, Z, tau scaled elsewhere to be O(1)
+        //
+        for(int i = 1; i <= 3; ++i)
+        {
+            DSCALE(i) = D(i) * sclfac;
+            ZSCALE(i) = Z(i) * sclfac;
+        }
+        tau = tau * sclfac;
+        lbd = lbd * sclfac;
+        ubd = ubd * sclfac;
+    }
+    else
+    {
+        //
+        //        Copy D and Z to DSCALE and ZSCALE
+        //
+        for(int i = 1; i <= 3; ++i)
+        {
+            DSCALE(i) = D(i);
+            ZSCALE(i) = Z(i);
+        }
+    }
+    fc = S(0.);
+    df = S(0.);
+    ddf = S(0.);
+    for(int i = 1; i <= 3; ++i)
+    {
+        temp = S(1.) / (DSCALE(i) - tau);
+        temp1 = ZSCALE(i) * temp;
+        temp2 = temp1 * temp;
+        temp3 = temp2 * temp;
+        fc = fc + temp1 / DSCALE(i);
+        df = df + temp2;
+        ddf = ddf + temp3;
+    }
+    f = finit + tau * fc;
+    if(lam_abs(f) <= S(0.))
+    {
+        if(scale)
+        {
+            tau = tau * sclinv;
+        }
+        return info;
+    }
+    if(f <= S(0.))
+    {
+        lbd = tau;
+    }
+    else
+    {
+        ubd = tau;
+    }
+    //
+    //        Iteration begins -- Use Gragg-Thornton-Warner cubic convergent
+    //                            scheme
+    //
+    //     It is not hard to see that
+    //
+    //           1) Iterations will go up monotonically
+    //              if finit < 0;
+    //
+    //           2) Iterations will go down monotonically
+    //              if finit > 0.
+    //
+    iter = niter + 1;
+    for(int niter = iter; niter <= MAXIT; ++niter)
+    {
+        if(orgati)
+        {
+            temp1 = DSCALE(2) - tau;
+            temp2 = DSCALE(3) - tau;
+        }
+        else
+        {
+            temp1 = DSCALE(1) - tau;
+            temp2 = DSCALE(2) - tau;
+        }
+
+        a = (temp1 + temp2) * f - temp1 * temp2 * df;
+        b = temp1 * temp2 * f;
+        c = f - (temp1 + temp2) * df + temp1 * temp2 * ddf;
+        temp = lam_max(lam_abs(a), lam_abs(b), lam_abs(c));
+        a = a / temp;
+        b = b / temp;
+        c = c / temp;
+        if(c == S(0.))
+        {
+            eta = b / a;
+        }
+        else if(a <= S(0.))
+        {
+            eta = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+        }
+        else
+        {
+            eta = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+        }
+
+        if(f * eta >= S(0.))
+        {
+            eta = -f / df;
+        }
+
+        tau = tau + eta;
+        if(tau < lbd || tau > ubd)
+        {
+            tau = (lbd + ubd) / S(2.);
+        }
+
+        fc = S(0.);
+        erretm = S(0.);
+        df = S(0.);
+        ddf = S(0.);
+        for(int i = 1; i <= 3; ++i)
+        {
+            if((DSCALE(i) - tau) != S(0.))
+            {
+                temp = S(1.) / (DSCALE(i) - tau);
+                temp1 = ZSCALE(i) * temp;
+                temp2 = temp1 * temp;
+                temp3 = temp2 * temp;
+                temp4 = temp1 / DSCALE(i);
+                fc = fc + temp4;
+                erretm = erretm + lam_abs(temp4);
+                df = df + temp2;
+                ddf = ddf + temp3;
+            }
+            else
+            {
+                if(scale)
+                {
+                    tau = tau * sclinv;
+                }
+                return info;
+            }
+        }
+        f = finit + tau * fc;
+        erretm = S(8.) * (lam_abs(finit) + lam_abs(tau) * erretm) + lam_abs(tau) * df;
+        if((lam_abs(f) <= S(4.) * eps * erretm) || ((ubd - lbd) <= S(4.) * eps * lam_abs(tau)))
+        {
+            if(scale)
+            {
+                tau = tau * sclinv;
+            }
+            return info;
+        }
+        // REVIEW
+        if(f <= S(0.))
+        {
+            lbd = tau;
+        }
+        else
+        {
+            ubd = tau;
+        }
+    }
+    info = 1;
+    //
+    //     Undo scaling
+    //
+    if(scale)
+    {
+        tau = tau * sclinv;
+    }
+
+    return info;
+}
+
+template <typename S, typename I>
+__device__ I slaed4(I n,
+                    I i,
+                    S* delta,
+                    S* z,
+                    S rho,
+                    S& dlam,
+                    S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                    S ssfmin = std::numeric_limits<S>::min(),
+                    I MAXIT = 50)
+{
+    auto lam_abs = [](auto x) -> auto
+    {
+        return std::abs(x);
+    };
+    auto lam_sqr = [](auto x) -> auto
+    {
+        return x * x;
+    };
+    auto lam_sqrt = [](auto x) -> auto
+    {
+        return std::sqrt(x);
+    };
+    auto lam_max = [](auto x, auto y) -> auto
+    {
+        return std::max(x, y);
+    };
+    auto lam_min = [](auto x, auto y) -> auto
+    {
+        return std::min(x, y);
+    };
+
+    i = i + 1;
+    S zz[3]{};
+    struct X_t
+    {
+        S* x_;
+        __device__ X_t(S* x)
+            : x_(x)
+        {
+        }
+
+        __device__ S& operator()(int j)
+        {
+            return x_[j - 1];
+        }
+
+    } Z(z), ZZ(zz), DELTA(delta);
+
+    S tau, eta = S(0.), dltlb, dltub;
+    S psi, dpsi, phi, dphi, rhoinv, midpt;
+    S del, a, b, c, w, erretm, temp, dw, temp1, prew;
+    I ii, niter, iter, orgati, iim1, iip1;
+    bool swtch3, swtch;
+
+    S d1 = DELTA(1);
+    S di = DELTA(i);
+    S dnm1 = DELTA(n - 1);
+    S dn = DELTA(n);
+
+    rhoinv = S(1.) / rho;
+    I info = 0;
+
+    if(n == 1)
+    {
+        dlam = d1 + rho * Z(1) * Z(1);
+        DELTA(1) = S(1.);
+    }
+    else if(i == n)
+    {
+        ii = n - 1;
+        niter = 1;
+        //
+        //        Initial guess
+        //
+        //        If ||Z||_2 is not one, then midpt should be set to
+        //        rho * ||Z||_2^2 / S(2.)
+        //
+        midpt = rho / S(2.);
+
+        psi = S(0.);
+        for(int j = 1; j <= n - 2; ++j)
+        {
+            psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
+        }
+        c = rhoinv + psi;
+        w = c + Z(ii) * Z(ii) / ((DELTA(ii) - di) - midpt) + Z(n) * Z(n) / ((dn - di) - midpt);
+        if(w <= S(0.))
+        {
+            temp = Z(n - 1) * Z(n - 1) / (dn - dnm1 + rho) + Z(n) * Z(n) / rho;
+            if(c <= temp)
+            {
+                tau = rho;
+            }
+            else
+            {
+                del = dn - dnm1;
+                a = -c * del + Z(n - 1) * Z(n - 1) + Z(n) * Z(n);
+                b = Z(n) * Z(n) * del;
+                if(a < S(0.))
+                {
+                    tau = S(2.) * b / (lam_sqrt(a * a + S(4.) * b * c) - a);
+                }
+                else
+                {
+                    tau = (a + lam_sqrt(a * a + S(4.) * b * c)) / (S(2.) * c);
+                }
+            }
+            //
+            //           It can be proved that
+            //               D(n)+rho/2 <= LAMBDA(n) < D(n)+tau <= D(n)+rho
+            //
+            dltlb = midpt;
+            dltub = rho;
+        }
+        else
+        {
+            del = dn - dnm1;
+            a = -c * del + Z(n - 1) * Z(n - 1) + Z(n) * Z(n);
+            b = Z(n) * Z(n) * del;
+            if(a < S(0.))
+            {
+                tau = S(2.) * b / (lam_sqrt(a * a + S(4.) * b * c) - a);
+            }
+            else
+            {
+                tau = (a + lam_sqrt(a * a + S(4.) * b * c)) / (S(2.) * c);
+            }
+            //
+            //           It can be proved that
+            //               D(n) < D(n)+tau < LAMBDA(n) < D(n)+rho/2
+            //
+            dltlb = S(0.);
+            dltub = midpt;
+        }
+        for(int j = 1; j <= n; ++j)
+        {
+            DELTA(j) = (DELTA(j) - di) - tau;
+        }
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1; j <= ii; ++j)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        temp = Z(n) / DELTA(n);
+        phi = Z(n) * temp;
+        dphi = temp * temp;
+        erretm = S(8.) * (-phi - psi) + erretm - phi + rhoinv + lam_abs(tau) * (dpsi + dphi);
+        w = rhoinv + phi + psi;
+        //
+        //        Test for convergence
+        //
+        if(lam_abs(w) <= eps * erretm)
+        {
+            dlam = di + tau;
+            return info;
+        }
+        if(w <= S(0.))
+        {
+            dltlb = lam_max(dltlb, tau);
+        }
+        else
+        {
+            dltub = lam_min(dltub, tau);
+        }
+        //
+        //        Calculate the new step
+        //
+        niter = niter + 1;
+        c = w - DELTA(n - 1) * dpsi - DELTA(n) * dphi;
+        a = (DELTA(n - 1) + DELTA(n)) * w - DELTA(n - 1) * DELTA(n) * (dpsi + dphi);
+        b = DELTA(n - 1) * DELTA(n) * w;
+        // REVIEW
+        if(c < S(0.))
+        {
+            c = lam_abs(c);
+        }
+        if(c <= S(0.))
+        {
+            eta = -w / (dpsi + dphi);
+        }
+        else if(a >= S(0.))
+        {
+            eta = (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+        }
+        else
+        {
+            eta = S(2.) * b / (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+        }
+        //
+        //        Note, eta should be positive if w is negative, and
+        //        eta should be negative otherwise. However,
+        //        if for some reason caused by roundoff, eta*w > 0,
+        //        we simply use one Newton step instead. This way
+        //        will guarantee eta*w < 0.
+        //
+        if(w * eta > S(0.))
+        {
+            eta = -w / (dpsi + dphi);
+        }
+        temp = tau + eta;
+        if(temp > dltub || temp < dltlb)
+        {
+            if(w < S(0.))
+            {
+                eta = (dltub - tau) / S(2.);
+            }
+            else
+            {
+                eta = (dltlb - tau) / S(2.);
+            }
+        }
+        for(int j = 1; j <= n; ++j)
+        {
+            DELTA(j) = DELTA(j) - eta;
+        }
+        tau = tau + eta;
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1; j <= ii; ++j)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        temp = Z(n) / DELTA(n);
+        phi = Z(n) * temp;
+        dphi = temp * temp;
+        erretm = S(8.) * (-phi - psi) + erretm - phi + rhoinv + lam_abs(tau) * (dpsi + dphi);
+        w = rhoinv + phi + psi;
+        //
+        //        Main loop to update the values of the array DELTA
+        //
+        iter = niter + 1;
+        for(niter = iter; niter <= MAXIT; ++niter)
+        {
+            //
+            //           Test for convergence
+            //
+            if(lam_abs(w) <= eps * erretm)
+            {
+                dlam = di + tau;
+                return info;
+            }
+            if(w <= S(0.))
+            {
+                dltlb = lam_max(dltlb, tau);
+            }
+            else
+            {
+                dltub = lam_min(dltub, tau);
+            }
+            //
+            //           Calculate the new step
+            //
+            c = w - DELTA(n - 1) * dpsi - DELTA(n) * dphi;
+            a = (DELTA(n - 1) + DELTA(n)) * w - DELTA(n - 1) * DELTA(n) * (dpsi + dphi);
+            b = DELTA(n - 1) * DELTA(n) * w;
+            if(a >= S(0.))
+            {
+                eta = (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+            }
+            else
+            {
+                eta = S(2.) * b / (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+            }
+            //
+            //           Note, eta should be positive if w is negative, and
+            //           eta should be negative otherwise. However,
+            //           if for some reason caused by roundoff, eta*w > 0,
+            //           we simply use one Newton step instead. This way
+            //           will guarantee eta*w < 0.
+            //
+            if(w * eta > S(0.))
+            {
+                eta = -w / (dpsi + dphi);
+            }
+            temp = tau + eta;
+            if(temp > dltub || temp < dltlb)
+            {
+                if(w < S(0.))
+                {
+                    eta = (dltub - tau) / S(2.);
+                }
+                else
+                {
+                    eta = (dltlb - tau) / S(2.);
+                }
+            }
+            for(int j = 1; j <= n; ++j)
+            {
+                DELTA(j) = DELTA(j) - eta;
+            }
+            tau = tau + eta;
+            //
+            //           Evaluate psi and the derivative dpsi
+            //
+            dpsi = S(0.);
+            psi = S(0.);
+            erretm = S(0.);
+            for(int j = 1; j <= ii; ++j)
+            {
+                temp = Z(j) / DELTA(j);
+                psi = psi + Z(j) * temp;
+                dpsi = dpsi + temp * temp;
+                erretm = erretm + psi;
+            }
+            erretm = lam_abs(erretm);
+            //
+            //           Evaluate phi and the derivative dphi
+            //
+            temp = Z(n) / DELTA(n);
+            phi = Z(n) * temp;
+            dphi = temp * temp;
+            erretm = S(8.) * (-phi - psi) + erretm - phi + rhoinv + lam_abs(tau) * (dpsi + dphi);
+            w = rhoinv + phi + psi;
+        }
+        //
+        //        Return with info = 1, niter = MAXIT and not converged
+        //
+        info = 1;
+        dlam = di + tau;
+    }
+    else
+    {
+        //
+        //        The case for i < n
+        //
+        niter = 1;
+        I ip1 = i + 1;
+        S dip1 = DELTA(ip1);
+        //
+        //        Calculate initial guess
+        //
+        del = dip1 - di;
+        midpt = del / S(2.);
+        psi = S(0.);
+        for(int j = 1; j <= i - 1; ++j)
+        {
+            S dj = (DELTA(j) - di) - midpt;
+            psi = psi + Z(j) * Z(j) / dj;
+        }
+        phi = S(0.);
+        for(int j = n; j >= i + 2; --j)
+        {
+            S dj = (DELTA(j) - di) - midpt;
+            phi = phi + Z(j) * Z(j) / dj;
+        }
+        c = rhoinv + psi + phi;
+        w = c + Z(i) * Z(i) / (-midpt) + Z(ip1) * Z(ip1) / ((dip1 - di) - midpt);
+        if(w > S(0.))
+        {
+            //
+            //           d(i) < the ith eigenvalue < (d(i)+d(i+1))/2
+            //
+            //           We choose d(i) as origin.
+            //
+            orgati = true;
+            a = c * del + Z(i) * Z(i) + Z(ip1) * Z(ip1);
+            b = Z(i) * Z(i) * del;
+            if(a > S(0.))
+            {
+                tau = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+            }
+            else
+            {
+                tau = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+            }
+            dltlb = S(0.);
+            dltub = midpt;
+        }
+        else
+        {
+            //
+            //           (d(i)+d(i+1))/2 <= the ith eigenvalue < d(i+1)
+            //
+            //           We choose d(i+1) as origin.
+            //
+            orgati = false;
+            a = c * del - Z(i) * Z(i) - Z(ip1) * Z(ip1);
+            b = Z(ip1) * Z(ip1) * del;
+            if(a < S(0.))
+            {
+                tau = S(2.) * b / (a - lam_sqrt(lam_abs(a * a + S(4.) * b * c)));
+            }
+            else
+            {
+                tau = -(a + lam_sqrt(lam_abs(a * a + S(4.) * b * c))) / (S(2.) * c);
+            }
+            dltlb = -midpt;
+            dltub = S(0.);
+        }
+        if(orgati)
+        {
+            ii = i;
+        }
+        else
+        {
+            ii = i + 1;
+        }
+        iim1 = ii - 1;
+        iip1 = ii + 1;
+        S diim1 = DELTA(iim1);
+        S diip1 = DELTA(iip1);
+        if(orgati)
+        {
+            for(int j = 1; j <= n; ++j)
+            {
+                DELTA(j) = (DELTA(j) - di) - tau;
+            }
+        }
+        else
+        {
+            for(int j = 1; j <= n; ++j)
+            {
+                DELTA(j) = (DELTA(j) - dip1) - tau;
+            }
+        }
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1; j <= iim1; ++j)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        dphi = S(0.);
+        phi = S(0.);
+        for(int j = n; j >= iip1; --j)
+        {
+            temp = Z(j) / DELTA(j);
+            phi = phi + Z(j) * temp;
+            dphi = dphi + temp * temp;
+            erretm = erretm + phi;
+        }
+        w = rhoinv + phi + psi;
+        //
+        //        w is the value of the secular function with
+        //        its ii-th element removed.
+        //
+        swtch3 = false;
+        if(orgati)
+        {
+            if(w < S(0.))
+            {
+                swtch3 = true;
+            }
+        }
+        else
+        {
+            if(w > S(0.))
+            {
+                swtch3 = true;
+            }
+        }
+        if(ii == 1 || ii == n)
+        {
+            swtch3 = false;
+        }
+        temp = Z(ii) / DELTA(ii);
+        dw = dpsi + dphi + temp * temp;
+        temp = Z(ii) * temp;
+        w = w + temp;
+        erretm = S(8.) * (phi - psi) + erretm + S(2.) * rhoinv + S(3.) * lam_abs(temp)
+            + lam_abs(tau) * dw;
+        //
+        //        Test for convergence
+        //
+        if(lam_abs(w) <= eps * erretm)
+        {
+            if(orgati)
+            {
+                dlam = di + tau;
+            }
+            else
+            {
+                dlam = dip1 + tau;
+            }
+
+            return info;
+        }
+        if(w <= S(0.))
+        {
+            dltlb = lam_max(dltlb, tau);
+        }
+        else
+        {
+            dltub = lam_min(dltub, tau);
+        }
+        //
+        //        Calculate the new step
+        //
+        niter = niter + 1;
+        if(!swtch3)
+        {
+            if(orgati)
+            {
+                c = w - DELTA(ip1) * dw - (di - dip1) * lam_sqr(Z(i) / DELTA(i));
+            }
+            else
+            {
+                c = w - DELTA(i) * dw - (dip1 - di) * lam_sqr(Z(ip1) / DELTA(ip1));
+            }
+            a = (DELTA(i) + DELTA(ip1)) * w - DELTA(i) * DELTA(ip1) * dw;
+            b = DELTA(i) * DELTA(ip1) * w;
+            if(c == S(0.))
+            {
+                if(a == S(0.))
+                {
+                    if(orgati)
+                    {
+                        a = Z(i) * Z(i) + DELTA(ip1) * DELTA(ip1) * (dpsi + dphi);
+                    }
+                    else
+                    {
+                        a = Z(ip1) * Z(ip1) + DELTA(i) * DELTA(i) * (dpsi + dphi);
+                    }
+                }
+                eta = b / a;
+            }
+            else if(a <= S(0.))
+            {
+                eta = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+            }
+            else
+            {
+                eta = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+            }
+        }
+        else
+        {
+            //
+            //           Interpolation using THREE most relevant poles
+            //
+            temp = rhoinv + psi + phi;
+            if(orgati)
+            {
+                temp1 = Z(iim1) / DELTA(iim1);
+                temp1 = temp1 * temp1;
+                c = temp - DELTA(iip1) * (dpsi + dphi) - (diim1 - diip1) * temp1;
+                ZZ(1) = Z(iim1) * Z(iim1);
+                ZZ(3) = DELTA(iip1) * DELTA(iip1) * ((dpsi - temp1) + dphi);
+            }
+            else
+            {
+                temp1 = Z(iip1) / DELTA(iip1);
+                temp1 = temp1 * temp1;
+                c = temp - DELTA(iim1) * (dpsi + dphi) - (diip1 - diim1) * temp1;
+                ZZ(1) = DELTA(iim1) * DELTA(iim1) * (dpsi + (dphi - temp1));
+                ZZ(3) = Z(iip1) * Z(iip1);
+            }
+            ZZ(2) = Z(ii) * Z(ii);
+            info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin, MAXIT);
+            if(info != 0)
+            {
+                return info;
+            }
+        }
+        //
+        //        Note, eta should be positive if w is negative, and
+        //        eta should be negative otherwise. However,
+        //        if for some reason caused by roundoff, eta*w > 0,
+        //        we simply use one Newton step instead. This way
+        //        will guarantee eta*w < 0.
+        //
+        if(w * eta >= S(0.))
+        {
+            eta = -w / dw;
+        }
+        temp = tau + eta;
+        if(temp > dltub || temp < dltlb)
+        {
+            if(w < S(0.))
+            {
+                eta = (dltub - tau) / S(2.);
+            }
+            else
+            {
+                eta = (dltlb - tau) / S(2.);
+            }
+        }
+        prew = w;
+        for(int j = 1; j <= n; ++j)
+        {
+            DELTA(j) = DELTA(j) - eta;
+        }
+        //
+        //        Evaluate psi and the derivative dpsi
+        //
+        dpsi = S(0.);
+        psi = S(0.);
+        erretm = S(0.);
+        for(int j = 1; j <= iim1; ++j)
+        {
+            temp = Z(j) / DELTA(j);
+            psi = psi + Z(j) * temp;
+            dpsi = dpsi + temp * temp;
+            erretm = erretm + psi;
+        }
+        erretm = lam_abs(erretm);
+        //
+        //        Evaluate phi and the derivative dphi
+        //
+        dphi = S(0.);
+        phi = S(0.);
+        for(int j = n; j >= iip1; --j)
+        {
+            temp = Z(j) / DELTA(j);
+            phi = phi + Z(j) * temp;
+            dphi = dphi + temp * temp;
+            erretm = erretm + phi;
+        }
+        temp = Z(ii) / DELTA(ii);
+        dw = dpsi + dphi + temp * temp;
+        temp = Z(ii) * temp;
+        w = rhoinv + phi + psi + temp;
+        erretm = S(8.) * (phi - psi) + erretm + S(2.) * rhoinv + S(3.) * lam_abs(temp)
+            + lam_abs(tau + eta) * dw;
+        swtch = false;
+        if(orgati)
+        {
+            if(-w > lam_abs(prew) / S(10.))
+            {
+                swtch = true;
+            }
+        }
+        else
+        {
+            if(w > lam_abs(prew) / S(10.))
+            {
+                swtch = true;
+            }
+        }
+        tau = tau + eta;
+        //
+        //        Main loop to update the values of the array   DELTA
+        //
+        iter = niter + 1;
+        for(niter = iter; niter < MAXIT; ++niter)
+        {
+            //
+            //           Test for convergence
+            //
+            if(lam_abs(w) <= eps * erretm)
+            {
+                if(orgati)
+                {
+                    dlam = di + tau;
+                }
+                else
+                {
+                    dlam = dip1 + tau;
+                }
+
+                return info;
+            }
+            if(w <= S(0.))
+            {
+                dltlb = lam_max(dltlb, tau);
+            }
+            else
+            {
+                dltub = lam_min(dltub, tau);
+            }
+            //
+            //           Calculate the new step
+            //
+            if(!swtch3)
+            {
+                if(!swtch)
+                {
+                    if(orgati)
+                    {
+                        c = w - DELTA(ip1) * dw - (di - dip1) * lam_sqr(Z(i) / DELTA(i));
+                    }
+                    else
+                    {
+                        c = w - DELTA(i) * dw - (dip1 - di) * lam_sqr(Z(ip1) / DELTA(ip1));
+                    }
+                }
+                else
+                {
+                    temp = Z(ii) / DELTA(ii);
+                    if(orgati)
+                    {
+                        dpsi = dpsi + temp * temp;
+                    }
+                    else
+                    {
+                        dphi = dphi + temp * temp;
+                    }
+                    c = w - DELTA(i) * dpsi - DELTA(ip1) * dphi;
+                }
+                a = (DELTA(i) + DELTA(ip1)) * w - DELTA(i) * DELTA(ip1) * dw;
+                b = DELTA(i) * DELTA(ip1) * w;
+                if(c == S(0.))
+                {
+                    if(a == S(0.))
+                    {
+                        if(!swtch)
+                        {
+                            if(orgati)
+                            {
+                                a = Z(i) * Z(i) + DELTA(ip1) * DELTA(ip1) * (dpsi + dphi);
+                            }
+                            else
+                            {
+                                a = Z(ip1) * Z(ip1) + DELTA(i) * DELTA(i) * (dpsi + dphi);
+                            }
+                        }
+                        else
+                        {
+                            a = DELTA(i) * DELTA(i) * dpsi + DELTA(ip1) * DELTA(ip1) * dphi;
+                        }
+                    }
+                    eta = b / a;
+                }
+                else if(a <= S(0.))
+                {
+                    eta = (a - lam_sqrt(lam_abs(a * a - S(4.) * b * c))) / (S(2.) * c);
+                }
+                else
+                {
+                    eta = S(2.) * b / (a + lam_sqrt(lam_abs(a * a - S(4.) * b * c)));
+                }
+            }
+            else
+            {
+                //
+                //              Interpolation using 3 most relevant poles
+                //
+                temp = rhoinv + psi + phi;
+                if(swtch)
+                {
+                    c = temp - DELTA(iim1) * dpsi - DELTA(iip1) * dphi;
+                    ZZ(1) = DELTA(iim1) * DELTA(iim1) * dpsi;
+                    ZZ(3) = DELTA(iip1) * DELTA(iip1) * dphi;
+                }
+                else
+                {
+                    if(orgati)
+                    {
+                        temp1 = Z(iim1) / DELTA(iim1);
+                        temp1 = temp1 * temp1;
+                        c = temp - DELTA(iip1) * (dpsi + dphi) - (diim1 - diip1) * temp1;
+                        ZZ(1) = Z(iim1) * Z(iim1);
+                        ZZ(3) = DELTA(iip1) * DELTA(iip1) * ((dpsi - temp1) + dphi);
+                    }
+                    else
+                    {
+                        temp1 = Z(iip1) / DELTA(iip1);
+                        temp1 = temp1 * temp1;
+                        c = temp - DELTA(iim1) * (dpsi + dphi) - (diip1 - diim1) * temp1;
+                        ZZ(1) = DELTA(iim1) * DELTA(iim1) * (dpsi + (dphi - temp1));
+                        ZZ(3) = Z(iip1) * Z(iip1);
+                    }
+                }
+                info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin,
+                              MAXIT);
+                if(info != 0)
+                {
+                    return info;
+                }
+            }
+            //
+            //           Note, eta should be positive if w is negative, and
+            //           eta should be negative otherwise. However,
+            //           if for some reason caused by roundoff, eta*w > 0,
+            //           we simply use one Newton step instead. This way
+            //           will guarantee eta*w < 0.
+            //
+            if(w * eta >= S(0.))
+            {
+                eta = -w / dw;
+            }
+            temp = tau + eta;
+            if(temp > dltub || temp < dltlb)
+            {
+                if(w < S(0.))
+                {
+                    eta = (dltub - tau) / S(2.);
+                }
+                else
+                {
+                    eta = (dltlb - tau) / S(2.);
+                }
+            }
+            /* * */
+            for(int j = 1; j <= n; ++j)
+            {
+                DELTA(j) = DELTA(j) - eta;
+            }
+            tau = tau + eta;
+            prew = w;
+            //
+            //           Evaluate psi and the derivative dpsi
+            //
+            dpsi = S(0.);
+            psi = S(0.);
+            erretm = S(0.);
+            for(int j = 1; j <= iim1; ++j)
+            {
+                temp = Z(j) / DELTA(j);
+                psi = psi + Z(j) * temp;
+                dpsi = dpsi + temp * temp;
+                erretm = erretm + psi;
+            }
+            erretm = lam_abs(erretm);
+            //
+            //           Evaluate phi and the derivative dphi
+            //
+            dphi = S(0.);
+            phi = S(0.);
+            for(int j = n; j >= iip1; --j)
+            {
+                temp = Z(j) / DELTA(j);
+                phi = phi + Z(j) * temp;
+                dphi = dphi + temp * temp;
+                erretm = erretm + phi;
+            }
+            temp = Z(ii) / DELTA(ii);
+            dw = dpsi + dphi + temp * temp;
+            temp = Z(ii) * temp;
+            w = rhoinv + phi + psi + temp;
+            erretm = S(8.) * (phi - psi) + erretm + S(2.) * rhoinv + S(3.) * lam_abs(temp)
+                + lam_abs(tau) * dw;
+            if(w * prew > S(0.) && lam_abs(w) > lam_abs(prew) / S(10.))
+            {
+                swtch = !swtch;
+            }
+        }
+        //
+        //        Return with info = 1, niter = MAXIT and not converged
+        //
+        info = 1;
+        if(orgati)
+        {
+            dlam = di + tau;
+        }
+        else
+        {
+            dlam = dip1 + tau;
+        }
+    }
+
+    return info;
+}
+
+#define MAXITERS 50 // Max number of iterations for root finding method
+
+/** SEQ_EVAL evaluates the secular equation at a given point. It accumulates the
+    corrections to the elements in D so that distance to poles are computed
+   accurately **/
+template <typename S>
+__device__ void seq_eval(const rocblas_int type,
+                         const rocblas_int k,
+                         const rocblas_int dd,
+                         S* D,
+                         const S* z,
+                         const S p,
+                         const S cor,
+                         S* pt_fx,
+                         S* pt_fdx,
+                         S* pt_gx,
+                         S* pt_gdx,
+                         S* pt_hx,
+                         S* pt_hdx,
+                         S* pt_er,
+                         bool modif)
+{
+    S er, fx, gx, hx, fdx, gdx, hdx, zz, tmp;
+    rocblas_int gout, hout;
+
+    // prepare computations
+    // if type = 0: evaluate secular equation
+    if(type == 0)
+    {
+        gout = k + 1;
+        hout = k;
+    }
+    // if type = 1: evaluate secular equation without the k-th pole
+    else if(type == 1)
+    {
+        if(modif)
+        {
+            tmp = D[k] - cor;
+            D[k] = tmp;
+        }
+        gout = k;
+        hout = k;
+    }
+    // if type = 2: evaluate secular equation without the k-th and (k+1)-th poles
+    else if(type == 2)
+    {
+        if(modif)
+        {
+            tmp = D[k] - cor;
+            D[k] = tmp;
+            tmp = D[k + 1] - cor;
+            D[k + 1] = tmp;
+        }
+        gout = k;
+        hout = k + 1;
+    }
+    else
+    {
+        // unexpected value for type, something is wrong
+        assert(false);
+    }
+
+    // computations
+    gx = 0;
+    gdx = 0;
+    er = 0;
+    for(int i = 0; i < gout; ++i)
+    {
+        tmp = D[i] - cor;
+        if(modif)
+            D[i] = tmp;
+        zz = z[i];
+        tmp = zz / tmp;
+        gx += zz * tmp;
+        gdx += tmp * tmp;
+        er += gx;
+    }
+    er = abs(er);
+
+    hx = 0;
+    hdx = 0;
+    for(int i = dd - 1; i > hout; --i)
+    {
+        tmp = D[i] - cor;
+        if(modif)
+            D[i] = tmp;
+        zz = z[i];
+        tmp = zz / tmp;
+        hx += zz * tmp;
+        hdx += tmp * tmp;
+        er += hx;
+    }
+
+    fx = p + gx + hx;
+    fdx = gdx + hdx;
+
+    // return results
+    *pt_fx = fx;
+    *pt_fdx = fdx;
+    *pt_gx = gx;
+    *pt_gdx = gdx;
+    *pt_hx = hx;
+    *pt_hdx = hdx;
+    *pt_er = er;
+}
+
+//--------------------------------------------------------------------------------------//
+/** SEQ_SOLVE solves secular equation at point k (i.e. computes kth eigenvalue
+   that is within an internal interval). We use rational interpolation and fixed
+   weights method between the 2 poles of the interval. (TODO: In the future, we
+   could consider using 3 poles for those cases that may need it to reduce the
+   number of required iterations to converge. The performance improvements are
+   expected to be marginal, though) **/
+template <typename S>
+__device__ rocblas_int seq_solve(const rocblas_int dd,
+                                 S* D,
+                                 const S* z,
+                                 const S p,
+                                 rocblas_int k,
+                                 S* ev,
+                                 const S tol,
+                                 const S ssfmin,
+                                 const S ssfmax)
+{
+    bool converged = false;
+    bool up, fixed;
+    S lowb, uppb, aa, bb, cc, x;
+    S nx, er, fx, fdx, gx, gdx, hx, hdx, oldfx;
+    S tau, eta;
+    S dk, dk1, ddk, ddk1;
+    rocblas_int kk;
+    rocblas_int k1 = k + 1;
+
+    // initialize
+    dk = D[k];
+    dk1 = D[k1];
+    x = (dk + dk1) / 2; // midpoint of interval
+    tau = (dk1 - dk);
+    S pinv = 1 / p;
+
+    // find bounds and initial guess; translate origin
+    seq_eval(2, k, dd, D, z, pinv, x, &cc, &fdx, &gx, &gdx, &hx, &hdx, &er, false);
+    gdx = z[k] * z[k];
+    hdx = z[k1] * z[k1];
+    fx = cc + 2 * (hdx - gdx) / tau;
+    if(fx > 0)
+    {
+        // if the secular eq at the midpoint is positive, the root is in between
+        // D[k] and the midpoint take D[k] as the origin, i.e. x = D[k] + tau with
+        // tau in (0, uppb)
+        lowb = 0;
+        uppb = tau / 2;
+        up = true;
+        kk = k; // origin remains the same
+        aa = cc * tau + gdx + hdx;
+        bb = gdx * tau;
+        eta = sqrt(abs(aa * aa - 4 * bb * cc));
+        if(aa > 0)
+            tau = 2 * bb / (aa + eta);
+        else
+            tau = (aa - eta) / (2 * cc);
+        x = dk + tau; // initial guess
+    }
+    else
+    {
+        // otherwise, the root is in between the midpoint and D[k+1]
+        // take D[k+1] as the origin, i.e. x = D[k+1] + tau with tau in (lowb, 0)
+        lowb = -tau / 2;
+        uppb = 0;
+        up = false;
+        kk = k + 1; // translate the origin
+        aa = cc * tau - gdx - hdx;
+        bb = hdx * tau;
+        eta = sqrt(abs(aa * aa + 4 * bb * cc));
+        if(aa < 0)
+            tau = 2 * bb / (aa - eta);
+        else
+            tau = -(aa + eta) / (2 * cc);
+        x = dk1 + tau; // initial guess
+    }
+
+    // evaluate secular eq and get input values to calculate step correction
+    seq_eval(0, kk, dd, D, z, pinv, (up ? dk : dk1), &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+    seq_eval(1, kk, dd, D, z, pinv, tau, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+    bb = z[kk];
+    aa = bb / D[kk];
+    fdx += aa * aa;
+    bb *= aa;
+    fx += bb;
+
+    // calculate tolerance er for convergence test
+    er += 8 * (hx - gx) + 2 * pinv + 3 * abs(bb) + abs(tau) * fdx;
+
+    // if the value of secular eq is small enough, no point to continue;
+    // converged!!!
+    if(abs(fx) <= tol * er)
+        converged = true;
+
+    // otherwise...
+    else
+    {
+        // update bounds
+        lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+        uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+        // calculate first step correction with fixed weight method
+        ddk = D[k];
+        ddk1 = D[k1];
+        if(up)
+            cc = fx - ddk1 * fdx - (dk - dk1) * z[k] * z[k] / ddk / ddk;
+        else
+            cc = fx - ddk * fdx - (dk1 - dk) * z[k1] * z[k1] / ddk1 / ddk1;
+        aa = (ddk + ddk1) * fx - ddk * ddk1 * fdx;
+        bb = ddk * ddk1 * fx;
+        if(cc == 0)
+        {
+            if(aa == 0)
+            {
+                if(up)
+                    aa = z[k] * z[k] + ddk1 * ddk1 * (gdx + hdx);
+                else
+                    aa = z[k1] * z[k1] + ddk * ddk * (gdx + hdx);
+            }
+            eta = bb / aa;
+        }
+        else
+        {
+            eta = sqrt(abs(aa * aa - 4 * bb * cc));
+            if(aa <= 0)
+                eta = (aa - eta) / (2 * cc);
+            else
+                eta = (2 * bb) / (aa + eta);
+        }
+
+        // verify that the correction eta will get x closer to the root
+        // i.e. eta*fx should be negative. If not the case, take a Newton step
+        // instead
+        if(fx * eta >= 0)
+            eta = -fx / fdx;
+
+        // now verify that applying the correction won't get the process out of
+        // bounds if that is the case, bisect the interval instead
+        if(tau + eta > uppb || tau + eta < lowb)
+        {
+            if(fx < 0)
+                eta = (uppb - tau) / 2;
+            else
+                eta = (lowb - tau) / 2;
+        }
+
+        // take the step
+        tau += eta;
+        x = (up ? dk : dk1) + tau;
+
+        // evaluate secular eq and get input values to calculate step correction
+        oldfx = fx;
+        seq_eval(1, kk, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+        bb = z[kk];
+        aa = bb / D[kk];
+        fdx += aa * aa;
+        bb *= aa;
+        fx += bb;
+
+        // calculate tolerance er for convergence test
+        er += 8 * (hx - gx) + 2 * pinv + 3 * abs(bb) + abs(tau) * fdx;
+
+        // from now on, further step corrections will be calculated either with
+        // fixed weights method or with normal interpolation depending on the value
+        // of boolean fixed
+        cc = up ? -1 : 1;
+        fixed = (cc * fx) > (abs(oldfx) / 10);
+
+        // MAIN ITERATION LOOP
+        // ==============================================
+        for(int i = 1; i < MAXITERS; ++i)
+        {
+            // if the value of secular eq is small enough, no point to continue;
+            // converged!!!
+            if(abs(fx) <= tol * er)
+            {
+                converged = true;
+                break;
+            }
+
+            // update bounds
+            lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+            uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+            // calculate next step correction with either fixed weight method or
+            // simple interpolation
+            ddk = D[k];
+            ddk1 = D[k1];
+            if(fixed)
+            {
+                if(up)
+                    cc = fx - ddk1 * fdx - (dk - dk1) * z[k] * z[k] / ddk / ddk;
+                else
+                    cc = fx - ddk * fdx - (dk1 - dk) * z[k1] * z[k1] / ddk1 / ddk1;
+            }
+            else
+            {
+                if(up)
+                    gdx += aa * aa;
+                else
+                    hdx += aa * aa;
+                cc = fx - ddk * gdx - ddk1 * hdx;
+            }
+            aa = (ddk + ddk1) * fx - ddk * ddk1 * fdx;
+            bb = ddk * ddk1 * fx;
+            if(cc == 0)
+            {
+                if(aa == 0)
+                {
+                    if(fixed)
+                    {
+                        if(up)
+                            aa = z[k] * z[k] + ddk1 * ddk1 * (gdx + hdx);
+                        else
+                            aa = z[k1] * z[k1] + ddk * ddk * (gdx + hdx);
+                    }
+                    else
+                        aa = ddk * ddk * gdx + ddk1 * ddk1 * hdx;
+                }
+                eta = bb / aa;
+            }
+            else
+            {
+                eta = sqrt(abs(aa * aa - 4 * bb * cc));
+                if(aa <= 0)
+                    eta = (aa - eta) / (2 * cc);
+                else
+                    eta = (2 * bb) / (aa + eta);
+            }
+
+            // verify that the correction eta will get x closer to the root
+            // i.e. eta*fx should be negative. If not the case, take a Newton step
+            // instead
+            if(fx * eta >= 0)
+                eta = -fx / fdx;
+
+            // now verify that applying the correction won't get the process out of
+            // bounds if that is the case, bisect the interval instead
+            if(tau + eta > uppb || tau + eta < lowb)
+            {
+                if(fx < 0)
+                    eta = (uppb - tau) / 2;
+                else
+                    eta = (lowb - tau) / 2;
+            }
+
+            // take the step
+            tau += eta;
+            x = (up ? dk : dk1) + tau;
+
+            // evaluate secular eq and get input values to calculate step correction
+            oldfx = fx;
+            seq_eval(1, kk, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+            bb = z[kk];
+            aa = bb / D[kk];
+            fdx += aa * aa;
+            bb *= aa;
+            fx += bb;
+
+            // calculate tolerance er for convergence test
+            er += 8 * (hx - gx) + 2 * pinv + 3 * abs(bb) + abs(tau) * fdx;
+
+            // update boolean fixed if necessary
+            if(fx * oldfx > 0 && abs(fx) > abs(oldfx) / 10)
+                fixed = !fixed;
+        }
+    }
+
+    *ev = x;
+    return converged ? 0 : 1;
+}
+
+//--------------------------------------------------------------------------------------//
+/** SEQ_SOLVE_EXT solves secular equation at point n (i.e. computes last
+   eigenvalue). We use rational interpolation and fixed weights method between
+   the (n-1)th and nth poles. (TODO: In the future, we could consider using 3
+   poles for those cases that may need it to reduce the number of required
+   iterations to converge. The performance improvements are expected to be
+   marginal, though) **/
+template <typename S>
+__device__ rocblas_int seq_solve_ext(const rocblas_int dd,
+                                     S* D,
+                                     const S* z,
+                                     const S p,
+                                     S* ev,
+                                     const S tol,
+                                     const S ssfmin,
+                                     const S ssfmax)
+{
+    bool converged = false;
+    S lowb, uppb, aa, bb, cc, x;
+    S er, fx, fdx, gx, gdx, hx, hdx;
+    S tau, eta;
+    S dk, dkm1, ddk, ddkm1;
+    rocblas_int k = dd - 1;
+    rocblas_int km1 = dd - 2;
+
+    // initialize
+    dk = D[k];
+    dkm1 = D[km1];
+    x = dk + p / 2;
+    S pinv = 1 / p;
+
+    // find bounds and initial guess
+    seq_eval(2, km1, dd, D, z, pinv, x, &cc, &fdx, &gx, &gdx, &hx, &hdx, &er, false);
+    gdx = z[km1] * z[km1];
+    hdx = z[k] * z[k];
+    fx = cc + gdx / (dkm1 - x) - 2 * hdx * pinv;
+    if(fx > 0)
+    {
+        // if the secular eq at the midpoint is positive, the root is in between
+        // D[k] and the midpoint take D[k] as the origin, i.e. x = D[k] + tau with
+        // tau in (0, uppb)
+        lowb = 0;
+        uppb = p / 2;
+        tau = dk - dkm1;
+        aa = -cc * tau + gdx + hdx;
+        bb = hdx * tau;
+        eta = sqrt(aa * aa + 4 * bb * cc);
+        if(aa < 0)
+            tau = 2 * bb / (eta - aa);
+        else
+            tau = (aa + eta) / (2 * cc);
+    }
+    else
+    {
+        // otherwise, the root is in between the midpoint and D[k+1]
+        // take D[k+1] as the origin, i.e. x = D[k+1] + tau with tau in (lowb, 0)
+        lowb = p / 2;
+        uppb = p;
+        eta = gdx / (dk - dkm1 + p) + hdx / p;
+        if(cc <= eta)
+            tau = p;
+        else
+        {
+            tau = dk - dkm1;
+            aa = -cc * tau + gdx + hdx;
+            bb = hdx * tau;
+            eta = sqrt(aa * aa + 4 * bb * cc);
+            if(aa < 0)
+                tau = 2 * bb / (eta - aa);
+            else
+                tau = (aa + eta) / (2 * cc);
+        }
+    }
+    x = dk + tau; // initial guess
+
+    // evaluate secular eq and get input values to calculate step correction
+    seq_eval(0, km1, dd, D, z, pinv, dk, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+    seq_eval(0, km1, dd, D, z, pinv, tau, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+
+    // calculate tolerance er for convergence test
+    er += abs(tau) * (hdx + gdx) - 8 * (hx + gx) - hx + pinv;
+
+    // if the value of secular eq is small enough, no point to continue;
+    // converged!!!
+    if(abs(fx) <= tol * er)
+        converged = true;
+
+    // otherwise...
+    else
+    {
+        // update bounds
+        lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+        uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+        // calculate first step correction with fixed weight method
+        ddk = D[k];
+        ddkm1 = D[km1];
+        cc = abs(fx - ddkm1 * gdx - ddk * hdx);
+        aa = (ddk + ddkm1) * fx - ddk * ddkm1 * (gdx + hdx);
+        bb = ddk * ddkm1 * fx;
+        if(cc == 0)
+        {
+            eta = uppb - tau;
+        }
+        else
+        {
+            eta = sqrt(abs(aa * aa - 4 * bb * cc));
+            if(aa >= 0)
+                eta = (aa + eta) / (2 * cc);
+            else
+                eta = (2 * bb) / (aa - eta);
+        }
+
+        // verify that the correction eta will get x closer to the root
+        // i.e. eta*fx should be negative. If not the case, take a Newton step
+        // instead
+        if(fx * eta > 0)
+            eta = -fx / (gdx + hdx);
+
+        // now verify that applying the correction won't get the process out of
+        // bounds if that is the case, bisect the interval instead
+        if(tau + eta > uppb || tau + eta < lowb)
+        {
+            if(fx < 0)
+                eta = (uppb - tau) / 2;
+            else
+                eta = (lowb - tau) / 2;
+        }
+
+        // take the step
+        tau += eta;
+        x = dk + tau;
+
+        // evaluate secular eq and get input values to calculate step correction
+        seq_eval(0, km1, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+
+        // calculate tolerance er for convergence test
+        er += abs(tau) * (hdx + gdx) - 8 * (hx + gx) - hx + pinv;
+
+        // MAIN ITERATION LOOP
+        // ==============================================
+        for(int i = 1; i < MAXITERS; ++i)
+        {
+            // if the value of secular eq is small enough, no point to continue;
+            // converged!!!
+            if(abs(fx) <= tol * er)
+            {
+                converged = true;
+                break;
+            }
+
+            // update bounds
+            lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+            uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+            // calculate step correction
+            ddk = D[k];
+            ddkm1 = D[km1];
+            cc = fx - ddkm1 * gdx - ddk * hdx;
+            aa = (ddk + ddkm1) * fx - ddk * ddkm1 * (gdx + hdx);
+            bb = ddk * ddkm1 * fx;
+            eta = sqrt(abs(aa * aa - 4 * bb * cc));
+            if(aa >= 0)
+                eta = (aa + eta) / (2 * cc);
+            else
+                eta = (2 * bb) / (aa - eta);
+
+            // verify that the correction eta will get x closer to the root
+            // i.e. eta*fx should be negative. If not the case, take a Newton step
+            // instead
+            if(fx * eta > 0)
+                eta = -fx / (gdx + hdx);
+
+            // now verify that applying the correction won't get the process out of
+            // bounds if that is the case, bisect the interval instead
+            if(tau + eta > uppb || tau + eta < lowb)
+            {
+                if(fx < 0)
+                    eta = (uppb - tau) / 2;
+                else
+                    eta = (lowb - tau) / 2;
+            }
+
+            // take the step
+            tau += eta;
+            x = dk + tau;
+
+            // evaluate secular eq and get input values to calculate step correction
+            seq_eval(0, km1, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+
+            // calculate tolerance er for convergence test
+            er += abs(tau) * (hdx + gdx) - 8 * (hx + gx) - hx + pinv;
+        }
+    }
+
+    *ev = x;
+    return converged ? 0 : 1;
+}
+
+/** This local gemm adapts rocblas_gemm to multiply complex*real, and
+    overwrite result: A = A*B **/
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
+          typename S,
+          typename U,
+          std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+void local_gemm(rocblas_handle handle,
+                const rocblas_int n,
+                U A,
+                const rocblas_int shiftA,
+                const rocblas_int lda,
+                const rocblas_stride strideA,
+                S* B,
+                S* temp,
+                S* work,
+                const rocblas_int shiftV,
+                const rocblas_int ldv,
+                const rocblas_stride strideV,
+                const rocblas_int batch_count,
+                S** workArr)
+{
+    S one = 1.0;
+    S zero = 0.0;
+
+    // Execute A*B -> temp -> A
+    // temp = A*B
+    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n, &one, A, shiftA,
+                   lda, strideA, B, shiftV, ldv, strideV, &zero, temp, shiftV, ldv, strideV,
+                   batch_count, workArr);
+
+    // A = temp
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    rocblas_int blocks = (n - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
+                            stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, temp);
+}
+
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
+          typename S,
+          typename U,
+          std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+void local_gemm(rocblas_handle handle,
+                const rocblas_int n,
+                U A,
+                const rocblas_int shiftA,
+                const rocblas_int lda,
+                const rocblas_stride strideA,
+                S* B,
+                S* temp,
+                S* work,
+                const rocblas_int shiftV,
+                const rocblas_int ldv,
+                const rocblas_stride strideV,
+                const rocblas_int batch_count,
+                S** workArr)
+{
+    S one = 1.0;
+    S zero = 0.0;
+
+    // Execute A -> work; work*B -> temp -> A
+
+    // work = real(A)
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    rocblas_int blocks = (n - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, true>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2),
+                            0, stream, copymat_to_buffer, n, n, A, shiftA, lda, strideA, work);
+
+    // temp = work*B
+    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n, &one, work,
+                   shiftV, ldv, strideV, B, shiftV, ldv, strideV, &zero, temp, shiftV, ldv, strideV,
+                   batch_count, workArr);
+
+    // real(A) = temp
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, true>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2),
+                            0, stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, temp);
+
+    // work = imag(A)
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, false>), dim3(blocks, blocks, batch_count),
+                            dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, n, A, shiftA, lda,
+                            strideA, work);
+
+    // temp = work*B
+    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n, &one, work,
+                   shiftV, ldv, strideV, B, shiftV, ldv, strideV, &zero, temp, shiftV, ldv, strideV,
+                   batch_count, workArr);
+
+    // imag(A) = temp
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, false>), dim3(blocks, blocks, batch_count),
+                            dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, n, A, shiftA, lda,
+                            strideA, temp);
+}
+
+/******************************************************************************
+ * LACN2: 1-Norm Estimator for Inverse Matrices
+ *
+ * This is an internal utility routine that estimates ||A^{-1}||_1 using a
+ * reverse-communication iterative algorithm based on power iteration.
+ *
+ * ALGORITHM OVERVIEW:
+ * ------------------
+ * LACN2 uses a stateful iteration pattern where the caller:
+ * 1. Calls LACN2 to get the next operation to perform (via kase parameter)
+ * 2. Performs the requested matrix solve (A*x or A^H*x)
+ * 3. Calls LACN2 again with the result
+ * 4. Repeats until kase = 0 (convergence)
+ *
+ * STATE MACHINE:
+ * -------------
+ * kase = 0: Converged (d_est contains the final estimate of ||A^{-1}||_1)
+ * kase = 1: Caller should solve A*x = x and call LACN2 again
+ * kase = 2: Caller should solve A^H*x = x and call LACN2 again
+ *
+ * jump values (internal state transitions):
+ * - jump = 1: Initial iteration, compute first estimate
+ * - jump = 2: Find maximum component and set up unit vector
+ * - jump = 3: Check convergence criteria
+ * - jump = 4: Update max index and check stopping conditions
+ * - jump = 5: Finalize estimate
+ *
+ * DESIGN NOTES:
+ * ------------
+ * - This is an INTERNAL template utility, not a public API
+ * - LACN2 only computes the norm estimate; the caller computes rcond = 1/(||A||_1 * ||A^{-1}||_1)
+ * - Typically converges in 3-5 iterations
+ * - LACN2 can only process one matrix at a time, batched routines should compute
+ *   the condition number for one batch at a time in a loop
+ *
+ * REFERENCE:
+ * ---------
+ * Based on LAPACK's SLACN2/DLACN2/CLACN2/ZLACN2 routines
+ * Higham, N. J. (1988). FORTRAN codes for estimating the one-norm of a
+ * real or complex matrix, with applications to condition estimation.
+ * ACM Trans. Math. Softw., 14(4), 381-396.
+ *****************************************************************************/
+
+#ifndef LACN2_BLOCKSIZE
+#define LACN2_BLOCKSIZE 1024
+#endif
+
+/**
+ * lacn2_max_index: Device helper for finding max index via warp reduction
+ * Reduces within a warp using shuffle operations on both value and index
+ */
+template <typename T, typename I>
+__device__ inline void lacn2_max_index(const I n, T* local_max, I* local_max_index, rocblas_int offset)
+{
+    T compare_local_max = shift_left(*local_max, offset);
+    I compare_local_index = shift_left(*local_max_index, offset);
+    if(compare_local_max > *local_max)
+    {
+        *local_max = compare_local_max;
+        *local_max_index = compare_local_index;
+    }
+}
+
+/**
+ * lacn2_jump1_n_equals_one: Special case for n=1
+ * Simply stores the absolute value of x[0] as the estimate
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
+    lacn2_jump1_n_equals_one(const I n, T* x, S* norm, I* isgn)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    if(tid == 0)
+    {
+        *norm = rocblas_abs(x[0]);
+    }
+}
+
+/**
+ * lacn2_jump1: First iteration - compute initial estimate and set up x
+ * Computes sum of absolute values and normalizes x to unit entries
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
+    lacn2_jump1(const I n, T* x, S* norm, I* isgn)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+
+    // sum absolute values
+    S sum = 0;
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+    {
+        sum += rocblas_abs(x[i]);
+
+        if constexpr(rocblas_is_complex<T>)
+        {
+            S absxi = rocblas_abs(x[i]);
+            if(absxi == 0)
+            {
+                x[i] = T(1);
+            }
+            else
+            {
+                x[i] = x[i] / absxi;
+            }
+        }
+        else
+        {
+            if(x[i] >= 0)
+            {
+                x[i] = T(1);
+                isgn[i] = 1;
+            }
+            else
+            {
+                x[i] = T(-1);
+                isgn[i] = -1;
+            }
+        }
+    }
+
+    // reduce within Warp
+    sum += shift_left(sum, 1);
+    sum += shift_left(sum, 2);
+    sum += shift_left(sum, 4);
+    sum += shift_left(sum, 8);
+    sum += shift_left(sum, 16);
+    if(WarpSize > 32)
+        sum += shift_left(sum, 32);
+
+    if(tid % WarpSize == 0)
+        sval[tid / WarpSize] = sum;
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+            sum += sval[k];
+        *norm = sum;
+    }
+}
+
+/**
+ * lacn2_jump2: Find index of maximum absolute value in vector x
+ * Sets all x entries to 0 except the max element which is set to 1
+ * Must be called with only a single block
+ *
+ * Note: Uses imax1 device routine which computes max of sqrt(real(x[i])^2 + imag(x[i])^2) for complex types
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump2(const I n, T* x, I* max_idx)
+{
+    I tid = threadIdx.x;
+
+    // shared variables for imax1
+    __shared__ S sval[LACN2_BLOCKSIZE];
+    __shared__ I sidx[LACN2_BLOCKSIZE];
+
+    // Find index of maximum absolute value using imax1 device routine
+    // For complex types, imax1 uses sqrt(real^2 + imag^2)
+    imax1<LACN2_BLOCKSIZE, T, I, S>(tid, n, x, 1, sval, sidx);
+
+    // imax1 returns 1-based index in sidx[0], convert to 0-based
+    I local_max_index;
+    if(tid == 0)
+    {
+        local_max_index = sidx[0] - 1;
+        *max_idx = local_max_index;
+    }
+    __syncthreads();
+
+    // Read the max index that was computed
+    local_max_index = *max_idx;
+
+    // Zero out all elements except the max
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        x[i] = (i == local_max_index) ? T(1) : T(0);
+}
+
+/**
+ * lacn2_jump3: Check convergence criteria
+ * Must always be launched with one block
+ *
+ * Three possible outcomes:
+ * 1) Repeated signs: write alternating sign pattern, set kase=1, jump=5
+ * 2) Not repeated but est <= est_old: same as (1)
+ * 3) Not repeated and est > est_old: normalize x, set kase=2, jump=4
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
+    lacn2_jump3(const I n, T* x, T* v, I* isgn, rocblas_int* kase, rocblas_int* jump, S* est)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ bool sval_repeated[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ S sval_estold; // for broadcasting est_old to all warps
+
+    // Sum absolute values
+    S sum = 0;
+    int repeated = (rocblas_is_complex<T>) ? 0 : 1;
+    // we iterate over v, since v contains x from previous step (pointers swapped)
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+    {
+        sum += rocblas_abs(v[i]);
+        if constexpr(!rocblas_is_complex<T>)
+        {
+            if(v[i] >= 0)
+            {
+                if(isgn[i] <= -1)
+                    repeated = 0;
+            }
+            else
+            {
+                if(isgn[i] >= 1)
+                    repeated = 0;
+            }
+        }
+    }
+
+    // reduce within Warp
+    sum += shift_left(sum, 1);
+    repeated = repeated & __shfl_down(repeated, 1);
+    sum += shift_left(sum, 2);
+    repeated = repeated & __shfl_down(repeated, 2);
+    sum += shift_left(sum, 4);
+    repeated = repeated & __shfl_down(repeated, 4);
+    sum += shift_left(sum, 8);
+    repeated = repeated & __shfl_down(repeated, 8);
+    sum += shift_left(sum, 16);
+    repeated = repeated & __shfl_down(repeated, 16);
+    if(WarpSize > 32)
+    {
+        sum += shift_left(sum, 32);
+        repeated = repeated & __shfl_down(repeated, 32);
+    }
+
+    if(tid % WarpSize == 0)
+    {
+        sval[tid / WarpSize] = sum;
+        sval_repeated[tid / WarpSize] = repeated;
+    }
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+        {
+            sum += sval[k];
+            repeated = repeated && sval_repeated[k];
+        }
+        sval_estold = *est; // broadcast
+        *est = sum;
+        sval_repeated[0] = repeated;
+    }
+
+    __syncthreads();
+
+    repeated = sval_repeated[0];
+    S estold = sval_estold; // read broadcast
+
+    if(repeated || (*est <= estold))
+    {
+        for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            // we write over old x
+            T sign = (i % 2 == 0) ? T(1) : T(-1);
+            x[i] = T(sign * (S(1) + S(i) / S(n - 1)));
+        }
+        if(tid == 0)
+        {
+            *kase = 1;
+            *jump = 5;
+        }
+
+        return;
+    }
+
+    // we iterate over v, since v contains old x (pointers swapped)
+    if constexpr(rocblas_is_complex<T>)
+    {
+        for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            S absxi = rocblas_abs(v[i]);
+            if(absxi == 0)
+            {
+                x[i] = T(1);
+            }
+            else
+            {
+                x[i] = v[i] / absxi;
+            }
+        }
+    }
+    else
+    {
+        for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            if(v[i] >= 0)
+            {
+                x[i] = T(1);
+                isgn[i] = 1;
+            }
+            else
+            {
+                x[i] = T(-1);
+                isgn[i] = -1;
+            }
+        }
+    }
+
+    if(tid == 0)
+    {
+        *kase = 2;
+        *jump = 4;
+    }
+}
+
+/**
+ * lacn2_jump4: Update max index and check stopping conditions
+ * Determines if iteration should continue or finalize
+ *
+ * Note: Uses imax1 device routine which computes max of sqrt(real(x[i])^2 + imag(x[i])^2) for complex types
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump4(const I n,
+                                                                     T* x,
+                                                                     I* isgn,
+                                                                     rocblas_int* kase,
+                                                                     rocblas_int* jump,
+                                                                     I* max_idx,
+                                                                     const I iters,
+                                                                     const I iters_max)
+{
+    I tid = threadIdx.x;
+
+    int jlast = *max_idx;
+
+    // shared variables for imax1
+    __shared__ S sval[LACN2_BLOCKSIZE];
+    __shared__ I sidx[LACN2_BLOCKSIZE];
+
+    // Find index of maximum absolute value using imax1 device routine
+    // For complex types, imax1 uses sqrt(real^2 + imag^2)
+    imax1<LACN2_BLOCKSIZE, T, I, S>(tid, n, x, 1, sval, sidx);
+
+    // imax1 returns 1-based index in sidx[0], convert to 0-based
+    I local_max_idx;
+    if(tid == 0)
+    {
+        local_max_idx = sidx[0] - 1;
+        *max_idx = local_max_idx;
+    }
+    __syncthreads();
+
+    // Broadcast the max index to all threads
+    local_max_idx = *max_idx;
+
+    S val_new = rocblas_abs(x[local_max_idx]);
+    S val_old = rocblas_abs(x[jlast]);
+
+    if(val_new == val_old || iters >= iters_max)
+    {
+        for(rocblas_int i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            T sign = (i % 2 == 0) ? T(1) : T(-1);
+            x[i] = T(sign * (S(1) + S(i) / S(n - 1)));
+        }
+        if(tid == 0)
+        {
+            *kase = 1;
+            *jump = 5;
+        }
+
+        return;
+    }
+
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+    {
+        x[i] = T(0);
+    }
+
+    // ensure all threads done zeroing before writing to max element
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        x[local_max_idx] = T(1);
+        *kase = 1;
+        *jump = 3;
+    }
+}
+
+/**
+ * lacn2_jump5: Finalize estimate
+ * Computes final estimate and stores in norm
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump5(const I n, const T* x, S* norm)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+
+    // sum absolute values
+    S sum = 0;
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        sum += rocblas_abs(x[i]);
+
+    // reduce within Warp
+    sum += shift_left(sum, 1);
+    sum += shift_left(sum, 2);
+    sum += shift_left(sum, 4);
+    sum += shift_left(sum, 8);
+    sum += shift_left(sum, 16);
+    if(WarpSize > 32)
+        sum += shift_left(sum, 32);
+
+    if(tid % WarpSize == 0)
+        sval[tid / WarpSize] = sum;
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+            sum += sval[k];
+        sum = 2 * (sum / (3 * n));
+        if(sum > *norm)
+            *norm = sum;
+    }
+}
+
+// Main LACN2 host function - drives the reverse-communication iteration
+// to estimate ||A^-1||_1. Caller performs matrix solves between iterations.
+template <typename T, typename I, typename S>
+rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
+                                        const I n,
+                                        T** x, // passed by reference so swap persists
+                                        T** v, // passed by reference so swap persists
+                                        I* isgn,
+                                        S* d_est,
+                                        I* d_max_idx,
+                                        rocblas_int* d_kase,
+                                        rocblas_int* d_jump,
+                                        rocblas_int* h_kase,
+                                        rocblas_int* h_jump,
+                                        I* h_iters,
+                                        const I max_iters,
+                                        hipStream_t stream)
+{
+    if(*h_kase == 0)
+    {
+        // initialize x = (1/n, ..., 1/n)
+        rocblas_int blocks = (n - 1) / LACN2_BLOCKSIZE + 1;
+
+        // Get device properties and cap grid size to maxGridSize[0]
+        int device;
+        HIP_CHECK(hipGetDevice(&device));
+        hipDeviceProp_t props;
+        HIP_CHECK(hipGetDeviceProperties(&props, device));
+        blocks = std::min(blocks, static_cast<rocblas_int>(props.maxGridSize[0]));
+
+        ROCSOLVER_LAUNCH_KERNEL((reset_info<T, I, T>), dim3(blocks), dim3(LACN2_BLOCKSIZE), 0,
+                                stream, *x, n, T(1) / T(n));
+        *h_kase = 1;
+        *h_jump = 1;
+        return rocblas_status_success;
+    }
+
+    switch(*h_jump)
+    {
+    case 1:
+        if(n == 1)
+        {
+            ROCSOLVER_LAUNCH_KERNEL((lacn2_jump1_n_equals_one<T, I, S>), dim3(1),
+                                    dim3(LACN2_BLOCKSIZE), 0, stream, n, *x, d_est, isgn);
+            *h_kase = 0; // signal to exit
+            return rocblas_status_success;
+        }
+
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump1<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, d_est, isgn);
+
+        *h_kase = 2;
+        *h_jump = 2;
+
+        return rocblas_status_success;
+        break;
+    case 2:
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump2<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, d_max_idx);
+
+        *h_kase = 1;
+        *h_jump = 3;
+
+        *h_iters = 2;
+
+        return rocblas_status_success;
+        break;
+    case 3:
+        std::swap(*x, *v);
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump3<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, *v, isgn, d_kase, d_jump, d_est);
+
+        HIP_CHECK(hipMemcpyAsync(h_jump, d_jump, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipMemcpyAsync(h_kase, d_kase, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        return rocblas_status_success;
+        break;
+    case 4:
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump4<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, isgn, d_kase, d_jump, d_max_idx, *h_iters, max_iters);
+
+        HIP_CHECK(hipMemcpyAsync(h_jump, d_jump, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipMemcpyAsync(h_kase, d_kase, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        if(*h_jump == 3)
+            *h_iters = *h_iters + 1;
+
+        return rocblas_status_success;
+        break;
+    case 5:
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump5<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, d_est);
+        std::swap(*x, *v);
+        *h_kase = 0;
+
+        return rocblas_status_success;
+        break;
+    default: return rocblas_status_invalid_value; break;
     }
 }
 

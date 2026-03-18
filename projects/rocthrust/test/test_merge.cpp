@@ -25,7 +25,8 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(MergeTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveMergeTests, NumericalTestsParams);
@@ -281,6 +282,7 @@ TEST(PrimitiveMergeTests, TestMergeDevice)
         thrust::raw_pointer_cast(&d_a[0]),
         thrust::raw_pointer_cast(&d_b[0]),
         thrust::raw_pointer_cast(&d_result[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_result, d_result);
     }

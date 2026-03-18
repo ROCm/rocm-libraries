@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include "../../common/utils.hpp"
 #include "../../common/utils_custom_type.hpp"
 #include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
 #include "../../common/utils_half.hpp"
 
 // Identity iterator
@@ -38,11 +39,6 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
-#include "test_utils_data_generation.hpp"
-#ifdef WITH_ROCRAND
-    #include "test_utils_data_generation_with_rocrand.hpp"
-#endif
-#include "test_utils_assertions.hpp"
 #include "test_utils_get_random_data.hpp"
 #include "test_utils_hipgraphs.hpp"
 
@@ -574,7 +570,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = typename std::iterator_traits<ForwardIt>::value_type;
 
-    for(T value = value_mod; first != last; value++, *first++)
+    for(T value = value_mod; first != last; value++, static_cast<void>(first++))
     {
         if(static_cast<size_t>(value) >= ubound)
         {
@@ -597,7 +593,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = rocprim::half;
 
-    for(T value = value_mod; first != last; value++, *first++)
+    for(T value = value_mod; first != last; value++, static_cast<void>(first++))
     {
         if(static_cast<float>(static_cast<value_type>(value)) >= ubound)
         {
@@ -628,6 +624,44 @@ template<bool MakeConst, typename T>
 inline auto wrap_in_const(T* ptr) -> typename std::enable_if_t<!MakeConst, T*>
 {
     return ptr;
+}
+
+template<typename F>
+inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graphs = false)
+{
+    // temp storage
+    size_t temp_storage_size_bytes;
+
+    // Get size of d_temp_storage
+    HIP_CHECK(func(nullptr, temp_storage_size_bytes));
+
+    // temp_storage_size_bytes must be >0
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    // allocate temporary storage
+    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+
+    test_utils::GraphHelper gHelper;
+    if(use_graphs)
+    {
+        gHelper.startStreamCapture(stream);
+    }
+
+    // Run
+    HIP_CHECK(func(d_temp_storage.get(), temp_storage_size_bytes));
+
+    if(use_graphs)
+    {
+        gHelper.createAndLaunchGraph(stream);
+    }
+
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    if(use_graphs)
+    {
+        gHelper.cleanupGraphHelper();
+    }
 }
 
 } // namespace test_utils

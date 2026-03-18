@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
@@ -39,6 +16,24 @@ namespace rocRoller
             m_context, Register::Type::Vector, tmp->variableType(), 1);
 
         co_yield m_context->copier()->copy(val, tmp, "");
+    }
+
+    template <>
+    Generator<Instruction> generateOp<Expression::ToScalar>(Register::ValuePtr          dst,
+                                                            Register::ValuePtr          arg,
+                                                            Expression::ToScalar const& expr)
+    {
+        auto ctx = arg->context();
+        if(!ctx)
+            ctx = dst->context();
+
+        AssertFatal(ctx);
+
+        auto newDst = dst;
+
+        co_yield ctx->copier()->ensureType(newDst, arg, Register::Type::Scalar);
+
+        AssertFatal(newDst == dst, ShowValue(newDst), ShowValue(dst));
     }
 
     Generator<Instruction> ArithmeticGenerator::signExtendDWord(Register::ValuePtr dst,
@@ -189,27 +184,6 @@ namespace rocRoller
                 concatenate(indent, argName2, " (", arg2->description(), ")"));
     }
 
-    Generator<Instruction> ArithmeticGenerator::swapIfRHSLiteral(Register::ValuePtr& lhs,
-                                                                 Register::ValuePtr& rhs)
-    {
-        // Check for unsupported constant values and move them into vgprs
-        if(rhs->regType() == Register::Type::Literal)
-        {
-            AssertFatal(lhs->regType() != Register::Type::Literal,
-                        ShowValue(rhs),
-                        ShowValue(lhs),
-                        "Can not process two literal sources (consider simplifying expression)");
-            std::swap(lhs, rhs);
-        }
-
-        if(lhs->regType() == Register::Type::Literal
-           && !m_context->targetArchitecture().isSupportedConstantValue(lhs))
-        {
-            co_yield moveToVGPR(lhs);
-        }
-        co_return;
-    }
-
     Generator<Instruction>
         ArithmeticGenerator::scalarCompareThroughVALU(std::string const  instruction,
                                                       Register::ValuePtr dst,
@@ -228,16 +202,18 @@ namespace rocRoller
         co_yield_(Instruction(instruction, {wfp}, {lhs, tmp}, {}, ""));
 
         auto reduce = m_context->kernel()->wavefront_size() == 64 ? "s_and_b64" : "s_and_b32";
-        if(dst != nullptr && !dst->isSCC())
-        {
-            co_yield(Instruction::Lock(Scheduling::Dependency::SCC,
-                                       "Start Compare writing to non-SCC dest"));
-        }
-        co_yield_(Instruction(reduce, {wfp}, {wfp, m_context->getExec()}, {}, ""));
-        if(dst != nullptr && !dst->isSCC())
+
+        auto dependency = (dst != nullptr && !dst->isSCC()) ? Scheduling::Dependency::SCC
+                                                            : Scheduling::Dependency::Count;
+
+        co_yield Instruction(reduce, {wfp}, {wfp, m_context->getExec()}, {}, "")
+            .lock(Scheduling::Dependency::SCC, "Start Compare writing to non-SCC dest");
+
+        if(dependency == Scheduling::Dependency::SCC)
         {
             co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
-            co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
+            co_yield Instruction::Unlock(Scheduling::Dependency::SCC,
+                                         "End Compare writing to non-SCC dest");
         }
     }
 

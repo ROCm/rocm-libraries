@@ -23,30 +23,60 @@
 #include <thrust/complex.h>
 #include <thrust/detail/type_traits.h>
 
-#include <cmath>
-#include <type_traits>
-
 THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
 pow(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = typename detail::promoted_numerical_type<T0, T1>::type;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return exp(log(complex<T>(x)) * complex<T>(y));
 }
 
-template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const complex<T0>& x, const T1& y)
+// Specialized version for complex<float> on AMD GPUs to use FMA-based multiplication
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__)
+namespace detail
 {
-  using T = typename detail::promoted_numerical_type<T0, T1>::type;
+// FMA-aware complex multiplication for float precision on AMD GPUs.
+// This prevents SLP vectorizer from breaking FMA formation, which causes
+// numerical precision loss in complex arithmetic.
+// The issue occurs when vectorizer packs scalar multiplies before backend
+// can form FMA instructions, resulting in double rounding instead of single.
+THRUST_HOST_DEVICE inline thrust::complex<float> complex_mul_fma(thrust::complex<float> a, thrust::complex<float> b)
+{
+  // Complex multiplication: (a.r + a.i*i) * (b.r + b.i*i)
+  // = (a.r*b.r - a.i*b.i) + (a.r*b.i + a.i*b.r)*i
+  // Using __builtin_fmaf ensures FMA at source level:
+  // real: a.r*b.r + (-(a.i*b.i)) = FMA(a.r, b.r, -(a.i*b.i))
+  // imag: a.i*b.r + a.r*b.i = FMA(a.r, b.i, a.i*b.r)
+  float real_part = __builtin_fmaf(a.real(), b.real(), -(a.imag() * b.imag()));
+  float imag_part = __builtin_fmaf(a.real(), b.imag(), a.imag() * b.real());
+  return thrust::complex<float>(real_part, imag_part);
+}
+} // namespace detail
+
+template <>
+THRUST_HOST_DEVICE inline complex<float> pow(const complex<float>& x, const complex<float>& y)
+{
+  auto log_x   = thrust::log(static_cast<thrust::complex<float>>(x));
+  auto y_log_x = detail::complex_mul_fma(static_cast<thrust::complex<float>>(y), log_x);
+  return static_cast<complex<float>>(thrust::exp(y_log_x));
+}
+#endif
+
+template <typename T0, typename T1>
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+pow(const complex<T0>& x, const T1& y)
+{
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return exp(log(complex<T>(x)) * T(y));
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+pow(const T0& x, const complex<T1>& y)
 {
-  using T = typename detail::promoted_numerical_type<T0, T1>::type;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
 #ifdef __HIP_DEVICE_COMPILE__
   using ::log;
 #else

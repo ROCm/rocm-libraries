@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <variant>
 
@@ -73,6 +50,11 @@ namespace rocRoller
                 {
                     varType = lhsVal.varType;
                 }
+                // A bitfieldCombine's type is the same as the destination type.
+                else if constexpr(std::same_as<T, BitfieldCombine>)
+                {
+                    varType = rhsVal.varType;
+                }
                 else if(std::same_as<T, Subtract> && lhsVal.varType.isPointer()
                         && lhsVal.varType == rhsVal.varType)
                 {
@@ -102,6 +84,28 @@ namespace rocRoller
                 return {regType, varType};
             }
 
+            ResultType operator()(AddShiftL const& expr)
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r1hsVal = call(expr.r1hs);
+
+                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
+                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+
+                return {regType, varType};
+            }
+
+            ResultType operator()(ShiftLAdd const& expr)
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r2hsVal = call(expr.r2hs);
+
+                auto regType = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
+                auto varType = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
+
+                return {regType, varType};
+            }
+
             ResultType operator()(ScaledMatrixMultiply const& expr)
             {
                 auto matAVal = call(expr.matA);
@@ -124,11 +128,22 @@ namespace rocRoller
 
                 if constexpr(std::same_as<T, MagicShifts>)
                     return {argVal.regType, DataType::Int32};
+                else if constexpr(std::same_as<T, MagicShiftAndSign>)
+                    return {argVal.regType, DataType::UInt32};
+
+                if constexpr(std::same_as<T, ToScalar>)
+                    return {Register::Type::Scalar, argVal.varType};
 
                 return argVal;
             }
 
             ResultType operator()(Convert const& expr)
+            {
+                auto argVal = call(expr.arg);
+                return {argVal.regType, expr.destinationType};
+            }
+
+            ResultType operator()(Reinterpret const& expr)
             {
                 auto argVal = call(expr.arg);
                 return {argVal.regType, expr.destinationType};
@@ -298,6 +313,42 @@ namespace rocRoller
                 return {Register::Type::Scalar, varType};
             }
 
+            ResultType operator()(Concatenate const& expr)
+            {
+                auto         registerType = Register::Type::Literal;
+                VariableType variableType = expr.destinationType;
+
+                auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
+                unsigned actualNumRegister = 0;
+
+                for(auto const& operand : expr.operands)
+                {
+                    auto&& [operandRegisterType, operandVariableType] = call(operand);
+                    switch(operandRegisterType)
+                    {
+                    case Register::Type::Literal:
+                    case Register::Type::Scalar:
+                    case Register::Type::Vector:
+                        break;
+                    default:
+                        Throw<FatalError>(
+                            "Invalid register type for concatenate expression operands",
+                            ShowValue(operand));
+                    }
+
+                    registerType = Register::PromoteType(registerType, operandRegisterType);
+                    actualNumRegister
+                        = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
+                }
+
+                AssertFatal(expectedNumRegister == actualNumRegister,
+                            ShowValue(expr.destinationType),
+                            ShowValue(expectedNumRegister),
+                            ShowValue(actualNumRegister));
+
+                return {registerType, variableType};
+            }
+
             ResultType operator()(CommandArgumentPtr const& expr)
             {
                 if(expr == nullptr)
@@ -311,7 +362,7 @@ namespace rocRoller
                 if(expr == nullptr)
                     return {Register::Type::Count, DataType::Count};
 
-                return {Register::Type::Scalar, expr->variableType};
+                return {Register::Type::Scalar, expr->getVariableType()};
             }
 
             ResultType operator()(CommandArgumentValue const& expr)
@@ -335,7 +386,7 @@ namespace rocRoller
 
             ResultType operator()(PositionalArgument const& expr)
             {
-                Throw<FatalError>("Can not get result type of PositionalArgument.");
+                return {expr.regType, expr.varType};
             }
 
             ResultType operator()(WaveTilePtr const& expr)

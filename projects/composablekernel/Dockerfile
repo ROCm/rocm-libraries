@@ -1,38 +1,33 @@
+
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ROCMVERSION=6.4.1
+ARG ROCMVERSION=7.1.1
 ARG compiler_version=""
 ARG compiler_commit=""
 ARG CK_SCCACHE=""
 ARG DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/.apt_$ROCMVERSION/
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Add rocm repository
 RUN set -xe && \
-    apt-get update && apt-get install -y --allow-unauthenticated apt-utils wget gnupg2 curl && \
-    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/rocm-keyring.gpg
+    apt-get update && apt-get install -y --allow-unauthenticated apt-utils wget gnupg2 curl
 
-RUN if [ "$ROCMVERSION" != "6.5" ]; then \
-        sh -c "wget https://repo.radeon.com/amdgpu-install/$ROCMVERSION/ubuntu/jammy/amdgpu-install_6.4.60401-1_all.deb  --no-check-certificate" && \
-        apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ./amdgpu-install_6.4.60401-1_all.deb && \
-        wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
-        sh -c "echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] $DEB_ROCM_REPO jammy main > /etc/apt/sources.list.d/rocm.list" && \
-        sh -c 'echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/$ROCMVERSION/ubuntu jammy main > /etc/apt/sources.list.d/amdgpu.list'; \
-    fi
-
-RUN sh -c "echo deb http://mirrors.kernel.org/ubuntu jammy main universe | tee -a /etc/apt/sources.list" && \
-    amdgpu-install -y --usecase=rocm --no-dkms
-
-## Sccache binary built from source for ROCm, only install if CK_SCCACHE is defined
-ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
+RUN wget https://repo.radeon.com/amdgpu-install/7.1.1/ubuntu/noble/amdgpu-install_7.1.1.70101-1_all.deb && \
+    apt install ./amdgpu-install_7.1.1.70101-1_all.deb -y && \
+    apt update && \
+    apt install python3-setuptools python3-wheel -y && \
+    apt install rocm-dev -y
+    
+# Install SCCACHE
+ENV SCCACHE_VERSION="0.14.0"
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
-ENV CK_SCCACHE=$CK_SCCACHE
-RUN if [ "$CK_SCCACHE" != "" ]; then \
-        mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-        curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
-        chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
-    fi
+RUN set -x && \
+    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+    wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+    tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
+    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache
 
 # Install dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
@@ -45,7 +40,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-
     libelf-dev \
     libnuma-dev \
     libpthread-stubs0-dev \
-    llvm-amdgpu \
     mpich \
     net-tools \
     pkg-config \
@@ -61,23 +55,19 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-
     zip \
     libzstd-dev \
     openssh-server \
-    clang-format-12 \
+    clang-format-18 \
     kmod && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf amdgpu-install* && \
-# Remove unnecessary rocm components that take a lot of space
-    apt-get remove -y rocblas rocfft rocsparse composablekernel-dev hipblaslt
-
 #Install latest ccache
-RUN git clone https://github.com/ccache/ccache.git && \
+    git clone https://github.com/ccache/ccache.git && \
     cd ccache && mkdir build && cd build && cmake .. && make install && \
 #Install ninja build tracing tools
     cd / && \
     wget -qO /usr/local/bin/ninja.gz https://github.com/ninja-build/ninja/releases/latest/download/ninja-linux.zip && \
     gunzip /usr/local/bin/ninja.gz && \
     chmod a+x /usr/local/bin/ninja && \
-    git clone https://github.com/nico/ninjatracing.git && \
 #Install ClangBuildAnalyzer
     git clone https://github.com/aras-p/ClangBuildAnalyzer.git && \
     cd ClangBuildAnalyzer/ && \
@@ -106,7 +96,7 @@ ENV compiler_commit=$compiler_commit
 RUN sh -c "echo compiler version = '$compiler_version'" && \
     sh -c "echo compiler commit = '$compiler_commit'"
 
-RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" = "" ]; then \
+RUN if ( [ "$compiler_version" = "develop" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" = "" ]; then \
         git clone -b "$compiler_version" https://github.com/ROCm/llvm-project.git && \
         cd llvm-project && mkdir build && cd build && \
         cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_RUNTIMES="compiler-rt" ../llvm && \
@@ -114,7 +104,7 @@ RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd
     else echo "using the release compiler"; \
     fi
 
-RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" != "" ]; then \
+RUN if ( [ "$compiler_version" = "develop" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" != "" ]; then \
         git clone -b "$compiler_version" https://github.com/ROCm/llvm-project.git && \
         cd llvm-project && git checkout "$compiler_commit" && echo "checking out commit $compiler_commit" && mkdir build && cd build && \
         cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_RUNTIMES="compiler-rt" ../llvm && \

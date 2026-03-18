@@ -22,8 +22,8 @@
 
 cmake_minimum_required( VERSION 3.16 )
 
-# We use C++17 features, this will add compile option: -std=c++17
-set( CMAKE_CXX_STANDARD 17 )
+# We use C++20 features, this will add compile option: -std=c++20
+set( CMAKE_CXX_STANDARD 20 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -57,7 +57,7 @@ if( NOT ROCmCMakeBuildTools_FOUND )
   include( FetchContent )
 
   FetchContent_Declare( rocm_cmake_local
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake-build-tools
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake
     GIT_TAG rocm-6.4.1
     GIT_SHALLOW ON
   )
@@ -85,7 +85,7 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.34" )
+set ( VERSION_STRING "1.0.37" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -113,23 +113,8 @@ option(ROCFFT_BUILD_OFFLINE_TUNER "Build with offline tuner executable rocfft_of
 # Provide ability to disable hipRAND dependency
 option(USE_HIPRAND "Use hipRAND to provide device-side input generation" ON)
 
-if( USE_HIPRAND )
-  add_compile_definitions(USE_HIPRAND)
-endif( )
-
 # Split up function pool compilation across N files to parallelize its build
 set(ROCFFT_FUNCTION_POOL_N 8 CACHE STRING "Number of files to split function_pool into for compilation")
-
-# FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
-endif()
 
 set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-deprecated-declarations )
 if( WERROR )
@@ -148,7 +133,10 @@ set(DEFAULT_GPUS
   gfx1100
   gfx1101
   gfx1102
+  gfx1150
   gfx1151
+  gfx1152
+  gfx1153
   gfx1200
   gfx1201)
 
@@ -177,11 +165,18 @@ endif()
 
 if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
   message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
+  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+else()
+  # Don't force, users should be able to override GPU_TARGETS at the command line if desired
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "GPU architectures to build for")
 endif()
-set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined. (Deprecated, prefer GPU_TARGETS)")
-rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
-# Don't force, users should be able to override GPU_TARGETS at the command line if desired
-set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+# tolerate comma as a value separator since the compiler does the
+# same
+string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+# Filter out target flags as rocFFT builds generic code for each target.
+list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+list(REMOVE_DUPLICATES GPU_TARGETS)
+rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )

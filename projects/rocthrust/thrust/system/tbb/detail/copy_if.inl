@@ -49,11 +49,11 @@ struct body
   Size sum;
 
   body(InputIterator1 first, InputIterator2 stencil, OutputIterator result, Predicate pred)
-    : first(first), stencil(stencil), result(result), pred(pred), sum(0)
+    : first(first), stencil(stencil), result(result), pred{pred}, sum(0)
   {}
 
   body(body& b, ::tbb::split)
-    : first(b.first), stencil(b.stencil), result(b.result), pred(b.pred), sum(0)
+    : first(b.first), stencil(b.stencil), result(b.result), pred{b.pred}, sum(0)
   {}
 
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::pre_scan_tag)
@@ -66,13 +66,13 @@ struct body
         ++sum;
     }
   }
-  
+
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::final_scan_tag)
   {
     InputIterator1  iter1 = first   + r.begin();
     InputIterator2  iter2 = stencil + r.begin();
     OutputIterator  iter3 = result  + sum;
-      
+
     for (Size i = r.begin(); i != r.end(); ++i, ++iter1, ++iter2)
     {
       if (pred(*iter2))
@@ -87,12 +87,12 @@ struct body
   void reverse_join(body& b)
   {
     sum = b.sum + sum;
-  } 
+  }
 
   void assign(body& b)
   {
     sum = b.sum;
-  } 
+  }
 }; // end body
 
 } // end copy_if_detail
@@ -127,4 +127,3 @@ template<typename InputIterator1,
 } // end tbb
 } // end system
 THRUST_NAMESPACE_END
-

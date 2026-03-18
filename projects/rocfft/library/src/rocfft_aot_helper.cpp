@@ -226,10 +226,9 @@ void build_stockham_function_pool(CompileQueue& queue)
     function_pool fp(65536);
 
     // fused Bluestein and partial-pass kernels are always built at runtime
-    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
-    auto ppType    = PartialPassType::PPT_NONE;
-    auto ppFactors = std::vector<size_t>{};
-    auto ppLength  = 0;
+    auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    auto ppType   = PartialPassType::PPT_NONE;
+    auto ppParams = StockhamPartialPassParams();
 
     for(const auto& i : fp.get_map())
     {
@@ -246,7 +245,8 @@ void build_stockham_function_pool(CompileQueue& queue)
 
         StockhamGeneratorSpecs specs{factors,
                                      {},
-                                     {static_cast<unsigned int>(precision)},
+                                     static_cast<unsigned int>(precision),
+                                     get_curr_gcn_arch_name(),
                                      static_cast<unsigned int>(i.second.workgroup_size),
                                      PrintScheme(scheme)};
         specs.threads_per_transform = i.second.threads_per_transform[0];
@@ -302,12 +302,14 @@ void build_stockham_function_pool(CompileQueue& queue)
                                                             cbtype,
                                                             fuseBlue,
                                                             ppType,
+                                                            ppParams,
                                                             {},
                                                             {});
                 std::function<std::string(const std::string&)> generate_src
                     = [=](const std::string& kernel_name) -> std::string {
                     return stockham_rtc(specs,
                                         specs,
+                                        ppParams,
                                         nullptr,
                                         kernel_name,
                                         scheme,
@@ -326,8 +328,6 @@ void build_stockham_function_pool(CompileQueue& queue)
                                         cbtype,
                                         fuseBlue,
                                         ppType,
-                                        ppFactors,
-                                        ppLength,
                                         {},
                                         {});
                 };
@@ -491,7 +491,7 @@ void solution_kernel_combo(FMKey                             kernel_key,
         {
             placement_range = {rocfft_placement_inplace, rocfft_placement_notinplace};
         }
-        // sbcc can be used in 2D, 3D, for L1D, it's still psuedo-2D
+        // sbcc can be used in 2D, 3D, for L1D, it's still pseudo-2D
         if(static_dim == 0)
         {
             static_dims_range = {2, 3};
@@ -615,10 +615,9 @@ void build_solution_kernels(CompileQueue& queue)
     solmap.get_all_kernels(kernel_nodes, true);
 
     // fused Bluestein and partial-pass kernels are always built at runtime
-    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
-    auto ppType    = PartialPassType::PPT_NONE;
-    auto ppFactors = std::vector<size_t>{};
-    auto ppLength  = 0;
+    auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    auto ppType   = PartialPassType::PPT_NONE;
+    auto ppParams = StockhamPartialPassParams();
 
     for(const SolutionNode& kernel_sol : kernel_nodes)
     {
@@ -665,7 +664,8 @@ void build_solution_kernels(CompileQueue& queue)
 
                 StockhamGeneratorSpecs specs{factors,
                                              {},
-                                             {static_cast<unsigned int>(precision)},
+                                             static_cast<unsigned int>(precision),
+                                             get_curr_gcn_arch_name(),
                                              static_cast<unsigned int>(config.workgroup_size),
                                              PrintScheme(scheme)};
                 specs.threads_per_transform = config.threads_per_transform[0];
@@ -695,6 +695,7 @@ void build_solution_kernels(CompileQueue& queue)
                                                             cbtype,
                                                             fuseBlue,
                                                             ppType,
+                                                            ppParams,
                                                             {},
                                                             {});
 
@@ -702,6 +703,7 @@ void build_solution_kernels(CompileQueue& queue)
                     = [=](const std::string& kernel_name) -> std::string {
                     return stockham_rtc(specs,
                                         specs,
+                                        ppParams,
                                         nullptr,
                                         kernel_name,
                                         scheme,
@@ -720,8 +722,6 @@ void build_solution_kernels(CompileQueue& queue)
                                         cbtype,
                                         fuseBlue,
                                         ppType,
-                                        ppFactors,
-                                        ppLength,
                                         {},
                                         {});
                 };

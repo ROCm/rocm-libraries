@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*
  * Command to KernelGraph translator
@@ -31,10 +8,14 @@
 #include <variant>
 #include <vector>
 
+#include <optional>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
 
 namespace rocRoller
 {
@@ -231,11 +212,22 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Tiled const& tload)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
+                Log::debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
+                auto srcTag = tload.getSrcTag();
+
+                std::optional<Operations::SubTileTranspose> subTile;
+                if(std::holds_alternative<Operations::SubTileTranspose>(
+                       *m_command->findTag(srcTag)))
+                {
+                    subTile = m_command->getOperation<Operations::SubTileTranspose>(srcTag);
+                    srcTag  = subTile->input();
+                }
+
+                auto tensor = m_command->getOperation<Operations::Tensor>(srcTag);
 
                 auto const sizes          = tensor.sizes();
+                auto const literalSizes   = tensor.literalSizes();
                 auto const strides        = tensor.strides();
                 auto const literalStrides = tensor.literalStrides();
 
@@ -247,8 +239,15 @@ namespace rocRoller
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
-                    std::shared_ptr<Expression::Expression> strideExpr;
+                    std::shared_ptr<Expression::Expression> sizeExpr, strideExpr;
+                    if(literalSizes.size() > i && literalSizes[i] > 0)
+                    {
+                        sizeExpr = std::make_shared<Expression::Expression>(literalSizes[i]);
+                    }
+                    else
+                    {
+                        sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
+                    }
                     if(literalStrides.size() > i && literalStrides[i] > 0)
                     {
                         strideExpr = std::make_shared<Expression::Expression>(literalStrides[i]);
@@ -263,8 +262,65 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto tiled
-                    = m_graph.coordinates.addElement(MacroTile(tload.getTag(), sizes.size()));
+                if(subTile)
+                {
+                    // A is MxK and TransposeType::T (row-major),
+                    // therefore: M is slow, K is fast.
+                    //
+                    // Let K' = K/32.
+                    //
+                    // Let AScale be MxK'.  Let T_M and T_K be the
+                    // pre-tile sizes.
+                    //
+                    // Then pre-tiled AScale is; slow-to-fast:
+                    //
+                    //   tileM * ((K / T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
+                    //
+                    // Therefore: strides = {(K' / T_K) * T_M * T_K, T_M * T_K, T_K, 1};
+                    //
+                    // B is KxN and TransposeType::N (col-major),
+                    // therefore: K is fast, N is slow.
+                    //
+                    // Let BScale be K'xN.  Let T_K and T_N be the
+                    // pre-tile sizes.
+                    //
+                    // Then pre-tiled BScale is; slow-to-fast:
+                    //
+                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
+                    //
+                    // Therefore: strides = {T_N * T_K, (K' / T_N) * T_N * T_K, 1, T_K};
+                    //
+                    // Then pre-tiled B is; slow-to-fast:
+                    //
+                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
+                    //
+                    // Therefore: strides = {T_N * T_K, (K / T_N) * T_N * T_K, 1, T_K};
+
+                    auto const strideDataType = DataType::UInt32;
+
+                    auto sizes   = subTile->tileDimensions();
+                    auto strides = std::vector<uint32_t>{1, static_cast<uint32_t>(sizes[0])};
+                    if(subTile->isTranspose())
+                    {
+                        strides = {static_cast<uint32_t>(sizes[1]), 1};
+                    }
+
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(sizes[0]),
+                                     Expression::literal(strides[0]))));
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(sizes[1]),
+                                     Expression::literal(strides[1]))));
+
+                    // TODO: Audit pretile-scale and pretile-B paths
+                    // to make this intuitive.  Ideally the unit tests
+                    // and client would not have to muck around with
+                    // strides.
+                }
+
+                auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
                 m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});
@@ -656,23 +712,60 @@ namespace rocRoller
                     = std::visit(getBlockParams, *bSource);
 
                 // contraction dims are {1} and {0}, which is matrix multiplication
-                auto TC            = m_graph.control.addElement(contraction);
+                auto TC            = m_graph.control.addElement(NOP{});
                 m_op[mul.getTag()] = TC;
                 m_graph.mapper.connect(TC, D, NaryArgument::DEST);
 
                 std::vector<int> sourceDims;
 
                 auto connectBlockScale = [&](Operations::BlockScale const& op,
+                                             Operations::OperationTag      inputTag,
                                              NaryArgument                  valueArg,
-                                             NaryArgument                  scaleArg) {
+                                             NaryArgument scaleArg) -> std::vector<size_t> {
                     auto mode = op.scaleMode();
                     AssertFatal(mode != Operations::ScaleMode::Inline, ShowValue(mode));
 
+                    auto scaleInput   = op.scale().value();
+                    auto scaleInputOp = m_command->findTag(scaleInput);
+                    AssertFatal(scaleInputOp != nullptr);
+
+                    using TensorAndTranspose
+                        = std::tuple<Operations::OperationTag, std::vector<size_t>>;
+                    auto getTensorAndTranspose = rocRoller::overloaded{
+                        [](Operations::SubTileTranspose const& op) -> TensorAndTranspose {
+                            return {op.input(), op.tileDimensions()};
+                        },
+                        [](Operations::Nop const& op) -> TensorAndTranspose {
+                            return {Operations::OperationTag(), {}};
+                        },
+                        [](auto const& op) -> TensorAndTranspose {
+                            return {op.getTag(), {}};
+                        }};
+
+                    auto [scaleTensor, scaleTranspose]
+                        = std::visit(getTensorAndTranspose, *scaleInputOp);
+
+                    if(!scaleTranspose.empty())
+                    {
+                        AssertFatal(m_params);
+                        auto info = m_params->getDimensionInfo().at(scaleTensor);
+                        auto tile
+                            = std::get<rocRoller::KernelGraph::CoordinateGraph::MacroTile>(info);
+                        size_t miKScale = tile.miTileSizes.at(2);
+
+                        AssertFatal((scaleTranspose.at(0) * scaleTranspose.at(1) == 256)
+                                        && scaleTranspose.at(2) == miKScale,
+                                    ShowValue(scaleTranspose),
+                                    ShowValue(valueArg),
+                                    ShowValue(tile),
+                                    ShowValue(tile.miTileSizes));
+                    }
+
                     auto X      = m_dim.at(op.data());
-                    auto XScale = m_dim.at(*op.scale());
+                    auto XScale = m_dim.at(scaleTensor);
 
                     auto loadX      = m_op.at(op.data());
-                    auto loadXScale = m_op.at(*op.scale());
+                    auto loadXScale = m_op.at(scaleTensor);
 
                     m_graph.control.addElement(Sequence(), {loadX}, {TC});
                     m_graph.control.addElement(Sequence(), {loadXScale}, {TC});
@@ -681,55 +774,65 @@ namespace rocRoller
                     m_graph.mapper.connect(TC, XScale, scaleArg);
 
                     sourceDims.insert(sourceDims.end(), {X, XScale});
+
+                    return scaleTranspose;
                 };
 
+                auto handleInput = rocRoller::overloaded{
+                    [&](auto const& op, auto, auto, auto) -> std::vector<size_t> {
+                        Throw<FatalError>("Can't go here!");
+                        return {};
+                    },
+
+                    [&](Operations::T_Load_Tiled const& op,
+                        Operations::OperationTag        inputTag,
+                        NaryArgument                    valueArg,
+                        auto) -> std::vector<size_t> {
+                        auto AB     = m_dim.at(inputTag);
+                        auto loadAB = m_op.at(inputTag);
+
+                        sourceDims.push_back(AB);
+
+                        m_graph.control.addElement(Sequence(), {loadAB}, {TC});
+
+                        m_graph.mapper.connect(TC, AB, valueArg);
+
+                        return {};
+                    },
+                    connectBlockScale};
+
                 // Handle A, either T_Load_Tiled or BlockScale
-                std::visit(
-                    rocRoller::overloaded{
-                        [&](auto const& op, auto, auto) { Throw<FatalError>("Can't go here!"); },
+                contraction.scalePreShuffledTileA
+                    = std::visit(handleInput,
+                                 *aSource,
+                                 singleVariant(mul.a),
+                                 singleVariant(NaryArgument::LHS),
+                                 singleVariant(NaryArgument::LHS_SCALE));
 
-                        [&](Operations::T_Load_Tiled const& op, NaryArgument valueArg, auto) {
-                            // This is difficult to make common with the B version since it needs to directly access mul.a or mul.b.
-                            auto A     = m_dim.at(mul.a);
-                            auto loadA = m_op.at(mul.a);
-
-                            sourceDims.push_back(A);
-
-                            m_graph.control.addElement(Sequence(), {loadA}, {TC});
-
-                            m_graph.mapper.connect(TC, A, valueArg);
-                        },
-                        connectBlockScale},
-                    *aSource,
-                    singleVariant(NaryArgument::LHS),
-                    singleVariant(NaryArgument::LHS_SCALE));
-
-                std::visit(
-                    rocRoller::overloaded{
-                        [&](auto const& op, auto, auto) { Throw<FatalError>("Can't go here!"); },
-
-                        [&](Operations::T_Load_Tiled const& op, NaryArgument valueArg, auto) {
-                            auto B     = m_dim.at(mul.b);
-                            auto loadB = m_op.at(mul.b);
-
-                            sourceDims.push_back(B);
-
-                            m_graph.control.addElement(Sequence(), {loadB}, {TC});
-
-                            m_graph.mapper.connect(TC, B, valueArg);
-                        },
-                        connectBlockScale},
-                    *bSource,
-                    singleVariant(NaryArgument::RHS),
-                    singleVariant(NaryArgument::RHS_SCALE));
+                contraction.scalePreShuffledTileB
+                    = std::visit(handleInput,
+                                 *bSource,
+                                 singleVariant(mul.b),
+                                 singleVariant(NaryArgument::RHS),
+                                 singleVariant(NaryArgument::RHS_SCALE));
 
                 m_graph.coordinates.addElement(DataFlow(), sourceDims, std::vector{D});
+
+                // Replace contraction in graph after we have filled all the fields.
+                m_graph.control.setElement(TC, std::move(contraction));
             }
 
             void operator()(Operations::BlockScale const& t)
             {
                 AssertFatal(t.scaleMode() != Operations::ScaleMode::Inline,
                             "ScaleMode::Inline not supported yet.");
+            }
+
+            void operator()(Operations::SubTileTranspose const& t) {}
+
+            void operator()(Operations::Scratch const& t)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::Scratch");
             }
 
             void operator()(Operations::Literal const& literal)
@@ -745,9 +848,10 @@ namespace rocRoller
             void operator()(Operations::Tensor const& t) {}
             void operator()(Operations::Scalar const& t) {}
 
-            KernelGraph call(CommandPtr command)
+            KernelGraph call(CommandPtr command, CommandParametersPtr params)
             {
                 m_command = command;
+                m_params  = params;
                 for(auto const& op : command->operations())
                 {
                     std::visit(*this, *op);
@@ -770,16 +874,17 @@ namespace rocRoller
             // command tag -> dimension/coordinate tag
             std::map<Operations::OperationTag, int> m_dim;
 
-            CommandPtr m_command;
+            CommandPtr           m_command;
+            CommandParametersPtr m_params;
         };
 
-        KernelGraph translate(CommandPtr command)
+        KernelGraph translate(CommandPtr command, CommandParametersPtr params)
         {
             TIMER(t, "KernelGraph::translate");
             rocRoller::Log::getLogger()->debug("KernelGraph::translate(); Command\n{}",
                                                command->toString());
             TranslateVisitor visitor;
-            return visitor.call(command);
+            return visitor.call(command, params);
         }
     }
 }

@@ -1,33 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
@@ -55,8 +34,6 @@ namespace rocRoller
                     std::string const&                        comment);
 
         Instruction();
-
-        static Generator<std::string> EscapeComment(std::string comment, int indent = 0);
 
         static Instruction Allocate(Register::ValuePtr reg);
         static Instruction Allocate(std::shared_ptr<Register::Allocation> reg);
@@ -92,8 +69,9 @@ namespace rocRoller
         static Instruction Wait(WaitCount const& wait);
         static Instruction Wait(WaitCount&& wait);
 
-        static Instruction Lock(Scheduling::Dependency const& dependency, std::string comment);
-        static Instruction Unlock(std::string comment);
+        static Instruction Lock(Scheduling::Dependency dependency, std::string comment = "");
+        static Instruction Unlock(Scheduling::Dependency dependency, std::string comment = "");
+        static Instruction Unlock(std::string comment = "");
 
         /**
          * This instruction will be considered to write `reg` even though it
@@ -167,22 +145,29 @@ namespace rocRoller
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;
 
-        constexpr int          getLockValue() const;
-        Scheduling::Dependency getDependency() const;
+        constexpr Scheduling::LockOperation getLockValue() const;
+        constexpr Scheduling::Dependency    getDependency() const;
 
         std::string const&                                 getOpCode() const;
         std::array<std::string, Instruction::MaxModifiers> getModifiers() const;
+
+        CoexecCategory getCategory() const;
 
         constexpr int getNopCount() const
         {
             return m_nopCount;
         }
 
-        Instruction lock(Scheduling::Dependency const& dependency, std::string comment);
-        Instruction unlock(std::string comment);
+        Instruction& lock(Scheduling::Dependency dependency, std::string comment = "");
+        Instruction& unlock(Scheduling::Dependency dependency, std::string comment = "");
+        Instruction& unlock(std::string comment = "");
 
         void                    addControlOp(int id);
         std::vector<int> const& controlOps() const;
+        std::optional<int>      innerControlOp() const;
+
+        std::string const& referencedArg() const;
+        void               setReferencedArg(std::string arg);
 
         void addAllocation(std::shared_ptr<Register::Allocation> alloc);
         void addWaitCount(WaitCount const& wait);
@@ -217,10 +202,36 @@ namespace rocRoller
          */
         int numExecutedInstructions() const;
 
+        /**
+         * Get the total number of cycles for this instruction.
+         * This includes executed instructions, stall cycles, and additional cycles.
+         *
+         * An estimation as stall cycles are an estimation.
+         *
+         * Used for observers to keep track of cycles (in terms of time).
+         */
+        int totalCycles() const;
+
         void allocateNow();
 
         using AllocationArray = std::array<std::shared_ptr<Register::Allocation>, MaxAllocations>;
         AllocationArray allocations() const;
+
+        /**
+         * Set the modelled per-workitem addresses (only for select LDS instructions for now)
+         */
+        const std::optional<std::vector<size_t>>& getModelledAddresses() const
+        {
+            return m_addresses;
+        }
+
+        /**
+         * Set the modelled per-workitem addresses
+         */
+        void setModelledAddresses(const std::vector<size_t>& addresses)
+        {
+            m_addresses = addresses;
+        }
 
     private:
         /**
@@ -273,7 +284,10 @@ namespace rocRoller
 
         std::string m_opcode;
 
-        Scheduling::Dependency m_dependency = Scheduling::Dependency::None;
+        std::string m_referencedArg;
+
+        Scheduling::LockOperation m_lockOp     = Scheduling::LockOperation::None;
+        Scheduling::Dependency    m_dependency = Scheduling::Dependency::None;
 
         std::array<Register::ValuePtr, MaxDstRegisters> m_inoutDsts;
         std::array<Register::ValuePtr, MaxDstRegisters> m_dst;
@@ -287,6 +301,8 @@ namespace rocRoller
         bool m_operandsAreInout = false;
 
         Scheduling::InstructionStatus m_peekedStatus;
+
+        std::optional<std::vector<size_t>> m_addresses;
     };
 }
 

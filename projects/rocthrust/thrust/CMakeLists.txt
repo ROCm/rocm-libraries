@@ -11,16 +11,6 @@ configure_file(
   @ONLY
 )
 
-#Creat wrapper for generated version file
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-      "rocthrust_version.hpp"
-      HEADER_LOCATION include/thrust
-      WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
-      OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
-  )
-endif()
-
 # Only header target, does not include dependencies
 add_library(rocthrust INTERFACE)
 target_include_directories(rocthrust
@@ -30,10 +20,12 @@ target_include_directories(rocthrust
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
-target_link_libraries(rocthrust
-  INTERFACE
+if(${LINK_HIP_DEVICE_LIBS})
+  target_link_libraries(rocthrust
+    INTERFACE
     roc::rocprim_hip
-)
+  )
+endif()
 
 # hipstdpar header target
 add_library(hipstdpar INTERFACE)
@@ -66,20 +58,18 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-#Install the wrapper to rocthrust folder.
-#So wrapper would be in /opt/rocm-xxx/rocthrust/include/thrust
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_install(
-    DIRECTORY
-    "${PROJECT_BINARY_DIR}/rocthrust/wrapper/"
-    DESTINATION rocthrust/
+include(ROCMExportTargetsHeaderOnly)
+
+if(${LINK_HIP_DEVICE_LIBS})
+  # Export targets
+  rocm_export_targets_header_only(
+    TARGETS roc::rocthrust
+    DEPENDS PACKAGE rocprim
+    NAMESPACE roc::
+  )
+else()
+  rocm_export_targets_header_only(
+    TARGETS roc::rocthrust
+    NAMESPACE roc::
   )
 endif()
-
-include(ROCMExportTargetsHeaderOnly)
-# Export targets
-rocm_export_targets_header_only(
-  TARGETS roc::rocthrust
-  DEPENDS PACKAGE rocprim
-  NAMESPACE roc::
-)

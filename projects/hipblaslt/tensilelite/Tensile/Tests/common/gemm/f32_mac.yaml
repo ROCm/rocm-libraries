@@ -2,7 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950] # not supported by arch
 
 GlobalParameters:
-  MinimumRequiredVersion: 4.14.0
+  MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: 128
   DataInitTypeBeta: 0
@@ -209,3 +209,303 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [ [64, 64, 1024], [64, 64, 1024], [1], [32] ]
+
+  ########################################
+  # NN - corner
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: false
+      TransposeB: false
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [0,1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          # - [1, 1]
+          # - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [32,64]
+        - VectorWidthA: [1,2,4]
+        - VectorWidthB: [1,2,4]
+        - LocalReadVectorWidth: [1,2,4]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2,4]
+        - ScheduleIterAlg: [1,3]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 1
+          - Exact: [1, 1, 1, 1]
+          - Exact: [3, 3, 1, 3]
+          # 32
+          - Exact: [32, 32, 1, 32]
+          - Exact: [33, 32, 1, 32]
+          - Exact: [32, 33, 1, 32]
+          - Exact: [32, 32, 1, 33]
+          - Exact: [33, 33, 1, 33]
+          # 64
+          - Exact: [64, 64, 1, 64]
+          - Exact: [65, 64, 1, 64]
+          - Exact: [64, 65, 1, 64]
+          - Exact: [64, 64, 1, 65]
+          - Exact: [65, 65, 1, 65]
+          # 255
+          - Exact: [255, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 256, 1, 255]
+          - Exact: [255, 255, 1, 255]
+          # 256
+          - Exact: [256, 256, 1, 256]
+          # 257
+          - Exact: [257, 256, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 256, 1, 257]
+          - Exact: [257, 257, 1, 257]
+
+  ########################################
+  # NT - corner
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: false
+      TransposeB: true
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [0,1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          # - [1, 1]
+          # - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [32,64]
+        - VectorWidthA: [1,2,4]
+        - VectorWidthB: [1,2,4]
+        - LocalReadVectorWidth: [1,2,4]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2,4]
+        - ScheduleIterAlg: [1,3]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 1
+          - Exact: [1, 1, 1, 1]
+          - Exact: [3, 3, 1, 3]
+          # 32
+          - Exact: [32, 32, 1, 32]
+          - Exact: [33, 32, 1, 32]
+          - Exact: [32, 33, 1, 32]
+          - Exact: [32, 32, 1, 33]
+          - Exact: [33, 33, 1, 33]
+          # 64
+          - Exact: [64, 64, 1, 64]
+          - Exact: [65, 64, 1, 64]
+          - Exact: [64, 65, 1, 64]
+          - Exact: [64, 64, 1, 65]
+          - Exact: [65, 65, 1, 65]
+          # 255
+          - Exact: [255, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 256, 1, 255]
+          - Exact: [255, 255, 1, 255]
+          # 256
+          - Exact: [256, 256, 1, 256]
+          # 257
+          - Exact: [257, 256, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 256, 1, 257]
+          - Exact: [257, 257, 1, 257]
+
+  ########################################
+  # TN - corner
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: true
+      TransposeB: false
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [0,1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          # - [1, 1]
+          # - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [32,64]
+        - VectorWidthA: [1,2,4]
+        - VectorWidthB: [1,2,4]
+        - LocalReadVectorWidth: [1,2,4]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2,4]
+        - ScheduleIterAlg: [1,3]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 1
+          - Exact: [1, 1, 1, 1]
+          - Exact: [3, 3, 1, 3]
+          # 32
+          - Exact: [32, 32, 1, 32]
+          - Exact: [33, 32, 1, 32]
+          - Exact: [32, 33, 1, 32]
+          - Exact: [32, 32, 1, 33]
+          - Exact: [33, 33, 1, 33]
+          # 64
+          - Exact: [64, 64, 1, 64]
+          - Exact: [65, 64, 1, 64]
+          - Exact: [64, 65, 1, 64]
+          - Exact: [64, 64, 1, 65]
+          - Exact: [65, 65, 1, 65]
+          # 255
+          - Exact: [255, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 256, 1, 255]
+          - Exact: [255, 255, 1, 255]
+          # 256
+          - Exact: [256, 256, 1, 256]
+          # 257
+          - Exact: [257, 256, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 256, 1, 257]
+          - Exact: [257, 257, 1, 257]
+
+  ########################################
+  # TT - corner
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: true
+      TransposeB: true
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [0,1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          # - [1, 1]
+          # - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [32,64]
+        - VectorWidthA: [1,2,4]
+        - VectorWidthB: [1,2,4]
+        - LocalReadVectorWidth: [1,2,4]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2,4]
+        - ScheduleIterAlg: [1,3]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 1
+          - Exact: [1, 1, 1, 1]
+          - Exact: [3, 3, 1, 3]
+          # 32
+          - Exact: [32, 32, 1, 32]
+          - Exact: [33, 32, 1, 32]
+          - Exact: [32, 33, 1, 32]
+          - Exact: [32, 32, 1, 33]
+          - Exact: [33, 33, 1, 33]
+          # 64
+          - Exact: [64, 64, 1, 64]
+          - Exact: [65, 64, 1, 64]
+          - Exact: [64, 65, 1, 64]
+          - Exact: [64, 64, 1, 65]
+          - Exact: [65, 65, 1, 65]
+          # 255
+          - Exact: [255, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]
+          - Exact: [256, 256, 1, 255]
+          - Exact: [255, 255, 1, 255]
+          # 256
+          - Exact: [256, 256, 1, 256]
+          # 257
+          - Exact: [257, 256, 1, 256]
+          - Exact: [256, 257, 1, 256]
+          - Exact: [256, 256, 1, 257]
+          - Exact: [257, 257, 1, 257]

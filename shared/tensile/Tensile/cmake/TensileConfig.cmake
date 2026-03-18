@@ -176,7 +176,7 @@ function(TensileCreateLibraryFiles
     set(Options ${Options} "--verbose=${Tensile_VERBOSE}")
   else()
     set(Options ${Options} "--verbose=0")
-  endif()  
+  endif()
 
   if(Tensile_EMBED_LIBRARY)
     set(Options ${Options} "--embed-library=${Tensile_EMBED_LIBRARY}")
@@ -215,21 +215,25 @@ function(TensileCreateLibraryFiles
     set(Options ${Options} "--architecture=${archString}")
   endif()
 
+  if(Tensile_NO_ENUMERATE)
+    set(Options ${Options} "--no-enumerate")
+  endif()
+
   set(CommandLine ${Script} ${Options} ${Tensile_LOGIC_PATH} ${Tensile_OUTPUT_PATH} HIP)
   if (WIN32 OR (VIRTUALENV_BIN_DIR AND VIRTUALENV_PYTHON_EXENAME))
     set(CommandLine ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} ${CommandLine})
   endif()
-
-  if (NOT WIN32)
-    # This removed for windows as breaking rocBLAS compilation
-    #
-    # Tensile relies on the tools from the path, so capture the configure time
-    # path. It would be better if this were explicit, but that would be a pretty
-    # big change.
-    set(CommandLine
-      "${CMAKE_COMMAND}" -E env "'PATH=$ENV{PATH}'" --
-      ${CommandLine})
+  # Tensile relies on the tools from the path, so capture the configure time
+  # path. It would be better if this were explicit, but that would be a pretty
+  # big change.
+  set(ESC_PATH "$ENV{PATH}")
+  if(WIN32)
+    string(REPLACE ";" "$<SEMICOLON>" ESC_PATH "${ESC_PATH}")
   endif()
+  set(ENV_PATH_ARG "PATH=${ESC_PATH}")
+  set(CommandLine
+    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" --
+    ${CommandLine})
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
   if(Tensile_EMBED_LIBRARY)
@@ -263,12 +267,17 @@ function(TensileCreateLibraryFiles
         OUTPUT "${Tensile_OUTPUT_PATH}/library"
         DEPENDS ${Tensile_LOGIC_PATH}
         COMMAND ${CommandLine}
-        COMMENT "Generating libraries with TensileCreateLibrary")
+        COMMENT "Generating libraries with TensileCreateLibrary"
+        # To normalize special command line char handling between platforms.
+        VERBATIM
+        # To see progress vs buffering when built with ninja.
+        USES_TERMINAL)
 
       add_custom_target(${Tensile_VAR_PREFIX}_LIBRARY_TARGET
          DEPENDS "${Tensile_OUTPUT_PATH}/library"
          COMMAND ${CommandLine} "--verify-manifest"
-         COMMENT "Verifying files in ${Tensile_MANIFEST_FILE_PATH} were generated")
+         COMMENT "Verifying files in ${Tensile_MANIFEST_FILE_PATH} were generated"
+         VERBATIM)
   endif()
 
   if(Tensile_EMBED_LIBRARY)
@@ -276,16 +285,16 @@ function(TensileCreateLibraryFiles
       set_source_files_properties(${Tensile_EMBED_LIBRARY_SOURCE} PROPERTIES GENERATED TRUE)
       add_library(${Tensile_EMBED_LIBRARY} ${Tensile_EMBED_LIBRARY_SOURCE})
       target_link_libraries(${Tensile_EMBED_LIBRARY} PUBLIC TensileHost)
-      
+
       add_dependencies(${Tensile_EMBED_LIBRARY} ${Tensile_VAR_PREFIX}_LIBRARY_TARGET)
-    
+
       add_custom_command(
           TARGET ${Tensile_EMBED_LIBRARY} PRE_BUILD
           COMMAND ${CMAKE_COMMAND} -E copy
                   ${Tensile_EMBED_LIBRARY_SOURCE}
                   "${Tensile_OUTPUT_PATH}/library"
-          DEPENDS ${Tensile_EMBED_LIBRARY_SOURCE})
+          DEPENDS ${Tensile_EMBED_LIBRARY_SOURCE}
+          VERBATIM)
   endif()
 
 endfunction()
-

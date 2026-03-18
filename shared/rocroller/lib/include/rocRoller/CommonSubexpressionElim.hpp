@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -40,7 +17,8 @@ namespace rocRoller
             /**
              * The destination register for the expression.
              * Holds placeholder registers for temporary values.
-             * The root node register can be set to nullptr before a dest is determined.
+             * The root node register can be set to nullptr before a dest is
+             * determined.
              *
              * Set to nullptr when done using to release the reference.
              */
@@ -53,6 +31,8 @@ namespace rocRoller
              */
             ExpressionPtr expr;
 
+            Register::Type regType() const;
+
             /**
              * A set of dependencies that this expression relies on.
              * These are the indices of nodes in the parent ExpressionTree.
@@ -62,11 +42,25 @@ namespace rocRoller
             std::set<int> deps;
 
             /**
-             * Metric that tracks the number of subexpressions that have been eliminated.
-             * This count is for this node and its dependencies.
+             * Metric that tracks the number of subexpressions that have been
+             * eliminated. This count is for this node and its dependencies.
              *
              */
             int consolidationCount = 0;
+
+            /**
+             * What is the maximum distance of this node from the root node?
+             *
+             * This is used as a heuristic to avoid allocating temporary
+             * registers a long time before they are used.
+             */
+            int distanceFromRoot = 0;
+
+            /**
+             * This is used as a heuristic to guide which nodes to generate first
+             * to avoid allocating temporary registers a long time before they are used.
+             */
+            int priorityOrder = 0;
         };
 
         /**
@@ -102,5 +96,37 @@ namespace rocRoller
          * @return ExpressionPtr
          */
         ExpressionPtr rebuildExpression(ExpressionTree const& tree);
+
+        /**
+         * Calculates the distanceFromRoot values in every node of `tree`.
+         *
+         * Assumes (and asserts) that it is sorted in topological order.
+         */
+        void updateDistances(ExpressionTree& tree);
+
+        /**
+         * Calculates the priorityOrder values in every node of `tree` using a
+         * Sethi-Ullman inspired algorithm.
+         *
+         * This computes weights that approximate register pressure and then
+         * determines a traversal order where heavier subtrees are evaluated first.
+         * This helps minimize register pressure during code generation.
+         *
+         * Assumes (and asserts) that it is sorted in topological order.
+         */
+        void updatePriorityOrder(ExpressionTree& tree);
+
+        /**
+         * Returns a string containing some interesting statistical information
+         * about `tree`.
+         *
+         * Assumes (and asserts) that it is sorted in topological order.
+         */
+        std::string statistics(ExpressionTree tree);
+
+        /**
+         * Returns a DOT/graphviz representation of `tree`.
+         */
+        std::string toDOT(ExpressionTree const& tree);
     }
 }

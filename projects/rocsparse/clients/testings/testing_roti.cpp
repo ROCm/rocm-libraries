@@ -63,10 +63,12 @@ void testing_roti(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, M + base);
-    rocsparse_init<T>(hx_val_1, 1, nnz, 1);
-    rocsparse_init<T>(hy_1, 1, M, 1);
-    rocsparse_init<T>(hc, 1, 1, 1);
-    rocsparse_init<T>(hs, 1, 1, 1);
+
+    rocsparse_init<T>(hx_val_1, 1, nnz, 1, arg.convert_to_int);
+    rocsparse_init<T>(hy_1, 1, M, 1, arg.convert_to_int);
+    rocsparse_init<T>(hc, 1, 1, 1, arg.convert_to_int);
+    rocsparse_init<T>(hs, 1, 1, 1, arg.convert_to_int);
+
     hx_val_2    = hx_val_1;
     hx_val_gold = hx_val_1;
     hy_2        = hy_1;

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
@@ -31,9 +8,6 @@
 #include <rocRoller/Utilities/Logging.hpp>
 
 #include <bit>
-
-#include <llvm/Config/llvm-config.h>
-#include <llvm/Support/DivisionByConstantInfo.h>
 
 #define cast_to_unsigned(N) static_cast<typename std::make_unsigned<T>::type>(N)
 
@@ -48,32 +22,37 @@ namespace rocRoller
          * operations.
          */
 
-        void magicNumbersUnsigned(unsigned int  divisor,
-                                  u_int64_t&    magicNumber,
-                                  unsigned int& numPreShifts,
-                                  unsigned int& numPostShifts,
-                                  bool&         isAdd)
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context)
         {
-            llvm::UnsignedDivisionByConstantInfo magicu
-                = llvm::UnsignedDivisionByConstantInfo::get(llvm::APInt(32, divisor));
+            auto multiple = launchTimeSubExpressions(magicMultiple(denominator), context);
 
-            magicNumber   = magicu.Magic.getZExtValue();
-            numPreShifts  = magicu.PreShift;
-            numPostShifts = magicu.PostShift;
-            isAdd         = magicu.IsAdd;
-        }
+            auto resultType = resultVariableType(denominator);
+            auto typeInfo   = DataTypeInfo::Get(resultType);
 
-        void magicNumbersSigned(int           divisor,
-                                long int&     magicNumber,
-                                unsigned int& numShifts,
-                                bool&         isNegative)
-        {
-            llvm::SignedDivisionByConstantInfo magics
-                = llvm::SignedDivisionByConstantInfo::get(llvm::APInt(32, divisor, true));
+            if(!typeInfo.isSigned)
+            {
+                auto shifts = launchTimeSubExpressions(magicShifts(denominator), context);
 
-            magicNumber = magics.Magic.getSExtValue();
-            numShifts   = magics.ShiftAmount;
-            isNegative  = magicNumber < 0L;
+                return {multiple, shifts, nullptr, (shifts & literal(1u << 31u))};
+            }
+
+            auto bitfield = launchTimeSubExpressions(magicShiftAndSign(denominator), context);
+
+            auto mask   = typeInfo.elementBits - 1;
+            auto shifts = bitfield & literal(mask);
+
+            // Sign is in the most significant bit of the least significant byte
+            // (i.e. bit 7). We want every bit to match bit 7.
+            // 1. Shift it left into the most significant bit.
+            // 2. Arithmetic shift right by the width of the type to sign
+            // extend into every bit.
+            int  startingBit = 7;
+            int  endingBit   = typeInfo.elementBits - 1;
+            auto sign        = (convert(resultType, bitfield) << literal((endingBit - startingBit)))
+                        >> literal(endingBit);
+
+            return {multiple, shifts, sign, nullptr};
         }
 
         void enableDivideBy(ExpressionPtr expr, ContextPtr context)
@@ -100,8 +79,8 @@ namespace rocRoller
 
             AssertFatal(exprTimes[EvaluationTime::KernelLaunch], ShowValue(exprTimes));
 
-            auto magicExpr     = launchTimeSubExpressions(magicMultiple(expr), context);
-            auto numShiftsExpr = launchTimeSubExpressions(magicShifts(expr), context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(expr, context);
 
             auto magicTimes = evaluationTimes(magicExpr);
             auto shiftTimes = evaluationTimes(numShiftsExpr);
@@ -116,7 +95,9 @@ namespace rocRoller
 
             if(isSigned)
             {
-                auto signExpr  = launchTimeSubExpressions(magicSign(expr), context);
+                AssertFatal(numShiftsMSBExpr == nullptr,
+                            "Signed case does not need the MSB of magicShift");
+                AssertFatal(signExpr != nullptr);
                 auto signTimes = evaluationTimes(signExpr);
 
                 AssertFatal(signTimes[EvaluationTime::KernelExecute],
@@ -151,17 +132,21 @@ namespace rocRoller
 
             auto k = context->kernel();
 
-            auto magicExpr     = launchTimeSubExpressions(magicMultiple(denominator), context);
-            auto numShiftsExpr = launchTimeSubExpressions(magicShifts(denominator), context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(denominator, context);
 
             {
                 EvaluationTimes evalTimes
                     = evaluationTimes(magicExpr) & evaluationTimes(numShiftsExpr);
 
-                if(!evalTimes[EvaluationTime::KernelExecute])
+                if(!evalTimes[EvaluationTime::KernelExecute]
+                   && !evalTimes[EvaluationTime::Translate])
                 {
-                    Log::debug("Returning nullptr from magicNumberDivision ({})",
-                               toString(evalTimes));
+                    Log::debug("Returning nullptr from magicNumberDivision expr / shift "
+                               "({})\nmagic: {}\n shift: {}",
+                               toString(evalTimes),
+                               toString(magicExpr),
+                               toString(numShiftsExpr));
                     return nullptr;
                 }
             }
@@ -173,19 +158,25 @@ namespace rocRoller
             if(!isSigned)
             {
                 auto q = multiplyHigh(numerator, magicExpr);
+                setComment(q, "Magic q (unsigned)");
+
                 auto t = (arithmeticShiftR(numerator - q, one)) + q;
-                result = arithmeticShiftR(t, numShiftsExpr);
+                setComment(t, "Magic t (unsigned)");
+
+                result = conditional(
+                    numShiftsMSBExpr == literal(0u), arithmeticShiftR(t, numShiftsExpr), numerator);
+
+                setComment(result, "Magic result (unsigned)");
             }
             else
             {
-                auto signExpr = launchTimeSubExpressions(magicSign(denominator), context);
-
                 {
                     EvaluationTimes evalTimes = evaluationTimes(signExpr);
 
-                    if(!evalTimes[EvaluationTime::KernelExecute])
+                    if(!evalTimes[EvaluationTime::KernelExecute]
+                       && !evalTimes[EvaluationTime::Translate])
                     {
-                        Log::debug("Returning nullptr from magicNumberDivision ({})",
+                        Log::debug("Returning nullptr from magicNumberDivision sign ({})",
                                    toString(evalTimes));
                         return nullptr;
                     }
@@ -195,20 +186,39 @@ namespace rocRoller
 
                 auto numBytes = denominatorType.getElementSize();
 
-                auto q           = multiplyHigh(numerator, magicExpr) + numerator;
-                auto signOfQ     = arithmeticShiftR(q, literal(numBytes * 8 - 1, denominatorType));
+                // We are doing signed division; and in particular the
+                // magic-multiple might be negative.  Make sure the
+                // numerator is signed so that the arithmetic
+                // generators for the expressions below (q etc) use
+                // signed instructions.
+                if(not DataTypeInfo::Get(numeratorType).isSigned)
+                {
+                    auto signedNumeratorType
+                        = getIntegerType(true, DataTypeInfo::Get(numeratorType).elementBytes);
+                    numerator = std::make_shared<Expression>(
+                        Convert{{.arg{numerator}}, signedNumeratorType});
+                }
+
+                auto q = multiplyHigh(numerator, magicExpr) + numerator;
+                setComment(q, "Magic q (signed)");
+                auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1, denominatorType));
+                setComment(signOfQ, "Magic signOfQ");
                 auto magicIsPow2 = conditional(magicExpr == literal(0, denominatorType),
                                                literal(-1, denominatorType),
                                                literal(0, denominatorType));
+                setComment(magicIsPow2, "Magic isPow2");
 
                 auto handleSignOfLHS = q + (signOfQ & ((one << numShiftsExpr) + magicIsPow2));
+                setComment(handleSignOfLHS, "Magic handleSignOfLHS");
 
                 auto shiftedQ = arithmeticShiftR(handleSignOfLHS, numShiftsExpr);
+                setComment(shiftedQ, "Magic shiftedQ");
 
                 result = (shiftedQ ^ signExpr) - signExpr;
+                setComment(result, "Magic result (signed)");
             }
 
-            result = launchTimeSubExpressions(result, context);
+            result = launchTimeSubExpressions(simplify(result), context);
 
             {
                 auto evalTimes = evaluationTimes(result);
@@ -216,74 +226,6 @@ namespace rocRoller
             }
 
             return result;
-        }
-
-        template <typename T>
-        ExpressionPtr magicNumberDivisionByConstant(ExpressionPtr lhs, T rhs)
-        {
-            throw std::runtime_error("Magic Number Dvision not supported for this type");
-        }
-
-        // Magic number division for unsigned integers
-        template <>
-        ExpressionPtr magicNumberDivisionByConstant(ExpressionPtr lhs, unsigned int rhs)
-        {
-            u_int64_t    magicNumber;
-            unsigned int numPreShifts, numPostShifts;
-            bool         isAdd;
-
-            magicNumbersUnsigned(rhs, magicNumber, numPreShifts, numPostShifts, isAdd);
-
-            auto magicNumberExpr = literal(static_cast<unsigned int>(magicNumber));
-            auto lhsPreShifted   = lhs;
-            if(numPreShifts > 0)
-            {
-                ExpressionPtr numPreShiftsExpr = literal(numPreShifts);
-                lhsPreShifted                  = logicalShiftR(lhs, numPreShiftsExpr);
-            }
-
-            auto          magicMultiple     = multiplyHigh(lhsPreShifted, magicNumberExpr);
-            ExpressionPtr numPostShiftsExpr = literal(numPostShifts);
-
-            if(isAdd)
-            {
-                ExpressionPtr one = literal(1u);
-                return logicalShiftR(logicalShiftR(lhs - magicMultiple, one) + magicMultiple,
-                                     numPostShiftsExpr);
-            }
-            else
-            {
-                return logicalShiftR(magicMultiple, numPostShiftsExpr);
-            }
-        }
-
-        // Magic number division for signed integers
-        template <>
-        ExpressionPtr magicNumberDivisionByConstant(ExpressionPtr lhs, int rhs)
-        {
-            int64_t      magicNumber;
-            unsigned int numShifts;
-            bool         isNegative;
-
-            magicNumbersSigned(rhs, magicNumber, numShifts, isNegative);
-
-            auto magicNumberExpr = literal(static_cast<int>(magicNumber));
-            auto magicMultiple   = multiplyHigh(lhs, magicNumberExpr);
-
-            if(rhs > 0 && isNegative)
-            {
-                magicMultiple = magicMultiple + lhs;
-            }
-            else if(rhs < 0 && magicNumber > 0L)
-            {
-                magicMultiple = magicMultiple - lhs;
-            }
-
-            ExpressionPtr numShiftsExpr = literal(numShifts);
-            ExpressionPtr signBitsExpr  = literal<uint32_t>(sizeof(int) * 8 - 1);
-            ExpressionPtr shifted       = (magicMultiple >> numShiftsExpr);
-
-            return shifted + logicalShiftR(shifted, signBitsExpr);
         }
 
         template <typename T>
@@ -376,7 +318,8 @@ namespace rocRoller
                 }
                 else
                 {
-                    return magicNumberDivisionByConstant<T>(m_lhs, rhs);
+                    auto rhsExpr = literal(rhs);
+                    return magicNumberDivision(m_lhs, rhsExpr, m_context);
                 }
             }
 
@@ -394,7 +337,13 @@ namespace rocRoller
                 return visit(*this, rhs);
             }
 
+            DivisionByConstant(ContextPtr ctx)
+                : m_context(ctx)
+            {
+            }
+
         private:
+            ContextPtr    m_context;
             ExpressionPtr m_lhs;
         };
 
@@ -420,8 +369,8 @@ namespace rocRoller
                 }
                 else
                 {
-                    auto div     = magicNumberDivisionByConstant(m_lhs, rhs);
                     auto rhsExpr = literal(rhs);
+                    auto div     = magicNumberDivision(m_lhs, rhsExpr, m_context);
                     return m_lhs - (div * rhsExpr);
                 }
             }
@@ -440,7 +389,13 @@ namespace rocRoller
                 return visit(*this, rhs);
             }
 
+            ModuloByConstant(ContextPtr ctx)
+                : m_context(ctx)
+            {
+            }
+
         private:
+            ContextPtr    m_context;
             ExpressionPtr m_lhs;
         };
 
@@ -455,10 +410,7 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.arg)
-                {
-                    cpy.arg = call(expr.arg);
-                }
+                cpy.arg  = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -466,40 +418,19 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.rhs)
-                {
-                    cpy.rhs = call(expr.rhs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
                 return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
             {
                 ScaledMatrixMultiply cpy = expr;
-                if(expr.matA)
-                {
-                    cpy.matA = call(expr.matA);
-                }
-                if(expr.matB)
-                {
-                    cpy.matB = call(expr.matB);
-                }
-                if(expr.matC)
-                {
-                    cpy.matC = call(expr.matC);
-                }
-                if(expr.scaleA)
-                {
-                    cpy.scaleA = call(expr.scaleA);
-                }
-                if(expr.scaleB)
-                {
-                    cpy.scaleB = call(expr.scaleB);
-                }
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -507,19 +438,18 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.r1hs)
-                {
-                    cpy.r1hs = call(expr.r1hs);
-                }
-                if(expr.r2hs)
-                {
-                    cpy.r2hs = call(expr.r2hs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(std::move(cpy));
             }
 
             ExpressionPtr operator()(Divide const& expr) const
@@ -535,7 +465,7 @@ namespace rocRoller
                 if(rhsEvalTimes[EvaluationTime::Translate])
                 {
                     auto rhsVal     = evaluate(rhs);
-                    auto divByConst = DivisionByConstant();
+                    auto divByConst = DivisionByConstant(m_context);
                     auto rv         = divByConst.call(lhs, rhsVal);
                     copyComment(rv, expr);
                     return rv;
@@ -551,8 +481,13 @@ namespace rocRoller
                         return div;
                     }
 
-                    extraComment = " (magicNumberDivision returned nullptr)";
+                    if(expr.comment.find("magicNumberDivision") == std::string::npos)
+                    {
+                        extraComment = fmt::format(" (magicNumberDivision by {} returned nullptr)",
+                                                   toString(rhs));
+                    }
                 }
+
                 return std::make_shared<Expression>(Divide{lhs, rhs, expr.comment + extraComment});
             }
 
@@ -569,7 +504,7 @@ namespace rocRoller
                 if(rhsEvalTimes[EvaluationTime::Translate])
                 {
                     auto rhsVal     = evaluate(rhs);
-                    auto modByConst = ModuloByConstant();
+                    auto modByConst = ModuloByConstant(m_context);
                     auto rv         = modByConst.call(lhs, rhsVal);
                     copyComment(rv, expr);
                     return rv;
@@ -587,7 +522,11 @@ namespace rocRoller
                         return rv;
                     }
 
-                    extraComment = " (modulo: magicNumberDivision returned nullptr)";
+                    if(expr.comment.find("magicNumberDivision") == std::string::npos)
+                    {
+                        extraComment = fmt::format(
+                            " (modulo: magicNumberDivision returned nullptr)", toString(rhs));
+                    }
                 }
 
                 return std::make_shared<Expression>(Modulo{lhs, rhs, expr.comment + extraComment});

@@ -5,9 +5,9 @@
       "url": "ROCm/MIOpen",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
     },
     {
       "name": "tensile",
@@ -16,25 +16,43 @@
       "category": "shared",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "origami",
+      "url": "ROCm/origami",
+      "branch": "develop",
+      "category": "shared",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "mxdatagenerator",
+      "url": "ROCm/mxDataGenerator",
+      "branch": "develop",
+      "category": "shared",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "composablekernel",
       "url": "ROCm/composable_kernel",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": false
     },
     {
       "name": "hipblas",
       "url": "ROCm/hipBLAS",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipblas-common",
@@ -43,16 +61,16 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipblaslt",
       "url": "ROCm/hipBLASLt",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipcub",
@@ -61,16 +79,16 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipfft",
       "url": "ROCm/hipFFT",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hiprand",
@@ -79,52 +97,52 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipsolver",
       "url": "ROCm/hipSOLVER",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipsparse",
       "url": "ROCm/hipSPARSE",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipsparselt",
       "url": "ROCm/hipSPARSELt",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocblas",
       "url": "ROCm/rocBLAS",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocfft",
       "url": "ROCm/rocFFT",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocprim",
@@ -133,7 +151,7 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocrand",
@@ -142,34 +160,34 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocroller",
       "url": "ROCm/rocRoller",
-      "branch": "main",
+      "branch": "develop",
       "category": "shared",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocsolver",
       "url": "ROCm/rocSOLVER",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocsparse",
       "url": "ROCm/rocSPARSE",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocthrust",
@@ -178,7 +196,52 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": false
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hipdnn",
+      "url": "ROCm/hipDNN",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocwmma",
+      "url": "ROCm/rocWMMA",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hiptensor",
+      "url": "ROCm/hipTensor",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "miopen-provider",
+      "url": "ROCm/MIOpen-Provider",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hipblaslt-provider",
+      "url": "ROCm/hipBLASLt-Provider",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     }
   ]
 }

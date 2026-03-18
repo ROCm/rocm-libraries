@@ -1,32 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 
@@ -45,136 +23,7 @@ namespace rocRoller
         using namespace Expression;
 
         /**
-         * Clean Graph
-         *
-         * Replaces all CommandArguments found within the graph with the appropriate
-         * AssemblyKernelArgument.
-         */
-
-        /**
-         * Removes all CommandArgruments found within an expression with the appropriate
-         * AssemblyKernel Argument. This is used by CleanArgumentsVisitor.
-         */
-        struct CleanExpressionVisitor
-        {
-            CleanExpressionVisitor(AssemblyKernelPtr kernel)
-                : m_kernel(kernel)
-            {
-            }
-
-            template <CUnary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                Expr cpy = expr;
-                if(expr.arg)
-                {
-                    cpy.arg = call(expr.arg);
-                }
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            template <CBinary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.rhs)
-                {
-                    cpy.rhs = call(expr.rhs);
-                }
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
-            {
-                ScaledMatrixMultiply cpy = expr;
-                if(expr.matA)
-                {
-                    cpy.matA = call(expr.matA);
-                }
-                if(expr.matB)
-                {
-                    cpy.matB = call(expr.matB);
-                }
-                if(expr.matC)
-                {
-                    cpy.matC = call(expr.matC);
-                }
-                if(expr.scaleA)
-                {
-                    cpy.scaleA = call(expr.scaleA);
-                }
-                if(expr.scaleB)
-                {
-                    cpy.scaleB = call(expr.scaleB);
-                }
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            template <CTernary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.r1hs)
-                {
-                    cpy.r1hs = call(expr.r1hs);
-                }
-                if(expr.r2hs)
-                {
-                    cpy.r2hs = call(expr.r2hs);
-                }
-                return std::make_shared<Expression::Expression>(cpy);
-            }
-
-            // Finds the AssemblyKernelArgument with the same name as the provided
-            // CommandArgument.
-            ExpressionPtr operator()(CommandArgumentPtr const& expr) const
-            {
-                auto argument = m_kernel->findArgument(expr->name());
-                return std::make_shared<Expression::Expression>(
-                    std::make_shared<AssemblyKernelArgument>(argument));
-            }
-
-            template <CValue Value>
-            ExpressionPtr operator()(Value const& expr) const
-            {
-                return std::make_shared<Expression::Expression>(expr);
-            }
-
-            ExpressionPtr call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return expr;
-
-                return std::visit(*this, *expr);
-            }
-
-        private:
-            AssemblyKernelPtr m_kernel;
-        };
-
-        /**
-         * Removes all CommandArgruments found within an expression with the appropriate
-         * AssemblyKernel Argument.
-         */
-        ExpressionPtr cleanArguments(ExpressionPtr expr, AssemblyKernelPtr kernel)
-        {
-            auto visitor = CleanExpressionVisitor(kernel);
-            return visitor.call(expr);
-        }
-
-        /**
          * Visitor for cleaning all of the Dimensions within a graph.
-         *
-         * Calls cleanArguments on all of the expressions stored
-         * within a Dimension.
          */
         struct CleanArgumentsVisitor
         {
@@ -202,7 +51,8 @@ namespace rocRoller
                     if(size && !Expression::evaluationTimes(size)[ET::Translate])
                     {
                         auto resultType = resultVariableType(size);
-                        if(resultType == DataType::Int32 || resultType == DataType::Int64)
+                        if(resultType == DataType::Int32 || resultType == DataType::Int64
+                           || resultType == DataType::UInt32 || resultType == DataType::UInt64)
                             enableDivideBy(size, m_context);
                     }
                 };
@@ -241,7 +91,8 @@ namespace rocRoller
             template <CDimension T>
             Dimension visitDimension(int tag, T const& dim)
             {
-                auto d   = dim;
+                auto d = dim;
+
                 d.size   = cleanExpr(dim.size);
                 d.stride = cleanExpr(dim.stride);
                 d.offset = cleanExpr(dim.offset);
@@ -250,15 +101,10 @@ namespace rocRoller
                 {
                     if(!m_kernel->hasArgument(dim.argumentName))
                     {
-                        auto args  = m_command->getArguments();
-                        auto myArg = std::find_if(
-                            args.begin(), args.end(), [&dim](CommandArgumentPtr arg) {
-                                return dim.argumentName == arg->name();
-                            });
+                        auto arg = findArgumentByName(m_command, dim.argumentName);
+                        AssertFatal(arg, ShowValue(dim.argumentName));
 
-                        AssertFatal(myArg != args.end(), ShowValue(dim.argumentName));
-
-                        m_kernel->addCommandArgument(*myArg);
+                        m_kernel->addCommandArgument(arg);
                     }
                 }
 
@@ -313,7 +159,6 @@ namespace rocRoller
          */
         KernelGraph CleanArguments::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::cleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
             auto visitor = CleanArgumentsVisitor(k, m_context, m_command);
             return rewriteDimensions(k, visitor);

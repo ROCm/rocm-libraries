@@ -332,7 +332,7 @@ void testing_her2_strided_batched(const Arguments& arg)
     device_strided_batch_vector<T> dy(N, incy, stride_y, batch_count);
     device_vector<T>               d_alpha(1);
 
-    double hipblas_error_host, hipblas_error_device;
+    double hipblas_error_host{0}, hipblas_error_device{0};
 
     T h_alpha = arg.get_alpha<T>();
 
@@ -421,7 +421,7 @@ void testing_her2_strided_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIP_ERROR(dA.transfer_from(hA));
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));

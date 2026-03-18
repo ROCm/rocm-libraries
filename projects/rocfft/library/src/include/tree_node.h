@@ -27,20 +27,24 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
+#include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
-#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
+#include "callback_map.h"
 #include "compute_scheme.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
 #include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
+#include "logging.h"
+#include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
 
@@ -59,7 +63,7 @@ enum FuseType
     FT_STOCKHAM_WITH_TRANS_XY_Z, // R_T-XY_Z
     FT_R2C_TRANSPOSE, // post-r2c + transpose
     FT_TRANSPOSE_C2R, // transpose + pre-c2r
-    FT_STOCKHAM_R2C_TRANSPOSE, // Stokham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
+    FT_STOCKHAM_R2C_TRANSPOSE, // Stockham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
 };
 
 struct GridParam
@@ -94,6 +98,10 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx1100",
                                                        "gfx1101",
                                                        "gfx1102",
+                                                       "gfx1150",
+                                                       "gfx1151",
+                                                       "gfx1152",
+                                                       "gfx1153",
                                                        "gfx1200",
                                                        "gfx1201"};
 
@@ -156,11 +164,11 @@ struct SchemeTree
 
 using SchemeTreeVec = std::vector<std::unique_ptr<SchemeTree>>;
 
-static SchemeTreeVec EmptySchemeTreeVec = {};
+extern SchemeTreeVec EmptySchemeTreeVec;
 
 using SchemeVec = std::vector<ComputeScheme>;
 
-static SchemeVec EmptySchemeVec = {};
+extern SchemeVec EmptySchemeVec;
 
 class TreeNode;
 class LeafNode;
@@ -178,13 +186,12 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    bool                    applyPartialPass = false;
-    int                     direction        = -1;
-    rocfft_result_placement placement        = rocfft_placement_inplace;
-    rocfft_precision        precision        = rocfft_precision_single;
-    rocfft_array_type       inArrayType      = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType     = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp       = {};
+    int                     direction    = -1;
+    rocfft_result_placement placement    = rocfft_placement_inplace;
+    rocfft_precision        precision    = rocfft_precision_single;
+    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType = rocfft_array_type_unset;
+    hipDeviceProp_t         deviceProp   = {};
     bool                    rootIsC2C;
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -351,8 +358,9 @@ public:
     // sbrc transpose type
     mutable SBRC_TRANSPOSE_TYPE sbrcTranstype = SBRC_TRANSPOSE_TYPE::NONE;
 
-    // specified kernel key from solution map. (if there is any)
-    std::unique_ptr<FMKey> specified_key;
+    // specified kernel keys from solution map. (if there are any)
+    std::unique_ptr<FMKey>   specified_key;
+    std::unique_ptr<PPFMKey> specified_pp_key;
 
     // Tree structure:
     // non-owning pointer to parent node, may be null
@@ -373,11 +381,11 @@ public:
     size_t lengthBlue  = 0;
     size_t lengthBlueN = 0;
 
-    // enables partial pass for this node
-    bool applyPartialPass = false;
+    // Index of off-dimension in partial-pass nodes
+    size_t ppOffDim = 0;
 
-    // Dimension of the FFT where partial-pass is applied
-    size_t ppDim = 0;
+    // Index of current dimension (full pass) in partial-pass nodes
+    size_t ppCurrDim = 0;
 
     //
     BluesteinType     typeBlue   = BluesteinType::BT_NONE;
@@ -386,14 +394,16 @@ public:
 
     // Device pointers:
     // twiddle memory is owned by the repo
-    void*            twiddles            = nullptr;
-    size_t           twiddles_size       = 0;
-    void*            twiddles_large      = nullptr;
-    size_t           twiddles_large_size = 0;
-    void*            twiddles_pp         = nullptr;
-    size_t           twiddles_pp_size    = 0;
-    void*            chirp               = nullptr;
-    size_t           chirp_size          = 0;
+    void*            twiddles              = nullptr;
+    size_t           twiddles_size         = 0;
+    void*            twiddles_off_dim      = nullptr;
+    size_t           twiddles_off_dim_size = 0;
+    void*            twiddles_large        = nullptr;
+    size_t           twiddles_large_size   = 0;
+    void*            twiddles_pp           = nullptr;
+    size_t           twiddles_pp_size      = 0;
+    void*            chirp                 = nullptr;
+    size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
     // callback parameters
@@ -429,8 +439,8 @@ public:
     size_t                      allowedOutBuf;
     std::set<rocfft_array_type> allowedOutArrayTypes;
 
-    LoadOps  loadOps;
-    StoreOps storeOps;
+    std::optional<LoadOps>  loadOps;
+    std::optional<StoreOps> storeOps;
 
 public:
     // Disallow copy constructor:
@@ -490,6 +500,13 @@ public:
         return {};
     }
 
+    // Check node scheme to see if partial pass is enabled
+    bool isPartialPassEnabled() const
+    {
+        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+                || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
+    }
+
     // able to fuse CS_KERNEL_STOCKHAM and CS_KERNEL_TRANSPOSE_Z_XY ?
     bool fuse_CS_KERNEL_TRANSPOSE_Z_XY();
     // able to fuse CS_KERNEL_STOCKHAM and CS_KERNEL_TRANSPOSE_XY_Z ?
@@ -540,6 +557,10 @@ public:
     TreeNode* GetRealEvenAncestor();
     bool      IsRootPlanC2CTransform();
 
+    // Return ancestor node of 'this' that is partial-pass, or
+    // nullptr if there is no such ancestor
+    TreeNode* GetPartialPassAncestor() const;
+
     // Set length of transpose kernel node, since those are easily
     // knowable just by looking at the scheme and they're used in
     // many plans.  Throws an exception if this is not a transpose
@@ -580,6 +601,72 @@ public:
 
         return (dimension == 1) ? FMKey(length[0], precision, scheme)
                                 : FMKey(length[0], length[1], precision, scheme);
+    }
+
+    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // two kernels associated with them. The key for
+    // querying the function pool is different from the
+    // the standard kernel key.
+    virtual PPFMKey GetPPKernelsKey() const
+    {
+        if(specified_pp_key)
+            return *specified_pp_key.get();
+
+        auto pp_parent_node = GetPartialPassAncestor();
+        if(!pp_parent_node)
+            throw std::runtime_error("Invalid parent node for partial pass");
+
+        return PPFMKey(pp_parent_node->length[0],
+                       pp_parent_node->length[1],
+                       pp_parent_node->length[2],
+                       precision,
+                       pp_parent_node->scheme);
+    }
+
+    // Query the function pool with the right key,
+    // and return the kernel linked to this node.
+    virtual FFTKernel GetKernel() const
+    {
+        if(isPartialPassEnabled())
+        {
+            auto key = GetPPKernelsKey();
+            return pool.get_kernel(key, scheme);
+        }
+        else
+        {
+            auto key = GetKernelKey();
+            return pool.get_kernel(key);
+        }
+    }
+
+    // Check if the function pool has a kernel,
+    // querying it with the key linked to this node.
+    virtual bool HasKernel() const
+    {
+        if(isPartialPassEnabled())
+        {
+            auto key = GetPPKernelsKey();
+            if(!pool.has_function(key))
+            {
+                if(LOG_TRACE_ENABLED())
+                    (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
+
+                return false;
+            }
+        }
+        else
+        {
+            auto key = GetKernelKey();
+            if(!pool.has_function(key))
+            {
+                if(LOG_TRACE_ENABLED())
+                    (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Compute the large twd decomposition base
@@ -714,7 +801,7 @@ public:
         // Since large twiddle multiply (i.e. middle T of L1D_TRTRT)
         // cannot be fused with an FFT kernel, we should not try too
         // hard to pad its output.  The other T nodes of that plan can
-        // keep their buffer assigments so that padding doesn't upset
+        // keep their buffer assignments so that padding doesn't upset
         // the current choice of which nodes we fuse.
         return large1D == 0;
     }
@@ -747,6 +834,20 @@ struct rocfft_location_t
         if(comm_rank != other.comm_rank)
             return comm_rank < other.comm_rank;
         return device < other.device;
+    }
+
+    bool operator==(const rocfft_location_t& other) const
+    {
+        return comm_rank == other.comm_rank && device == other.device;
+    }
+
+    std::string str() const
+    {
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
     }
 
     int comm_rank = 0;
@@ -956,11 +1057,12 @@ struct MultiPlanItem
     // object's event is allocated and recorded on the stream when
     // the last piece of work is queued, so callers can wait on that
     // event to know when the work is complete.
-    virtual void ExecuteAsync(const rocfft_plan     plan,
-                              void*                 in_buffer[],
-                              void*                 out_buffer[],
-                              rocfft_execution_info info,
-                              size_t                multiPlanIdx)
+    virtual void ExecuteAsync(const rocfft_plan                       plan,
+                              void*                                   in_buffer[],
+                              void*                                   out_buffer[],
+                              rocfft_execution_info                   info,
+                              size_t                                  multiPlanIdx,
+                              const std::map<int, device_callback_t>& callbacks)
         = 0;
 
     // wait for async operations to finish
@@ -1009,6 +1111,13 @@ struct MultiPlanItem
 
     // This process's rank relative to the plan communicator.
     int local_comm_rank;
+
+    // Sub-communicator for this operation, which is only set if
+    // we know we're only talking to a subset of the ranks
+    std::optional<MPI_Comm_wrapper_t> subcomm;
+    // Helper to get the sub-communicator if it's set, or the plan's
+    // communicator.
+    MPI_Comm ActiveMPIComm(const rocfft_plan plan) const;
 };
 
 // Communication operations
@@ -1048,7 +1157,8 @@ struct CommPointToPoint : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1145,7 +1255,8 @@ struct CommScatter : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1249,7 +1360,8 @@ struct CommGather : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1291,14 +1403,16 @@ private:
 // The former is preferable, as it is usually more optimized.
 struct CommAllToAll : public MultiPlanItem
 {
-    CommAllToAll(rocfft_precision           _precision,
-                 rocfft_array_type          _arrayType,
-                 const std::vector<size_t>& _sendOffsets,
-                 const std::vector<size_t>& _sendCounts,
-                 const std::vector<size_t>& _recvOffsets,
-                 const std::vector<size_t>& _recvCounts,
-                 BufferPtr                  _sendBuf,
-                 BufferPtr                  _recvBuf)
+
+    CommAllToAll(rocfft_precision                    _precision,
+                 rocfft_array_type                   _arrayType,
+                 const std::vector<size_t>&          _sendOffsets,
+                 const std::vector<size_t>&          _sendCounts,
+                 const std::vector<size_t>&          _recvOffsets,
+                 const std::vector<size_t>&          _recvCounts,
+                 BufferPtr                           _sendBuf,
+                 BufferPtr                           _recvBuf,
+                 std::optional<MPI_Comm_wrapper_t>&& _subcomm)
         : precision(_precision)
         , arrayType(_arrayType)
         , sendOffsets(_sendOffsets)
@@ -1307,7 +1421,16 @@ struct CommAllToAll : public MultiPlanItem
         , recvCounts(_recvCounts)
         , sendBuf(_sendBuf)
         , recvBuf(_recvBuf)
+        // check if uniform exchange to use MPI_Alltoall
+        , uniform_counts(std::all_of(sendCounts.begin(),
+                                     sendCounts.end(),
+                                     [&](size_t c) { return c == sendCounts[0]; })
+                         && std::all_of(recvCounts.begin(), recvCounts.end(), [&](size_t c) {
+                                return c == recvCounts[0];
+                            }))
     {
+        subcomm = std::move(_subcomm);
+
         // Currently MPI interface uses 32-bit signed ints, so assert
         // that our counts/offsets don't overflow that type
         auto checkArray = [](const std::vector<size_t>& arr) {
@@ -1337,7 +1460,8 @@ struct CommAllToAll : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
 
     void Wait() override;
 
@@ -1369,6 +1493,9 @@ private:
     // send/receive buffers
     const BufferPtr sendBuf;
     const BufferPtr recvBuf;
+
+    // check uniform counts for using AlltoAll instead of AlltoAllv
+    const bool uniform_counts = false;
 };
 
 // Tree-structured FFT plan.  This is specific to a single device on
@@ -1407,11 +1534,12 @@ struct ExecPlan : public MultiPlanItem
     BufferPtr inputPtr;
     BufferPtr outputPtr;
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+    void ExecuteAsync(const rocfft_plan                       plan,
+                      void*                                   in_buffer[],
+                      void*                                   out_buffer[],
+                      rocfft_execution_info                   info,
+                      size_t                                  multiPlanIdx,
+                      const std::map<int, device_callback_t>& callbacks) override;
 
     void Wait() override;
 

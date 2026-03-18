@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -35,6 +12,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -71,20 +49,15 @@ namespace ArithmeticTest
         template <typename T>
         void testBody()
         {
+            setKernelOptions({{.enableFullDivision = true}});
+
             auto dataType = TypeInfo<T>::Var.dataType;
             auto regType  = std::get<1>(GetParam());
 
             auto k = m_context->kernel();
 
-            auto const& gpu = m_context->targetArchitecture().target();
-            if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-            {
-                GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-            }
-
             auto numBoolRegs = k->wavefront_size() / 32;
 
-            k->setKernelName("IntegralArithmeticTest");
             k->setKernelDimensions(1);
 
             auto command = std::make_shared<Command>();
@@ -513,7 +486,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithFloat");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -706,11 +678,6 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
@@ -789,7 +756,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithUnaryFloat");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -855,11 +821,6 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
@@ -901,7 +862,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithFMAMixed");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -1043,11 +1003,6 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
@@ -1126,7 +1081,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithDouble");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -1326,11 +1280,6 @@ namespace ArithmeticTest
         m_context->schedule(kb());
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
-
-        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
 
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())

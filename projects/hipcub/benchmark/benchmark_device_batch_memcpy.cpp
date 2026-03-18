@@ -24,10 +24,10 @@
 #include "cmdparser.hpp"
 #include "common_benchmark_header.hpp"
 
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/device/device_memcpy.hpp"
-#include "hipcub/hipcub.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/device/device_memcpy.hpp>
+#include <hipcub/hipcub.hpp>
 
 #ifdef __HIP_PLATFORM_AMD__
     // Only include this on AMD as it contains specialized config information
@@ -37,6 +37,7 @@
 #include <hip/hip_runtime.h>
 
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <utility>

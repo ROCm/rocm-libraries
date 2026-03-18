@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -153,6 +153,7 @@ struct BlockwiseGemmXdlops_pipeline_moe_blockscale_bpreshuffle_v1<
 
     using Base::MWaves;
     using Base::NWaves;
+    using Base::WaveSize;
 
     static constexpr index_t PrefetchStages  = 2;
     static constexpr index_t PrefillStages   = 1;
@@ -165,7 +166,7 @@ struct BlockwiseGemmXdlops_pipeline_moe_blockscale_bpreshuffle_v1<
         constexpr index_t M1 = TileDesc_M0_M1_M2_K{}.GetLength(Number<1>{});
         constexpr index_t M2 = TileDesc_M0_M1_M2_K{}.GetLength(Number<2>{});
         constexpr index_t K2 = KPack / KGroup;
-        constexpr index_t K1 = 64 / NPerXDL;
+        constexpr index_t K1 = WaveSize / NPerXDL;
         constexpr index_t K0 = KRepeat * KGroup;
 
         return transform_tensor_descriptor(
@@ -359,6 +360,7 @@ struct BlockwiseGemmXdlops_pipeline_moe_blockscale_bpreshuffle_v1<
             });
         });
 
+        __builtin_amdgcn_sched_barrier(0);
         // Local prefill A1
         a_blockwise_copy.RunWrite(a_block_desc, a_block_buf, I0);
 
@@ -549,6 +551,7 @@ struct BlockwiseGemmXdlops_pipeline_moe_blockscale_bpreshuffle_v1<
                         });
                     });
 
+                    __builtin_amdgcn_sched_barrier(0);
                     a_scale_thread_copy.Run(a_scale_grid_desc,
                                             a_scale_grid_buf,
                                             a_scale_thread_desc,
@@ -676,6 +679,7 @@ struct BlockwiseGemmXdlops_pipeline_moe_blockscale_bpreshuffle_v1<
             });
 
             block_sync_lds();
+            __builtin_amdgcn_sched_barrier(0);
 
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 static_for<0, KRepeat, 1>{}([&](auto k0) {

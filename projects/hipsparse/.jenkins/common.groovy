@@ -15,7 +15,7 @@ def runCompileCommand(platform, project, boolean sameOrg=false)
         }
     }
     String centos7 = platform.jenkinsLabel.contains('centos7') ? 'source scl_source enable devtoolset-7' : ':'
-    
+
     command = """#!/usr/bin/env bash
                 set -x
                 ${centos7}
@@ -23,7 +23,7 @@ def runCompileCommand(platform, project, boolean sameOrg=false)
                 ${getDependenciesCommand}
                 CXX=${project.compiler.compiler_path} ${project.paths.build_command}
             """
- 
+
     platform.runCommand(this, command)
 }
 
@@ -33,27 +33,32 @@ def runTestCommand (platform, project, gfilter)
     def command = """#!/usr/bin/env bash
                     set -x
                     cd ${project.paths.project_build_prefix}/build/release/clients/staging
-                    ${sudo} GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipsparse-test --gtest_also_run_disabled_tests --gtest_output=xml --gtest_color=yes #--gtest_filter=${gfilter}-*known_bug*
+                    ${sudo} GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipsparse-test --gtest_also_run_disabled_tests --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
                 """
 
     platform.runCommand(this, command)
-    junit "${project.paths.project_build_prefix}/build/release/clients/staging/*.xml"
 }
 
 def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
 {
-    //Temporary workaround due to bug in container
-    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
+    String commitSha
+    String repoUrl
+    (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    def command = """#!/usr/bin/env bash
-                set -x
-                cd ${project.paths.project_build_prefix}/build/${dirmode}
-                export LD_LIBRARY_PATH=/opt/rocm/lib/
-                ${centos7Workaround}
-                GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-            """
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocm-libraries", variable: 'CODECOV_TOKEN')])
+    {
+        def command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}/build/${dirmode}
+                    export LD_LIBRARY_PATH=/opt/rocm/lib/
+                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
+                    curl -Os https://uploader.codecov.io/latest/linux/codecov
+                    chmod +x codecov
+                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocm-libraries --flags hipSPARSE --sha ${commitSha}
+                """
 
-    platform.runCommand(this, command)
+        platform.runCommand(this, command)
+    }
 
     publishHTML([allowMissing: false,
                 alwaysLinkToLastBuild: false,
@@ -72,4 +77,3 @@ def runPackageCommand(platform, project)
 }
 
 return this
-

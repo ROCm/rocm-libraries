@@ -22,7 +22,7 @@
  *
  *******************************************************************************/
 
-// This shared library is available at https://github.com/ROCmSoftwarePlatform/rocJENKINS/
+// This shared library is available at https://github.com/ROCm/rocJENKINS/
 @Library('rocJenkins@pong') _
 
 // This is file for internal AMD use.
@@ -89,8 +89,5 @@ def ci() {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
     properties(auxiliary.addCommonProperties([]))
-
-    stage(urlJobName) {
-        runCI([ubuntu22:['gfx90a']], urlJobName)
-    }
+    runCI([ubuntu22:['gfx90a']], urlJobName)
 }

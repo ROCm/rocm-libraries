@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,15 +24,29 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/contiguous_storage.h>
 #include <thrust/detail/type_traits.h>
+#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/iterator/detail/normal_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/reverse_iterator.h>
 #include <thrust/sequence_access.h>
 
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <initializer_list>
 #include <vector>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -45,7 +60,7 @@ private:
   using storage_type = thrust::detail::contiguous_storage<T, Alloc>;
 
 public:
-  // typedefs
+  // aliases
   using value_type      = typename storage_type::value_type;
   using pointer         = typename storage_type::pointer;
   using const_pointer   = typename storage_type::const_pointer;
@@ -63,21 +78,19 @@ public:
 
   /*! This constructor creates an empty vector_base.
    */
-  vector_base(void);
+  vector_base();
 
   /*! This constructor creates an empty vector_base.
    *  \param alloc The allocator to use by this vector_base.
    */
   explicit vector_base(const Alloc& alloc);
 
-  /*! This constructor creates a vector_base with default-constructed
-   *  elements.
+  /*! This constructor creates a vector_base with value-initialized elements.
    *  \param n The number of elements to create.
    */
   explicit vector_base(size_type n);
 
-  /*! This constructor creates a vector_base with default-constructed
-   *  elements.
+  /*! This constructor creates a vector_base with value-initialized elements.
    *  \param n The number of elements to create.
    *  \param alloc The allocator to use by this vector_base.
    */
@@ -181,7 +194,7 @@ public:
    *  \param first The beginning of the range.
    *  \param last The end of the range.
    */
-  template <typename InputIterator>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -189,12 +202,12 @@ public:
    *  \param last The end of the range.
    *  \param alloc The allocator to use by this vector_base.
    */
-  template <typename InputIterator>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
    */
-  ~vector_base(void);
+  ~vector_base();
 
   /*! \brief Resizes this vector_base to the specified number of elements.
    *  \param new_size Number of elements this vector_base should contain.
@@ -203,7 +216,7 @@ public:
    *  This method will resize this vector_base to the specified number of
    *  elements. If the number is smaller than this vector_base's current
    *  size this vector_base is truncated, otherwise this vector_base is
-   *  extended and new elements are default constructed.
+   *  extended and new elements are value initialized.
    */
   void resize(size_type new_size);
 
@@ -221,12 +234,12 @@ public:
 
   /*! Returns the number of elements in this vector_base.
    */
-  THRUST_HOST_DEVICE size_type size(void) const;
+  THRUST_HOST_DEVICE size_type size() const;
 
   /*! Returns the size() of the largest possible vector_base.
    *  \return The largest possible return value of size().
    */
-  THRUST_HOST_DEVICE size_type max_size(void) const;
+  THRUST_HOST_DEVICE size_type max_size() const;
 
   /*! \brief If n is less than or equal to capacity(), this call has no effect.
    *         Otherwise, this method is a request for allocation of additional memory. If
@@ -239,12 +252,12 @@ public:
   /*! Returns the number of elements which have been reserved in this
    *  vector_base.
    */
-  THRUST_HOST_DEVICE size_type capacity(void) const;
+  THRUST_HOST_DEVICE size_type capacity() const;
 
   /*! This method shrinks the capacity of this vector_base to exactly
    *  fit its elements.
    */
-  void shrink_to_fit(void);
+  void shrink_to_fit();
 
   /*! \brief Subscript access to the data contained in this vector_dev.
    *  \param n The index of the element for which data should be accessed.
@@ -270,119 +283,119 @@ public:
    *  this vector_base.
    *  \return mStart
    */
-  THRUST_HOST_DEVICE iterator begin(void);
+  THRUST_HOST_DEVICE iterator begin();
 
   /*! This method returns a const_iterator pointing to the beginning
    *  of this vector_base.
    *  \return mStart
    */
-  THRUST_HOST_DEVICE const_iterator begin(void) const;
+  THRUST_HOST_DEVICE const_iterator begin() const;
 
   /*! This method returns a const_iterator pointing to the beginning
    *  of this vector_base.
    *  \return mStart
    */
-  THRUST_HOST_DEVICE const_iterator cbegin(void) const;
+  THRUST_HOST_DEVICE const_iterator cbegin() const;
 
   /*! This method returns a reverse_iterator pointing to the beginning of
    *  this vector_base's reversed sequence.
    *  \return A reverse_iterator pointing to the beginning of this
    *          vector_base's reversed sequence.
    */
-  THRUST_HOST_DEVICE reverse_iterator rbegin(void);
+  THRUST_HOST_DEVICE reverse_iterator rbegin();
 
   /*! This method returns a const_reverse_iterator pointing to the beginning of
    *  this vector_base's reversed sequence.
    *  \return A const_reverse_iterator pointing to the beginning of this
    *          vector_base's reversed sequence.
    */
-  THRUST_HOST_DEVICE const_reverse_iterator rbegin(void) const;
+  THRUST_HOST_DEVICE const_reverse_iterator rbegin() const;
 
   /*! This method returns a const_reverse_iterator pointing to the beginning of
    *  this vector_base's reversed sequence.
    *  \return A const_reverse_iterator pointing to the beginning of this
    *          vector_base's reversed sequence.
    */
-  THRUST_HOST_DEVICE const_reverse_iterator crbegin(void) const;
+  THRUST_HOST_DEVICE const_reverse_iterator crbegin() const;
 
   /*! This method returns an iterator pointing to one element past the
    *  last of this vector_base.
    *  \return begin() + size().
    */
-  THRUST_HOST_DEVICE iterator end(void);
+  THRUST_HOST_DEVICE iterator end();
 
   /*! This method returns a const_iterator pointing to one element past the
    *  last of this vector_base.
    *  \return begin() + size().
    */
-  THRUST_HOST_DEVICE const_iterator end(void) const;
+  THRUST_HOST_DEVICE const_iterator end() const;
 
   /*! This method returns a const_iterator pointing to one element past the
    *  last of this vector_base.
    *  \return begin() + size().
    */
-  THRUST_HOST_DEVICE const_iterator cend(void) const;
+  THRUST_HOST_DEVICE const_iterator cend() const;
 
   /*! This method returns a reverse_iterator pointing to one element past the
    *  last of this vector_base's reversed sequence.
    *  \return rbegin() + size().
    */
-  THRUST_HOST_DEVICE reverse_iterator rend(void);
+  THRUST_HOST_DEVICE reverse_iterator rend();
 
   /*! This method returns a const_reverse_iterator pointing to one element past the
    *  last of this vector_base's reversed sequence.
    *  \return rbegin() + size().
    */
-  THRUST_HOST_DEVICE const_reverse_iterator rend(void) const;
+  THRUST_HOST_DEVICE const_reverse_iterator rend() const;
 
   /*! This method returns a const_reverse_iterator pointing to one element past the
    *  last of this vector_base's reversed sequence.
    *  \return rbegin() + size().
    */
-  THRUST_HOST_DEVICE const_reverse_iterator crend(void) const;
+  THRUST_HOST_DEVICE const_reverse_iterator crend() const;
 
   /*! This method returns a const_reference referring to the first element of this
    *  vector_base.
    *  \return The first element of this vector_base.
    */
-  THRUST_HOST_DEVICE const_reference front(void) const;
+  THRUST_HOST_DEVICE const_reference front() const;
 
   /*! This method returns a reference pointing to the first element of this
    *  vector_base.
    *  \return The first element of this vector_base.
    */
-  THRUST_HOST_DEVICE reference front(void);
+  THRUST_HOST_DEVICE reference front();
 
   /*! This method returns a const reference pointing to the last element of
    *  this vector_base.
    *  \return The last element of this vector_base.
    */
-  THRUST_HOST_DEVICE const_reference back(void) const;
+  THRUST_HOST_DEVICE const_reference back() const;
 
   /*! This method returns a reference referring to the last element of
    *  this vector_dev.
    *  \return The last element of this vector_base.
    */
-  THRUST_HOST_DEVICE reference back(void);
+  THRUST_HOST_DEVICE reference back();
 
   /*! This method returns a pointer to this vector_base's first element.
    *  \return A pointer to the first element of this vector_base.
    */
-  THRUST_HOST_DEVICE pointer data(void);
+  THRUST_HOST_DEVICE pointer data();
 
   /*! This method returns a const_pointer to this vector_base's first element.
    *  \return a const_pointer to the first element of this vector_base.
    */
-  THRUST_HOST_DEVICE const_pointer data(void) const;
+  THRUST_HOST_DEVICE const_pointer data() const;
 
   /*! This method resizes this vector_base to 0.
    */
-  void clear(void);
+  void clear();
 
   /*! This method returns true iff size() == 0.
    *  \return true if size() == 0; false, otherwise.
    */
-  THRUST_HOST_DEVICE bool empty(void) const;
+  THRUST_HOST_DEVICE bool empty() const;
 
   /*! This method appends the given element to the end of this vector_base.
    *  \param x The element to append.
@@ -392,12 +405,17 @@ public:
   /*! This method erases the last element of this vector_base, invalidating
    *  all iterators and references to it.
    */
-  void pop_back(void);
+  void pop_back();
 
   /*! This method swaps the contents of this vector_base with another vector_base.
    *  \param v The vector_base with which to swap.
    */
-  void swap(vector_base& v);
+  void swap(vector_base& v)
+  {
+    using _THRUST_STD::swap;
+    swap(m_storage, v.m_storage);
+    swap(m_size, v.m_size);
+  }
 
   /*! This method removes the element at position pos.
    *  \param pos The position of the element of interest.
@@ -461,9 +479,9 @@ public:
   void assign(InputIterator first, InputIterator last);
 
   /*! This method returns a copy of this vector's allocator.
-   *  \return A copy of the alloctor used by this vector.
+   *  \return A copy of the allocator used by this vector.
    */
-  allocator_type get_allocator(void) const;
+  allocator_type get_allocator() const;
 
   THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator);
   THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator);
@@ -492,7 +510,7 @@ private:
   template <typename ForwardIterator>
   void range_init(ForwardIterator first, ForwardIterator last, thrust::random_access_traversal_tag);
 
-  void default_init(size_type n);
+  void value_init(size_type n);
 
   void fill_init(size_type n, const T& x);
 
@@ -505,7 +523,7 @@ private:
   template <typename InputIteratorOrIntegralType>
   void insert_dispatch(iterator position, InputIteratorOrIntegralType n, InputIteratorOrIntegralType x, true_type);
 
-  // this method appends n default-constructed elements at the end
+  // this method appends n value-initialized elements at the end
   void append(size_type n);
 
   // this method performs insertion from a fill value
@@ -542,18 +560,20 @@ private:
   template <typename ForwardIterator>
   void
   allocate_and_copy(size_type requested_size, ForwardIterator first, ForwardIterator last, storage_type& new_storage);
-}; // end vector_base
 
-/*! This function assigns the contents of vector a to vector b and the
- *  contents of vector b to vector a.
- *
- *  \param a The first vector of interest. After completion, the contents
- *           of b will be returned here.
- *  \param b The second vector of interest. After completion, the contents
- *           of a will be returned here.
- */
-template <typename T, typename Alloc>
-void swap(vector_base<T, Alloc>& a, vector_base<T, Alloc>& b);
+  /*! This function assigns the contents of vector a to vector b and the
+   *  contents of vector b to vector a.
+   *
+   *  \param a The first vector of interest. After completion, the contents
+   *           of b will be returned here.
+   *  \param b The second vector of interest. After completion, the contents
+   *           of a will be returned here.
+   */
+  friend void swap(vector_base& a, vector_base& b) noexcept(noexcept(a.swap(b)))
+  {
+    a.swap(b);
+  }
+}; // end vector_base
 
 /*! This operator allows comparison between two vectors.
  *  \param lhs The first \p vector to compare.

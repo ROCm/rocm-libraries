@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -59,7 +36,7 @@ namespace rocRollerTest
     protected:
         void SetUp() override
         {
-            m_kernelOptions.assertWaitCntState = false;
+            m_kernelOptions->assertWaitCntState = false;
 
             std::tie(procedure, m_randomSeed) = GetParam();
             CurrentGPUContextFixture::SetUp();
@@ -169,6 +146,7 @@ namespace rocRollerTest
             // Double the input value.
             co_yield Expression::generate(
                 v_value, v_value->expression() + v_value->expression(), m_context);
+            co_yield Instruction::Lock(Scheduling::Dependency::VCC);
             // Compare against the stop value.
             co_yield Expression::generate(
                 s_condition, v_value->expression() < v_target->expression(), m_context);
@@ -176,6 +154,7 @@ namespace rocRollerTest
             co_yield m_context->brancher()->branchIfNonZero(
                 loop_start, s_condition, "// Conditionally branching to the label register.");
 
+            co_yield Instruction::Unlock("unlock VCC");
             co_yield Instruction::Unlock("Loop end");
 
             co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
@@ -574,7 +553,8 @@ namespace rocRollerTest
             co_yield m_context->brancher()->branch(end);
             co_yield Instruction::Label(label);
             co_yield m_context->copier()->copy(v_value, Register::Value::Literal(10));
-            co_yield Instruction::Label(end).unlock();
+            co_yield Instruction::Label(end);
+            co_yield Instruction::Unlock("unlock VCC");
 
             co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
@@ -604,8 +584,10 @@ namespace rocRollerTest
             co_yield Expression::generate(
                 v_res2, v_res2->expression() * v_res2->expression(), m_context);
 
+            co_yield Instruction::Lock(Scheduling::Dependency::VCC);
             co_yield Expression::generate(
                 vcc, v_lhs2->expression() == v_rhs2->expression(), m_context);
+            co_yield Instruction::Unlock("unlock VCC");
         };
 
         sequences.push_back(set_vcc());

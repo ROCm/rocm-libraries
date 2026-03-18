@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -88,17 +65,26 @@ namespace rocRollerTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
-                co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+                bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                          Expression::literal(131072)); //0x00020000
+
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-                co_yield bufDesc->setBasePointer(s_result);
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
             };
 
             m_context->schedule(kb());
@@ -245,11 +231,11 @@ namespace rocRollerTest
             auto dataType = DataType::FP4;
 
             auto tagTensorA = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Load A
+                rocRoller::Operations::Tensor(2, dataType, {}, {0, 1})); // Load A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Store B
+                rocRoller::Operations::Tensor(2, dataType, {}, {0, 1})); // Store B
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
             auto commandArgs = command->createArguments();
@@ -279,7 +265,7 @@ namespace rocRollerTest
                 = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
 
             params->setDimensionInfo(tagLoadA, macTileVGPR);
-            params->transposeMemoryAccess[LayoutType::None] = true;
+            params->transposeMemoryAccess.set(LayoutType::None, true);
 
             commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileFP4");
             commandKernel->setContext(m_context);

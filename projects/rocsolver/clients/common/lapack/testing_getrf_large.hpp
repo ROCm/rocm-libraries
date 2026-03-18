@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 /*
  * ===========================================================================
@@ -256,21 +257,21 @@ void getrf_large_getError(const rocblas_handle handle,
 
     // execute computations
     // GPU lapack
-    CHECK_ROCBLAS_ERROR(rocsolver_getf2_getrf(STRIDED, GETRF, handle, n, n, dA.data(), lda, stA,
-                                              dIpiv.data(), stP, dInfo.data(), bc));
+    CHECK_ROCBLAS_ALLOCATION(rocsolver_getf2_getrf(STRIDED, GETRF, handle, n, n, dA.data(), lda,
+                                                   stA, dIpiv.data(), stP, dInfo.data(), bc));
 
     // Solve Ax = b for x
-    CHECK_ROCBLAS_ERROR(rocsolver_getrs(STRIDED, handle, rocblas_operation_none, n, nrhs, dA, lda,
-                                        stA, dIpiv, stP, dX, ldb, stB, bc));
+    CHECK_ROCBLAS_ALLOCATION(rocsolver_getrs(STRIDED, handle, rocblas_operation_none, n, nrhs, dA,
+                                             lda, stA, dIpiv, stP, dX, ldb, stB, bc));
 
     // Resetting the value of dA.
     CHECK_HIP_ERROR(dA.transfer_from(hA));
 
     // Compute Ax
     T alpha = T(1), beta = T(0);
-    CHECK_ROCBLAS_ERROR(rocblas_gemm(STRIDED, handle, rocblas_operation_none,
-                                     rocblas_operation_none, n, nrhs, n, &alpha, dA, lda, stA, dX,
-                                     ldb, stB, &beta, dB, ldb, stB, bc));
+    CHECK_ROCBLAS_ALLOCATION(rocsolver_gemm(STRIDED, handle, rocblas_operation_none,
+                                            rocblas_operation_none, n, nrhs, n, &alpha, dA, lda,
+                                            stA, dX, ldb, stB, &beta, dB, ldb, stB, bc));
     CHECK_HIP_ERROR(hBRes.transfer_from(dB));
 
     double err;
@@ -396,15 +397,15 @@ void testing_getrf_large(Arguments& argus)
         device_strided_batch_vector<rocblas_int> dInfo(1, 1, 1, bc);
 
         if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
+            CHECK_DEVICE_ALLOCATION(dA.memcheck());
         if(size_B)
         {
-            CHECK_HIP_ERROR(dB.memcheck());
-            CHECK_HIP_ERROR(dX.memcheck());
+            CHECK_DEVICE_ALLOCATION(dB.memcheck());
+            CHECK_DEVICE_ALLOCATION(dX.memcheck());
         }
         if(size_P)
-            CHECK_HIP_ERROR(dIpiv.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
+            CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
+        CHECK_DEVICE_ALLOCATION(dInfo.memcheck());
 
         // check computations
         if(argus.unit_check || argus.norm_check)
@@ -414,7 +415,7 @@ void testing_getrf_large(Arguments& argus)
                                                     hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrf_large_getPerfData<STRIDED, GETRF, T>(
                 handle, n, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,
@@ -437,15 +438,15 @@ void testing_getrf_large(Arguments& argus)
         device_strided_batch_vector<rocblas_int> dInfo(1, 1, 1, bc);
 
         if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
+            CHECK_DEVICE_ALLOCATION(dA.memcheck());
         if(size_B)
         {
-            CHECK_HIP_ERROR(dB.memcheck());
-            CHECK_HIP_ERROR(dX.memcheck());
+            CHECK_DEVICE_ALLOCATION(dB.memcheck());
+            CHECK_DEVICE_ALLOCATION(dX.memcheck());
         }
         if(size_P)
-            CHECK_HIP_ERROR(dIpiv.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
+            CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
+        CHECK_DEVICE_ALLOCATION(dInfo.memcheck());
 
         // check computations
         if(argus.unit_check || argus.norm_check)
@@ -455,7 +456,7 @@ void testing_getrf_large(Arguments& argus)
 
         // The perf function must return NAN
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrf_large_getPerfData<STRIDED, GETRF, T>(
                 handle, n, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,

@@ -23,6 +23,7 @@ version = version_number
 release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
+numfig = False
 
 docs_core = ROCmDocs(left_nav_title)
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
