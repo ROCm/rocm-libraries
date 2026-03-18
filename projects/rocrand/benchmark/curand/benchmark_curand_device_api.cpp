@@ -19,34 +19,54 @@
 // THE SOFTWARE.
 
 #include "benchmark_curand_utils.hpp"
-#include "cmdparser.hpp"
-
-#include <benchmark/benchmark.h>
 
 #include <cuda_runtime.h>
+
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_mtgp32_host.h>
-#include <curand_mtgp32dc_p_11213.h>
 
-#include <algorithm>
-#include <iomanip>
-#include <iostream>
-#include <numeric>
-#include <string>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#include <optional>
 
 #define CURAND_DEFAULT_MAX_BLOCK_SIZE 256
 
-#ifndef DEFAULT_RAND_N
-    #define DEFAULT_RAND_N (1024 * 1024 * 128)
-#endif
+enum distribution
+{
+    DISTRIBUTION_UNIFORM,
+    DISTRIBUTION_NORMAL,
+    DISTRIBUTION_LOG_NORMAL,
+    DISTRIBUTION_POISSON,
+    DISTRIBUTION_DISCRETE_POISSON,
+    DISTRIBUTION_DISCRETE_CUSTOM,
+};
+
+constexpr const char* distribution_name(distribution d)
+{
+    switch(d)
+    {
+        case DISTRIBUTION_UNIFORM: return "uniform";
+        case DISTRIBUTION_NORMAL: return "normal";
+        case DISTRIBUTION_LOG_NORMAL: return "log_normal";
+        case DISTRIBUTION_POISSON: return "poisson";
+        case DISTRIBUTION_DISCRETE_POISSON: return "discrete_poisson";
+        case DISTRIBUTION_DISCRETE_CUSTOM: return "discrete_custom";
+    }
+    return "unknown";
+}
+
+constexpr size_t next_power2(size_t x)
+{
+    size_t power = 1;
+    while(power < x)
+        power *= 2;
+    return power;
+}
 
 template<typename EngineState>
-__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void init_kernel(
-    EngineState* states, const unsigned long long seed, const unsigned long long offset)
+__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE)
+void init_kernel(EngineState*             states,
+                 const unsigned long long seed,
+                 const unsigned long long offset)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
     EngineState        state;
@@ -55,8 +75,8 @@ __global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void init_kernel(
 }
 
 template<typename EngineState, typename T, typename Generator>
-__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void generate_kernel(
-    EngineState* states, T* data, const size_t size, Generator generator)
+__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE)
+void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int stride   = gridDim.x * blockDim.x;
@@ -83,17 +103,17 @@ struct runner
            const unsigned long long offset)
     {
         const size_t states_size = blocks * threads;
-        CUDA_CALL(cudaMalloc(&states, states_size * sizeof(EngineState)));
+        CUDA_CHECK(cudaMalloc(&states, states_size * sizeof(EngineState)));
 
         init_kernel<<<blocks, threads>>>(states, seed, offset);
 
-        CUDA_CALL(cudaGetLastError());
-        CUDA_CALL(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 
     ~runner()
     {
-        CUDA_CALL(cudaFree(states));
+        CUDA_CHECK(cudaFree(states));
     }
 
     template<typename T, typename Generator>
@@ -109,21 +129,22 @@ struct runner
 };
 
 template<typename T, typename Generator>
-__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void generate_kernel(
-    curandStateMtgp32_t* states, T* data, const size_t size, Generator generator)
+__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE)
+void generate_kernel(curandStateMtgp32_t* states, T* data, const size_t size, Generator generator)
 {
-    const unsigned int state_id  = blockIdx.x;
-    const unsigned int thread_id = threadIdx.x;
-    unsigned int       index     = blockIdx.x * blockDim.x + thread_id;
-    unsigned int       stride    = gridDim.x * blockDim.x;
+    const unsigned int  state_id  = blockIdx.x;
+    const unsigned int  thread_id = threadIdx.x;
+    unsigned int        index     = blockIdx.x * blockDim.x + thread_id;
+    unsigned int        stride    = gridDim.x * blockDim.x;
 
-    __shared__ curandStateMtgp32_t state;
+    __shared__
+    curandStateMtgp32_t state;
 
     if(thread_id == 0)
         state = states[state_id];
     __syncthreads();
 
-    const size_t r               = size % blockDim.x;
+    const size_t r                 = size % blockDim.x;
     const size_t size_rounded_down = size - r;
     const size_t size_rounded_up   = r == 0 ? size : size_rounded_down + blockDim.x;
     while(index < size_rounded_down)
@@ -157,11 +178,11 @@ struct runner<curandStateMtgp32_t>
            const unsigned long long /* offset */)
     {
         const size_t states_size = std::min((size_t)200, blocks);
-        CUDA_CALL(cudaMalloc(&states, states_size * sizeof(curandStateMtgp32_t)));
+        CUDA_CHECK(cudaMalloc(&states, states_size * sizeof(curandStateMtgp32_t)));
 
-        CUDA_CALL(cudaMalloc(&d_param, sizeof(mtgp32_kernel_params)));
-        CURAND_CALL(curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, d_param));
-        CURAND_CALL(curandMakeMTGP32KernelState(states,
+        CUDA_CHECK(cudaMalloc(&d_param, sizeof(mtgp32_kernel_params)));
+        CURAND_CHECK(curandMakeMTGP32Constants(mtgp32dc_params_fast_11213, d_param));
+        CURAND_CHECK(curandMakeMTGP32KernelState(states,
                                                 mtgp32dc_params_fast_11213,
                                                 d_param,
                                                 states_size,
@@ -170,8 +191,8 @@ struct runner<curandStateMtgp32_t>
 
     ~runner()
     {
-        CUDA_CALL(cudaFree(states));
-        CUDA_CALL(cudaFree(d_param));
+        CUDA_CHECK(cudaFree(states));
+        CUDA_CHECK(cudaFree(d_param));
     }
 
     template<typename T, typename Generator>
@@ -190,8 +211,8 @@ struct runner<curandStateMtgp32_t>
 };
 
 template<typename EngineState, typename SobolType>
-__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void init_sobol_kernel(
-    EngineState* states, SobolType* directions, SobolType offset)
+__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE)
+void init_sobol_kernel(EngineState* states, SobolType* directions, SobolType offset)
 {
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
@@ -201,8 +222,11 @@ __global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void init_sobol_kern
 }
 
 template<typename EngineState, typename SobolType>
-__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void init_scrambled_sobol_kernel(
-    EngineState* states, SobolType* directions, SobolType* scramble_constants, SobolType offset)
+__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE)
+void init_scrambled_sobol_kernel(EngineState* states,
+                                 SobolType*   directions,
+                                 SobolType*   scramble_constants,
+                                 SobolType    offset)
 {
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
@@ -216,8 +240,8 @@ __global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void init_scrambled_
 
 // generate_kernel for the sobol generators
 template<typename EngineState, typename T, typename Generator>
-__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE) void generate_sobol_kernel(
-    EngineState* states, T* data, const size_t size, Generator generator)
+__global__ __launch_bounds__(CURAND_DEFAULT_MAX_BLOCK_SIZE)
+void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int dimension = blockIdx.y;
     const unsigned int state_id  = blockIdx.x * blockDim.x + threadIdx.x;
@@ -252,16 +276,16 @@ struct runner<curandStateSobol32_t>
         this->dimensions = dimensions;
 
         curandDirectionVectors32_t* h_directions;
-        CURAND_CALL(
+        CURAND_CHECK(
             curandGetDirectionVectors32(&h_directions, CURAND_DIRECTION_VECTORS_32_JOEKUO6));
 
         const size_t states_size = blocks * threads * dimensions;
-        CUDA_CALL(cudaMalloc(&states, states_size * sizeof(curandStateSobol32_t)));
+        CUDA_CHECK(cudaMalloc(&states, states_size * sizeof(curandStateSobol32_t)));
 
         unsigned int* directions;
         const size_t  size = dimensions * sizeof(unsigned int) * 32;
-        CUDA_CALL(cudaMalloc(&directions, size));
-        CUDA_CALL(cudaMemcpy(directions, h_directions, size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(&directions, size));
+        CUDA_CHECK(cudaMemcpy(directions, h_directions, size, cudaMemcpyHostToDevice));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), threads>>>(
@@ -269,15 +293,15 @@ struct runner<curandStateSobol32_t>
             directions,
             static_cast<unsigned int>(offset));
 
-        CUDA_CALL(cudaGetLastError());
-        CUDA_CALL(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
 
-        CUDA_CALL(cudaFree(directions));
+        CUDA_CHECK(cudaFree(directions));
     }
 
     ~runner()
     {
-        CUDA_CALL(cudaFree(states));
+        CUDA_CHECK(cudaFree(states));
     }
 
     template<typename T, typename Generator>
@@ -313,22 +337,22 @@ struct runner<curandStateScrambledSobol32_t>
         curandDirectionVectors32_t* h_directions;
         unsigned int*               h_constants;
 
-        CURAND_CALL(
+        CURAND_CHECK(
             curandGetDirectionVectors32(&h_directions, CURAND_DIRECTION_VECTORS_32_JOEKUO6));
-        CURAND_CALL(curandGetScrambleConstants32(&h_constants));
+        CURAND_CHECK(curandGetScrambleConstants32(&h_constants));
 
         const size_t states_size = blocks * threads * dimensions;
-        CUDA_CALL(cudaMalloc(&states, states_size * sizeof(curandStateScrambledSobol32_t)));
+        CUDA_CHECK(cudaMalloc(&states, states_size * sizeof(curandStateScrambledSobol32_t)));
 
         unsigned int* directions;
         const size_t  directions_size = dimensions * sizeof(unsigned int) * 32;
-        CUDA_CALL(cudaMalloc(&directions, directions_size));
-        CUDA_CALL(cudaMemcpy(directions, h_directions, directions_size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(&directions, directions_size));
+        CUDA_CHECK(cudaMemcpy(directions, h_directions, directions_size, cudaMemcpyHostToDevice));
 
         unsigned int* scramble_constants;
         const size_t  constants_size = dimensions * sizeof(unsigned int);
-        CUDA_CALL(cudaMalloc(&scramble_constants, constants_size));
-        CUDA_CALL(
+        CUDA_CHECK(cudaMalloc(&scramble_constants, constants_size));
+        CUDA_CHECK(
             cudaMemcpy(scramble_constants, h_constants, constants_size, cudaMemcpyHostToDevice));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
@@ -338,16 +362,16 @@ struct runner<curandStateScrambledSobol32_t>
             scramble_constants,
             static_cast<unsigned int>(offset));
 
-        CUDA_CALL(cudaGetLastError());
-        CUDA_CALL(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
 
-        CUDA_CALL(cudaFree(directions));
-        CUDA_CALL(cudaFree(scramble_constants));
+        CUDA_CHECK(cudaFree(directions));
+        CUDA_CHECK(cudaFree(scramble_constants));
     }
 
     ~runner()
     {
-        CUDA_CALL(cudaFree(states));
+        CUDA_CHECK(cudaFree(states));
     }
 
     template<typename T, typename Generator>
@@ -381,29 +405,29 @@ struct runner<curandStateSobol64_t>
         this->dimensions = dimensions;
 
         curandDirectionVectors64_t* h_directions;
-        CURAND_CALL(
+        CURAND_CHECK(
             curandGetDirectionVectors64(&h_directions, CURAND_DIRECTION_VECTORS_64_JOEKUO6));
 
         const size_t states_size = blocks * threads * dimensions;
-        CUDA_CALL(cudaMalloc(&states, states_size * sizeof(curandStateSobol64_t)));
+        CUDA_CHECK(cudaMalloc(&states, states_size * sizeof(curandStateSobol64_t)));
 
         unsigned long long int* directions;
         const size_t            size = dimensions * sizeof(unsigned long long) * 64;
-        CUDA_CALL(cudaMalloc(&directions, size));
-        CUDA_CALL(cudaMemcpy(directions, h_directions, size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(&directions, size));
+        CUDA_CHECK(cudaMemcpy(directions, h_directions, size, cudaMemcpyHostToDevice));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
         init_sobol_kernel<<<dim3(blocks_x, dimensions), threads>>>(states, directions, offset);
 
-        CUDA_CALL(cudaGetLastError());
-        CUDA_CALL(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
 
-        CUDA_CALL(cudaFree(directions));
+        CUDA_CHECK(cudaFree(directions));
     }
 
     ~runner()
     {
-        CUDA_CALL(cudaFree(states));
+        CUDA_CHECK(cudaFree(states));
     }
 
     template<typename T, typename Generator>
@@ -439,22 +463,22 @@ struct runner<curandStateScrambledSobol64_t>
         curandDirectionVectors64_t* h_directions;
         unsigned long long*         h_constants;
 
-        CURAND_CALL(
+        CURAND_CHECK(
             curandGetDirectionVectors64(&h_directions, CURAND_DIRECTION_VECTORS_64_JOEKUO6));
-        CURAND_CALL(curandGetScrambleConstants64(&h_constants));
+        CURAND_CHECK(curandGetScrambleConstants64(&h_constants));
 
         const size_t states_size = blocks * threads * dimensions;
-        CUDA_CALL(cudaMalloc(&states, states_size * sizeof(curandStateScrambledSobol64_t)));
+        CUDA_CHECK(cudaMalloc(&states, states_size * sizeof(curandStateScrambledSobol64_t)));
 
         unsigned long long* directions;
         const size_t        directions_size = dimensions * sizeof(unsigned long long) * 64;
-        CUDA_CALL(cudaMalloc(&directions, directions_size));
-        CUDA_CALL(cudaMemcpy(directions, h_directions, directions_size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(&directions, directions_size));
+        CUDA_CHECK(cudaMemcpy(directions, h_directions, directions_size, cudaMemcpyHostToDevice));
 
         unsigned long long* scramble_constants;
         const size_t        constants_size = dimensions * sizeof(unsigned long long);
-        CUDA_CALL(cudaMalloc(&scramble_constants, constants_size));
-        CUDA_CALL(
+        CUDA_CHECK(cudaMalloc(&scramble_constants, constants_size));
+        CUDA_CHECK(
             cudaMemcpy(scramble_constants, h_constants, constants_size, cudaMemcpyHostToDevice));
 
         const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
@@ -463,16 +487,16 @@ struct runner<curandStateScrambledSobol64_t>
                                                                              scramble_constants,
                                                                              offset);
 
-        CUDA_CALL(cudaGetLastError());
-        CUDA_CALL(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
 
-        CUDA_CALL(cudaFree(directions));
-        CUDA_CALL(cudaFree(scramble_constants));
+        CUDA_CHECK(cudaFree(directions));
+        CUDA_CHECK(cudaFree(scramble_constants));
     }
 
     ~runner()
     {
-        CUDA_CALL(cudaFree(states));
+        CUDA_CHECK(cudaFree(states));
     }
 
     template<typename T, typename Generator>
@@ -494,9 +518,9 @@ struct runner<curandStateScrambledSobol64_t>
 // Provide optional create and destroy functions for the generators.
 struct generator_type
 {
-    void create() {}
+    static void create() {}
 
-    void destroy() {}
+    static void destroy() {}
 };
 
 template<typename Engine>
@@ -504,12 +528,8 @@ struct generator_uint : public generator_type
 {
     typedef unsigned int data_type;
 
-    std::string name()
-    {
-        return "uniform-uint";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand(state);
     }
@@ -520,12 +540,8 @@ struct generator_ullong : public generator_type
 {
     typedef unsigned long long int data_type;
 
-    std::string name()
-    {
-        return "uniform-ullong";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand(state);
     }
@@ -536,12 +552,8 @@ struct generator_uniform : public generator_type
 {
     typedef float data_type;
 
-    std::string name()
-    {
-        return "uniform-float";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_uniform(state);
     }
@@ -552,12 +564,8 @@ struct generator_uniform_double : public generator_type
 {
     typedef double data_type;
 
-    std::string name()
-    {
-        return "uniform-double";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_uniform_double(state);
     }
@@ -568,12 +576,8 @@ struct generator_normal : public generator_type
 {
     typedef float data_type;
 
-    std::string name()
-    {
-        return "normal-float";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_normal(state);
     }
@@ -584,12 +588,8 @@ struct generator_normal_double : public generator_type
 {
     typedef double data_type;
 
-    std::string name()
-    {
-        return "normal-double";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_normal_double(state);
     }
@@ -600,12 +600,8 @@ struct generator_log_normal : public generator_type
 {
     typedef float data_type;
 
-    std::string name()
-    {
-        return "log-normal-float";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_log_normal(state, 0.f, 1.f);
     }
@@ -616,12 +612,8 @@ struct generator_log_normal_double : public generator_type
 {
     typedef double data_type;
 
-    std::string name()
-    {
-        return "log-normal-double";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_log_normal_double(state, 0., 1.);
     }
@@ -630,16 +622,13 @@ struct generator_log_normal_double : public generator_type
 template<typename Engine>
 struct generator_poisson : public generator_type
 {
+    // TODO: REMOVE!
+    generator_poisson(double l) : lambda(l) {}
+
     typedef unsigned int data_type;
 
-    std::string name()
-    {
-        std::stringstream stream;
-        stream << std::fixed << std::setprecision(1) << lambda;
-        return "poisson(lambda=" + stream.str() + ")";
-    }
-
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_poisson(state, lambda);
     }
@@ -650,26 +639,23 @@ struct generator_poisson : public generator_type
 template<typename Engine>
 struct generator_discrete_poisson : public generator_type
 {
-    typedef unsigned int data_type;
+    // TODO: REMOVE!
+    generator_discrete_poisson(double l) : lambda(l) {}
 
-    std::string name()
-    {
-        std::stringstream stream;
-        stream << std::fixed << std::setprecision(1) << lambda;
-        return "discrete-poisson(lambda=" + stream.str() + ")";
-    }
+    typedef unsigned int data_type;
 
     void create()
     {
-        CURAND_CALL(curandCreatePoissonDistribution(lambda, &discrete_distribution));
+        CURAND_CHECK(curandCreatePoissonDistribution(lambda, &discrete_distribution));
     }
 
     void destroy()
     {
-        CURAND_CALL(curandDestroyDistribution(discrete_distribution));
+        CURAND_CHECK(curandDestroyDistribution(discrete_distribution));
     }
 
-    __device__ data_type operator()(Engine* state)
+    __device__
+    data_type operator()(Engine* state) const
     {
         return curand_discrete(state, discrete_distribution);
     }
@@ -678,230 +664,162 @@ struct generator_discrete_poisson : public generator_type
     double                       lambda;
 };
 
-struct benchmark_context
+template<typename Generator, typename State, typename T, distribution Distribution>
+struct curand_device_api_benchmark : public primbench::benchmark_interface
 {
-    size_t              size;
-    size_t              dimensions;
-    size_t              trials;
-    size_t              blocks;
-    size_t              threads;
-    std::vector<double> lambdas;
+    curand_device_api_benchmark(Generator             generator, // TODO: REMOVE!
+                                curandRngType         engine,
+                                size_t                blocks,
+                                size_t                threads,
+                                size_t                dimensions,
+                                size_t                offset,
+                                std::optional<double> poisson_lambda = std::nullopt)
+        : m_generator(generator) // TODO: REMOVE!
+        , m_engine(engine)
+        , m_blocks(blocks)
+        , m_threads(threads)
+        , m_dimensions(dimensions)
+        , m_offset(offset)
+        , m_poisson_lambda(poisson_lambda)
+        // MTGP32 supports a maximum of 200 states.
+        , m_mtgp32_states(std::min((size_t)200, blocks))
+    {
+    }
+
+    primbench::json meta() const override
+    {
+        auto json = primbench::json{}
+                        .add("algo", "curand_device_api")
+                        .add("engine", engine_name(m_engine))
+                        .add("type", primbench::name<T>())
+                        .add("distribution", distribution_name(Distribution))
+                        .add("cfg",
+                            primbench::json{}
+                                .add("blocks", m_blocks)
+                                .add("threads", m_threads));
+
+        if constexpr(Distribution == DISTRIBUTION_POISSON
+                     || Distribution == DISTRIBUTION_DISCRETE_POISSON)
+            json.add("poisson_lambda", *m_poisson_lambda);
+
+        return json;
+    }
+
+    void run(primbench::state& state) override
+    {
+        const auto& stream = state.stream;
+
+        const size_t items = state.size;
+
+        primbench::log("Creating generator");
+        m_generator.create();
+
+        primbench::log("Allocating data");
+        T* data;
+        CUDA_CHECK(cudaMalloc(&data, items * sizeof(T)));
+
+        constexpr unsigned long long int seed   = 12345ULL; // TODO: Use state.seed
+        constexpr unsigned long long int offset = 6789ULL; // TODO: Use m_offset
+
+        primbench::log("Creating runner");
+        runner<State> r(m_dimensions, m_blocks, m_threads, seed, offset);
+
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run([&] { r.generate(m_blocks, m_threads, stream, data, items, m_generator); });
+
+        m_generator.destroy();
+
+        CUDA_CHECK(cudaFree(data));
+    }
+
+private:
+    Generator             m_generator; // TODO: REMOVE!
+    curandRngType      m_engine;
+    size_t                m_blocks;
+    size_t                m_threads;
+    size_t                m_dimensions;
+    size_t                m_offset;
+    std::optional<double> m_poisson_lambda; // TODO: USE!
+    size_t                m_mtgp32_states; // TODO: USE!
 };
 
-template<typename Engine, typename Generator>
-void run_benchmark(benchmark::State&        state,
-                   const cudaStream_t       stream,
-                   const benchmark_context& context,
-                   Generator                generator)
-{
-    typedef typename Generator::data_type data_type;
+#define QUEUE(generator, T, State, engine, Distribution, ...)                        \
+    executor.queue<curand_device_api_benchmark<generator, State, T, Distribution>>( \
+        generator(__VA_ARGS__),                                                      \
+        engine,                                                                      \
+        blocks,                                                                      \
+        threads,                                                                     \
+        dimensions,                                                                  \
+        offset,                                                                      \
+        ##__VA_ARGS__)
 
-    const size_t size       = context.size;
-    const size_t dimensions = context.dimensions;
-    const size_t trials     = context.trials;
-    const size_t blocks     = context.blocks;
-    const size_t threads    = context.threads;
-
-    // Optional initialization of the generator
-    generator.create();
-
-    data_type* data;
-    CUDA_CALL(cudaMalloc(&data, size * sizeof(data_type)));
-
-    constexpr unsigned long long int seed   = 12345ULL;
-    constexpr unsigned long long int offset = 6789ULL;
-
-    runner<Engine> r(dimensions, blocks, threads, seed, offset);
-
-    // Warm-up
-    for(size_t i = 0; i < 5; i++)
-    {
-        r.generate(blocks, threads, stream, data, size, generator);
-        CUDA_CALL(cudaGetLastError());
-        CUDA_CALL(cudaDeviceSynchronize());
-    }
-
-    // Measurement
-    cudaEvent_t start, stop;
-    CUDA_CALL(cudaEventCreate(&start));
-    CUDA_CALL(cudaEventCreate(&stop));
-    for(auto _ : state)
-    {
-        CUDA_CALL(cudaEventRecord(start, stream));
-        for(size_t i = 0; i < trials; i++)
-        {
-            r.generate(blocks, threads, stream, data, size, generator);
-        }
-        CUDA_CALL(cudaEventRecord(stop, stream));
-        CUDA_CALL(cudaEventSynchronize(stop));
-
-        float elapsed;
-        CUDA_CALL(cudaEventElapsedTime(&elapsed, start, stop));
-
-        state.SetIterationTime(elapsed / 1000.f);
-    }
-    state.SetBytesProcessed(trials * state.iterations() * size * sizeof(data_type));
-    state.SetItemsProcessed(trials * state.iterations() * size);
-
-    // Optional de-initialization of the generator
-    generator.destroy();
-
-    CUDA_CALL(cudaEventDestroy(start));
-    CUDA_CALL(cudaEventDestroy(stop));
-    CUDA_CALL(cudaFree(data));
-}
-
-template<typename Engine, typename Generator>
-void add_benchmark(const benchmark_context&                      context,
-                   const cudaStream_t                            stream,
-                   std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                   const std::string&                            engine_name,
-                   Generator                                     generator)
-{
-    static_assert(std::is_trivially_copyable<Generator>::value
-                      && std::is_trivially_destructible<Generator>::value,
-                  "Generator gets copied to device at kernel launch.");
-    const std::string benchmark_name
-        = "device_kernel<" + engine_name + "," + generator.name() + ">";
-    benchmarks.emplace_back(benchmark::RegisterBenchmark(benchmark_name.c_str(),
-                                                         &run_benchmark<Engine, Generator>,
-                                                         stream,
-                                                         context,
-                                                         generator));
-}
-
-template<typename Engine>
-void add_benchmarks(const benchmark_context&                      ctx,
-                    const cudaStream_t                            stream,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const curandRngType                           engine_type)
-{
-    constexpr bool is_64_bits = std::is_same<Engine, curandStateSobol64_t>::value
-                                || std::is_same<Engine, curandStateScrambledSobol64_t>::value;
-
-    const std::string name = engine_name(engine_type);
-
-    if(is_64_bits)
-    {
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_ullong<Engine>());
-    }
-    else
-    {
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_uint<Engine>());
-    }
-
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_uniform<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_uniform_double<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_normal<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_normal_double<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_log_normal<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_log_normal_double<Engine>());
-
-    for(size_t i = 0; i < ctx.lambdas.size(); i++)
-    {
-        generator_poisson<Engine> gen_poisson;
-        gen_poisson.lambda = ctx.lambdas[i];
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, gen_poisson);
-    }
-
-    for(size_t i = 0; i < ctx.lambdas.size(); i++)
-    {
-        generator_discrete_poisson<Engine> gen_discrete_poisson;
-        gen_discrete_poisson.lambda = ctx.lambdas[i];
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, gen_discrete_poisson);
-    }
-}
+#define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
+    do                                                                                             \
+    {                                                                                              \
+        if constexpr(std::is_same_v<State, curandStateSobol64_t>                                  \
+                     || std::is_same_v<State, curandStateScrambledSobol64_t>)                    \
+        {                                                                                          \
+            QUEUE(generator_ullong<State>,                                                         \
+                  unsigned long long,                                                              \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_UNIFORM);                                                           \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);           \
+        }                                                                                          \
+                                                                                                   \
+        QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);               \
+        QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM);       \
+        QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);                 \
+        QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);         \
+        QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);         \
+        QUEUE(generator_log_normal_double<State>, double, State, engine, DISTRIBUTION_LOG_NORMAL); \
+                                                                                                   \
+        for(double lambda : poisson_lambdas)                                                       \
+        {                                                                                          \
+            QUEUE(generator_poisson<State>,                                                        \
+                  uint32_t,                                                                        \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_POISSON,                                                            \
+                  lambda);                                                                         \
+            QUEUE(generator_discrete_poisson<State>,                                               \
+                  uint32_t,                                                                        \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_DISCRETE_POISSON,                                                   \
+                  lambda);                                                                         \
+        }                                                                                          \
+    }                                                                                              \
+    while(0)
 
 int main(int argc, char* argv[])
 {
-    // get paramaters before they are passed into
-    // benchmark::Initialize()
-    std::string outFormat     = "";
-    std::string filter        = "";
-    std::string consoleFormat = "";
+    primbench::settings settings;
+    settings.size = 128 * 1024 * 1024; // In items
+    primbench::executor executor(argc, argv, settings);
 
-    getFormats(argc, argv, outFormat, filter, consoleFormat);
+    auto blocks     = executor.get<size_t>("blocks", 256, "Number of blocks");
+    auto threads    = executor.get<size_t>("threads", 256, "Threads per block");
+    auto dimensions = executor.get<size_t>("dimensions", 1, "Number of quasi-random dimensions");
+    auto offset     = executor.get<size_t>("offset", 0, "Offset of generated pseudo-random values");
+    auto poisson_lambdas
+        = executor.get<std::vector<double>>("lambda",
+                                            {10.0},
+                                            "Space-separated list of Poisson lambdas");
 
-    benchmark::Initialize(&argc, argv);
+    QUEUE_DISTRIBUTIONS(curandStateMRG32k3a_t, CURAND_RNG_PSEUDO_MRG32K3A);
+    QUEUE_DISTRIBUTIONS(curandStatePhilox4_32_10_t, CURAND_RNG_PSEUDO_PHILOX4_32_10);
+    QUEUE_DISTRIBUTIONS(curandStateXORWOW_t, CURAND_RNG_PSEUDO_XORWOW);
+    QUEUE_DISTRIBUTIONS(curandStateMtgp32_t, CURAND_RNG_PSEUDO_MTGP32);
+    QUEUE_DISTRIBUTIONS(curandStateSobol32_t, CURAND_RNG_QUASI_SOBOL32);
+    QUEUE_DISTRIBUTIONS(curandStateScrambledSobol32_t, CURAND_RNG_QUASI_SCRAMBLED_SOBOL32);
+    QUEUE_DISTRIBUTIONS(curandStateSobol64_t, CURAND_RNG_QUASI_SOBOL64);
+    QUEUE_DISTRIBUTIONS(curandStateScrambledSobol64_t, CURAND_RNG_QUASI_SCRAMBLED_SOBOL64);
 
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_RAND_N, "number of values");
-    parser.set_optional<size_t>("dimensions",
-                                "dimensions",
-                                1,
-                                "number of dimensions of quasi-random values");
-    parser.set_optional<size_t>("trials", "trials", 20, "number of trials");
-    parser.set_optional<size_t>("blocks", "blocks", 256, "number of blocks");
-    parser.set_optional<size_t>("threads", "threads", 256, "number of threads in each block");
-    parser.set_optional<std::vector<double>>(
-        "lambda",
-        "lambda",
-        {10.0},
-        "space-separated list of lambdas of Poisson distribution");
-    parser.run_and_exit_if_error();
-
-    cudaStream_t stream;
-    CUDA_CALL(cudaStreamCreate(&stream));
-
-    add_common_benchmark_curand_info();
-
-    benchmark_context ctx{};
-
-    ctx.size       = parser.get<size_t>("size");
-    ctx.dimensions = parser.get<size_t>("dimensions");
-    ctx.trials     = parser.get<size_t>("trials");
-    ctx.blocks     = parser.get<size_t>("blocks");
-    ctx.threads    = parser.get<size_t>("threads");
-    ctx.lambdas    = parser.get<std::vector<double>>("lambda");
-
-    benchmark::AddCustomContext("size", std::to_string(ctx.size));
-    benchmark::AddCustomContext("dimensions", std::to_string(ctx.dimensions));
-    benchmark::AddCustomContext("trials", std::to_string(ctx.trials));
-    benchmark::AddCustomContext("blocks", std::to_string(ctx.blocks));
-    benchmark::AddCustomContext("threads", std::to_string(ctx.threads));
-
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
-
-    add_benchmarks<curandStateMRG32k3a_t>(ctx, stream, benchmarks, CURAND_RNG_PSEUDO_MRG32K3A);
-    add_benchmarks<curandStateMtgp32_t>(ctx, stream, benchmarks, CURAND_RNG_PSEUDO_MTGP32);
-    add_benchmarks<curandStatePhilox4_32_10_t>(ctx,
-                                               stream,
-                                               benchmarks,
-                                               CURAND_RNG_PSEUDO_PHILOX4_32_10);
-    add_benchmarks<curandStateScrambledSobol32_t>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  CURAND_RNG_QUASI_SCRAMBLED_SOBOL32);
-    add_benchmarks<curandStateScrambledSobol64_t>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  CURAND_RNG_QUASI_SCRAMBLED_SOBOL64);
-    add_benchmarks<curandStateSobol32_t>(ctx, stream, benchmarks, CURAND_RNG_QUASI_SOBOL32);
-    add_benchmarks<curandStateSobol64_t>(ctx, stream, benchmarks, CURAND_RNG_QUASI_SOBOL64);
-    add_benchmarks<curandStateXORWOW_t>(ctx, stream, benchmarks, CURAND_RNG_PSEUDO_XORWOW);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    benchmark::BenchmarkReporter* console_reporter  = getConsoleReporter(consoleFormat);
-    benchmark::BenchmarkReporter* out_file_reporter = getOutFileReporter(outFormat);
-
-    std::string spec = (filter == "" || filter == "all") ? "." : filter;
-
-    // Run benchmarks
-    if(outFormat == "") // default case
-    {
-        benchmark::RunSpecifiedBenchmarks(console_reporter, spec);
-    }
-    else
-    {
-        benchmark::RunSpecifiedBenchmarks(console_reporter, out_file_reporter, spec);
-    }
-    CUDA_CALL(cudaStreamDestroy(stream));
-
-    return 0;
+    executor.run();
 }

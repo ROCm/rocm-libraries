@@ -99,7 +99,7 @@ add_benchmark("rocrand/benchmark_rocrand_device_api.cpp" OFF)
 # curand
 if(HIP_COMPILER STREQUAL "nvcc")
   add_benchmark("curand/benchmark_curand_host_api.cpp" OFF)
-  add_benchmark("benchmark_curand_device_api.cpp" OFF)
+  add_benchmark("curand/benchmark_curand_device_api.cpp" OFF)
 endif()
 
 if(BUILD_LEGACY_BENCHMARK)
