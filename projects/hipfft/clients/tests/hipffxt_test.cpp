@@ -81,7 +81,6 @@ std::string fft_result_placement_name(const fft_result_placement placement)
     }
 }
 
-
 std::string format_name(const int format)
 {
     switch(format)
@@ -469,7 +468,6 @@ TEST_P(hipfftxtunitdesc, desccreation)
                           const bool isreal,
                           std::vector<size_t> batchlengths,
                           const std::vector<size_t> &hostdiststrides) -> void  {
-        using lint = decltype(batchlengths)::value_type;
         switch(batchlengths.size())
         {
         case 3:
