@@ -10,6 +10,7 @@
 
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider
@@ -110,6 +111,24 @@ void checkBatchnormInferenceVarianceExtTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
+
+void checkBatchnormInferenceActivationTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormFwdActivationModeSupported(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
+
+void checkBatchnormBwdActivationModeSupported(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 
 // --- Batchnorm Type Configuration ---
 

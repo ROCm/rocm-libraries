@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include <exception>
-#include <optional>
-
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 
