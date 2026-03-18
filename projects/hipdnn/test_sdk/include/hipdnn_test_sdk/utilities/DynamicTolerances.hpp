@@ -814,7 +814,7 @@ float calculatePointwiseTolerance(double scale, PointwiseErrorClass errorClass)
     auto epsilonCompute = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     // Core error: C * epsilon_compute * scale
-    double c = detail::getErrorMultiplier<ComputeType>(errorClass);
+    const double c = detail::getErrorMultiplier<ComputeType>(errorClass);
     double tolerance = c * epsilonCompute * scale;
 
     // Input casting error: added when InputType has higher precision than ComputeType.
