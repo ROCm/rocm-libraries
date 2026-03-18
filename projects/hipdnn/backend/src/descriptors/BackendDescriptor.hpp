@@ -61,12 +61,14 @@ private:
     bool _finalized = false;
     hipdnnBackendDescriptorType_t _type = HIPDNN_INVALID_TYPE;
 
-public:
+    friend T;
+
     HipdnnBackendDescriptorImpl()
         : _type(getStaticType())
     {
     }
 
+public:
     void finalize() override
     {
         _finalized = true;
@@ -148,6 +150,12 @@ struct HipdnnBackendDescriptor : public IBackendDescriptor
     std::string toString() const override;
 
     bool operator==(const HipdnnBackendDescriptor& other) const;
+
+    // Returns the wrapped impl as a shared_ptr to IBackendDescriptor.
+    std::shared_ptr<IBackendDescriptor> getImpl() const
+    {
+        return _impl;
+    }
 
     // Returns a shared_ptr to the IGraphOperation interface if the wrapped impl
     // implements it, or nullptr otherwise. Uses the virtual asGraphOperation()

@@ -21,7 +21,7 @@
 *******************************************************************************/
 
 #include <iostream>
-#ifndef WIN32
+#ifndef _WIN32
 #include "rocfft/rocfft.h"
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime.h>
@@ -51,7 +51,7 @@ __device__ auto load_callback_dev = load_callback;
 
 int main()
 {
-#ifdef WIN32
+#ifdef _WIN32
     std::cout << "This sample is temporarily disabled on Windows" << std::endl;
     return EXIT_SUCCESS;
 #else

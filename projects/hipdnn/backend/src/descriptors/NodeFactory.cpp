@@ -7,7 +7,7 @@
 namespace hipdnn_backend
 {
 
-std::shared_ptr<IGraphOperation> NodeFactory::createOperationFromNode(
+std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     const hipdnn_data_sdk::data_objects::NodeT& nodeT,
     const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
 {

@@ -41,16 +41,10 @@ constexpr bool IS_VALID_TENSOR_TYPE_V
 template <typename TargetType, typename SourceType>
 inline TargetType safeConvert(const SourceType& value)
 {
-    if constexpr(std::is_same_v<TargetType, bfloat16>)
+    if constexpr(std::is_same_v<TargetType, bfloat16> || std::is_same_v<TargetType, half>)
     {
-        // For bfloat16, explicitly convert through float to avoid precision warnings
-        // bfloat16 lacks direct constructor from double, only from float
-        return static_cast<TargetType>(static_cast<float>(value));
-    }
-    else if constexpr(std::is_same_v<TargetType, half>)
-    {
-        // For half, explicitly convert through float to avoid precision warnings
-        // half lacks direct constructor from double, only from float
+        // For bfloat16/half, explicitly convert through float to avoid precision warnings
+        // These types lack direct constructors from double, only from float
         return static_cast<TargetType>(static_cast<float>(value));
     }
     else
@@ -178,14 +172,14 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
+        std::size_t const workPerThread = (totalElements + numThreads - 1) / numThreads;
 
         std::vector<JoinableThread> threads(numThreads);
 
         for(std::size_t threadIdx = 0; threadIdx < numThreads; ++threadIdx)
         {
-            std::size_t workBegin = threadIdx * workPerThread;
-            std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
+            std::size_t const workBegin = threadIdx * workPerThread;
+            std::size_t const workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
 
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)

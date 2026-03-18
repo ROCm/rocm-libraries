@@ -507,14 +507,10 @@ public:
             padding_mask,
             causal_mask,
             causal_mask_bottom_right,
-            dropout_probability.has_value() ? flatbuffers::Optional<float>(*dropout_probability)
-                                            : flatbuffers::nullopt,
-            attn_scale_value.has_value() ? flatbuffers::Optional<float>(*attn_scale_value)
-                                         : flatbuffers::nullopt,
-            left_bound.has_value() ? flatbuffers::Optional<int64_t>(*left_bound)
-                                   : flatbuffers::nullopt,
-            right_bound.has_value() ? flatbuffers::Optional<int64_t>(*right_bound)
-                                    : flatbuffers::nullopt,
+            dropout_probability,
+            attn_scale_value,
+            left_bound,
+            right_bound,
             toSdkType(diagonal_alignment));
     }
 
@@ -582,19 +578,19 @@ public:
 
         if(fb->dropout_probability().has_value())
         {
-            attr.dropout_probability = fb->dropout_probability().value();
+            attr.dropout_probability = fb->dropout_probability();
         }
         if(fb->attn_scale_value().has_value())
         {
-            attr.attn_scale_value = fb->attn_scale_value().value();
+            attr.attn_scale_value = fb->attn_scale_value();
         }
         if(fb->left_bound().has_value())
         {
-            attr.left_bound = fb->left_bound().value();
+            attr.left_bound = fb->left_bound();
         }
         if(fb->right_bound().has_value())
         {
-            attr.right_bound = fb->right_bound().value();
+            attr.right_bound = fb->right_bound();
         }
 
         attr.diagonal_alignment = fromSdkType(fb->diagonal_alignment());

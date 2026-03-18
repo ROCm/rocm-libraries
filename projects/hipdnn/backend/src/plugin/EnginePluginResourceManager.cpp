@@ -46,7 +46,7 @@ void EnginePluginResourceManager::setPluginPaths(
     const std::vector<std::filesystem::path>& pluginPaths,
     hipdnnPluginLoadingMode_ext_t loadingMode)
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    std::lock_guard<std::mutex> const lock(pluginMutex);
 
     auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
     if(pluginConfig.paths == newPathsSet && pluginConfig.mode == loadingMode)
@@ -77,7 +77,7 @@ void EnginePluginResourceManager::setPluginPaths(
 
 std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    std::lock_guard<std::mutex> const lock(pluginMutex);
     return pluginConfig.paths;
 }
 
@@ -139,7 +139,7 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
 
 void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode)
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    std::lock_guard<std::mutex> const lock(pluginMutex);
 
     switch(mode)
     {
@@ -213,7 +213,7 @@ void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    std::lock_guard<std::mutex> const lock(pluginMutex);
 
     auto pm = pmPtr.lock();
 
