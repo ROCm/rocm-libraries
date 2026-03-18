@@ -731,9 +731,9 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
     if(gemm->params->kernelType.swizzleA)
     {
         descA = TensorDescriptor(gemm->params->kernelType.typeA,
-                                {M, K},
-                                {static_cast<size_t>(SHUFFLE_M * SHUFFLE_K),
-                                static_cast<size_t>((M / SHUFFLE_M) * SHUFFLE_M * SHUFFLE_K)});
+                                 {M, K},
+                                 {static_cast<size_t>((K / SHUFFLE_K) * SHUFFLE_M * SHUFFLE_K),
+                                  static_cast<size_t>(SHUFFLE_M * SHUFFLE_K)});
     }
 
     if(gemm->params->kernelType.swizzleB)
