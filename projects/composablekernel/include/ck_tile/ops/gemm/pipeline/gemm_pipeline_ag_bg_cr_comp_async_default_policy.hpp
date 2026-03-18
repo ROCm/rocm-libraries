@@ -89,9 +89,9 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         else
         {
             constexpr index_t APackedSize = numeric_traits<OverrideADataType>::PackedSize;
-            constexpr index_t KPack       = MaxVecSize / (sizeof(OverrideADataType) * APackedSize);
+            constexpr index_t KPack       = MaxVecSize / sizeof(OverrideADataType) * APackedSize;
             constexpr index_t PacksPerLdsRow =
-                (kLdsRowBytes / (sizeof(OverrideADataType) * APackedSize)) / KPack;
+                (kLdsRowBytes / sizeof(OverrideADataType) * APackedSize) / KPack;
 
             constexpr index_t L2              = KPack;
             constexpr index_t L1              = PacksPerLdsRow;
@@ -156,9 +156,9 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         {
             using BDataType               = remove_cvref_t<typename Problem::BDataType>;
             constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
-            constexpr index_t KPack       = MaxVecSize / (sizeof(BDataType) * BPackedSize);
+            constexpr index_t KPack       = MaxVecSize / sizeof(BDataType) * BPackedSize;
             constexpr index_t PacksPerLdsRow =
-                (kLdsRowBytes / (sizeof(typename Problem::BDataType) * BPackedSize)) / KPack;
+                (kLdsRowBytes / sizeof(typename Problem::BDataType) * BPackedSize) / KPack;
 
             constexpr index_t L2              = KPack;
             constexpr index_t L1              = PacksPerLdsRow;
@@ -267,7 +267,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
         const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
 
-        constexpr index_t K2 = MaxVecSize / (sizeof(ADataType) * APackedSize);
+        constexpr index_t K2 = MaxVecSize / sizeof(ADataType) * APackedSize;
         constexpr index_t K1 = KPerBlock / K2;
         const index_t K0     = cols / (K1 * K2);
         const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
@@ -338,8 +338,8 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                 sequence<0, 1>>{});
 
         return make_tile_window(byte_tensor_view,
-                                make_tuple(number<MPerBlock>{}, number<KPerBlock / APackedSize>{}),
-                                {origin_tmp[0], origin_tmp[1] / APackedSize},
+                                make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
+                                {origin_tmp[0], origin_tmp[1]},
                                 tile_dstr);
     }
 
@@ -356,7 +356,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
         const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
 
-        constexpr index_t K2 = MaxVecSize / (sizeof(BDataType) * BPackedSize);
+        constexpr index_t K2 = MaxVecSize / sizeof(BDataType) * BPackedSize;
         constexpr index_t K1 = KPerBlock / K2;
         const index_t K0     = cols / (K1 * K2);
         const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
@@ -424,8 +424,8 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
                 sequence<0, 1>>{});
 
         return make_tile_window(byte_tensor_view,
-                                make_tuple(number<NPerBlock>{}, number<KPerBlock / BPackedSize>{}),
-                                {origin_tmp[0], origin_tmp[1] / BPackedSize},
+                                make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
+                                {origin_tmp[0], origin_tmp[1]},
                                 tile_dstr);
     }
 
@@ -440,17 +440,19 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     template <typename Problem, typename ADataType>
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
+        constexpr index_t APackedSize   = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = MakeALdsStoreBlockDescriptor<Problem, ADataType>();
-        return integer_least_multiple(sizeof(ADataType) * a_lds_block_desc.get_element_space_size(),
-                                      16);
+        return integer_least_multiple(
+            sizeof(ADataType) * a_lds_block_desc.get_element_space_size() / APackedSize, 16);
     }
 
     template <typename Problem, typename BDataType>
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
+        constexpr index_t BPackedSize   = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = MakeBLdsStoreBlockDescriptor<Problem>();
-        return integer_least_multiple(sizeof(BDataType) * b_lds_block_desc.get_element_space_size(),
-                                      16);
+        return integer_least_multiple(
+            sizeof(BDataType) * b_lds_block_desc.get_element_space_size() / BPackedSize, 16);
     }
 
     template <typename Problem, typename BDataType>

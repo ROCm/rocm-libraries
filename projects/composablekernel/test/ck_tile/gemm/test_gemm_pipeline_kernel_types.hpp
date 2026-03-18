@@ -335,9 +335,8 @@ using KernelTypesCompAsync = ::testing::Types< // CompAsyncConfig<Row, Row, Row,
     // CompAsyncConfig<Col, Col, Row, F8>
     >;
 
-using KernelTypesCompAsync16x16x128 =
-    ::testing::Types< // CompAsyncConfig16x16x128<Row, Col, Row, F4>,
-        CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
+using KernelTypesCompAsync16x16x128 = ::testing::Types<CompAsyncConfig16x16x128<Row, Col, Row, F4>,
+                                                       CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
 
 using KernelTypesCompAsyncEightWaves =
     ::testing::Types<CompAsyncEightWavesConfig<Row, Col, Row, F8>>;
