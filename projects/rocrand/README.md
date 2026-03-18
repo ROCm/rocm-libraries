@@ -198,15 +198,6 @@ cd rocm-libraries/projects/rocrand; cd build
 ./benchmark/benchmark_curand_device_api [google benchmark options]
 ```
 
-### Legacy benchmarks
-
-You can disable legacy benchmarks (those used prior to Google Benchmark) by setting the
-CMake option `BUILD_LEGACY_BENCHMARK` to `OFF`. For compatibility, the default setting is `ON`
-when `BUILD_BENCHMARK` is set.
-
-Legacy benchmarks are deprecated and will be removed in a future version once all benchmarks have
-been migrated to the new framework.
-
 ## Wrappers
 
 * C++ wrappers for the rocRAND host API are in [`rocrand.hpp`](./library/include/rocrand/rocrand.hpp).
