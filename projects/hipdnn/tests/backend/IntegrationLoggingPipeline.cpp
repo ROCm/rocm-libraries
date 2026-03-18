@@ -78,7 +78,7 @@ TEST_F(IntegrationGpuLoggingPipeline, DescriptorLogging)
 {
     SKIP_IF_NO_DEVICES();
 
-    std::vector<hipdnnBackendDescriptorType_t> const descriptorTypes
+    const std::vector<hipdnnBackendDescriptorType_t> descriptorTypes
         = {HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR,
            HIPDNN_BACKEND_ENGINE_DESCRIPTOR,
            HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR,

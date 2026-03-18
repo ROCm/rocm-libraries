@@ -78,7 +78,7 @@ TEST_F(TestKnobSettingWrapper, ConstructFromFlatbufferPointer)
     auto buffer = createKnobSetting("test_knob_42", 100);
     auto setting = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::KnobSetting>(buffer.data());
 
-    KnobSettingWrapper const wrapper(setting);
+    const KnobSettingWrapper wrapper(setting);
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobId(), "test_knob_42");
     EXPECT_EQ(wrapper.valueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
@@ -88,7 +88,7 @@ TEST_F(TestKnobSettingWrapper, ConstructFromBuffer)
 {
     auto buffer = createKnobSetting("test_knob_42", 100);
 
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobId(), "test_knob_42");
     EXPECT_EQ(wrapper.valueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
@@ -96,14 +96,14 @@ TEST_F(TestKnobSettingWrapper, ConstructFromBuffer)
 
 TEST_F(TestKnobSettingWrapper, ConstructFromNullPointer)
 {
-    KnobSettingWrapper const wrapper(
+    const KnobSettingWrapper wrapper(
         static_cast<hipdnn_data_sdk::data_objects::KnobSetting*>(nullptr));
     EXPECT_FALSE(wrapper.isValid());
 }
 
 TEST_F(TestKnobSettingWrapper, ConstructFromNullBuffer)
 {
-    KnobSettingWrapper const wrapper(nullptr, 0);
+    const KnobSettingWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
 }
 
@@ -111,21 +111,21 @@ TEST_F(TestKnobSettingWrapper, ConstructFromInvalidBuffer)
 {
     std::array<uint8_t, 10> invalidData
         = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    KnobSettingWrapper const wrapper(invalidData.data(), invalidData.size());
+    const KnobSettingWrapper wrapper(invalidData.data(), invalidData.size());
     EXPECT_FALSE(wrapper.isValid());
 }
 
 TEST_F(TestKnobSettingWrapper, GetKnobIdFromValidWrapper)
 {
     auto buffer = createKnobSetting("test_knob_999", 123);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_EQ(wrapper.knobId(), "test_knob_999");
 }
 
 TEST_F(TestKnobSettingWrapper, ValueAsIntValue)
 {
     auto buffer = createKnobSetting("test_knob_42", 100);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_EQ(wrapper.valueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
 
     const auto& intValue = wrapper.valueAs<hipdnn_data_sdk::data_objects::IntValue>();
@@ -135,7 +135,7 @@ TEST_F(TestKnobSettingWrapper, ValueAsIntValue)
 TEST_F(TestKnobSettingWrapper, ValueAsStringValue)
 {
     auto buffer = createKnobSettingWithString("test_knob_42", "test_value");
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_EQ(wrapper.valueType(), hipdnn_data_sdk::data_objects::KnobValue::StringValue);
 
     const auto& stringValue = wrapper.valueAs<hipdnn_data_sdk::data_objects::StringValue>();
@@ -145,7 +145,7 @@ TEST_F(TestKnobSettingWrapper, ValueAsStringValue)
 TEST_F(TestKnobSettingWrapper, ValueAsFloatValue)
 {
     auto buffer = createKnobSettingWithFloat("test_knob_42", 3.14159);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
     EXPECT_EQ(wrapper.valueType(), hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
 
     const auto& floatValue = wrapper.valueAs<hipdnn_data_sdk::data_objects::FloatValue>();
@@ -155,7 +155,7 @@ TEST_F(TestKnobSettingWrapper, ValueAsFloatValue)
 TEST_F(TestKnobSettingWrapper, ValueAsTypeMismatchThrows)
 {
     auto buffer = createKnobSetting("test_knob_42", 100);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
     // Value is IntValue, trying to get as FloatValue should throw
     EXPECT_THROW(wrapper.valueAs<hipdnn_data_sdk::data_objects::FloatValue>(),
@@ -169,14 +169,14 @@ TEST_F(TestKnobSettingWrapper, GetKnobSettingFromValidWrapper)
     auto buffer = createKnobSetting("test_knob_42", 100);
     auto setting = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::KnobSetting>(buffer.data());
 
-    KnobSettingWrapper const wrapper(setting);
+    const KnobSettingWrapper wrapper(setting);
     const auto& retrievedSetting = wrapper.getKnobSetting();
     EXPECT_EQ(&retrievedSetting, setting);
 }
 
 TEST_F(TestKnobSettingWrapper, AccessMethodsOnInvalidWrapperThrow)
 {
-    KnobSettingWrapper const wrapper(nullptr, 0);
+    const KnobSettingWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
 
     EXPECT_THROW(wrapper.knobId(), std::invalid_argument);
@@ -191,9 +191,9 @@ TEST_F(TestKnobSettingWrapper, MultipleDifferentKnobSettings)
     auto buffer2 = createKnobSettingWithString("knob_2", "config_value");
     auto buffer3 = createKnobSettingWithFloat("knob_3", 2.718);
 
-    KnobSettingWrapper const wrapper1(buffer1.data(), buffer1.size());
-    KnobSettingWrapper const wrapper2(buffer2.data(), buffer2.size());
-    KnobSettingWrapper const wrapper3(buffer3.data(), buffer3.size());
+    const KnobSettingWrapper wrapper1(buffer1.data(), buffer1.size());
+    const KnobSettingWrapper wrapper2(buffer2.data(), buffer2.size());
+    const KnobSettingWrapper wrapper3(buffer3.data(), buffer3.size());
 
     EXPECT_EQ(wrapper1.knobId(), "knob_1");
     EXPECT_EQ(wrapper1.valueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
@@ -208,7 +208,7 @@ TEST_F(TestKnobSettingWrapper, MultipleDifferentKnobSettings)
 TEST_F(TestKnobSettingWrapper, EmptyKnobId)
 {
     auto buffer = createKnobSetting("", 42);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobId(), "");
@@ -216,9 +216,9 @@ TEST_F(TestKnobSettingWrapper, EmptyKnobId)
 
 TEST_F(TestKnobSettingWrapper, LongKnobId)
 {
-    std::string const longKnobId = "this.is.a.very.long.knob.id.with.many.parts.for.testing";
+    const std::string longKnobId = "this.is.a.very.long.knob.id.with.many.parts.for.testing";
     auto buffer = createKnobSetting(longKnobId, 42);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobId(), longKnobId);
@@ -227,7 +227,7 @@ TEST_F(TestKnobSettingWrapper, LongKnobId)
 TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithIntValue)
 {
     auto buffer = createKnobSetting("test_knob_42", 100);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
     auto knobSettingT = wrapper.toKnobSettingT();
 
@@ -241,7 +241,7 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithIntValue)
 TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithStringValue)
 {
     auto buffer = createKnobSettingWithString("test_knob_99", "test_string_value");
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
     auto knobSettingT = wrapper.toKnobSettingT();
 
@@ -255,7 +255,7 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithStringValue)
 TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithFloatValue)
 {
     auto buffer = createKnobSettingWithFloat("test_knob_123", 3.14159);
-    KnobSettingWrapper const wrapper(buffer.data(), buffer.size());
+    const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
     auto knobSettingT = wrapper.toKnobSettingT();
 
@@ -268,7 +268,7 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithFloatValue)
 
 TEST_F(TestKnobSettingWrapper, ToKnobSettingTOnInvalidWrapperThrows)
 {
-    KnobSettingWrapper const wrapper(nullptr, 0);
+    const KnobSettingWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
 
     EXPECT_THROW(wrapper.toKnobSettingT(), std::invalid_argument);

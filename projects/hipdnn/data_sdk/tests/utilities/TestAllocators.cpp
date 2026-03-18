@@ -84,9 +84,9 @@ TEST(TestAllocators, HostAllocatorRebind)
 
 TEST(TestAllocators, HostAllocatorComparison)
 {
-    HostAllocator<int> const alloc1;
-    HostAllocator<int> const alloc2;
-    HostAllocator<double> const alloc3;
+    const HostAllocator<int> alloc1;
+    const HostAllocator<int> alloc2;
+    const HostAllocator<double> alloc3;
 
     EXPECT_TRUE(alloc1 == alloc2);
     EXPECT_FALSE(alloc1 != alloc2);
@@ -214,9 +214,9 @@ TEST(TestGpuAllocators, DeviceAllocatorComparison)
 {
     SKIP_IF_NO_DEVICES();
 
-    DeviceAllocator<int> const alloc1;
-    DeviceAllocator<int> const alloc2;
-    DeviceAllocator<double> const alloc3;
+    const DeviceAllocator<int> alloc1;
+    const DeviceAllocator<int> alloc2;
+    const DeviceAllocator<double> alloc3;
 
     EXPECT_TRUE(alloc1 == alloc2);
     EXPECT_FALSE(alloc1 != alloc2);

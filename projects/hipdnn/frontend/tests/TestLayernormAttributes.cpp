@@ -9,7 +9,7 @@ using namespace hipdnn_frontend::graph;
 
 TEST(TestLayernormAttributes, DefaultValues)
 {
-    LayernormAttributes const attrs;
+    const LayernormAttributes attrs;
 
     EXPECT_EQ(attrs.get_x(), nullptr);
     EXPECT_EQ(attrs.get_scale(), nullptr);
