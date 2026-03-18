@@ -8,7 +8,9 @@
 
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/json/Common.hpp>
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -194,6 +196,118 @@ TEST(TestJson, Enum)
     enumTestSuite(NodeAttributes::BatchnormInferenceAttributes,
                   "BatchnormInferenceAttributes",
                   "(for hipdnn_data_sdk::data_objects::NodeAttributes)");
+}
+
+TEST(TestJson, FlatbufferStringToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto strOffset = builder.CreateString("hello_world");
+    auto svOffset = CreateStringValue(builder, strOffset);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sv->value());
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "hello_world");
+}
+
+TEST(TestJson, FlatbufferStringToJsonImplicit)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto strOffset = builder.CreateString("implicit_test");
+    auto svOffset = CreateStringValue(builder, strOffset);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j = sv->value();
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "implicit_test");
+}
+
+TEST(TestJson, FlatbufferNullStringToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto svOffset = CreateStringValue(builder);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j = "should_be_replaced";
+    flatbuffers::to_json(j, sv->value());
+    EXPECT_TRUE(j.is_string()) << "null flatbuffer string should leave json unchanged";
+    EXPECT_EQ(j.get<std::string>(), "should_be_replaced");
+}
+
+TEST(TestJson, FlatbufferEmptyStringToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto strOffset = builder.CreateString("");
+    auto svOffset = CreateStringValue(builder, strOffset);
+    builder.Finish(svOffset);
+
+    auto sv = flatbuffers::GetRoot<StringValue>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sv->value());
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "");
+}
+
+TEST(TestJson, FlatbufferStringVectorToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> stringOffsets;
+    stringOffsets.push_back(builder.CreateString("alpha"));
+    stringOffsets.push_back(builder.CreateString("beta"));
+    stringOffsets.push_back(builder.CreateString("gamma"));
+    auto vecOffset = builder.CreateVector(stringOffsets);
+
+    auto scOffset = CreateStringConstraint(builder, 100, vecOffset);
+    builder.Finish(scOffset);
+
+    auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sc->valid_values());
+    ASSERT_TRUE(j.is_array());
+    ASSERT_EQ(j.size(), 3u);
+    EXPECT_EQ(j[0].get<std::string>(), "alpha");
+    EXPECT_EQ(j[1].get<std::string>(), "beta");
+    EXPECT_EQ(j[2].get<std::string>(), "gamma");
+}
+
+TEST(TestJson, FlatbufferEmptyStringVectorToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> emptyOffsets;
+    auto vecOffset = builder.CreateVector(emptyOffsets);
+
+    auto scOffset = CreateStringConstraint(builder, 0, vecOffset);
+    builder.Finish(scOffset);
+
+    auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sc->valid_values());
+    ASSERT_TRUE(j.is_array());
+    EXPECT_EQ(j.size(), 0u);
+}
+
+TEST(TestJson, FlatbufferNullStringVectorToJson)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto scOffset = CreateStringConstraint(builder);
+    builder.Finish(scOffset);
+
+    auto sc = flatbuffers::GetRoot<StringConstraint>(builder.GetBufferPointer());
+
+    nlohmann::json j;
+    flatbuffers::to_json(j, sc->valid_values());
+    ASSERT_TRUE(j.is_array());
+    EXPECT_EQ(j.size(), 0u);
 }
 
 #endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

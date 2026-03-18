@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
+#include "GraphLogger.hpp"
 #include "PlatformUtils.hpp"
 #include "UserCallbackSink.hpp"
 
@@ -307,6 +308,7 @@ void loggerShutdown()
     // level so that if/when the logger is restarted it will reread the value from the
     // environment, following the original start-up behavior.
     hipdnn_data_sdk::logging::resetLogLevelCache();
+    GraphLogger::resetCache();
 
     state.loggerInitialized = false;
 }

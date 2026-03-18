@@ -16,9 +16,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
 {
     tensorAttrJson["uid"] = tensorAttr.uid();
     tensorAttrJson["data_type"] = tensorAttr.data_type();
-    tensorAttrJson["dims"] = *tensorAttr.dims();
-    tensorAttrJson["strides"] = *tensorAttr.strides();
-    tensorAttrJson["name"] = tensorAttr.name()->c_str();
+    tensorAttrJson["dims"] = tensorAttr.dims();
+    tensorAttrJson["strides"] = tensorAttr.strides();
+    tensorAttrJson["name"] = tensorAttr.name();
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
 
     // Serialize TensorValue union if present
