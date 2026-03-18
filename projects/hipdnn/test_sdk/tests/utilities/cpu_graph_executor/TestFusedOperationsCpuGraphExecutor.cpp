@@ -28,17 +28,17 @@ class TestFusedOperationsCpuGraphExecutor : public ::testing::Test
 TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
 {
     auto tolerance = pointwise::getTolerance<float>();
-    std::vector<int64_t> xDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 2, 2};
+    std::vector<int64_t> const xDims = {1, 1, 2, 2};
+    std::vector<int64_t> const wDims = {1, 1, 1, 1};
+    std::vector<int64_t> const yDims = {1, 1, 2, 2};
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    std::vector<int64_t> const strides = {1, 1};
+    std::vector<int64_t> const dilation = {1, 1};
+    std::vector<int64_t> const padding = {0, 0};
 
-    float addConstant = 5.0f;
-    float multiplyConstant = 2.0f;
-    unsigned int seed = getGlobalTestSeed();
+    float const addConstant = 5.0f;
+    float const multiplyConstant = 2.0f;
+    unsigned int const seed = getGlobalTestSeed();
 
     // DIRECT TENSOR MANAGEMENT - Expert Architecture
     // Graph execution tensors
@@ -172,10 +172,10 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     Tensor<float> tempAddOutput(yDims, TensorLayout::NHWC);
     auto* convOutputData = static_cast<float*>(tempConvOutput.memory().hostData());
     auto* addOutputData = static_cast<float*>(tempAddOutput.memory().hostData());
-    size_t elementCount = static_cast<size_t>(tempConvOutput.dims()[0])
-                          * static_cast<size_t>(tempConvOutput.dims()[1])
-                          * static_cast<size_t>(tempConvOutput.dims()[2])
-                          * static_cast<size_t>(tempConvOutput.dims()[3]);
+    size_t const elementCount = static_cast<size_t>(tempConvOutput.dims()[0])
+                                * static_cast<size_t>(tempConvOutput.dims()[1])
+                                * static_cast<size_t>(tempConvOutput.dims()[2])
+                                * static_cast<size_t>(tempConvOutput.dims()[3]);
 
     for(size_t i = 0; i < elementCount; ++i)
     {
@@ -190,7 +190,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     }
 
     // Validate results
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor, yTensor));
 }

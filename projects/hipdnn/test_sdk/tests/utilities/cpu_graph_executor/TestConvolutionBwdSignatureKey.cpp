@@ -18,45 +18,45 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestConvolutionBwdSignatureKey, EqualityOperator)
 {
-    ConvolutionBwdSignatureKey key1{
+    ConvolutionBwdSignatureKey const key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionBwdSignatureKey key2{
+    ConvolutionBwdSignatureKey const key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    ConvolutionBwdSignatureKey key3{
+    ConvolutionBwdSignatureKey const key3{
         DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::HALF};
-    ConvolutionBwdSignatureKey key4{
+    ConvolutionBwdSignatureKey const key4{
         DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::HALF};
     EXPECT_TRUE(key3 == key4);
 
-    ConvolutionBwdSignatureKey key5{
+    ConvolutionBwdSignatureKey const key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionBwdSignatureKey key6{
+    ConvolutionBwdSignatureKey const key6{
         DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key5 == key6);
 
-    ConvolutionBwdSignatureKey key7{
+    ConvolutionBwdSignatureKey const key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionBwdSignatureKey key8{
+    ConvolutionBwdSignatureKey const key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 }
 
 TEST(TestConvolutionBwdSignatureKey, HashFunction)
 {
-    ConvolutionBwdSignatureKey key1{
+    ConvolutionBwdSignatureKey const key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionBwdSignatureKey key2{
+    ConvolutionBwdSignatureKey const key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    ConvolutionBwdSignatureKey key3{
+    ConvolutionBwdSignatureKey const key3{
         DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT};
-    ConvolutionBwdSignatureKey key4{
+    ConvolutionBwdSignatureKey const key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionBwdSignatureKey key5{
+    ConvolutionBwdSignatureKey const key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
     auto hash3 = key3.hashSelf();
@@ -68,9 +68,9 @@ TEST(TestConvolutionBwdSignatureKey, HashFunction)
 
 TEST(TestConvolutionBwdSignatureKey, Copy)
 {
-    ConvolutionBwdSignatureKey original{
+    ConvolutionBwdSignatureKey const original{
         DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    ConvolutionBwdSignatureKey copied{original};
+    ConvolutionBwdSignatureKey const copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.dyDataType, DataType::BFLOAT16);
@@ -81,11 +81,11 @@ TEST(TestConvolutionBwdSignatureKey, Copy)
 
 TEST(TestConvolutionBwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    ConvolutionBwdSignatureKey expectedKey{
+    ConvolutionBwdSignatureKey const expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    std::vector<int64_t> const dxDims = {1, 1, 2, 2};
+    std::vector<int64_t> const wDims = {1, 1, 1, 1};
+    std::vector<int64_t> const dyDims = {1, 1, 2, 2};
 
     ConvolutionBwdTensorBundle<float> tensorBundle(dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -97,7 +97,7 @@ TEST(TestConvolutionBwdSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionBwdSignatureKey keyFromNode(
+    ConvolutionBwdSignatureKey const keyFromNode(
         graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 
     EXPECT_TRUE(keyFromNode == expectedKey);
