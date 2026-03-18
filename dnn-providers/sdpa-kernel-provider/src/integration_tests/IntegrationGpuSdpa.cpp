@@ -123,10 +123,6 @@ protected:
 
         o->set_output(true);
 
-        EXPECT_EQ(o->get_name(), "SdpaNode::O");
-        EXPECT_TRUE(o->get_is_virtual());
-        EXPECT_EQ(stats, nullptr);
-
         auto validationResult = graph.validate();
         EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 

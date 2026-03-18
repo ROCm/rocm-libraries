@@ -4,6 +4,7 @@
 # OBJECT library with all implementation
 add_library(
     sdpa_kernel_plugin_impl OBJECT
+    SdpaKernelEngine.cpp
     SdpaKernelHandle.cpp
     SdpaKernelContainer.cpp
     SdpaKernelPluginPublic.cpp
