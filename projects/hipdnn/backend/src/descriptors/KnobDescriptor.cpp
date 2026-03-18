@@ -126,8 +126,8 @@ void KnobDescriptor::setKnobId(hipdnnBackendAttributeType_t attributeType,
                   "elementCount exceeds MAX_KNOB_ID_LENGTH ("
                       + std::to_string(MAX_KNOB_ID_LENGTH) + ")");
 
-    _knobId = std::string(static_cast<const char*>(arrayOfElements),
-                          static_cast<size_t>(elementCount));
+    _knobId
+        = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
 }
 
 void KnobDescriptor::setDescription(hipdnnBackendAttributeType_t attributeType,
@@ -157,8 +157,8 @@ void KnobDescriptor::setDescription(hipdnnBackendAttributeType_t attributeType,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "KnobDescriptor::setAttribute(): arrayOfElements is null");
 
-    _description = std::string(static_cast<const char*>(arrayOfElements),
-                               static_cast<size_t>(elementCount));
+    _description
+        = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
 }
 
 void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
@@ -824,9 +824,8 @@ void KnobDescriptor::getValidValuesInt(hipdnnBackendAttributeType_t attributeTyp
     }
 
     auto copyCount = std::min(requestedElementCount, count);
-    std::memcpy(arrayOfElements,
-                _validValuesInt.data(),
-                static_cast<size_t>(copyCount) * sizeof(int64_t));
+    std::memcpy(
+        arrayOfElements, _validValuesInt.data(), static_cast<size_t>(copyCount) * sizeof(int64_t));
 
     if(elementCount != nullptr)
     {
@@ -869,8 +868,8 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
         THROW_IF_NULL(elementCount,
                       HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                       "KnobDescriptor::getAttribute(): elementCount is null");
-        *elementCount             = totalCount;
-        _pendingStringCopyIndex   = -1;
+        *elementCount = totalCount;
+        _pendingStringCopyIndex = -1;
         return;
     }
 
@@ -884,8 +883,8 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
         THROW_IF_NULL(elementCount,
                       HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                       "KnobDescriptor::getAttribute(): elementCount is null");
-        const auto& str    = _validValuesString[static_cast<size_t>(index)];
-        *elementCount          = static_cast<int64_t>(str.size() + 1);
+        const auto& str = _validValuesString[static_cast<size_t>(index)];
+        *elementCount = static_cast<int64_t>(str.size() + 1);
         _pendingStringCopyIndex = index;
         return;
     }
@@ -897,7 +896,7 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
                   "must query string size (null buffer) before copying VALID_VALUES_STRING");
 
     const auto& str = _validValuesString[static_cast<size_t>(_pendingStringCopyIndex)];
-    auto maxSize    = static_cast<size_t>(requestedElementCount);
+    auto maxSize = static_cast<size_t>(requestedElementCount);
     hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
         static_cast<char*>(arrayOfElements), str.c_str(), maxSize);
 
@@ -995,9 +994,9 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
                    "KnobDescriptor::toKnobT() failed: Not finalized.");
 
     auto knob = std::make_unique<hipdnn_data_sdk::data_objects::KnobT>();
-    knob->knob_id    = _knobId;
+    knob->knob_id = _knobId;
     knob->description = _description;
-    knob->deprecated  = _deprecated;
+    knob->deprecated = _deprecated;
 
     // Deep-copy the default value
     switch(_defaultValue.type)
@@ -1037,9 +1036,9 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
            || !_validValuesInt.empty())
         {
             hipdnn_data_sdk::data_objects::IntConstraintT intConstraint;
-            intConstraint.min_value    = _minValueInt.value_or(0);
-            intConstraint.max_value    = _maxValueInt.value_or(0);
-            intConstraint.step         = _stride.value_or(1);
+            intConstraint.min_value = _minValueInt.value_or(0);
+            intConstraint.max_value = _maxValueInt.value_or(0);
+            intConstraint.step = _stride.value_or(1);
             intConstraint.valid_values = _validValuesInt;
             knob->constraint.Set(std::move(intConstraint));
         }
@@ -1059,7 +1058,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
         if(!_validValuesString.empty() || _stringMaxLength.has_value())
         {
             hipdnn_data_sdk::data_objects::StringConstraintT stringConstraint;
-            stringConstraint.max_length   = static_cast<int32_t>(_stringMaxLength.value_or(0));
+            stringConstraint.max_length = static_cast<int32_t>(_stringMaxLength.value_or(0));
             stringConstraint.valid_values = _validValuesString;
             knob->constraint.Set(std::move(stringConstraint));
         }
@@ -1116,8 +1115,7 @@ std::string KnobDescriptor::toString() const
     }
     if(!_validValuesString.empty() || _stringMaxLength.has_value())
     {
-        str += ", stringConstraint:{validValues["
-               + std::to_string(_validValuesString.size()) + "]";
+        str += ", stringConstraint:{validValues[" + std::to_string(_validValuesString.size()) + "]";
         if(_stringMaxLength.has_value())
         {
             str += " maxLen=" + std::to_string(*_stringMaxLength);
