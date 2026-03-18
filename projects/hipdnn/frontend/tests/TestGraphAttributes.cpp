@@ -23,7 +23,7 @@ TEST(TestGraphAttributes, CreateGraphAttributes)
 
 TEST(TestGraphAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::GraphAttributes graphAttributes;
+    hipdnn_frontend::graph::GraphAttributes const graphAttributes;
 
     // Check default values
     EXPECT_EQ(graphAttributes.get_name(), "");
@@ -44,7 +44,7 @@ TEST(TestGraphAttributes, SetName)
     EXPECT_EQ(graphAttributes.get_name(), "");
 
     // Test long name
-    std::string longName = "VeryLongGraphNameThatShouldStillWorkProperly";
+    std::string const longName = "VeryLongGraphNameThatShouldStillWorkProperly";
     graphAttributes.set_name(longName);
     EXPECT_EQ(graphAttributes.get_name(), longName);
 }

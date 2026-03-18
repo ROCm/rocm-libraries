@@ -41,7 +41,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, BatchnormInferenceNodeVarianceExtPro
     auto varianceTensor = batchnormAttributes.get_variance();
     varianceTensor->set_dim({1, 2, 1, 1});
 
-    GraphAttributes graphAttributes;
+    GraphAttributes const graphAttributes;
     BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
     auto error = node.infer_properties_node();
 
@@ -80,8 +80,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNode)
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -91,8 +91,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNodeMissingValues)
 {
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -100,48 +100,48 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNodeMissingValues)
     batchnormAttributes = BatchnormInferenceAttributesVarianceExt{};
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithX(std::move(batchnormAttributesCopy),
-                                                graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithX(std::move(batchnormAttributesCopy),
+                                                      graphAttributes);
 
     error = nodeWithX.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithY(std::move(batchnormAttributesCopy),
-                                                graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithY(std::move(batchnormAttributesCopy),
+                                                      graphAttributes);
 
     error = nodeWithY.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithScale(std::move(batchnormAttributesCopy),
-                                                    graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithScale(std::move(batchnormAttributesCopy),
+                                                          graphAttributes);
 
     error = nodeWithScale.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithBias(std::move(batchnormAttributesCopy),
-                                                   graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithBias(std::move(batchnormAttributesCopy),
+                                                         graphAttributes);
 
     error = nodeWithBias.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithMean(std::move(batchnormAttributesCopy),
-                                                   graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithMean(std::move(batchnormAttributesCopy),
+                                                         graphAttributes);
 
     error = nodeWithMean.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_variance(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithVariance(std::move(batchnormAttributesCopy),
-                                                       graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithVariance(std::move(batchnormAttributesCopy),
+                                                             graphAttributes);
 
     error = nodeWithVariance.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -168,8 +168,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNodeMissingValues)
     epsilonTensor->set_dim({1}).set_value(1e-5);
 
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNodeVarianceExt nodeWithAllValues(std::move(batchnormAttributesCopy),
-                                                        graphAttributes);
+    BatchnormInferenceNodeVarianceExt const nodeWithAllValues(std::move(batchnormAttributesCopy),
+                                                              graphAttributes);
 
     error = nodeWithAllValues.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -207,7 +207,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNode)
     auto varianceTensor = batchnormAttributes.get_variance();
     varianceTensor->set_dim({1, 2, 1, 1});
 
-    GraphAttributes graphAttributes;
+    GraphAttributes const graphAttributes;
     BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -279,8 +279,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PackNode)
         .set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -335,8 +335,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, GatherHipdnnTensors)
     yTensor->set_uid(7).set_name("Y");
     bnAttributes.set_y(yTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(bnAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(bnAttributes), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -387,8 +387,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedInputOut
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -425,8 +425,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedChannelD
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -463,8 +463,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidScaleTensor
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -501,8 +501,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidBiasTensorS
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -539,8 +539,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidMeanTensorS
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -577,8 +577,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidVarianceTen
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -620,8 +620,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsSpatialDimensionEq
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
@@ -658,8 +658,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsValidSpatialDimens
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -700,8 +700,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsValid5DSpatialDime
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -738,8 +738,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAccepts5DSpatialDimension
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
+    GraphAttributes const graphAttributes;
+    BatchnormInferenceNodeVarianceExt const node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
@@ -755,7 +755,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNodeMissingX)
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>()); // Only set y, not x
 
-    GraphAttributes graphAttributes;
+    GraphAttributes const graphAttributes;
     BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -767,7 +767,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNodeMissingY)
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>()); // Only set x, not y
 
-    GraphAttributes graphAttributes;
+    GraphAttributes const graphAttributes;
     BatchnormInferenceNodeVarianceExt node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -776,7 +776,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, InferPropertiesNodeMissingY)
 
 TEST(TestBatchnormInferenceNodeVarianceExt, GetNodeTypeReturnsBatchnormInferenceVarianceExt)
 {
-    GraphAttributes graphAttrs;
-    BatchnormInferenceNodeVarianceExt node(BatchnormInferenceAttributesVarianceExt{}, graphAttrs);
+    GraphAttributes const graphAttrs;
+    BatchnormInferenceNodeVarianceExt const node(BatchnormInferenceAttributesVarianceExt{},
+                                                 graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT);
 }
