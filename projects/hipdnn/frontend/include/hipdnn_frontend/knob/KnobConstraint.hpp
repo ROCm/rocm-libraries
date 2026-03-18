@@ -86,7 +86,7 @@ public:
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
         }
 
-        int64_t val = *value;
+        int64_t const val = *value;
 
         // If explicit valid values are specified, check against them
         if(!_validValues.empty())
@@ -195,7 +195,7 @@ public:
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
         }
 
-        double val = *value;
+        double const val = *value;
 
         if(val < _minValue || val > _maxValue)
         {

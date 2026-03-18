@@ -305,8 +305,7 @@ endif()
 
 if(MIOPEN_NO_GPU)
     set(SKIP_ALL_EXCEPT_TESTS
-            test_sqlite_perfdb
-            test_perfdb)
+            test_sqlite_perfdb)
 endif()
 
 #TODO WORKAROUND_ISSUE_1424
@@ -506,7 +505,6 @@ endforeach()
 if(MIOPEN_TEST_ENABLE_TEST_SQLITE_PERFDB)
     set_tests_properties(test_sqlite_perfdb PROPERTIES RUN_SERIAL On)
 endif()
-set_tests_properties(test_perfdb PROPERTIES RUN_SERIAL On)
 
 # add_sanitize_test(perfdb.cpp)
 # add_sanitize_test(cache.cpp)

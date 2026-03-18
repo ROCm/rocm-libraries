@@ -150,7 +150,7 @@ inline Error setHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t st
     {
         return {ErrorCode::INVALID_VALUE, "Cannot set stream on null handle"};
     }
-    auto status = detail::hipdnnBackend()->setStream(*handle, stream);
+    const auto status = detail::hipdnnBackend()->setStream(*handle, stream);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to set stream on hipdnn handle");
     return {};
 }
@@ -171,7 +171,7 @@ inline Error getHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t* s
     {
         return {ErrorCode::INVALID_VALUE, "Stream output pointer is null"};
     }
-    auto status = detail::hipdnnBackend()->getStream(*handle, stream);
+    const auto status = detail::hipdnnBackend()->getStream(*handle, stream);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to get stream from hipdnn handle");
     return {};
 }
