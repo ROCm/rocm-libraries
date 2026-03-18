@@ -68,7 +68,7 @@ TEST(TestLoggingUtils, IsLoggingEnabledWithValidLevels)
 
 TEST(TestLoggingUtils, IsLoggingEnabledWithInvalidOrUnsetLevels)
 {
-    ScopedEnvironmentVariableSetter guard("HIPDNN_LOG_LEVEL", "invalid");
+    ScopedEnvironmentVariableSetter const guard("HIPDNN_LOG_LEVEL", "invalid");
 
     EXPECT_FALSE(isLoggingEnabled());
 

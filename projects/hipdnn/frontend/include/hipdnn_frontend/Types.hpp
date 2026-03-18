@@ -965,7 +965,6 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     switch(type)
     {
     case HeuristicMode::FALLBACK:
-        return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     }

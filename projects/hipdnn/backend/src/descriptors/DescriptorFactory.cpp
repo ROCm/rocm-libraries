@@ -6,6 +6,7 @@
 #include "BatchnormBackwardOperationDescriptor.hpp"
 #include "BatchnormInferenceOperationDescriptor.hpp"
 #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
+#include "BatchnormOperationDescriptor.hpp"
 #include "BlockScaleQuantizeOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
@@ -100,6 +101,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<LayernormOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BatchnormOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

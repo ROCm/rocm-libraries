@@ -45,19 +45,19 @@ TEST_F(TestTopologicalSortingUtils, ComputesInDegreesCorrectly)
     {
         GraphStructure structure;
         structure.adjacencyList = {};
-        std::vector<int> inDegreesExpected = {};
+        std::vector<int> const inDegreesExpected = {};
         EXPECT_EQ(computeInDegrees(structure), inDegreesExpected);
     }
     {
         GraphStructure structure;
         structure.adjacencyList = {{}};
-        std::vector<int> inDegreesExpected = {0};
+        std::vector<int> const inDegreesExpected = {0};
         EXPECT_EQ(computeInDegrees(structure), inDegreesExpected);
     }
     {
         GraphStructure structure;
         structure.adjacencyList = {{1}, {2}, {}};
-        std::vector<int> inDegreesExpected = {0, 1, 1};
+        std::vector<int> const inDegreesExpected = {0, 1, 1};
         EXPECT_EQ(computeInDegrees(structure), inDegreesExpected);
     }
     {
@@ -74,7 +74,7 @@ TEST_F(TestTopologicalSortingUtils, ComputesInDegreesCorrectly)
             {9}, // 8
             {} // 9
         };
-        std::vector<int> inDegreesExpected = {0, 1, 1, 1, 2, 1, 2, 1, 1, 3};
+        std::vector<int> const inDegreesExpected = {0, 1, 1, 1, 2, 1, 2, 1, 1, 3};
         // Graph structure:
         //      0
         //     / \

@@ -9,6 +9,7 @@ add_executable(
     public_hipdnn_frontend_tests
     main.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
+    IntegrationBatchnormDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
@@ -25,6 +26,7 @@ add_executable(
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationGraphLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
@@ -32,6 +34,7 @@ add_executable(
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 
@@ -67,6 +70,7 @@ target_compile_definitions(
 add_dependencies(
     public_hipdnn_frontend_tests
     test_good_plugin
+    test_good_default_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin

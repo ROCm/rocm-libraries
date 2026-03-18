@@ -32,8 +32,7 @@ Install OS dependencies
 
    .. code-block::
 
-    apt-get install libyaml python3-yaml \
-        libomp-dev libboost-program-options-dev libboost-filesystem-dev
+    apt-get install libyaml python3-yaml libomp-dev
 
 2. Install one of the following, depending on your preferred Tensile data format. If both are installed, ``msgpack`` is preferred:
 
