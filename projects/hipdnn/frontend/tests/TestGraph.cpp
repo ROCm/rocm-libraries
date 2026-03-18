@@ -5212,16 +5212,16 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsEmptyVectorWhenNoKnobs)
             engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    static constexpr int64_t ENGINE_ID = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
-        .WillOnce([engineId](hipdnnBackendDescriptor_t,
-                             hipdnnBackendAttributeName_t,
-                             hipdnnBackendAttributeType_t,
-                             int64_t,
-                             const void* arrayOfElements) {
-            EXPECT_EQ(*static_cast<const int64_t*>(arrayOfElements), engineId);
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     const void* arrayOfElements) {
+            EXPECT_EQ(*static_cast<const int64_t*>(arrayOfElements), ENGINE_ID);
             return HIPDNN_STATUS_SUCCESS;
         });
 
@@ -5246,7 +5246,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsEmptyVectorWhenNoKnobs)
         });
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    auto result = graph.get_knobs_for_engine(ENGINE_ID, knobs);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(knobs.empty());
