@@ -154,9 +154,9 @@ TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)
     // Create a second graph with different data types
     {
         flatbuffers::FlatBufferBuilder builder;
-        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
             tensorAttributes;
-        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
         auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
             builder,
             "different_graph",
@@ -186,7 +186,7 @@ TEST_F(TestGraphLogger, OutputDirectoryUsesEnvVar)
 {
     // Create a subdirectory and point HIPDNN_LOG_GRAPH_DIR there
     auto subDir = _tempDir / "graphs";
-    std::string subDirStr = subDir.string();
+    const std::string subDirStr = subDir.string();
     std::filesystem::create_directories(subDir);
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", subDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
@@ -205,7 +205,7 @@ TEST_F(TestGraphLogger, OutputDirectoryUsesEnvVar)
 TEST_F(TestGraphLogger, OutputDirectoryCreatedIfMissing)
 {
     auto newDir = _tempDir / "new_subdir" / "graphs";
-    std::string newDirStr = newDir.string();
+    const std::string newDirStr = newDir.string();
 
     ASSERT_FALSE(std::filesystem::exists(newDir));
 

@@ -243,7 +243,11 @@ def main():
                 if gpu_arch_matches(gpu_arch, config_arch):
                     patterns = gpu_config.get("test_patterns", [])
                     if patterns:
-                        all_applicable_patterns.extend(patterns)
+                        for p in patterns:
+                            if isinstance(p, list):
+                                all_applicable_patterns.extend(p)
+                            else:
+                                all_applicable_patterns.append(p)
 
                     # Collect applicable categories from this config
                     gpu_labels = gpu_config.get("labels", [])
