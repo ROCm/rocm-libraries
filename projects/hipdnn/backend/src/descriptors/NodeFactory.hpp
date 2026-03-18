@@ -22,7 +22,7 @@ public:
     // based on nodeT.attributes.type. The operation descriptor handles its own
     // attribute casting internally.
     // Throws HIPDNN_STATUS_NOT_SUPPORTED for unsupported node types.
-    static std::shared_ptr<IGraphOperation> createOperationFromNode(
+    static std::shared_ptr<IBackendDescriptor> createOperationFromNode(
         const hipdnn_data_sdk::data_objects::NodeT& nodeT,
         const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
 

@@ -126,7 +126,7 @@ TEST(TestSharedContainerManager, ThreadSafeCreation)
     {
         threads.emplace_back([&]() {
             auto container = manager.getOrCreate();
-            std::lock_guard<std::mutex> lock(containersMutex);
+            std::lock_guard<std::mutex> const lock(containersMutex);
             containers.push_back(container);
         });
     }

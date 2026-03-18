@@ -80,8 +80,6 @@ if(NOT gtest_SOURCE_DIR)
     message(FATAL_ERROR "googletest not found.  Run git submodule update --init")
 endif()
 
-find_package(Boost COMPONENTS filesystem)
-
 #if(TENSILE_USE_HIP AND NOT HIP_DIR)
 if(TENSILE_USE_HIP)
     find_package(HIP REQUIRED CONFIG PATHS $ENV{ROCM_PATH} /opt/rocm)
@@ -181,7 +179,7 @@ if(NOT TENSILE_DISABLE_CTEST)
     endif()
 endif()
 
-target_link_libraries(TensileTests PUBLIC gtest TensileHost TensileTestLib ${Boost_LIBRARIES})
+target_link_libraries(TensileTests PUBLIC gtest TensileHost TensileTestLib)
 
 if(TENSILE_USE_LLVM)
     find_library(LLVMObjectYAML_LIBRARY

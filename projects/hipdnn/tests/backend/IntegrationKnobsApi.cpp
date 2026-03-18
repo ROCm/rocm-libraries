@@ -52,13 +52,13 @@ protected:
 
     void createFinalizedEngine()
     {
-        int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+        int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
         test_util::createTestEngine(&_engine, &_graph, _handle, gidx, true);
     }
 
     void createFinalizedEngineConfig()
     {
-        int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+        int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
         ASSERT_EQ(
             hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
             HIPDNN_STATUS_SUCCESS);
@@ -398,7 +398,7 @@ using hipdnn_plugin_sdk::KnobSettingFactory;
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceIntValue)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -428,7 +428,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceIntValue)
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceFloatValue)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -458,7 +458,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceFloatValue)
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceStringValue)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -488,7 +488,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceStringValue)
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceMultipleKnobs)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -534,7 +534,7 @@ TEST_F(IntegrationKnobsApi, FinalizeEngineConfigWithKnobs)
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceNullPointer)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -557,7 +557,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceNullPointer)
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceInvalidType)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -600,7 +600,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceOnFinalizedConfig)
 
 TEST_F(IntegrationKnobsApi, GetMaxWorkspaceSizeWithKnobs)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
               HIPDNN_STATUS_SUCCESS);
@@ -684,7 +684,8 @@ protected:
 
     void setupEngineConfig()
     {
-        int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
+        int64_t const gidx
+            = hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
         ASSERT_EQ(
             hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
             HIPDNN_STATUS_SUCCESS);
