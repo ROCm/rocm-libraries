@@ -11,6 +11,7 @@ template <class T>
 constexpr int64_t engineId() = delete;
 } // namespace hipdnn_tests::plugin_constants
 
+// NOLINTBEGIN(bugprone-macro-parentheses) ClassName is used as a type identifier
 #define HIPDNN_MAP_TO_ID(ClassName, id)      \
     class ClassName;                         \
     namespace hipdnn_tests::plugin_constants \
@@ -18,9 +19,10 @@ constexpr int64_t engineId() = delete;
     template <>                              \
     constexpr int64_t engineId<ClassName>()  \
     {                                        \
-        return id;                           \
+        return (id);                         \
     };                                       \
     }
+// NOLINTEND(bugprone-macro-parentheses)
 
 HIPDNN_MAP_TO_ID(GoodPlugin, -2);
 HIPDNN_MAP_TO_ID(GoodDefaultPlugin, -3);

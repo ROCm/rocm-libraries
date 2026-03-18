@@ -280,8 +280,8 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawA));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedA(rawA);
+                                       static_cast<void*>(&rawA)));
+    std::unique_ptr<HipdnnBackendDescriptor> const retrievedA(rawA);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedA, nullptr);
@@ -445,7 +445,7 @@ TEST_F(TestMatmulOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    std::string const str = desc->toString();
     ASSERT_NE(str.find("MatmulOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("a_uid=" + std::to_string(K_TENSOR_A_UID)), std::string::npos);
     ASSERT_NE(str.find("b_uid=" + std::to_string(K_TENSOR_B_UID)), std::string::npos);
@@ -520,7 +520,7 @@ TEST_F(TestMatmulOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     auto tensors = graphOp->getTensorDescriptors();
@@ -530,6 +530,6 @@ TEST_F(TestMatmulOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
 TEST_F(TestMatmulOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
-    auto graphOp = _aDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _aDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
