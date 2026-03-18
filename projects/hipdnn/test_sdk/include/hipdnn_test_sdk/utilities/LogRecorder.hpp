@@ -86,25 +86,25 @@ public:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        std::lock_guard<std::mutex> const lock(_logsMutex);
         _recordedLogs.push_back({severity, message});
     }
 
     void clearLogs()
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        std::lock_guard<std::mutex> const lock(_logsMutex);
         _recordedLogs.clear();
     }
 
     std::vector<RecordedLog> getRecordedLogs() const
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        std::lock_guard<std::mutex> const lock(_logsMutex);
         return _recordedLogs;
     }
 
     size_t getRecordedLogCount() const
     {
-        std::lock_guard<std::mutex> lock(_logsMutex);
+        std::lock_guard<std::mutex> const lock(_logsMutex);
         return _recordedLogs.size();
     }
 
@@ -328,7 +328,7 @@ public:
         }
 
         std::ostringstream oss;
-        size_t logsToOutput = (maxLogs == 0 || maxLogs > logs.size()) ? logs.size() : maxLogs;
+        size_t const logsToOutput = (maxLogs == 0 || maxLogs > logs.size()) ? logs.size() : maxLogs;
 
         for(size_t i = 0; i < logsToOutput; ++i)
         {
@@ -337,7 +337,7 @@ public:
 
         if(maxLogs > 0 && logs.size() > maxLogs)
         {
-            size_t skipped = logs.size() - maxLogs;
+            size_t const skipped = logs.size() - maxLogs;
             oss << "(Skipped " << skipped << " additional log" << (skipped > 1 ? "s" : "")
                 << ".)\n";
         }
@@ -402,7 +402,7 @@ public:
      */
     static SharedLogRecorder withCurrentLevel()
     {
-        hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
+        hipdnnSeverity_t const currentLevel = hipdnn_data_sdk::logging::getLogLevel();
         return {currentLevel, false}; // Don't change level
     }
 
@@ -454,7 +454,7 @@ public:
      */
     static IsolatedLogRecorder withCurrentLevel()
     {
-        hipdnnSeverity_t currentLevel = hipdnn_data_sdk::logging::getLogLevel();
+        hipdnnSeverity_t const currentLevel = hipdnn_data_sdk::logging::getLogLevel();
         return {currentLevel, false}; // Don't change level
     }
 

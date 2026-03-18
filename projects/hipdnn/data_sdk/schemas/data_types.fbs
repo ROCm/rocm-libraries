@@ -15,4 +15,5 @@ enum DataType : byte {
     FP8_E4M3 = 8,
     FP8_E5M2 = 9,
     FP8_E8M0 = 10,
+    FP4_E2M1 = 11,
 }
