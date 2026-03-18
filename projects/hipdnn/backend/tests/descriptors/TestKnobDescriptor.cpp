@@ -388,7 +388,10 @@ TEST_F(TestKnobDescriptor, SetDeprecatedWrongTypeFails)
 
 TEST_F(TestKnobDescriptor, SetAndGetMaxValueInt64)
 {
+    int64_t minVal = 0;
     int64_t maxVal = 100;
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &minVal));
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &maxVal));
     makeFinalized();
@@ -402,8 +405,11 @@ TEST_F(TestKnobDescriptor, SetAndGetMaxValueInt64)
 TEST_F(TestKnobDescriptor, SetAndGetMinValueInt64)
 {
     int64_t minVal = -50;
+    int64_t maxVal = 100;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &minVal));
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &maxVal));
     makeFinalized();
 
     int64_t result = 0;
@@ -436,10 +442,15 @@ TEST_F(TestKnobDescriptor, GetMinValueNotSetReturnsZeroCount)
 
 TEST_F(TestKnobDescriptor, SetAndGetMaxValueDouble)
 {
+    double minVal = 0.0;
     double maxVal = 1.0;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_DOUBLE, 1, &minVal));
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_DOUBLE, 1, &maxVal));
-    makeFinalized();
+    setKnobId("test_knob");
+    setDoubleDefault(0.5);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 
     double result = 0.0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
@@ -525,7 +536,9 @@ TEST_F(TestKnobDescriptor, SetAndGetValidValuesString)
                                                       static_cast<int64_t>(s.size()),
                                                       s.c_str()));
     }
-    makeFinalized();
+    setKnobId("test_knob");
+    setStringDefault("default");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 
     // Query total count (requestedElementCount=0)
     int64_t count = 0;
@@ -542,12 +555,12 @@ TEST_F(TestKnobDescriptor, SetAndGetValidValuesString)
             HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, i + 1, &strSize, nullptr));
         ASSERT_EQ(strSize, static_cast<int64_t>(values[static_cast<size_t>(i)].size() + 1));
 
-        // Step 3: requestedElementCount=bufferSize, non-null buffer → bounded copy
+        // Step 3: requestedElementCount=i+1 (same 1-based index), non-null buffer → copy
         std::vector<char> buf(static_cast<size_t>(strSize));
         int64_t written = 0;
         ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                                       HIPDNN_TYPE_CHAR,
-                                                      strSize,
+                                                      i + 1,
                                                       &written,
                                                       buf.data()));
         ASSERT_EQ(written, strSize);
@@ -585,7 +598,9 @@ TEST_F(TestKnobDescriptor, SetAndGetStringMaxLength)
     int64_t maxLen = 256;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT64, 1, &maxLen));
-    makeFinalized();
+    setKnobId("test_knob");
+    setStringDefault("default");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 
     int64_t result = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
@@ -883,25 +898,6 @@ TEST_F(TestKnobDescriptor, SetValidValuesIntNullPtrWithCountFails)
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-// C1: getValidValuesString requires size query before copy
-TEST_F(TestKnobDescriptor, GetValidValuesStringCopyWithoutSizeQueryFails)
-{
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 8, "option_a"));
-    makeFinalized();
-
-    std::array<char, 64> buf{};
-    int64_t written = 0;
-    // Attempt copy (step 3) without a prior size query (step 2) should fail
-    ASSERT_THROW_HIPDNN_STATUS(
-        getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                                      HIPDNN_TYPE_CHAR,
-                                      static_cast<int64_t>(buf.size()),
-                                      &written,
-                                      buf.data()),
-        HIPDNN_STATUS_BAD_PARAM);
-}
-
 // W1: Default value type discriminator attribute
 TEST_F(TestKnobDescriptor, GetDefaultValueTypeInt64)
 {
@@ -997,7 +993,9 @@ TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountAppendsEmpty)
 {
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, nullptr));
-    makeFinalized();
+    setKnobId("test_knob");
+    setStringDefault("default");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
 
     int64_t count = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
@@ -1020,35 +1018,7 @@ TEST_F(TestKnobDescriptor, SetDefaultValueNullFails)
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-// 5. getValidValuesString step 3 with smaller buffer truncates
-TEST_F(TestKnobDescriptor, GetValidValuesStringTruncatesToBufferSize)
-{
-    std::string longStr = "long_option_value";
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                                                  HIPDNN_TYPE_CHAR,
-                                                  static_cast<int64_t>(longStr.size()),
-                                                  longStr.c_str()));
-    makeFinalized();
-
-    // Step 2: query size of string[0]
-    int64_t strSize = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 1, &strSize, nullptr));
-
-    // Step 3: copy with a smaller buffer (5 bytes)
-    constexpr int64_t SMALL_BUF_SIZE = 5;
-    std::vector<char> buf(static_cast<size_t>(SMALL_BUF_SIZE));
-    int64_t written = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                                                  HIPDNN_TYPE_CHAR,
-                                                  SMALL_BUF_SIZE,
-                                                  &written,
-                                                  buf.data()));
-    ASSERT_EQ(written, SMALL_BUF_SIZE);
-    ASSERT_EQ(buf.back(), '\0'); // null-terminated
-}
-
-// 6. getKnobId with buffer smaller than string truncates
+// 5. getKnobId with buffer smaller than string truncates
 TEST_F(TestKnobDescriptor, GetKnobIdTruncatesToBufferSize)
 {
     std::string knobId = "a_long_knob_id_name";
@@ -1066,37 +1036,25 @@ TEST_F(TestKnobDescriptor, GetKnobIdTruncatesToBufferSize)
     ASSERT_EQ(std::string(buf.data()), "a_lon");
 }
 
-// 7. Only min set (no max) — finalize succeeds, toKnobT builds constraint with max=0
-TEST_F(TestKnobDescriptor, OnlyMinSetFinalizesAndBuildsConstraint)
+// 7. Only min or only max set — finalize rejects (both must be set or both unset)
+TEST_F(TestKnobDescriptor, OnlyMinSetFinalizeFails)
 {
     setKnobId("test_knob");
     setInt64Default(5);
     int64_t minVal = 1;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &minVal));
-    ASSERT_NO_THROW(getDescriptor()->finalize());
-
-    auto knob = getDescriptor()->toKnobT();
-    ASSERT_EQ(knob->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
-    const auto* constraint = knob->constraint.AsIntConstraint();
-    ASSERT_EQ(constraint->min_value, 1);
-    ASSERT_EQ(constraint->max_value, 0); // value_or(0) default
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestKnobDescriptor, OnlyMaxSetFinalizesAndBuildsConstraint)
+TEST_F(TestKnobDescriptor, OnlyMaxSetFinalizeFails)
 {
     setKnobId("test_knob");
     setInt64Default(5);
     int64_t maxVal = 100;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64, 1, &maxVal));
-    ASSERT_NO_THROW(getDescriptor()->finalize());
-
-    auto knob = getDescriptor()->toKnobT();
-    ASSERT_EQ(knob->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
-    const auto* constraint = knob->constraint.AsIntConstraint();
-    ASSERT_EQ(constraint->min_value, 0); // value_or(0) default
-    ASSERT_EQ(constraint->max_value, 100);
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 // S2: DescriptorFactory wiring for HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR

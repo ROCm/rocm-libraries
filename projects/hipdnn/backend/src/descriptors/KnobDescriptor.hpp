@@ -82,10 +82,6 @@ private:
     std::vector<std::string> _validValuesString;
     std::optional<int64_t> _stringMaxLength;
 
-    // State for getValidValuesString: tracks the last string index queried for size,
-    // so the subsequent copy call can use requestedElementCount as the buffer size.
-    mutable int64_t _pendingStringCopyIndex = -1;
-
     // Private helpers — complex logic that can't be inlined into the switch
     void setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                          int64_t elementCount,
