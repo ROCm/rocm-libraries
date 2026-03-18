@@ -346,3 +346,63 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
     hipdnnBackendDestroyDescriptor(desc);
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
+
+TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Build a FlatBuffer graph with a known name
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
+                                                                  "TestGraphName",
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  &tensorAttributes,
+                                                                  &nodes);
+    builder.Finish(graph);
+    flatbuffers::DetachedBuffer serializedGraph = builder.Release();
+
+    // Deserialize into a backend descriptor
+    hipdnnBackendDescriptor_t desc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &desc, serializedGraph.data(), serializedGraph.size()),
+              HIPDNN_STATUS_SUCCESS);
+
+    // Set handle and finalize
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    // Query name count
+    int64_t count = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(
+                  desc, HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(count, 0);
+
+    // Query name value
+    std::vector<char> nameBuffer(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        count,
+                                        &actualCount,
+                                        nameBuffer.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_STREQ(nameBuffer.data(), "TestGraphName");
+
+    hipdnnBackendDestroyDescriptor(desc);
+    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
