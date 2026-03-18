@@ -193,22 +193,7 @@ bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        // PRIMARY: SPB window fragmentation detection
-        // SPB in [4, 23): Moderate fragmentation window
-        //   - Excludes SPB < 4 (extreme fragmentation - often false positives)
-        //   - Excludes SPB >= 23 (less fragmented - likely good performance)
-        // CPG >= 700: High channel requirement
-        if(4 <= spatial_per_batch && spatial_per_batch < 23 && channels_per_group >= 700)
-            return true;
-
-        // SECONDARY: Very high SWPG anomaly (batch=1 pattern)
-        // SWPG >= 10M
-        //   - Only catches extreme single-batch cases
-        //   - Avoids false positives from moderate SWPG
-        // CPG >= 1800: Very high channels
-        // Pattern: Extreme single-batch tensor with poor parallelization
-        if(spatial_work_per_group >= 10000000 && channels_per_group >= 1800)
-            return true;
+        return false;
     }
     else if(is_mi)
     {
@@ -445,11 +430,7 @@ bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        // SPB window with CPG filter
-        // SPB in [20, 70): Catches specific medium SPB range
-        // CPG >= 600: Ensures sufficient channels (avoids low-channel false positives)
-        if(20 <= spatial_per_batch && spatial_per_batch < 70 && channels_per_group >= 600)
-            return true;
+        return false;
     }
     else if(is_mi)
     {
@@ -670,15 +651,18 @@ bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
 
     if(is_gfx11 || is_gfx12)
     {
+        // GemmBwdRest - Multi-metric filtering
+        // Analysis: 51.6% terrible cases - significant filtering benefit
+        //
         // PRIMARY: Memory-bound small problem detection
-        // SWPG < 1.4M: Low spatial-channel work (memory-bound)
-        // CPG < 320: Low channels (poor reuse)
-        if(spatial_work_per_group < 1400000 && channels_per_group < 320)
+        // SWPG < 1.6M: Low spatial-channel work
+        // CPG < 360: Low channels
+        if(spatial_work_per_group < 1600000 && channels_per_group < 360)
             return true;
 
         // SECONDARY: Batch fragmentation detection
-        // SPB < 0.7: Each batch item has < 0.7 pixels
-        if(spatial_per_batch < 0.7)
+        // SPB < 0.8: Extreme batch fragmentation
+        if(spatial_per_batch < 0.8)
             return true;
     }
     else if(is_mi)

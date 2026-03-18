@@ -221,11 +221,7 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        // Extreme batch fragmentation detection
-        // SPB < 4: Each batch item has < 4 pixels (extreme fragmentation)
-        // CPG >= 800: High channel count (avoids false positives)
-        if(spatial_per_batch < 4 && channels_per_group >= 800)
-            return true;
+        return false;
     }
     else if(is_mi)
     {
@@ -929,15 +925,15 @@ bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
 
     if(is_gfx11 || is_gfx12)
     {
-        // PRIMARY: Memory-bound small problem detection
-        // SWPG < 200k: Low spatial-channel work (memory-bound)
-        // CPG < 450: Moderate channels (poor reuse)
-        if(spatial_work_per_group < 200000 && channels_per_group < 450)
-            return true;
-
-        // SECONDARY: Batch fragmentation detection
-        // SPB < 1.75: Each batch item has < 1.75 pixels
-        if(spatial_per_batch < 1.75)
+        // GemmFwdRest - SPB-only filtering
+        // Analysis: 63.8% terrible cases - batch fragmentation dominant
+        //
+        // Terrible cases have high batch (32x) but low SPB (0.07x)
+        // This indicates batch fragmentation → poor GPU utilization
+        //
+        // SPB < 50: Low spatial-per-batch = batch fragmentation
+        // Performance: FPR=11-25%, TPR=61-76%, Score=1.37-1.60
+        if(spatial_per_batch < 50)
             return true;
     }
     else if(is_mi)

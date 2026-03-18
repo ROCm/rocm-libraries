@@ -144,17 +144,20 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        // REFINED RULE: SWPG and CPG windows
-        // Pattern: Medium-high SWPG range with moderate CPG range
-        // SWPG window [1M, 2.5M):
-        //   - Excludes small problems (swpg < 1M)
-        //   - Excludes very large problems (swpg >= 2.5M) which perform better
-        // CPG window [300, 2500):
-        //   - Includes problematic medium-to-high channel counts
-        //   - Excludes very high CPG (>= 2500) which are different workloads
-        if(1000000 <= spatial_work_per_group && spatial_work_per_group < 2500000)
-            if(300 <= channels_per_group && channels_per_group < 2500)
-                return true;
+        // GemmWrw1x1_stride1 - Batch-based filtering
+        // Analysis: 8.4% terrible cases - moderate filtering benefit
+        //
+        // INVERTED PATTERN discovered: Terrible cases have HIGH batch but LOW channels
+        // - Batch separation: 16-32x (terrible > decent)
+        // - CPG separation: 0.12-0.60x (terrible < decent)
+        // - SWPG separation: 0.12-0.41x (terrible < decent)
+        //
+        // Physical interpretation: High batch + low channels = poor wave occupancy
+        //
+        // Threshold: batch > 16 AND cpg < 1400
+        // Performance: FPR=3-15%, TPR=73-87%, Score=1.65-1.79
+        if(b > 16 && channels_per_group < 1400)
+            return true;
     }
     else if(is_mi)
     {
@@ -382,15 +385,15 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
 
     if(is_gfx11 || is_gfx12)
     {
-        // PRIMARY: Memory-bound small problem
-        // SWPG < 15k: Very low spatial-channel work
-        // CPG < 110: Very low channels
-        if(spatial_work_per_group < 15000 && channels_per_group < 110)
-            return true;
-
-        // SECONDARY: Extreme batch fragmentation
-        // SPB < 3.0: Each batch item has < 3 pixels
-        if(spatial_per_batch < 3.0)
+        // GemmWrwUniversal - SPB-only filtering
+        // Analysis: 18.4% terrible cases - significant filtering benefit
+        //
+        // Terrible cases have high batch (16x) but very low SPB (0.00x)
+        // This indicates extreme batch fragmentation
+        //
+        // SPB < 100: Low spatial-per-batch = batch fragmentation
+        // Performance: FPR=19-27%, TPR=72-92%, Score=1.49-1.66
+        if(spatial_per_batch < 100)
             return true;
     }
     else if(is_mi)
