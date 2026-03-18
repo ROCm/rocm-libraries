@@ -134,8 +134,9 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
     auto split_k = std::string(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
 
     // The bwd data profiler in old CK uses -1 to loop over all split-K values.
-    // We want to have the same API for backward compatibility, but we need to convert it to "all" for the new API.
-    if (split_k == "-1")
+    // We want to have the same API for backward compatibility, but we need to convert it to "all"
+    // for the new API.
+    if(split_k == "-1")
     {
         split_k = "all";
     }
