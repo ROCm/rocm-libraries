@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -383,7 +383,7 @@ __device__ void run_steqr(const rocblas_int tid,
                           const S ssfmax,
                           const bool ordered = true)
 {
-    __shared__ rocblas_int m, l, lsv, lend, lendsv;
+    __shared__ rocblas_int m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     __shared__ rocblas_int l1;
     __shared__ rocblas_int iters;
     __shared__ S anorm, p;
@@ -430,13 +430,15 @@ __device__ void run_steqr(const rocblas_int tid,
         if(lend == l)
             continue;
 
+        lsv_scaling = lsv;
+        lendsv_scaling = lendsv;
         // Scale submatrix
         if(anorm == 0)
             continue;
         else if(anorm > ssfmax)
-            scale_tridiag(lsv, lendsv, D, E, anorm / ssfmax, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmax / anorm, tid, tid_inc);
         else if(anorm < ssfmin)
-            scale_tridiag(lsv, lendsv, D, E, anorm / ssfmin, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm, tid, tid_inc);
         __syncthreads();
 
         if(lend >= l)
@@ -622,9 +624,9 @@ __device__ void run_steqr(const rocblas_int tid,
 
         // Undo scaling
         if(anorm > ssfmax)
-            scale_tridiag(lsv, lendsv, D, E, ssfmax / anorm, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmax, tid, tid_inc);
         if(anorm < ssfmin)
-            scale_tridiag(lsv, lendsv, D, E, ssfmin / anorm, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmin, tid, tid_inc);
         __syncthreads();
     }
 
