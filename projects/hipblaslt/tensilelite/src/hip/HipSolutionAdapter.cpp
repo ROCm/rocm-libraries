@@ -91,12 +91,37 @@ namespace TensileLite
             Debug::Instance().markerStart("loadCodeObjectFile", path);
             hipModule_t module;
 
-            HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
-                [&](hipError_t error) {
-                    std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
-                            << " error: " << hipGetErrorString(error) << std::endl;
+            hipError_t error = hipModuleLoad(&module, path.c_str());
+            // Large problem sizes may cause global memory to run out of space 
+            // when loading the module, which can lead to hipErrorLaunchFailure or hipErrorNoBinaryForGpu.
+            if(error == hipErrorLaunchFailure || error == hipErrorNoBinaryForGpu)
+            {        
+                // Reset the error code from previous hipModuleLoad failure
+                (void)hipGetLastError();
+                std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
+                for(auto m_module : m_modules)
+                {
+                    HIP_CHECK_PRINT(hipModuleUnload(m_module),
+                        [&](hipError_t error_t) {
+                            std::cerr << "hipModuleUnload failed: " << std::endl
+                                      << " error: " << hipGetErrorString(error_t) << std::endl;
+                        }
+                    );
                 }
-            );
+                m_modules.clear();
+                HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
+                    [&](hipError_t error_t) {
+                        std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    }
+                );
+            }
+            else if(error)
+            {
+                std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
+                          << " error: " << hipGetErrorString(error) << std::endl;
+                return error;
+            }
 
             if(m_debug)
                 std::cout << "loaded code object " << path << std::endl;
