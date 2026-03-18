@@ -59,10 +59,7 @@ const vector<vector<int>> matrix_size_range = {
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
-    {192, 192, 1},
-    {640, 640, 0},
-    {1000, 1024, 1},
-    {1000, 1024, 0},
+    {192, 192, 1}, {204, 204, 0}, {640, 640, 0}, {1000, 1024, 1}, {1000, 1024, 0},
 };
 
 Arguments sytrf_setup_arguments(sytrf_tuple tup)
@@ -102,7 +99,7 @@ protected:
         if(arg.peek<char>("uplo") == 'L' && arg.peek<rocblas_int>("n") == 0)
             testing_sytf2_sytrf_bad_arg<BATCHED, STRIDED, BLOCKED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? 81 : 1);
         if(arg.singular == 1)
             testing_sytf2_sytrf<BATCHED, STRIDED, BLOCKED, T>(arg);
 
