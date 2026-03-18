@@ -55,7 +55,7 @@ __forceinline__ __device__ void lds_reduce2_welford(FloatAccum& mean,
             FloatAccum n_b   = lcl_data_count[lid + red];
             FloatAccum n_new = n_a + n_b;
             FloatAccum n_new_rcp =
-                n_new != 0.0f ? (1 / n_new)
+                n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new)
                               : 0.f; // Calculates 1 / n_new; Done to handle the case where some of
                                      // the partitions of mean/variance calculation are zero
             lcl_data_mean[lid] =
@@ -336,8 +336,9 @@ __forceinline__ __device__ void gcn_reduce2_welford(FloatAccum& mean,
         FloatAccum n_a   = count;
         FloatAccum n_b   = lcl_data_count[i];
         FloatAccum n_new = n_a + n_b;
-        mean             = (mean * n_a + lcl_data_mean[i] * n_b) / (n_new);
-        variance         = variance + lcl_data_variance[i] + (delta * delta * (n_a * n_b)) / n_new;
+        FloatAccum n_rcp = n_new != 0.0f ? (__builtin_amdgcn_rcpf(n_new)) : 0.0f;
+        mean             = (mean * n_a + lcl_data_mean[i] * n_b) * (n_rcp);
+        variance         = variance + lcl_data_variance[i] + (delta * delta * (n_a * n_b)) * n_rcp;
         count            = n_new;
     }
     // No scaling of the mean, that is already kept to scale as a requirement of Welford's variance
