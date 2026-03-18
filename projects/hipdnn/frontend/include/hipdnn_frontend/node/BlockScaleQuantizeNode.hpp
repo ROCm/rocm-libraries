@@ -60,7 +60,7 @@ public:
         {
             HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
 
-            auto const& xDims = x->get_dim();
+            const auto& xDims = x->get_dim();
 
             // Validate axis is within tensor rank
             auto axis = attributes.get_axis();

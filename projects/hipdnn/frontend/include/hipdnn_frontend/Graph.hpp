@@ -435,7 +435,7 @@ private:
     }
 
     static Error checkTensorUidsSetImpl(
-        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
     {
         std::vector<std::string> missingUidTensors;
 
@@ -464,7 +464,7 @@ private:
     }
 
     static Error checkNoDuplicateTensorIdsImpl(
-        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
     {
         std::unordered_set<int64_t> seenUids;
         std::unordered_set<int64_t> duplicateUids;
@@ -1496,7 +1496,7 @@ public:
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
-                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK},
                 [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)

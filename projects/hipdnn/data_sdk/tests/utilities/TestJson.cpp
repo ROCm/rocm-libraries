@@ -159,7 +159,7 @@ TEST(TestJson, GraphToJsonAndBack)
     }
 }
 
-void vectorTestSuite(std::vector<int> const& vec, const std::string& context)
+void vectorTestSuite(const std::vector<int>& vec, const std::string& context)
 {
     nlohmann::json vecJson = vec;
     ASSERT_EQ(vec.size(), vecJson.size()) << context;

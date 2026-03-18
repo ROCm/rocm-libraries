@@ -88,7 +88,7 @@ public:
      * @param scalar The scalar value to store in the tensor
      */
     template <typename T>
-    TensorAttributes(T const& scalar)
+    TensorAttributes(const T& scalar)
     {
         set_value(scalar);
     }

@@ -21,7 +21,7 @@ struct FakeAttributes : public Attributes<FakeAttributes>
 class FakeNode : public NodeCRTP<FakeNode>
 {
 public:
-    FakeNode(FakeAttributes&& fakeAttrs, GraphAttributes const& graphAttrs)
+    FakeNode(FakeAttributes&& fakeAttrs, const GraphAttributes& graphAttrs)
         : NodeCRTP<FakeNode>(graphAttrs)
         , attributes(std::move(fakeAttrs))
     {
