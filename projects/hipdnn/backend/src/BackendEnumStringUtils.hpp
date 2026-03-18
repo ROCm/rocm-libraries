@@ -676,7 +676,7 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT";
     case HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT:
         return "HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT";
-        
+
     // Operation extension attributes
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
         return "HIPDNN_ATTR_OPERATION_NAME_EXT";

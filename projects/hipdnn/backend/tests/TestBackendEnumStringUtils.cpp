@@ -554,7 +554,7 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT),
                  "HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT");
-  
+
     // Operation extension attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_NAME_EXT),
                  "HIPDNN_ATTR_OPERATION_NAME_EXT");
@@ -608,7 +608,6 @@ TEST(TestBackendEnumStringUtils, GetOperationTypeString)
     // Unknown type
     EXPECT_STREQ(hipdnnGetOperationTypeString(static_cast<hipdnnOperationType_t>(-1)),
                  "HIPDNN_OPERATION_TYPE_UNKNOWN");
-
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
