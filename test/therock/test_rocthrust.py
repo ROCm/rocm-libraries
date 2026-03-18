@@ -11,7 +11,7 @@ from pathlib import Path
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
 AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
 SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+THEROCK_DIR = Path(os.getenv("THEROCK_DIR", SCRIPT_DIR.parent.parent.parent)).resolve()
 
 logging.basicConfig(level=logging.INFO)
 
