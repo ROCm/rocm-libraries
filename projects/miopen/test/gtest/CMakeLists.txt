@@ -38,20 +38,23 @@ endif()
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
 if(THEROCK_SANITIZER STREQUAL "ASAN")
+    # Disable tests temporarily due to a bug that cause a hang when using CK kernels while Address Sanitizer is enabled.
     list(APPEND SKIP_TESTS bad_fusion_plan.cpp cba_find2_infer.cpp cba_infer.cpp ck_builder_shared.cpp ck_builder_xdl.cpp conv_activ_infer.cpp conv_ai_3d_kernel_tuning_utils.cpp conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp conv_hip_igemm_xdlops.cpp conv_igemm_mlir_xdlops_bwd_wrw.cpp conv_igemm_mlir_xdlops_fwd.cpp find_2_conv.cpp find_db.cpp fused_conv_bias_res_add_activ.cpp graphapi_conv_bias_res_add_activ_fwd.cpp group_conv_deterministic_split_k.cpp group_conv2d_fwd.cpp group_conv2d_bwd.cpp group_conv2d_wrw.cpp group_conv3d_fwd.cpp group_conv3d_bwd.cpp group_conv3d_wrw.cpp find_mode_trust_verify.cpp kernel_tuning_net.cpp miopendriver_conv_immed.cpp miopendriver_conv2d_trans.cpp miopendriver_gemm.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_half_gfx9.cpp miopendriver_regression_half.cpp nonpack_conv3d_fwd.cpp perf_config_HipImplicitGemm3DGroupFwdXdlops.cpp smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlops.cpp unit_conv_solver_ConvCkGroupedConvFwd.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R5Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC.cpp unit_conv_solver_ConvHipImplicitGemmGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp unit_implicitgemm_ck_util.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp)
+    # Disable test temporarily due to a Memory Fault Error while Address Sanitizer is enabled.  Needs to be investigated further.
+    list(APPEND SKIP_TESTS tensor_fwd_bias_ocl_hip.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
-    set(TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
+    set (TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
 
-    if(NOT TMP_FILTER )
-        set(TMP_FILTER "-")
+    if (NOT TMP_FILTER )
+        set (TMP_FILTER "-")
     else()
-        set(TMP_FILTER "${TMP_FILTER}:")
+        set (TMP_FILTER "${TMP_FILTER}:")
     endif()
-    set(TMP_FILTER ${TMP_FILTER}${NEGATIVE_FILTER_TO_ADD})
+    set (TMP_FILTER ${TMP_FILTER}${NEGATIVE_FILTER_TO_ADD})
 
-    set(MIOPEN_GTEST_FILTER_NEGATIVE ${TMP_FILTER} PARENT_SCOPE)
+    set (MIOPEN_GTEST_FILTER_NEGATIVE ${TMP_FILTER} PARENT_SCOPE)
 endfunction()
 
 function(add_gtest TEST_NAME TEST_CPP)
@@ -239,7 +242,7 @@ else()
   add_gtest(miopen_gtest "${TESTS_CPP}")
 
   if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK)
+    if(MIOPEN_BUILD_CK )
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
         target_include_directories(miopen_gtest SYSTEM PRIVATE

@@ -65,6 +65,7 @@ positive_patterns: &positive_patterns
   - "*GPU_TestMhaFind20*"
   - "*/GPU_MIOpenDriver*"
 
+
 test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
@@ -163,7 +164,7 @@ test_categories:
       - "gtest/gtest_activation.cpp"
       - "handle_test.cpp"
       - "gtest/handle_hip_device.cpp"
-
+      
       # Standard tests
       - "conv2d.cpp"
       - "conv2d_bias.cpp"
@@ -192,6 +193,7 @@ test_categories:
     labels:
       - "standard"
       - "pr"
+
 
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
@@ -264,6 +266,7 @@ test_categories:
       - "weekly"
       - "all"
 
+
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
   - "Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
@@ -305,7 +308,7 @@ exclude_gpu:
 
   exclude_gpu_gfx110X:
     test_patterns: 
-      - gfx11_common_patterns
+      - *gfx11_common_patterns
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
       - "Full/GPU_reduce_custom_fp32*"

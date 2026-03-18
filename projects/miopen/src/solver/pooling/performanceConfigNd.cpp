@@ -40,17 +40,16 @@ void PerformanceConfigPoolingNd<OpType>::HeuristicInit(
     default: MIOPEN_THROW("Unsupported datatype");
     }
 #else
-    (void)problem;
+    std::ignore = problem;
 #endif
 }
 
 template <OperationType OpType>
 bool PerformanceConfigPoolingNd<OpType>::IsValid(
-    const ExecutionContext&,
-    const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext& /*context*/, const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
-    (void)problem;
+    std::ignore = problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())

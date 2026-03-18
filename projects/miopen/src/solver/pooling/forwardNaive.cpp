@@ -360,8 +360,7 @@ bool PerformanceConfigPoolingForwardNaive::IsValidValue() const
 }
 
 bool PerformanceConfigPoolingForwardNaive::IsValid(
-    const ExecutionContext& /*context*/,
-    const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext& /*context*/, const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
     (void)problem;

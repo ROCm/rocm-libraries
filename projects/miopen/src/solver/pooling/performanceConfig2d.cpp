@@ -40,7 +40,7 @@ void PerformanceConfigPooling2d<OpType>::HeuristicInit(
     default: MIOPEN_THROW("Unsupported datatype");
     }
 #else
-    (void)problem;
+    std::ignore = problem;
 #endif
 }
 
@@ -68,11 +68,10 @@ bool PerformanceConfigPooling2d<OpType>::SetNextValue(const miopen::pooling::Pro
 
 template <OperationType OpType>
 bool PerformanceConfigPooling2d<OpType>::IsValid(
-    const ExecutionContext&,
-    const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext& /*context*/, const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
-    (void)problem;
+    std::ignore = problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())
