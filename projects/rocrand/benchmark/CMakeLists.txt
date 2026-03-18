@@ -42,6 +42,15 @@ function(add_rocrand_benchmark benchmark_src legacy)
     target_link_libraries(${BENCHMARK_TARGET} benchmark::benchmark)
   endif()
 
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
+
+  find_library(AMDSMI_LIB NAMES amd_smi)
+  if(AMDSMI_LIB)
+    target_link_libraries(${BENCHMARK_TARGET} ${AMDSMI_LIB})
+  else()
+    message(FATAL_ERROR "AMD SMI is not installed")
+  endif()
+
   set_target_properties(${BENCHMARK_TARGET}
       PROPERTIES
           RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
@@ -63,8 +72,11 @@ function(add_rocrand_benchmark benchmark_src legacy)
   endif()
 endfunction()
 
-add_rocrand_benchmark("benchmark_rocrand_host_api.cpp" OFF)
+# rocrand
+add_rocrand_benchmark("rocrand/benchmark_rocrand_host_api.cpp" OFF)
 add_rocrand_benchmark("benchmark_rocrand_device_api.cpp" OFF)
+
+# curand
 if(HIP_COMPILER STREQUAL "nvcc")
   add_rocrand_benchmark("benchmark_curand_host_api.cpp" OFF)
   add_rocrand_benchmark("benchmark_curand_device_api.cpp" OFF)
