@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -216,6 +216,8 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gebsrmv.hpp"
 #include "testing_gemvi.hpp"
 #include "testing_hybmv.hpp"
+#include "testing_spic0.hpp"
+#include "testing_spilu0.hpp"
 #include "testing_spitsv_csr.hpp"
 #include "testing_spmv_bsr.hpp"
 #include "testing_spmv_coo.hpp"
@@ -225,6 +227,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_spmv_ell.hpp"
 #include "testing_spsv_coo.hpp"
 #include "testing_spsv_csr.hpp"
+#include "testing_sptrsv.hpp"
 #include "testing_v2_spmv_bsr.hpp"
 #include "testing_v2_spmv_coo.hpp"
 #include "testing_v2_spmv_coo_aos.hpp"
@@ -553,6 +556,9 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T_FLOAT_ONLY(csrsort);
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
         DEFINE_CASE_IJT_X(spitsv_csr, testing_spitsv_csr);
+        DEFINE_CASE_IJT(spic0);
+        DEFINE_CASE_IJT(spilu0);
+        DEFINE_CASE_IJT(sptrsv);
         DEFINE_CASE_T(csritsv);
         DEFINE_CASE_T(csr2dense);
         DEFINE_CASE_T(csr2bsr);

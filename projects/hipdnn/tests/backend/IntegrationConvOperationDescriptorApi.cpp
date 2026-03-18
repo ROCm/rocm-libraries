@@ -67,19 +67,19 @@ TEST_F(IntegrationConvOperationDescriptorApi, CreateAndFinalizeConvOperation)
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &xDesc),
+                                        static_cast<const void*>(&xDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &wDesc),
+                                        static_cast<const void*>(&wDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &yDesc),
+                                        static_cast<const void*>(&yDesc)),
               HIPDNN_STATUS_SUCCESS);
 
     // Set convolution parameters
@@ -147,19 +147,19 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &xDesc),
+                                        static_cast<const void*>(&xDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &wDesc),
+                                        static_cast<const void*>(&wDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
                                         HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &yDesc),
+                                        static_cast<const void*>(&yDesc)),
               HIPDNN_STATUS_SUCCESS);
 
     // Set convolution parameters
@@ -215,7 +215,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &elementCount,
-                                        &retrievedDesc),
+                                        static_cast<void*>(&retrievedDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_NE(retrievedDesc, nullptr);
@@ -228,7 +228,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &elementCount,
-                                        &retrievedDesc),
+                                        static_cast<void*>(&retrievedDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_NE(retrievedDesc, nullptr);
@@ -241,7 +241,7 @@ TEST_F(IntegrationConvOperationDescriptorApi, GetAfterSetVerifiesAllAttributes)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &elementCount,
-                                        &retrievedDesc),
+                                        static_cast<void*>(&retrievedDesc)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(elementCount, 1);
     EXPECT_NE(retrievedDesc, nullptr);

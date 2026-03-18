@@ -45,6 +45,7 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    batchnormAttributes = BatchnormBackwardAttributes{};
     batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
     BatchnormBackwardNode nodeWithDy(std::move(batchnormAttributesCopy), graphAttributes);
@@ -817,4 +818,11 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
     EXPECT_TRUE(error.get_message().find("Batch normalization backward") != std::string::npos);
     EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
                 != std::string::npos);
+}
+
+TEST(TestBatchnormBackwardNode, GetNodeTypeReturnsBatchnormBackward)
+{
+    GraphAttributes graphAttrs;
+    BatchnormBackwardNode node(BatchnormBackwardAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_BACKWARD);
 }

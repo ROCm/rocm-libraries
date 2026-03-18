@@ -2178,3 +2178,10 @@ TEST_F(TestConvolutionNodeCreateOperation, SuccessCreatesThreeTensorsAndOneOpera
     EXPECT_EQ(tensorDescs.size(), 3u);
     EXPECT_EQ(operations.size(), 1u);
 }
+
+TEST(TestConvolutionNode, GetNodeTypeReturnsConvolutionFprop)
+{
+    GraphAttributes graphAttrs;
+    ConvolutionFpropNode node(ConvFpropAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_FPROP);
+}

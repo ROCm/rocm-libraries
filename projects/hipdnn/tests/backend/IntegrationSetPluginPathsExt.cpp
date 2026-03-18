@@ -92,7 +92,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 
     auto loadedPlugins = test_util::getLoadedPlugins(handle);
 
-    std::string expectedPluginPath = getDefaultPluginPath();
+    std::string expectedPluginPath = testDefaultGoodPluginPath();
 
     EXPECT_EQ(loadedPlugins.size(), 1);
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, expectedPluginPath));
@@ -117,7 +117,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAdditiveLoadsBothDefaultA
     auto loadedPlugins = test_util::getLoadedPlugins(handle);
     EXPECT_GE(loadedPlugins.size(), 2);
 
-    auto defaultPluginPath = getDefaultPluginPath();
+    auto defaultPluginPath = testDefaultGoodPluginPath();
     const auto& testPluginPath = testGoodPluginPath();
 
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, defaultPluginPath));

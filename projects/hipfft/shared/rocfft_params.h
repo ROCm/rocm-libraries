@@ -32,7 +32,7 @@
 #include <mpi.h>
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -220,18 +220,21 @@ public:
             if(fft_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(fft_status);
 
-            fft_status
-                = rocfft.plan_description_set_data_layout(desc,
-                                                          rocfft_array_type_from_fftparams(itype),
-                                                          rocfft_array_type_from_fftparams(otype),
-                                                          ioffset.data(),
-                                                          ooffset.data(),
-                                                          istride_cm().size(),
-                                                          istride_cm().data(),
-                                                          idist,
-                                                          ostride_cm().size(),
-                                                          ostride_cm().data(),
-                                                          odist);
+            const bool test_default_strides_and_dist
+                = is_using_default_layout() && std::hash<std::string>()(token()) % 2 == 1;
+
+            fft_status = rocfft.plan_description_set_data_layout(
+                desc,
+                rocfft_array_type_from_fftparams(itype),
+                rocfft_array_type_from_fftparams(otype),
+                test_default_strides_and_dist ? nullptr : ioffset.data(),
+                test_default_strides_and_dist ? nullptr : ooffset.data(),
+                test_default_strides_and_dist ? 0 : istride_cm().size(),
+                test_default_strides_and_dist ? nullptr : istride_cm().data(),
+                test_default_strides_and_dist ? 0 : idist,
+                test_default_strides_and_dist ? 0 : ostride_cm().size(),
+                test_default_strides_and_dist ? nullptr : ostride_cm().data(),
+                test_default_strides_and_dist ? 0 : odist);
             if(fft_status != rocfft_status_success)
             {
                 throw std::runtime_error("rocfft_plan_description_set_data_layout failed");
@@ -761,7 +764,7 @@ struct rocfft_funcs
 
 struct dyna_rocfft_funcs
 {
-#ifdef WIN32
+#ifdef _WIN32
     typedef HMODULE ROCFFT_LIB;
 #else
     typedef void* ROCFFT_LIB;
@@ -770,7 +773,7 @@ struct dyna_rocfft_funcs
     // Load the rocfft library
     static ROCFFT_LIB lib_load(const std::string& path)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return LoadLibraryA(path.c_str());
 #else
         return dlopen(path.c_str(), RTLD_LAZY);
@@ -780,7 +783,7 @@ struct dyna_rocfft_funcs
     // Return a string describing the error loading rocfft
     static const char* lib_load_error()
     {
-#ifdef WIN32
+#ifdef _WIN32
         // just return the error number
         static std::string error_str;
         error_str = std::to_string(GetLastError());
@@ -793,7 +796,7 @@ struct dyna_rocfft_funcs
     // Get symbol from rocfft lib
     static void* lib_symbol(ROCFFT_LIB libhandle, const char* sym)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return reinterpret_cast<void*>(GetProcAddress(libhandle, sym));
 #else
         return dlsym(libhandle, sym);
@@ -804,7 +807,7 @@ struct dyna_rocfft_funcs
     {
         if(!libhandle)
             return;
-#ifdef WIN32
+#ifdef _WIN32
         FreeLibrary(libhandle);
 #else
         dlclose(libhandle);
