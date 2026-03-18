@@ -42,9 +42,8 @@ namespace solver {
 
 namespace softmax {
 
-bool Softmax::IsApplicable(
-    const ExecutionContext& /*context*/,
-    const miopen::softmax::ProblemDescription& problem) const
+bool Softmax::IsApplicable(const ExecutionContext& /*context*/,
+                           const miopen::softmax::ProblemDescription& problem) const
 {
     if(!(problem.GetYDesc().GetType() == miopenFloat ||
          problem.GetYDesc().GetType() == miopenHalf ||
