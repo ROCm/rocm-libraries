@@ -192,7 +192,10 @@ namespace TensileLite
 
     std::string toString(CustomArgDefinition arg)
     {
-        return toString(arg.type) + " " + toString(arg.semantic);
+        auto s = toString(arg.type) + " " + toString(arg.semantic);
+        if(arg.padding > 0)
+            s += " padding:" + std::to_string(arg.padding);
+        return s;
     }
 
     std::ostream& operator<<(std::ostream& stream, const CustomArgDefinition& t)
@@ -1834,6 +1837,9 @@ namespace TensileLite
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));
             }
+
+            if(arg.padding > 0)
+                rv.args.appendPadding(arg.padding);
         }
         return rv;
     }

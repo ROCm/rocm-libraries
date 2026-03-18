@@ -149,6 +149,8 @@ namespace TensileLite
         template <typename T>
         void appendAligned(std::string const& name, T value);
 
+        void appendPadding(size_t bytes);
+
         template <typename T>
         void appendUnbound(std::string const& name);
 
@@ -641,6 +643,11 @@ namespace TensileLite
     {
         alignTo(alignof(T));
         append(name, value, true);
+    }
+
+    inline void KernelArguments::appendPadding(size_t bytes)
+    {
+        m_data.insert(m_data.end(), bytes, 0);
     }
 
     template <typename T>

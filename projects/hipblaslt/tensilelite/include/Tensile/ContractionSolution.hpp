@@ -90,6 +90,7 @@ namespace TensileLite
     {
         CustomArgType type;
         CustomArgSemantic semantic;
+        size_t padding = 0;
     };
 
     std::string toString(CustomArgDefinition arg);
