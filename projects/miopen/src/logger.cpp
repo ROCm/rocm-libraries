@@ -82,6 +82,15 @@ size_t& GetBufferIdx()
     return log_buffer_i;
 }
 
+// Optimization: Thread-local stream pool to avoid repeated ostringstream construction
+std::ostringstream& GetThreadLocalLogStream()
+{
+    static thread_local std::ostringstream stream;
+    stream.str("");  // Clear contents
+    stream.clear();  // Clear state flags
+    return stream;
+}
+
 std::vector<std::string>& GetLogBuffer()
 {
     auto log_buffer_size = GetBufferSize();
@@ -106,11 +115,11 @@ void ClearLogBuffer()
     log_buffer_i       = 0;
 }
 
-void BufferLog(std::string line)
+void BufferLog(std::string&& line)
 {
     auto& log_buffer         = GetLogBuffer();
     auto& log_buffer_i       = GetBufferIdx();
-    log_buffer[log_buffer_i] = line;
+    log_buffer[log_buffer_i] = std::move(line);
     log_buffer_i             = (log_buffer_i + 1) % GetBufferSize();
 }
 
@@ -292,6 +301,25 @@ std::string LoggingPrefix()
     }
     ss << ": ";
     return ss.str();
+}
+
+std::string LoggingPrefixMinimal()
+{
+    // Optimization: Cache the static prefix to avoid repeated string construction
+    // This minimal prefix skips expensive syscalls (hostname, TID, timestamps)
+    // and is used for buffer-only logs when actual logging is disabled.
+    static const std::string prefix = []() {
+        std::stringstream ss;
+        ss << "MIOpen";
+#if MIOPEN_BACKEND_OPENCL
+        ss << "(OpenCL)";
+#elif MIOPEN_BACKEND_HIP
+        ss << "(HIP)";
+#endif
+        ss << ": ";
+        return ss.str();
+    }();
+    return prefix;
 }
 
 } // namespace miopen
