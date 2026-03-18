@@ -121,4 +121,4 @@ inline void clear(const LibEnvVar& env) { miopen::debug::env::ClearEnvVariable(e
 
 } // namespace lib_env
 
-#define MIOPEN_LIB_ENV_VAR(name) [[maybe_unused]] inline constexpr lib_env::LibEnvVar name(#name);
+#define MIOPEN_LIB_ENV_VAR(name) inline constexpr lib_env::LibEnvVar name(#name);

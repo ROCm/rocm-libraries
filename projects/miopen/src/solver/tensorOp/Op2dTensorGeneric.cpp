@@ -37,30 +37,22 @@ namespace solver {
 
 namespace tensorOp {
 
-bool Op2dTensorGeneric::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool Op2dTensorGeneric::IsApplicable(const ExecutionContext& /*context*/,
                                      const miopen::tensorOp::ProblemDescription& problem) const
 {
     const auto& aTensorDesc = problem.GetATensorDesc();
-    const auto& alens       = aTensorDesc.GetLengths();
-    auto asize              = alens.size();
-
-    if(asize == 2)
-    {
-        return true;
-    }
-
-    return false;
+    return (aTensorDesc.GetLengths().size() == 2);
 }
 
-std::size_t Op2dTensorGeneric::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
+std::size_t
+Op2dTensorGeneric::GetWorkspaceSize(const ExecutionContext& /*context*/,
+                                    const miopen::tensorOp::ProblemDescription& /*problem*/) const
 {
     return 0;
 }
 
 ConvSolution
-Op2dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
+Op2dTensorGeneric::GetSolution(const ExecutionContext& /*context*/,
                                const miopen::tensorOp::ProblemDescription& problem) const
 {
     auto result = ConvSolution{miopenStatusSuccess};

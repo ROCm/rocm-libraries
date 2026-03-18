@@ -203,9 +203,8 @@ std::vector<Solution> Problem::FindSolutions(const Handle& handle,
     return ret;
 }
 
-const TensorDescriptor&
-Problem::GetTensorDescriptorChecked(miopenTensorArgumentId_t name,
-                                    [[maybe_unused]] const std::string& name_str) const
+const TensorDescriptor& Problem::GetTensorDescriptorChecked(miopenTensorArgumentId_t name,
+                                                            const std::string& name_str) const
 {
     const auto found = tensor_descriptors.find(name);
     if(found == tensor_descriptors.end())
@@ -545,12 +544,11 @@ std::vector<Solution> Problem::FindSolutionsImpl(const Handle& handle,
     return results;
 }
 
-std::vector<Solution>
-Problem::FindSolutionsImpl(const Handle& handle,
-                           [[maybe_unused]] const FindOptions& options,
-                           std::size_t max_solutions,
-                           [[maybe_unused]] const Buffers& buffers,
-                           [[maybe_unused]] const SoftmaxDescriptor& softmax_desc) const
+std::vector<Solution> Problem::FindSolutionsImpl(const Handle& handle,
+                                                 const FindOptions& /*options*/,
+                                                 std::size_t max_solutions,
+                                                 const Buffers& /*buffers*/,
+                                                 const SoftmaxDescriptor& /*softmax_desc*/) const
 {
     auto ret = std::vector<Solution>();
 
@@ -597,12 +595,11 @@ Problem::FindSolutionsImpl(const Handle& handle,
     return ret;
 }
 
-std::vector<Solution>
-Problem::FindSolutionsImpl(const Handle& handle,
-                           [[maybe_unused]] const FindOptions& options,
-                           std::size_t max_solutions,
-                           [[maybe_unused]] const Buffers& buffers,
-                           [[maybe_unused]] const MhaDescriptor& mha_desc) const
+std::vector<Solution> Problem::FindSolutionsImpl(const Handle& handle,
+                                                 const FindOptions& /*options*/,
+                                                 std::size_t max_solutions,
+                                                 const Buffers& /*buffers*/,
+                                                 const MhaDescriptor& /*mha_desc*/) const
 {
     auto ret = std::vector<Solution>{};
 

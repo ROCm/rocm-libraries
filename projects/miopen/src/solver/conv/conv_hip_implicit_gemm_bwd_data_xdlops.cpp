@@ -225,8 +225,8 @@ void PerformanceConfigHipImplicitGemmBwdXdlops::DefaultKernelFromList(const Exec
 }
 
 void PerformanceConfigHipImplicitGemmBwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem)
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "";
@@ -247,6 +247,9 @@ void PerformanceConfigHipImplicitGemmBwdXdlops::HeuristicInit(
 
     if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
         DefaultKernelFromList(ctx);
+#else
+    (void)ctx;
+    (void)problem;
 #endif
 }
 
@@ -288,7 +291,7 @@ bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
@@ -303,6 +306,8 @@ bool PerformanceConfigHipImplicitGemmBwdXdlops::IsValid(
     case miopenInt64:
     case miopenDouble: break;
     }
+#else
+   (void)problem;
 #endif
     return false;
 }
@@ -339,8 +344,8 @@ ConvHipImplicitGemmBwdXdlops::Search(const ExecutionContext& ctx,
 }
 
 bool ConvHipImplicitGemmBwdXdlops::IsApplicable(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS))
@@ -384,14 +389,17 @@ bool ConvHipImplicitGemmBwdXdlops::IsApplicable(
     case miopenInt64:
     case miopenDouble: break;
     }
+#else
+    (void)ctx;
+    (void)problem;
 #endif
     return false;
 }
 
 ConvSolution ConvHipImplicitGemmBwdXdlops::GetSolution(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemmBwdXdlops& config) const
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem,
+    const PerformanceConfigHipImplicitGemmBwdXdlops& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
@@ -424,6 +432,10 @@ ConvSolution ConvHipImplicitGemmBwdXdlops::GetSolution(
         MIOPEN_THROW(miopenStatusInternalError,
                      "ConvHipImplicitGemmFwdXdlops operation not implemented for this data type");
     }
+#else
+    (void)ctx;
+    (void)problem;
+    (void)config;
 #endif
     return {};
 }

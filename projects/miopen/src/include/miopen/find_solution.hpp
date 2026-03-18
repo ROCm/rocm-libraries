@@ -177,8 +177,8 @@ auto FindSolutionImpl(rank<0>,
                       Db&&,
                       const AnyInvokeParams&,
                       const std::string&,
-                      const std::optional<FindOptions>&) -> decltype(s.GetSolution(context,
-                                                                                   problem))
+                      const std::optional<FindOptions>&)
+    -> decltype(s.GetSolution(context, problem))
 {
     MIOPEN_LOG_I(s.SolverDbId() << " (not searchable)");
     return s.GetSolution(context, problem);
@@ -208,11 +208,9 @@ auto GetInvokeFactoryImpl(
 }
 
 template <class Solver, class Context, class Problem>
-auto GetInvokeFactoryImpl(rank<0>,
-                          Solver s,
-                          const Context& context,
-                          const Problem& problem,
-                          const std::string&) -> decltype(s.GetInvokerFactory(context, problem))
+auto GetInvokeFactoryImpl(
+    rank<0>, Solver s, const Context& context, const Problem& problem, const std::string&)
+    -> decltype(s.GetInvokerFactory(context, problem))
 {
     MIOPEN_LOG_I(s.SolverDbId() << " (not searchable)");
     return s.GetInvokerFactory(context, problem);
@@ -385,9 +383,8 @@ struct SolverContainer
                 else
                 {
                     auto db = [&]() -> PerformanceDb& {
-                        constexpr auto db_getter =
-                            []([[maybe_unused]] const ExecutionContext& ctx,
-                               [[maybe_unused]] const auto& problem) -> PerformanceDb {
+                        constexpr auto db_getter = [](const ExecutionContext& ctx,
+                                                      const auto& problem) -> PerformanceDb {
                             if constexpr(IsTunable<decltype(solver)>())
                                 return GetDb(ctx, problem);
                             else

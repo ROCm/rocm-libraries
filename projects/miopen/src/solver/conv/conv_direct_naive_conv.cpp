@@ -392,10 +392,11 @@ inline void PrepareBatchedKernelRun(int batch_start,
 }
 
 namespace conv_internal {
-::miopen::solver::ConvSolution
-GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+
+miopen::solver::ConvSolution
+GetConv2DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
-    ::miopen::solver::ConvSolution result;
+    miopen::solver::ConvSolution result;
 
     int hi          = ProblemInterpreter::GetInputHeightHi(problem);
     int wi          = ProblemInterpreter::GetInputWidthWi(problem);
@@ -465,7 +466,7 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
             decltype(auto) data_ctx =
-                primitive_parameters.CastTo<::miopen::conv::DataInvokeParams>();
+                primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
             const auto& tensors = data_ctx.tensors;
             float elapsed       = 0;
             auto in_strides     = MakeStrideArray<5>(
@@ -609,10 +610,10 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     return result;
 }
 
-::miopen::solver::ConvSolution
-GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution
+GetConv3DFWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
-    ::miopen::solver::ConvSolution result;
+    miopen::solver::ConvSolution result;
 
     int di          = ProblemInterpreter::GetInputDepthDi(problem);
     int hi          = ProblemInterpreter::GetInputHeightHi(problem);
@@ -686,7 +687,7 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
             decltype(auto) data_ctx =
-                primitive_parameters.CastTo<::miopen::conv::DataInvokeParams>();
+                primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
             const auto& tensors = data_ctx.tensors;
             float elapsed       = 0;
             auto in_strides     = MakeStrideArray<6>(
@@ -776,10 +777,10 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     return result;
 }
 
-::miopen::solver::ConvSolution
-GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution
+GetConv2DWRWSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
-    ::miopen::solver::ConvSolution result;
+    miopen::solver::ConvSolution result;
 
     int hi          = ProblemInterpreter::GetInputHeightHi(problem);
     int wi          = ProblemInterpreter::GetInputWidthWi(problem);
@@ -907,10 +908,10 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     return result;
 }
 
-::miopen::solver::ConvSolution
-GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution
+GetConv3DWRWSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
-    ::miopen::solver::ConvSolution result;
+    miopen::solver::ConvSolution result;
 
     int di          = ProblemInterpreter::GetInputDepthDi(problem);
     int hi          = ProblemInterpreter::GetInputHeightHi(problem);
@@ -1018,10 +1019,10 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     return result;
 }
 
-::miopen::solver::ConvSolution
-GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution
+GetConv2DBWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
-    ::miopen::solver::ConvSolution result;
+    miopen::solver::ConvSolution result;
 
     int hi          = ProblemInterpreter::GetInputHeightHi(problem);
     int wi          = ProblemInterpreter::GetInputWidthWi(problem);
@@ -1162,10 +1163,10 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     return result;
 }
 
-::miopen::solver::ConvSolution
-GetConv3DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+miopen::solver::ConvSolution
+GetConv3DBWDSolution(const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
-    ::miopen::solver::ConvSolution result;
+    miopen::solver::ConvSolution result;
 
     int di          = ProblemInterpreter::GetInputDepthDi(problem);
     int hi          = ProblemInterpreter::GetInputHeightHi(problem);

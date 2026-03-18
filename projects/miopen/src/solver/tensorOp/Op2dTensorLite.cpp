@@ -38,7 +38,7 @@ namespace solver {
 
 namespace tensorOp {
 
-bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool Op2dTensorLite::IsApplicable(const ExecutionContext& /*context*/,
                                   const miopen::tensorOp::ProblemDescription& problem) const
 {
     const auto& aTensorDesc = problem.GetATensorDesc();
@@ -49,12 +49,10 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     const auto& blens = bTensorDesc.GetLengths();
     const auto& clens = cTensorDesc.GetLengths();
 
-    auto asize = alens.size();
-
-    if(asize == 3)
+    if(alens.size() == 3)
     {
-        size_t local_threads = 256;
-        int max_num_wg       = 4096;
+        size_t local_threads{256};
+        int max_num_wg{4096};
 
         // for naive tensor ops
         size_t RD_BLCK    = (clens[2] % 4 == 0) ? 4 : (clens[2] % 2 == 0) ? 2 : 1;
@@ -76,14 +74,14 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     return false;
 }
 
-std::size_t Op2dTensorLite::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
+std::size_t
+Op2dTensorLite::GetWorkspaceSize(const ExecutionContext& /*context*/,
+                                 const miopen::tensorOp::ProblemDescription& /*problem*/) const
 {
     return 0;
 }
 
-ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext& context,
+ConvSolution Op2dTensorLite::GetSolution(const ExecutionContext& /*context*/,
                                          const miopen::tensorOp::ProblemDescription& problem) const
 {
     auto result = ConvSolution{miopenStatusSuccess};

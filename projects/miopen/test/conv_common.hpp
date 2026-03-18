@@ -1127,8 +1127,9 @@ struct verify_backward_conv : conv_base<T>
                 });
                 selected = std::move(solutions.front());
 
-                [[maybe_unused]] std::size_t ws_size = filter.GetForwardSolutionWorkspaceSize(
+                size_t ws_size = filter.GetForwardSolutionWorkspaceSize(
                     handle, weights.desc, out.desc, rinput.desc, selected.solution_id);
+                (void)ws_size;
 
                 filter.CompileSolution(ctx, problem, selected.solution_id);
 
@@ -1190,8 +1191,9 @@ struct verify_backward_conv : conv_base<T>
                 });
                 selected = std::move(solutions.front());
 
-                [[maybe_unused]] std::size_t ws_size = filter.GetBackwardSolutionWorkspaceSize(
+                size_t ws_size = filter.GetBackwardSolutionWorkspaceSize(
                     handle, out.desc, weights.desc, rinput.desc, selected.solution_id);
+                (void)ws_size;
 
                 filter.CompileSolution(ctx, problem, selected.solution_id);
 
@@ -1480,12 +1482,13 @@ struct verify_backward_weights_conv : conv_base<T>
             });
             selected = std::move(solutions.front());
 
-            [[maybe_unused]] std::size_t ws_size = filter.GetWrwSolutionWorkspaceSize(
+            size_t ws_size = filter.GetWrwSolutionWorkspaceSize(
                 handle,
                 filter.mode == miopenTranspose ? input.desc : out.desc,
                 filter.mode == miopenTranspose ? out.desc : input.desc,
                 rweights.desc,
                 selected.solution_id);
+            (void)ws_size;
 
             filter.CompileSolution(ctx, problem, selected.solution_id);
 
@@ -1745,12 +1748,13 @@ struct verify_forward_conv_int8 : conv_base<T>
         });
         auto selected = std::move(solutions.front());
 
-        [[maybe_unused]] std::size_t ws_size =
+        size_t ws_size =
             filter.GetForwardSolutionWorkspaceSize(handle,
                                                    (is_transform ? weight_vpad_desc : weights.desc),
                                                    (is_transform ? input_vpad_desc : input.desc),
                                                    rout.desc,
                                                    selected.solution_id);
+        (void)ws_size;
 
         filter.CompileSolution(ctx, problem, selected.solution_id);
 

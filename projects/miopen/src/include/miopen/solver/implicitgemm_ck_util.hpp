@@ -590,9 +590,12 @@ public:
     {
         HipEventProfiler pfr(handle);
 
-        [[maybe_unused]] auto status =
-            hipMemsetAsync(buf_handle.get(), 0, tensor_sz, handle.GetStream());
+        auto status = hipMemsetAsync(buf_handle.get(), 0, tensor_sz, handle.GetStream());
+#ifdef NDEBUG
+        (void)status;
+#else
         assert(status == hipSuccess);
+#endif
     }
 
     TransposeInstance()                         = delete;
@@ -824,7 +827,7 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
 {
     if(problem.IsLayoutNHWC())
     {
-        if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
+        if(problem.GetDirection() == miopen::conv::Direction::BackwardWeights)
         {
             return (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem);
         }
@@ -833,7 +836,7 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
 
     assert(problem.IsLayoutDefault());
 
-    if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
+    if(problem.GetDirection() == miopen::conv::Direction::BackwardWeights)
     {
         MultiBufferWorkspaceTraits wt(
             {GetPackedSize(problem.GetIn()),
@@ -1337,7 +1340,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
         miopenAlphaBetaCase_t alpha_beta_case = problem.GetAlphaBetaCase();
         auto ck_args                          = CKArgsType{problem};
         auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
-        [[maybe_unused]] bool should_allocated_wrw_buffer = ck_ws_size > 0;
+        bool should_allocated_wrw_buffer = ck_ws_size > 0;
 
         result.invoker_factory = [kernel_id                   = kernel_id,
                                   split_k                     = split_k,

@@ -47,7 +47,7 @@ void RNNModularMultiStreamBWWeights::Compute(const Handle& handle,
                                              Data_t workSpace,
                                              size_t workSpaceSize,
                                              ConstData_t reserveSpace,
-                                             [[maybe_unused]] size_t reserveSpaceSize) const
+                                             size_t /*reserveSpaceSize*/) const
 {
 
     if(rnnDesc.nLayers == 0 || max_seq_len == 0)

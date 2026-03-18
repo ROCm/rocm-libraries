@@ -264,7 +264,7 @@ static std::string WriteNop(kernel_type_t kern_type)
 }
 #endif
 
-static void test_warnings([[maybe_unused]] kernel_type_t kern_type)
+static void test_warnings(kernel_type_t kern_type)
 {
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
     auto&& h = get_handle();
@@ -285,6 +285,8 @@ static void test_warnings([[maybe_unused]] kernel_type_t kern_type)
                                      0,
                                      WriteNop(kern_type)));
     }
+#else
+    (void)kern_type;
 #endif
 }
 

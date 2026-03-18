@@ -96,7 +96,7 @@ void Run2dDriver(miopenDataType_t prec)
     }
 }
 
-bool IsTestSupportedForDevice([[maybe_unused]] const miopen::Handle& handle) { return true; }
+bool IsTestSupportedForDevice(const miopen::Handle& /*handle*/) { return true; }
 
 std::vector<std::string> GetTestCases(const std::string& precision)
 {

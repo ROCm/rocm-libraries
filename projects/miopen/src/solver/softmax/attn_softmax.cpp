@@ -65,7 +65,7 @@ constexpr uint32_t nextPow2(uint32_t v)
 }
 } // namespace
 
-bool AttnSoftmax::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool AttnSoftmax::IsApplicable(const ExecutionContext& /*context*/,
                                const miopen::softmax::ProblemDescription& problem) const
 {
     const size_t seq_len = problem.GetXDesc().GetStrides().front(); // c * h * w
@@ -85,9 +85,9 @@ bool AttnSoftmax::IsApplicable([[maybe_unused]] const ExecutionContext& context,
            (seq_len > 16 || nhs <= 1024);                       // heuristic
 }
 
-std::size_t AttnSoftmax::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
+std::size_t
+AttnSoftmax::GetWorkspaceSize(const ExecutionContext& /*context*/,
+                              const miopen::softmax::ProblemDescription& /*problem*/) const
 {
     return 0;
 }

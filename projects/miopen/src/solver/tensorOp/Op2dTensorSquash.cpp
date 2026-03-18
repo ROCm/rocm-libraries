@@ -37,7 +37,7 @@ namespace solver {
 
 namespace tensorOp {
 
-bool Op2dTensorSquash::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool Op2dTensorSquash::IsApplicable(const ExecutionContext& /*context*/,
                                     const miopen::tensorOp::ProblemDescription& problem) const
 {
     const auto& aTensorDesc = problem.GetATensorDesc();
@@ -48,9 +48,7 @@ bool Op2dTensorSquash::IsApplicable([[maybe_unused]] const ExecutionContext& con
     const auto& blens = bTensorDesc.GetLengths();
     const auto& clens = cTensorDesc.GetLengths();
 
-    auto asize = alens.size();
-
-    if(asize == 3)
+    if(alens.size() == 3)
     {
         bool is_lite = clens[0] == 1 && blens[0] == 1 && alens[0] == 1 &&
                        (blens[1] == clens[1] || blens[1] == 1) && blens[2] == clens[2];
@@ -68,15 +66,15 @@ bool Op2dTensorSquash::IsApplicable([[maybe_unused]] const ExecutionContext& con
     return false;
 }
 
-std::size_t Op2dTensorSquash::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
+std::size_t
+Op2dTensorSquash::GetWorkspaceSize(const ExecutionContext& /*context*/,
+                                   const miopen::tensorOp::ProblemDescription& /*problem*/) const
 {
     return 0;
 }
 
 ConvSolution
-Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
+Op2dTensorSquash::GetSolution(const ExecutionContext& /*context*/,
                               const miopen::tensorOp::ProblemDescription& problem) const
 {
     auto result = ConvSolution{miopenStatusSuccess};

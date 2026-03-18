@@ -23,7 +23,7 @@ void PerformanceConfigPoolingNd<OpType>::Init(const miopen::pooling::ProblemDesc
 
 template <OperationType OpType>
 void PerformanceConfigPoolingNd<OpType>::HeuristicInit(
-    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
+    const miopen::pooling::ProblemDescription& problem)
 {
 #if MIOPEN_BACKEND_HIP
     switch(problem.GetXDesc().GetType())
@@ -39,15 +39,18 @@ void PerformanceConfigPoolingNd<OpType>::HeuristicInit(
     case miopenInt64:
     default: MIOPEN_THROW("Unsupported datatype");
     }
+#else
+    (void)problem;
 #endif
 }
 
 template <OperationType OpType>
 bool PerformanceConfigPoolingNd<OpType>::IsValid(
     const ExecutionContext&,
-    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
+    const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
+    (void)problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())

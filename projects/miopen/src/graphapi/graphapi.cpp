@@ -307,8 +307,8 @@ namespace graphapi {
 
 BackendDescriptor::~BackendDescriptor() {}
 
-void BackendDescriptor::execute([[maybe_unused]] miopenHandle_t handle,
-                                [[maybe_unused]] miopenBackendDescriptor_t variantPack)
+void BackendDescriptor::execute(miopenHandle_t /*handle*/,
+                                miopenBackendDescriptor_t /*variantPack*/)
 {
     MIOPEN_THROW(miopenStatusBadParm);
 }

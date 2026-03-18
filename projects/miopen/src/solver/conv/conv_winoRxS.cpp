@@ -403,9 +403,7 @@ bool PerformanceConfigConvBinWinogradRxS::IsValid(const ExecutionContext& ctx) c
     if(ctx.GetStream().GetMaxHardwareComputeUnits() < n_groups)
         return false;
 
-    if(!IsValidValue())
-        return false;
-    return true;
+    return IsValidValue();
 }
 
 bool PerformanceConfigConvBinWinogradRxS::operator==(
@@ -584,7 +582,7 @@ public:
         n_works_per_CU = Ceil(n_works, n_groups) * Ceil(G * n_groups, n_CU);
     }
 
-    [[maybe_unused]] size_t GetNGroups() const noexcept { return n_groups; }
+    // [[maybe_unused]] size_t GetNGroups() const noexcept { return n_groups; }
 
     double ComputeWti() const noexcept
     {

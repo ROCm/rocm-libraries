@@ -211,11 +211,9 @@ struct reorder_invoke_param : public miopen::InvokeParams
     ConstData_t src = nullptr;
     Data_t dst      = nullptr;
 
-    [[maybe_unused]] reorder_invoke_param(ConstData_t src_, Data_t dst_) : src(src_), dst(dst_) {}
-    [[maybe_unused]] reorder_invoke_param(miopen::InvokeType type_, ConstData_t src_, Data_t dst_)
-        : InvokeParams{type_}, src(src_), dst(dst_)
-    {
-    }
+    reorder_invoke_param(ConstData_t src_, Data_t dst_) : src(src_), dst(dst_) {}
+    // reorder_invoke_param(miopen::InvokeType type_, ConstData_t src_, Data_t dst_)
+    //     : InvokeParams{type_}, src(src_), dst(dst_) {}
 
     Data_t GetWorkspace() const { return nullptr; }
     std::size_t GetWorkspaceSize() const { return 0; }

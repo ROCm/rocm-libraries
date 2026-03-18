@@ -46,8 +46,8 @@ namespace {
 
 #if MIOPEN_USE_GEMM
 
-bool RNNForwardMSIsSupported([[maybe_unused]] const RNNDescriptor& desctiptor,
-                             [[maybe_unused]] bool use_dropout)
+bool RNNForwardMSIsSupported(const RNNDescriptor& desctiptor,
+                             bool use_dropout)
 {
 #if MIOPEN_BACKEND_HIP
     if(desctiptor.rnnMode == miopenLSTM && desctiptor.algoMode == miopenRNNdefault &&
@@ -56,6 +56,9 @@ bool RNNForwardMSIsSupported([[maybe_unused]] const RNNDescriptor& desctiptor,
     {
         return true;
     }
+#else
+    (void)desctiptor;
+    (void)use_dropout;
 #endif // MIOPEN_BACKEND_HIP
     return false;
 }

@@ -22,9 +22,9 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                                 Data_t losses,
                                 const TensorDescriptor& gradientsDesc,
                                 Data_t gradients,
-                                [[maybe_unused]] miopenCTCLossAlgo_t algo,
+                                miopenCTCLossAlgo_t /*algo*/,
                                 Data_t workSpace,
-                                [[maybe_unused]] size_t workSpaceSize) const
+                                size_t /*workSpaceSize*/) const
 {
     if(probsDesc.GetType() != miopenFloat && probsDesc.GetType() != miopenHalf)
     {

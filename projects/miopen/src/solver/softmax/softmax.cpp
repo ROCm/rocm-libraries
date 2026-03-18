@@ -43,8 +43,8 @@ namespace solver {
 namespace softmax {
 
 bool Softmax::IsApplicable(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
+    const ExecutionContext& /*context*/,
+    const miopen::softmax::ProblemDescription& problem) const
 {
     if(!(problem.GetYDesc().GetType() == miopenFloat ||
          problem.GetYDesc().GetType() == miopenHalf ||
@@ -109,7 +109,7 @@ bool Softmax::IsValidPerformanceConfig(const ExecutionContext& context,
     return config.IsValid(context, problem);
 }
 
-ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& context,
+ConvSolution Softmax::GetSolution(const ExecutionContext& /*context*/,
                                   const miopen::softmax::ProblemDescription& problem,
                                   const PerformanceConfigSoftmax& config) const
 {

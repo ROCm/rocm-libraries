@@ -520,8 +520,8 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
 }
 
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem)
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "";
@@ -546,7 +546,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
                 return;
         }
     }
-#endif
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -562,6 +562,9 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 
     if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
         DefaultKernelFromList(ctx);
+#else
+    (void)ctx;
+    (void)problem;
 #endif
 }
 
@@ -602,7 +605,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
@@ -617,6 +620,8 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+#else
+    (void)problem;
 #endif
     return false;
 }
@@ -659,8 +664,8 @@ ConvHipImplicitGemmGroupFwdXdlops::Search(const ExecutionContext& ctx,
 }
 
 bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
@@ -698,14 +703,17 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+#else
+    (void)ctx;
+    (void)problem;
 #endif
     return false;
 }
 
 ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupFwdXdlops& config) const
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem,
+    const PerformanceConfigHipImplicitGemmGroupFwdXdlops& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
@@ -731,6 +739,9 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
         },
         config.UseTF32());
 #else
+    (void)ctx;
+    (void)problem;
+    (void)config;
     return {};
 #endif
 }

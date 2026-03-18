@@ -576,29 +576,23 @@ TEST(CPU_DBSync_NONE, KDBTargetID)
 #endif
 }
 
-bool LogBuildMessage()
-{
-    MIOPEN_LOG_W("Unable to produce missing binary due to COMGR being enabled");
-    return true;
-}
-
 void BuildKernel(const fs::path& program_file,
                  const std::string& program_args,
-                 [[maybe_unused]] const miopen::Handle& handle)
+                 const miopen::Handle& handle)
 {
     // Build the code object entry
     // This will write the code object in the user kdb which Jenkins can archive
     // This has to be done with the offline clang compiler and not COMGR (or hipRTC) otherwise the
     // code object would be target ID specific
 #if MIOPEN_USE_COMGR
-    static const bool discard = LogBuildMessage();
-    std::ignore               = discard;
-    std::ignore               = program_file;
-    std::ignore               = program_args;
+    std::ignore = program_file;
+    std::ignore = program_args;
+    std::ignore = handle;
+    MIOPEN_LOG_W("Unable to produce missing binary due to COMGR being enabled");
 #else
     try
     {
-        auto p = handle.LoadProgram(program_file, program_args, "");
+        (void)handle.LoadProgram(program_file, program_args, "");
     }
     catch(std::exception&)
     {

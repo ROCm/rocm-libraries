@@ -30,7 +30,7 @@
 #include <miopen/logger.hpp>
 
 namespace miopen {
-std::ostream& operator<<(std::ostream& stream, [[maybe_unused]] const FusionOpDescriptor& x)
+std::ostream& operator<<(std::ostream& stream, const FusionOpDescriptor& x)
 {
     return MIOPEN_LOG_ENUM(stream,
                            x.kind(),

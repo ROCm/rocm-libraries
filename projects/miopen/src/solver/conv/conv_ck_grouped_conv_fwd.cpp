@@ -389,9 +389,8 @@ void PerformanceConfigConvDepthwiseFwd2D::Init(const ProblemDescription& problem
 }
 #endif
 
-void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem)
+void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(const ExecutionContext& /*ctx*/,
+                                                        const ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "";
@@ -401,6 +400,8 @@ void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(
     case miopenHalf: Init<ck::half_t>(problem); break;
     default: break;
     }
+#else
+    (void)problem;
 #endif
 }
 
@@ -428,8 +429,7 @@ bool PerformanceConfigConvDepthwiseFwd2D::IsValidValue() const
     return index < valid_kernels.size();
 }
 
-bool PerformanceConfigConvDepthwiseFwd2D::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+bool PerformanceConfigConvDepthwiseFwd2D::IsValid(const ProblemDescription& /*problem*/) const
 {
     return IsValidValue();
 }
@@ -479,7 +479,7 @@ bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
 }
 
 uint32_t
-ConvDepthwiseFwd2D::GetSupportedSolutionCount([[maybe_unused]] const ExecutionContext& ctx,
+ConvDepthwiseFwd2D::GetSupportedSolutionCount(const ExecutionContext& /*ctx*/,
                                               const miopen::conv::ProblemDescription& problem) const
 {
     uint32_t solutionCount = 0;
@@ -501,8 +501,7 @@ ConvDepthwiseFwd2D::GetSupportedSolutionCount([[maybe_unused]] const ExecutionCo
 }
 
 PerformanceConfigConvDepthwiseFwd2D ConvDepthwiseFwd2D::GetDefaultPerformanceConfig(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    const miopen::conv::ProblemDescription& problem) const
+    const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem) const
 {
     PerformanceConfigConvDepthwiseFwd2D pp;
     pp.HeuristicInit(ctx, problem);
@@ -514,7 +513,7 @@ bool ConvDepthwiseFwd2D::IsValidPerformanceConfig(
     const miopen::conv::ProblemDescription& problem,
     const PerformanceConfigConvDepthwiseFwd2D& config) const
 {
-    return config.IsValid((problem));
+    return config.IsValid(problem);
 }
 
 PerformanceConfigConvDepthwiseFwd2D

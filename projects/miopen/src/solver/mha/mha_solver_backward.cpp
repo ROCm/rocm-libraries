@@ -79,7 +79,7 @@ miopen::HipEventPtr make_hip_fast_event()
 }
 } // namespace
 
-bool MhaBackward::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool MhaBackward::IsApplicable(const ExecutionContext& /*context*/,
                                const miopen::mha::ProblemDescription& problem) const
 {
 #if MIOPEN_USE_ROCBLAS
@@ -127,7 +127,7 @@ bool MhaBackward::IsApplicable([[maybe_unused]] const ExecutionContext& context,
 #endif
 }
 
-std::size_t MhaBackward::GetWorkspaceSize([[maybe_unused]] const ExecutionContext& context,
+std::size_t MhaBackward::GetWorkspaceSize(const ExecutionContext& /*context*/,
                                           const miopen::mha::ProblemDescription& problem) const
 {
     const auto& kDesc = problem.GetDescsBackward().kDesc;

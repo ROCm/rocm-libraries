@@ -38,12 +38,10 @@ namespace solver {
 
 namespace adam {
 
-bool Adam::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool Adam::IsApplicable(const ExecutionContext& /*context*/,
                         const miopen::adam::ProblemDescription& problem) const
 {
-    if(!problem.IsAllContiguous())
-        return false;
-    return true;
+    return (problem.IsAllContiguous());
 }
 
 ConvSolution Adam::GetSolution(const ExecutionContext& context,

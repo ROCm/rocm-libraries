@@ -42,10 +42,7 @@ using miopen::graphapi::VariantPack;
 class MockPatternExecutor : public GraphPatternExecutor
 {
 public:
-    void execute([[maybe_unused]] miopenHandle_t handle,
-                 [[maybe_unused]] const VariantPack& vpk) override
-    {
-    }
+    void execute(miopenHandle_t /*handle*/, const VariantPack& /*vpk*/) override {}
     size_t getWorkspaceSize() const override { return 0; }
     nlohmann::json getJson() override { return {}; };
 };

@@ -299,7 +299,7 @@ void PerformanceConfigPoolingForwardNaive::Init(const miopen::pooling::ProblemDe
 }
 
 void PerformanceConfigPoolingForwardNaive::HeuristicInit(
-    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
+    const miopen::pooling::ProblemDescription& problem)
 {
 #if MIOPEN_BACKEND_HIP
     switch(problem.GetXDesc().GetType())
@@ -315,6 +315,8 @@ void PerformanceConfigPoolingForwardNaive::HeuristicInit(
     case miopenInt64:
     default: MIOPEN_THROW("Unsupported datatype");
     }
+#else
+    (void)problem;
 #endif
 }
 
@@ -358,10 +360,11 @@ bool PerformanceConfigPoolingForwardNaive::IsValidValue() const
 }
 
 bool PerformanceConfigPoolingForwardNaive::IsValid(
-    const ExecutionContext&,
-    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext& /*context*/,
+    const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
+    (void)problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())

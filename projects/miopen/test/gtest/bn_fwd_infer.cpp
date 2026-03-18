@@ -137,7 +137,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::string network_config = ss.str();
 
     // add the kernel to the handle
-    [[maybe_unused]] auto kernelInvoke =
+    auto kernelInvoke =
         handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
 
     if constexpr(PERF_ENABLE)

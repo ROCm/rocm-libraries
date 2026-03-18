@@ -486,7 +486,7 @@ bool PerformanceConfigConvAsm1x1U::IsModelApplicable(const ExecutionContext& ctx
     return true;
 }
 
-void PerformanceConfigConvAsm1x1U::HeuristicInit([[maybe_unused]] const ExecutionContext& ctx,
+void PerformanceConfigConvAsm1x1U::HeuristicInit(const ExecutionContext& ctx,
                                                  const ProblemDescription& problem)
 {
     if(problem.GetInDataType() == miopenDouble)
@@ -498,6 +498,8 @@ void PerformanceConfigConvAsm1x1U::HeuristicInit([[maybe_unused]] const Executio
         if(RunParameterPredictionModel(ctx, problem))
             return;
     }
+#else
+    (void)ctx;
 #endif
     StaticHeuristic(problem);
     MIOPEN_LOG_I(ToString());

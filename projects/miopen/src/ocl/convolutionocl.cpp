@@ -179,12 +179,15 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
 static inline void ValidateWorkspace(Data_t workSpace, const size_t workSpaceSize)
 {
 
-    [[maybe_unused]] bool x = (workSpace != nullptr);
-    [[maybe_unused]] bool y = (workSpaceSize != 0);
-
+    bool x = (workSpace != nullptr);
+    bool y = (workSpaceSize != 0);
+#ifdef NDEBUG
+    (void)x;
+    (void)y;
+#else
     assert(((x && y) || (!x && !y)) && "workspace pointer and size don't match. Either both should "
                                        "be zero or both should be non-zero");
-
+#endif
     /// \todo could add a check here that workSpace points to GPU memory
 }
 

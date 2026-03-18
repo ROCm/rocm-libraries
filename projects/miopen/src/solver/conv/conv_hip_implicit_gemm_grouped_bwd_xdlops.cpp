@@ -523,8 +523,8 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(
 }
 
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem)
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem)
 {
     split_k   = 1;
     index     = 0;
@@ -568,7 +568,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
         if(ai_succeeded)
             return;
     }
-#endif
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -587,6 +587,9 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);
+#else
+   (void)ctx;
+   (void)problem;
 #endif
 }
 
@@ -654,7 +657,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     // Database validation: Reject configurations with split_k > 1 in deterministic mode.
@@ -697,6 +700,8 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+#else
+    (void)problem;
 #endif
     return false;
 }
@@ -762,8 +767,8 @@ ConvHipImplicitGemmGroupBwdXdlops::Search(const ExecutionContext& ctx,
 }
 
 bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
@@ -797,14 +802,17 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+#else
+   (void)ctx;
+   (void)problem;
 #endif
     return false;
 }
 
 ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupBwdXdlops& config) const
+    const ExecutionContext& ctx,
+    const ProblemDescription& problem,
+    const PerformanceConfigHipImplicitGemmGroupBwdXdlops& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
@@ -829,8 +837,10 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
                 ctx, problem, config.kernel_id);
         },
         config.UseTF32());
-
 #else
+    (void)ctx;
+    (void)problem;
+    (void)config;
     return {};
 #endif
 }

@@ -120,9 +120,8 @@ miopenStatus_t try_(F f, bool output = true)
 }
 
 template <class T>
-auto deref(T&& x,
-           [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm) -> decltype((x == nullptr),
-                                                                                  get_object(*x))
+auto deref(T&& x, miopenStatus_t err = miopenStatusBadParm)
+    -> decltype((x == nullptr), get_object(*x))
 {
     if(x == nullptr)
     {
@@ -135,7 +134,7 @@ template <class... Ts>
 auto tie_deref(Ts&... xs) MIOPEN_RETURNS(std::tie(miopen::deref(xs)...));
 
 template <typename Ptr>
-Ptr checkPtr(Ptr ptr, [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm)
+Ptr checkPtr(Ptr ptr, miopenStatus_t err = miopenStatusBadParm)
 {
     if(ptr != nullptr)
     {

@@ -206,12 +206,14 @@ void RNNBackwardWeightsModularAlgo::HiddenXInputWeights(const Handle& handle,
     assert(gemm_batch_size != 0);
     assert(layer > 0);
 
-    [[maybe_unused]] bool use_dropout = !float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0);
-
+    bool use_dropout = !float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0);
+#ifdef NDEBUG
+    (void)use_dropout;
+#else
     assert(use_dropout == false);
+#endif
 
-    // both directions in 1 call;
-
+    // both directions in 1 call
     const auto tmp_block_offset =
         workspaceInfo.getGateBlockOffset(layer, gemm_batch_offset, direction);
     const auto filter_offset = weightsLayout.getMatrixXinOff(layer, static_cast<int>(direction));

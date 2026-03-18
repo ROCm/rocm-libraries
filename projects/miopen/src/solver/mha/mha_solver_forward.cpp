@@ -66,7 +66,7 @@ MultiBufferWorkspaceTraits SplitBufferToWorkspace(const std::vector<size_t>& len
 }
 } // namespace
 
-bool MhaForward::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool MhaForward::IsApplicable(const ExecutionContext& /*context*/,
                               const miopen::mha::ProblemDescription& problem) const
 {
 #if MIOPEN_USE_ROCBLAS
@@ -104,7 +104,7 @@ bool MhaForward::IsApplicable([[maybe_unused]] const ExecutionContext& context,
 #endif
 }
 
-std::size_t MhaForward::GetWorkspaceSize([[maybe_unused]] const ExecutionContext& context,
+std::size_t MhaForward::GetWorkspaceSize(const ExecutionContext& /*context*/,
                                          const miopen::mha::ProblemDescription& problem) const
 {
     const auto& kDesc = problem.GetDescsForward().kDesc;

@@ -47,9 +47,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            const float activ_gamma,
                            const miopen::TensorDescriptor& xDesc,
                            ConstData_t x,
-                           const miopen::TensorDescriptor& yDesc,
+                           const miopen::TensorDescriptor& /*yDesc*/,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           const miopen::TensorDescriptor& /*bnScaleBiasMeanVarDesc*/,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
@@ -59,7 +59,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
 {
     int n, c, h, w;
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
-    (void)yDesc;
 
     // Setup the kernel launch parameters
     bool is_layout_NHWC = (xDesc.GetLayout_t() == miopenTensorNHWC);
@@ -122,9 +121,8 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     ss << "activ" << activ_mode;
     std::string network_config = ss.str();
 
-    (void)bnScaleBiasMeanVarDesc;
     // add the kernel to the handle
-    [[maybe_unused]] auto kernelInvoke =
+    auto kernelInvoke =
         handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
 
     if constexpr(PERF_ENABLE)
@@ -332,7 +330,7 @@ TEST_P(GPU_bn_activ_infer_spatial_FP32, PortTest)
     RunTestGPU();
     // Compare the outputs
     Verify();
-};
+}
 
 TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
 {
@@ -342,7 +340,7 @@ TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
     RunTestGPU();
     // Compare the outputs
     Verify();
-};
+}
 
 TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
 {
@@ -352,7 +350,7 @@ TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
     RunTestGPU();
     // Compare the outputs
     Verify();
-};
+}
 
 TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
 {
@@ -362,7 +360,7 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
     RunTestGPU();
     // Compare the outputs
     Verify();
-};
+}
 
 TEST_P(GPU_bn_activ_infer_spatial_BFP16, PortTest)
 {
@@ -372,7 +370,7 @@ TEST_P(GPU_bn_activ_infer_spatial_BFP16, PortTest)
     RunTestGPU();
     // Compare the outputs
     Verify();
-};
+}
 
 TEST_P(GPU_bn_activ_infer_per_act_BFP16, PortTest)
 {
@@ -382,7 +380,7 @@ TEST_P(GPU_bn_activ_infer_per_act_BFP16, PortTest)
     RunTestGPU();
     // Compare the outputs
     Verify();
-};
+}
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,

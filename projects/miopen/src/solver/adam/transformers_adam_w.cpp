@@ -38,12 +38,10 @@ namespace solver {
 
 namespace adam {
 
-bool TransformersAdamW::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool TransformersAdamW::IsApplicable(const ExecutionContext& /*context*/,
                                      const miopen::adam::ProblemDescription& problem) const
 {
-    if(!problem.IsAllContiguous())
-        return false;
-    return true;
+    return (problem.IsAllContiguous());
 }
 
 ConvSolution TransformersAdamW::GetSolution(const ExecutionContext& context,

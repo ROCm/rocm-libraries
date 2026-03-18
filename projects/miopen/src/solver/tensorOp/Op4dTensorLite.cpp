@@ -37,7 +37,7 @@ namespace solver {
 
 namespace tensorOp {
 
-bool Op4dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& context,
+bool Op4dTensorLite::IsApplicable(const ExecutionContext& /*context*/,
                                   const miopen::tensorOp::ProblemDescription& problem) const
 {
     const auto& aTensorDesc = problem.GetATensorDesc();
@@ -48,9 +48,7 @@ bool Op4dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     const auto& blens = bTensorDesc.GetLengths();
     const auto& clens = cTensorDesc.GetLengths();
 
-    auto asize = alens.size();
-
-    if(asize == 4)
+    if(alens.size() == 4)
     {
         auto&& [num_wg, work_per_wg, bitmap] = GetBitmapAndWgInfo(blens, clens);
 
@@ -77,14 +75,14 @@ bool Op4dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     return false;
 }
 
-std::size_t Op4dTensorLite::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
+std::size_t
+Op4dTensorLite::GetWorkspaceSize(const ExecutionContext& /*context*/,
+                                 const miopen::tensorOp::ProblemDescription& /*problem*/) const
 {
     return 0;
 }
 
-ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext& context,
+ConvSolution Op4dTensorLite::GetSolution(const ExecutionContext& /*context*/,
                                          const miopen::tensorOp::ProblemDescription& problem) const
 {
     auto result = ConvSolution{miopenStatusSuccess};

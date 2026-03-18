@@ -47,9 +47,8 @@ struct Adam final : AdamSolver
                       const miopen::adam::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::adam::ProblemDescription& problem) const override;
-    std::size_t GetWorkspaceSize(
-        [[maybe_unused]] const ExecutionContext& context,
-        [[maybe_unused]] const miopen::adam::ProblemDescription& problem) const override
+    size_t GetWorkspaceSize(const ExecutionContext& /*context*/,
+                            const miopen::adam::ProblemDescription& /*problem*/) const override
     {
         return 0;
     }
@@ -64,9 +63,8 @@ struct TransformersAdamW final : AdamSolver
                       const miopen::adam::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::adam::ProblemDescription& problem) const override;
-    std::size_t GetWorkspaceSize(
-        [[maybe_unused]] const ExecutionContext& context,
-        [[maybe_unused]] const miopen::adam::ProblemDescription& problem) const override
+    size_t GetWorkspaceSize(const ExecutionContext& /*context*/,
+                            const miopen::adam::ProblemDescription& /*problem*/) const override
     {
         return 0;
     }

@@ -39,15 +39,18 @@ struct manage_deleter
     {
         if(x != nullptr)
         {
+#if 0
             if constexpr(std::is_void_v<decltype(f(x))>)
             {
                 f(x); // NOLINT (cppcoreguidelines-owning-memory)
             }
             else
             {
-                [[maybe_unused]] const auto status =
-                    f(x); // NOLINT (cppcoreguidelines-owning-memory)
+                const auto status = f(x); // NOLINT (cppcoreguidelines-owning-memory)
             }
+#else
+            (void)f(x);
+#endif
         }
     }
 };

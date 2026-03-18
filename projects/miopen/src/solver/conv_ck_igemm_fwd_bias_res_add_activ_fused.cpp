@@ -176,9 +176,13 @@ struct CKArgs
 
         /// \todo: Support general activation functions.
         /// only relu activation supported and hardcoded for now
-        [[maybe_unused]] const auto& activ_param =
+        const auto& activ_param =
             dynamic_cast<miopen::fusion::ActivationOpInvokeParam&>(*data_ctx.op_args.params[3]);
+#ifdef NDEBUG
+        (void)&activ_param;
+#else
         assert(&activ_param);
+#endif
 
         return MakeArgPtr(op_ptr,
                           data_ctx.in,
