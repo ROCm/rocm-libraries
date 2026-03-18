@@ -373,7 +373,7 @@ TEST_P(TestBlockScaleDequantizeOperationDescriptorGetTensor,
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(rawRetrieved, nullptr);
-    std::unique_ptr<HipdnnBackendDescriptor> retrieved(rawRetrieved);
+    const std::unique_ptr<HipdnnBackendDescriptor> retrieved(rawRetrieved);
 
     auto tensorImpl = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         retrieved.get(),
@@ -647,7 +647,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, ToStringContainsExpectedInfo
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("BlockScaleDequantizeOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_BSD_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BSD_TENSOR_SCALE_UID)), std::string::npos);

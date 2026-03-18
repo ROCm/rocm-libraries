@@ -246,7 +246,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, AutoAssignedUidsPreser
         << "Y tensor UID " << dequant->y_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {dequant->x_tensor_uid, dequant->scale_tensor_uid, dequant->y_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Block scale dequantize node tensor UIDs are not distinct";
 }
