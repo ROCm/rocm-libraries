@@ -16,6 +16,7 @@ add_executable(
     sdpa_kernel_plugin_integration_tests
     main.cpp
     IntegrationNoEngines.cpp
+    IntegrationGpuSdpa.cpp
 )
 
 target_compile_options(sdpa_kernel_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
