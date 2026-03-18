@@ -842,7 +842,8 @@ struct right_aligned_deleter
         auto status = hipFree(mem);
         if(status != hipSuccess)
             MIOPEN_THROW_HIP_STATUS(status,
-                                    "hipFree on right-aligned memory failed at " + to_string(mem));
+                                    "hipFree on right-aligned memory failed at " +
+                                        (std::ostringstream() << mem).str());
         MIOPEN_LOG_T("hipFree (right-aligned) at " << std::hex << mem << " Ok");
     }
 };
