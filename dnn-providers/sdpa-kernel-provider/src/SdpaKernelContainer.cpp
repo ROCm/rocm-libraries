@@ -2,8 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include "SdpaKernelContainer.hpp"
+#include "SdpaKernelEngine.cpp"
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
+#include <ranges>
 
 namespace sdpa_kernel_provider
 {
@@ -20,62 +23,68 @@ namespace sdpa_kernel_provider
 // HIPDNN_REGISTER_ENGINE(SDPA_KERNEL_ENGINE, "SDPA_KERNEL_ENGINE")
 // ============================================================================
 
-const std::vector<SdpaKernelContainer::EngineDefinition>&
-    SdpaKernelContainer::getEngineDefinitions()
-{
-    static const std::vector<EngineDefinition> s_engineDefinitions = {
-        // ====================================================================
-        // Engines will be added here as plan builders are implemented
-        // ====================================================================
-        // Example:
-        // {SDPA_KERNEL_ENGINE_ID, []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<
-        //     SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>> {
-        //     auto engine = std::make_unique<SdpaKernelEngine>(SDPA_KERNEL_ENGINE_ID);
-        //     engine->addPlanBuilder(std::make_unique<SomePlanBuilder>());
-        //     return engine;
-        // }}
-        // ====================================================================
-    };
+// Comma separated list of all engine classes
+#define ENGINE_TYPES SdpaKernelEngine
 
-    return s_engineDefinitions;
+namespace detail
+{
+template <class... Ts>
+std::array<int64_t, sizeof...(Ts)> engineIds()
+{
+    return {Ts::staticId()...};
+}
+
+template <class... Ts>
+std::vector<std::unique_ptr<
+    hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>>
+    createEngines()
+{
+}
+}
+
+const auto& engineIds()
+{
+    static auto s_engineIds = detail::engineIds<ENGINE_TYPES>();
+    return s_engineIds;
+}
+
+std::vector<std::unique_ptr<
+    hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>>
+    SdpaKernelContainer::getEngines()
+{
+    return {std::unique_ptr<SdpaKernelEngine>(
+        new SdpaKernelEngine({std::make_unique<SdpaKernelPlanBuilder>()}))};
 }
 
 uint32_t SdpaKernelContainer::copyEngineIds(int64_t* engineIds,
                                             uint32_t maxEngines,
                                             uint32_t& numEngines)
 {
-    const auto& engineDefinitions = getEngineDefinitions();
-    auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
+    static std::vector<int64_t> s_allEngineIds = []() {
+        auto idRange = getEngines()
+                       | ranges::views::transform([](const auto& engine) { return engine->id(); });
+        return std::vector<int64_t>(idRange.begin(), idRange.end());
+    }();
 
     if(maxEngines == 0)
     {
-        numEngines = totalEngines;
-        return totalEngines;
+        numEngines = s_allEnginesIds.size();
+        return numEngines;
     }
 
-    auto enginesToCopy = std::min(maxEngines, totalEngines);
-    for(uint32_t i = 0; i < enginesToCopy; ++i)
-    {
-        engineIds[i] = engineDefinitions[i].id;
-    }
+    numEngines = std::min(maxEngines, s_allEnginesIds.size());
+    std::ranges::copy_n(s_allEnginesIds, numEngines, engineIds);
 
-    numEngines = enginesToCopy;
-
-    return totalEngines;
+    return allEngines.size();
 }
 
 SdpaKernelContainer::SdpaKernelContainer()
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating SdpaKernelContainer");
 
-    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle,
-                                                                       SdpaKernelSettings,
-                                                                       SdpaKernelContext>>();
-
-    for(const auto& engineDefinition : getEngineDefinitions())
-    {
-        _engineManager->addEngine(engineDefinition.createEngine());
-    }
+    _engineManager = std::make_unique<
+        hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>(
+        getEngines());
 }
 
 SdpaKernelContainer::~SdpaKernelContainer()

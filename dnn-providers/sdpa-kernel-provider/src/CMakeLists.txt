@@ -7,6 +7,7 @@ add_library(
     SdpaKernelEngine.cpp
     SdpaKernelHandle.cpp
     SdpaKernelContainer.cpp
+    SdpaKernelPlanBuilder.cpp
     SdpaKernelPluginPublic.cpp
 )
 target_include_directories(sdpa_kernel_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

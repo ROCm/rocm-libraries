@@ -3,32 +3,27 @@
 
 #include "SdpaKernelEngine.hpp"
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <ranges>
 
 namespace sdpa_kernel_provider
 {
 
 int64_t SdpaKernelEngine::id() const
 {
-    return hipdnn_data_sdk::utilities::engineNameToId(engineName());
+    return staticId();
+}
+
+static int64_t staticId()
+{
+    static int64_t s_cachedId = hipdnn_data_sdk::utilities::engineNameToId(engineName());
+    return s_cachedId;
 }
 
 bool SdpaKernelEngine::isApplicable(
-    SdpaKernelHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    SdpaKernelHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto& nodeWrappers = opGraph.nodeWrappers();
-
-    if(nodeWrappers.size() != 1
-       || nodeWrappers.front()->attributesType()
-              != hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes)
-    {
-        return false;
-    }
-
-    // TODO: Add more expansive checks
-    HIPDNN_PLUGIN_LOG_WARN("SdpaKernelEngine::isApplicable not fully implemented");
-
-    return true;
+    return std::ranges::any_of(_planBuilders,
+                               [&](const auto& pb) { return pb->isApplicable(handle, opGraph); });
 }
 
 void SdpaKernelEngine::getDetails(SdpaKernelHandle& /* handle*/,
@@ -39,21 +34,39 @@ void SdpaKernelEngine::getDetails(SdpaKernelHandle& /* handle*/,
 }
 
 size_t SdpaKernelEngine::getMaxWorkspaceSize(
-    const SdpaKernelHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
+    const SdpaKernelHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaKernelEngine::getMaxWorkspaceSize not implemented");
+    for(const auto& pb : _planBuilders)
+    {
+        if(pb->isApplicable(handle, opGraph))
+        {
+            return pb->getMaxWorkspaceSize(handle, opGraph, SdpaKernelSettings(engineConfig));
+        }
+    }
+
+    HIPDNN_PLUGIN_LOG_ERROR("SdpaKernelEngine::getMaxWorkspaceSize: no supporting engine found");
     return 0;
 }
 
 void SdpaKernelEngine::initializeExecutionContext(
-    const SdpaKernelHandle& /*handle*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-    SdpaKernelContext& /*executionContext*/) const
+    const SdpaKernelHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    SdpaKernelContext& executionContext) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaKernelEngine::initializeExecutionContext not implemented");
+    for(const auto& pb : _planBuilders)
+    {
+        if(pb->isApplicable(handle, opGraph))
+        {
+            pb->buildPlan(handle, opGraph, engineConfig, executionContext);
+            return;
+        }
+    }
+
+    HIPDNN_PLUGIN_LOG_ERROR(
+        "SdpaKernelEngine::initializeExecutionContext: no supporting engine found");
 }
 
 }

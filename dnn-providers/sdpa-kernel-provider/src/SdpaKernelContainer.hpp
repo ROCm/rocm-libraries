@@ -37,15 +37,9 @@ public:
         getEngineManager();
 
 private:
-    struct EngineDefinition
-    {
-        int64_t id;
-        std::function<std::unique_ptr<
-            hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>()>
-            createEngine;
-    };
-
-    static const std::vector<EngineDefinition>& getEngineDefinitions();
+    static std::vector<std::unique_ptr<
+        hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>>
+        getEngines();
 
     std::unique_ptr<
         hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>

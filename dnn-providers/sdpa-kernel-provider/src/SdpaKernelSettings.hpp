@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+
 /**
  * @brief SDPA kernel provider plugin-specific execution settings.
  *
@@ -11,4 +13,8 @@
  */
 struct SdpaKernelSettings
 {
+    SdpaKernelSettings(const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/)
+    {
+    }
+    SdpaKernelSettings() = default;
 };

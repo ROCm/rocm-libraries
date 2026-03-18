@@ -22,6 +22,7 @@ add_executable(
     TestSdpaKernelContext.cpp
     TestSdpaKernelEngine.cpp
     TestSdpaKernelHandle.cpp
+    TestSdpaKernelPlanBuilder.cpp
     TestSdpaKernelPluginApi.cpp
 )
 
