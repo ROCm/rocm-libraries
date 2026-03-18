@@ -2042,8 +2042,8 @@ namespace
         // push 2 activation arguments
         std::visit(
             [&inputs, &prob](auto val) {
-                inputs.activationArgs.push_back(prob.act0);
-                inputs.activationArgs.push_back(prob.act1);
+                inputs.activationArgs.push_back(static_cast<decltype(val)>(prob.act0));
+                inputs.activationArgs.push_back(static_cast<decltype(val)>(prob.act1));
                 if(prob.k)
                     inputs.alpha = *(decltype(val)*)(prob.alpha);
                 else
