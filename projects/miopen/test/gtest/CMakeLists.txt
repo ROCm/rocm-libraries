@@ -43,7 +43,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # Disable test temporarily due to a Memory Fault Error while Address Sanitizer is enabled.  Needs to be investigated further.
     list(APPEND SKIP_TESTS tensor_fwd_bias_ocl_hip.cpp)
     # Disable tests that leak memory when Address Sanitizer is enabled.  These tests need to be investigated and fixed.
-    list(APPEND SKIP_TEST
+    list(APPEND SKIP_TESTS
         fusion_test.cpp
         graphapi_enginecfg.cpp
         graphapi_engineheur.cpp
