@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -153,8 +130,11 @@ namespace rocRoller
              *
              * @param size How many elements make up the User dimension.
              * @param offset Location of data within the scratch space
+             * @param argName Name of the argument for this scratch space
              */
-            User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset);
+            User(Expression::ExpressionPtr size,
+                 Expression::ExpressionPtr offset,
+                 std::string const&        argName);
 
             std::string name() const override;
         };
@@ -263,12 +243,8 @@ namespace rocRoller
         struct LDS : public BaseDimension
         {
             static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
-
-            bool isDirect2LDS = false;
-
-            LDS();
-            explicit LDS(bool const isDirect2LDS);
 
             std::string name() const override;
         };
@@ -358,6 +334,11 @@ namespace rocRoller
             std::vector<int> miTileSizes;
 
             /**
+             * Size of swizzle tile.
+             */
+            std::vector<int> swizzleTileSizes;
+
+            /**
              * Number of bytes padding each dimension.
              *
              * For example, a MxN Macrotile padded with [[x y]] requires
@@ -394,9 +375,10 @@ namespace rocRoller
              */
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
-                      std::vector<int> const& subTileSizes = {},
-                      MemoryType const        memoryType   = MemoryType::WAVE,
-                      std::vector<int> const& miTileSizes  = {});
+                      std::vector<int> const& subTileSizes     = {},
+                      MemoryType const        memoryType       = MemoryType::WAVE,
+                      std::vector<int> const& miTileSizes      = {},
+                      std::vector<int> const& swizzleTileSizes = {64, 64, 4, 1});
 
             /**
              * Construct MacroTile dimension that is padded.

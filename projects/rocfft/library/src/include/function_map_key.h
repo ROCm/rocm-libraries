@@ -289,10 +289,12 @@ struct FMKeyBase
 {
     FMKeyBase(std::array<size_t, 3> lengths,
               rocfft_precision      precision,
-              ComputeScheme         scheme = CS_NONE)
+              ComputeScheme         scheme        = CS_NONE,
+              std::string           gcn_arch_name = get_curr_gcn_arch_name())
         : lengths(lengths)
         , precision(precision)
         , scheme(scheme)
+        , gcn_arch_name(gcn_arch_name)
     {
     }
 
@@ -310,11 +312,12 @@ struct FMKeyBase
 
     rocfft_precision precision;
     ComputeScheme    scheme;
+    std::string      gcn_arch_name;
 };
 
-// length, precision, scheme are theose fundemantal information of a kernel;
-// SBRC_TRANS is also neccessary for SBRC or SBRC_3D, but for non-SBRC, it is just NONE
-// And the newly added KernerlConfig is the key to supporting the "multi-configurations".
+// length, precision, scheme are those fundamental information of a kernel;
+// SBRC_TRANS is also necessary for SBRC or SBRC_3D, but for non-SBRC, it is just NONE
+// And the newly added KernelConfig is the key to supporting the "multi-configurations".
 // KernelConfig denotes what parameters we can alter to "generate and tune" a kernel
 //
 // NB:
@@ -340,8 +343,9 @@ struct FMKey : public FMKeyBase
           rocfft_precision    precision,
           ComputeScheme       scheme        = CS_KERNEL_STOCKHAM,
           SBRC_TRANSPOSE_TYPE transpose     = NONE,
-          KernelConfig        kernel_config = KernelConfig::EmptyConfig())
-        : FMKeyBase({length0, 0, 0}, precision, scheme)
+          KernelConfig        kernel_config = KernelConfig::EmptyConfig(),
+          std::string         gcn_arch_name = get_curr_gcn_arch_name())
+        : FMKeyBase({length0, 0, 0}, precision, scheme, gcn_arch_name)
         , sbrcTrans(transpose)
         , kernel_config(kernel_config)
 
@@ -354,8 +358,9 @@ struct FMKey : public FMKeyBase
           rocfft_precision    precision,
           ComputeScheme       scheme        = CS_KERNEL_2D_SINGLE,
           SBRC_TRANSPOSE_TYPE transpose     = NONE,
-          KernelConfig        kernel_config = KernelConfig::EmptyConfig())
-        : FMKeyBase({length0, length1, 0}, precision, scheme)
+          KernelConfig        kernel_config = KernelConfig::EmptyConfig(),
+          std::string         gcn_arch_name = get_curr_gcn_arch_name())
+        : FMKeyBase({length0, length1, 0}, precision, scheme, gcn_arch_name)
         , sbrcTrans(transpose)
         , kernel_config(kernel_config)
     {
@@ -365,9 +370,13 @@ struct FMKey : public FMKeyBase
 
     bool operator==(const FMKey& rhs) const
     {
-        return std::tie(lengths, precision, scheme, sbrcTrans, kernel_config)
-               == std::tie(
-                   rhs.lengths, rhs.precision, rhs.scheme, rhs.sbrcTrans, rhs.kernel_config);
+        return std::tie(lengths, precision, scheme, sbrcTrans, kernel_config, gcn_arch_name)
+               == std::tie(rhs.lengths,
+                           rhs.precision,
+                           rhs.scheme,
+                           rhs.sbrcTrans,
+                           rhs.kernel_config,
+                           rhs.gcn_arch_name);
     }
 
     bool operator!=(const FMKey& rhs) const
@@ -377,8 +386,13 @@ struct FMKey : public FMKeyBase
 
     bool operator<(const FMKey& rhs) const
     {
-        return std::tie(lengths, precision, scheme, sbrcTrans, kernel_config)
-               < std::tie(rhs.lengths, rhs.precision, rhs.scheme, rhs.sbrcTrans, rhs.kernel_config);
+        return std::tie(lengths, precision, scheme, sbrcTrans, kernel_config, gcn_arch_name)
+               < std::tie(rhs.lengths,
+                          rhs.precision,
+                          rhs.scheme,
+                          rhs.sbrcTrans,
+                          rhs.kernel_config,
+                          rhs.gcn_arch_name);
     }
 
     static FMKey EmptyFMKey()
@@ -388,7 +402,7 @@ struct FMKey : public FMKeyBase
     }
 };
 
-static std::vector<FMKey> EmptyFMKeyVec = {};
+extern std::vector<FMKey> EmptyFMKeyVec;
 
 // add an alternative kernel with different kernel config from base FMKey
 static FMKey get_alternative_FMKey(const FMKey& base_FMKey, const KernelConfig& alt_config)
@@ -434,7 +448,8 @@ struct ToString<FMKey>
         str += FieldDescriptor<std::string>().describe("sbrc_trans",
                                                        PrintSBRCTransposeType(value.sbrcTrans))
                + ",";
-        str += FieldDescriptor<KernelConfig>().describe("kernelConfig", value.kernel_config);
+        str += FieldDescriptor<KernelConfig>().describe("kernelConfig", value.kernel_config) + ",";
+        str += FieldDescriptor<std::string>().describe("gcn_arch_name", value.gcn_arch_name);
         str += "}";
         return str;
     }
@@ -448,18 +463,21 @@ struct FromString<FMKey>
         std::vector<size_t> len;
         std::string         precStr, schemeStr, sbrcTransStr;
         KernelConfig        config;
+        std::string         gcn_arch_name;
 
         VectorFieldParser<size_t>().parse("lengths", len, current);
         FieldParser<std::string>().parse("precision", precStr, current);
         FieldParser<std::string>().parse("scheme", schemeStr, current);
         FieldParser<std::string>().parse("sbrc_trans", sbrcTransStr, current);
         FieldParser<KernelConfig>().parse("kernelConfig", config, current);
+        FieldParser<std::string>().parse("gcn_arch_name", gcn_arch_name, current);
 
         ret.lengths       = {len[0], len[1]};
         ret.precision     = StrToPrecision(precStr);
         ret.scheme        = StrToComputeScheme(schemeStr);
         ret.sbrcTrans     = StrToSBRCTransType(sbrcTransStr);
         ret.kernel_config = config;
+        ret.gcn_arch_name = gcn_arch_name;
     }
 };
 
@@ -475,6 +493,7 @@ struct SimpleHash
         h ^= std::hash<ComputeScheme>{}(p.scheme);
         h ^= std::hash<SBRC_TRANSPOSE_TYPE>{}(p.sbrcTrans);
         h ^= std::hash<KernelConfig>{}(p.kernel_config);
+        h ^= std::hash<std::string>{}(p.gcn_arch_name);
 
         return h;
     }
@@ -503,8 +522,9 @@ struct PPFMKey : public FMKeyBase
             rocfft_precision precision,
             ComputeScheme    scheme          = CS_3D_PP,
             KernelConfig     kernel_config_1 = KernelConfig::EmptyConfig(),
-            KernelConfig     kernel_config_2 = KernelConfig::EmptyConfig())
-        : FMKeyBase({length0, length1, length2}, precision, scheme)
+            KernelConfig     kernel_config_2 = KernelConfig::EmptyConfig(),
+            std::string      gcn_arch_name   = get_curr_gcn_arch_name())
+        : FMKeyBase({length0, length1, length2}, precision, scheme, gcn_arch_name)
         , kernel_config_1(kernel_config_1)
         , kernel_config_2(kernel_config_2)
     {
@@ -514,12 +534,13 @@ struct PPFMKey : public FMKeyBase
 
     bool operator==(const PPFMKey& rhs) const
     {
-        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2)
+        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2, gcn_arch_name)
                == std::tie(rhs.lengths,
                            rhs.precision,
                            rhs.scheme,
                            rhs.kernel_config_1,
-                           rhs.kernel_config_2);
+                           rhs.kernel_config_2,
+                           rhs.gcn_arch_name);
     }
 
     bool operator!=(const PPFMKey& rhs) const
@@ -529,12 +550,13 @@ struct PPFMKey : public FMKeyBase
 
     bool operator<(const PPFMKey& rhs) const
     {
-        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2)
+        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2, gcn_arch_name)
                < std::tie(rhs.lengths,
                           rhs.precision,
                           rhs.scheme,
                           rhs.kernel_config_1,
-                          rhs.kernel_config_2);
+                          rhs.kernel_config_2,
+                          rhs.gcn_arch_name);
     }
 
     static PPFMKey EmptyPPFMKey()
@@ -562,6 +584,7 @@ struct SimpleHashPP
         h ^= std::hash<ComputeScheme>{}(p.scheme);
         h ^= std::hash<KernelConfig>{}(p.kernel_config_1);
         h ^= std::hash<KernelConfig>{}(p.kernel_config_2);
+        h ^= std::hash<std::string>{}(p.gcn_arch_name);
 
         return h;
     }

@@ -28,13 +28,15 @@
 
 #include "device_properties.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/sysinfo.h>
 #endif
 
 static constexpr size_t ONE_GiB = 1 << 30;
+static constexpr size_t ONE_MiB = 1 << 20;
+static constexpr size_t ONE_KiB = 1 << 10;
 
 inline size_t bytes_to_GiB(const size_t bytes)
 {
@@ -116,7 +118,7 @@ private:
     void update()
     {
         std::unique_lock lock(host_memory_mutex);
-#ifdef WIN32
+#ifdef _WIN32
         MEMORYSTATUSEX info;
         info.dwLength = sizeof(info);
         if(!GlobalMemoryStatusEx(&info))
@@ -169,11 +171,10 @@ private:
             // for "host" things.
             if(deviceProp.integrated)
             {
-                total_bytes -= deviceProp.totalGlobalMem;
-                if(free_bytes < deviceProp.totalGlobalMem)
-                    free_bytes = 0;
-                else
-                    free_bytes -= deviceProp.totalGlobalMem;
+                const auto dedicated_for_device_allocs
+                    = std::min(deviceProp.totalGlobalMem, std::min(free_bytes, total_bytes) / 2);
+                total_bytes -= dedicated_for_device_allocs;
+                free_bytes -= dedicated_for_device_allocs;
             }
         }
         catch(std::runtime_error&)

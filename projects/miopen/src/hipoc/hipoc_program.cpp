@@ -39,10 +39,10 @@
 #include <miopen/write_file.hpp>
 #include <miopen/env.hpp>
 #include <miopen/comgr.hpp>
-#include <boost/optional.hpp>
 
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <sstream>
 
 #if defined(__linux__)
@@ -175,22 +175,22 @@ HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const fs::path&
 }
 
 HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const std::vector<char>& blob)
-    : program(program_name) ///, module(CreateModuleInMem(blob))
+    : program(program_name), binary(blob) // Store the binary data to prevent use-after-free
 {
     const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
         return;
-    module = CreateModuleInMem(blob);
+    module = CreateModuleInMem(binary); // Use stored binary instead of parameter
 }
 
-HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name,
-                                   const std::vector<uint8_t>& blob)
-    : program(program_name) ///, module(CreateModuleInMem(blob))
+HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const std::vector<uint8_t>& blob)
+    : program(program_name),
+      binary(blob.begin(), blob.end()) // Store the binary data to prevent use-after-free
 {
     const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
         return;
-    module = CreateModuleInMem(blob);
+    module = CreateModuleInMem(binary); // Use stored binary instead of parameter
 }
 
 HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name,
@@ -220,7 +220,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
                                              const fs::path& filename)
 {
     dir.emplace(filename.filename().string());
-    hsaco_file = make_object_file_name(dir.get() / filename);
+    hsaco_file = make_object_file_name(dir.value() / filename);
 
     if(filename.extension() == dynamic_library_postfix) // ".so" or ".dll"
     {
@@ -233,7 +233,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
     }
     else if(filename.extension() == ".cpp")
     {
-        hsaco_file = HipBuild(dir.get(), filename, src, params, target);
+        hsaco_file = HipBuild(dir.value(), filename, src, params, target);
     }
 #if MIOPEN_USE_MLIR
     else if(filename.extension() == ".mlir")
@@ -248,7 +248,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
         params += " " + GetCodeObjectVersionOption();
         if(env::enabled(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP))
             params += " -mwavefrontsize64 -mcumode";
-        WriteFile(src, dir.get() / filename);
+        WriteFile(src, dir.value() / filename);
         params += " -target amdgcn-amd-amdhsa -x cl -D__AMD__=1  -O3";
         params += " -cl-kernel-arg-info -cl-denorms-are-zero";
         params += " -cl-std=CL2.0 -mllvm -amdgpu-early-inline-all";
@@ -391,7 +391,7 @@ void HIPOCProgram::AttachBinary(std::vector<char> binary) { impl->binary = std::
 void HIPOCProgram::AttachBinary(fs::path binary)
 {
     if(impl->hsaco_file != binary)
-        impl->dir = boost::none;
+        impl->dir.reset();
     impl->hsaco_file = std::move(binary);
 }
 

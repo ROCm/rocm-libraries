@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Load kernel graph from the meta data of an assembly file and render it.
 
@@ -37,15 +15,15 @@ open it (via xdg-open), pass '-x'.
 """
 
 import argparse
-import pathlib
 import re
 import subprocess
+from pathlib import Path
 
 import yaml
 from dot_diff import diff_dots
 
 
-def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
+def extract_normalised_asm(path: Path, keep_trailing_comments: bool = False):
     """Extract normalized ASM from assembly file."""
     source = path.read_text()
 
@@ -53,10 +31,15 @@ def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
 
     asm = []
     for line in source.splitlines():
-        double_slash = line.find("//")
-        if double_slash != -1:
-            line = line[:double_slash]
-        line = line.rstrip()
+        if keep_trailing_comments:
+            line = line.strip()
+            if line.startswith("//"):
+                continue
+        else:
+            double_slash = line.find("//")
+            if double_slash != -1:
+                line = line[:double_slash]
+            line = line.rstrip()
         if "kernel_graph_dot" in line:
             continue
         if ".amdgpu_metadata" in line:
@@ -69,7 +52,7 @@ def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
     return "\n".join(asm)
 
 
-def extract_asm_dot(path: pathlib.Path):
+def extract_asm_dot(path: Path):
     """Extract .kernel_graph meta data from assembly file."""
     source = path.read_text()
     beginMatch = re.search(r"^---$", source, re.MULTILINE)
@@ -93,7 +76,7 @@ def extract_asm_dot(path: pathlib.Path):
     return try_get(".name"), try_get(".kernel_graph_dot"), try_get(".kernel_graph")
 
 
-def extract_log_dots(path: pathlib.Path):
+def extract_log_dots(path: Path):
     source = path.read_text()
     source_clean = ""
     prev_end = 0
@@ -111,14 +94,14 @@ def extract_log_dots(path: pathlib.Path):
     return dots, source_clean
 
 
-def write_dot(dot: str, fname: pathlib.Path):
+def write_dot(dot: str, fname: Path):
     out_fname = fname.with_suffix(".dot")
     out_fname.write_text(dot)
     print(f"Wrote {out_fname}")
     return out_fname
 
 
-def render_dot(fname: pathlib.Path, dot: str):
+def render_dot(fname: Path, dot: str):
     """Render graph."""
     with fname.open("w") as out:
         subprocess.run(["dot", "-Tpdf"], input=dot.encode(), stdout=out)
@@ -135,7 +118,7 @@ def open_code(fname):
 
 def process_dot(
     dot: str,
-    out_path: pathlib.Path,
+    out_path: Path,
     code_open: bool,
     dot_only: bool,
     xdg_open: bool,
@@ -150,15 +133,15 @@ def process_dot(
             open_dot(rendered_fname)
 
 
-def process_serialized_graph(graph: dict, out_path: pathlib.Path):
+def process_serialized_graph(graph: dict, out_path: Path):
     with out_path.with_suffix(".yaml").open("w") as f:
         yaml.dump(graph, f, default_flow_style=None, Dumper=yaml.CSafeDumper)
         print(f"Wrote {f.name}")
 
 
-def process_asm(path: pathlib.Path):
-    asm = pathlib.Path(path.stem + "_normalized.s")
-    asm.write_text(extract_normalised_asm(path))
+def process_normalized_asm(path: Path, keep_trailing_comments: bool = True):
+    asm = Path(path.stem + "_normalized.s")
+    asm.write_text(extract_normalised_asm(path, keep_trailing_comments))
     print(f"Wrote {asm}")
 
 
@@ -187,6 +170,13 @@ if __name__ == "__main__":
         help="Output file base name",
     )
     parser.add_argument(
+        "-k",
+        "--keep-trailing",
+        default=False,
+        action="store_true",
+        help="Keep trailing comments in normalized assembly file.",
+    )
+    parser.add_argument(
         "--omit_diff",
         default=False,
         action="store_true",
@@ -194,11 +184,11 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    path = pathlib.Path(args.fname)
+    path = Path(args.fname)
 
     foutput = path
     if args.output is not None:
-        foutput = pathlib.Path(args.output)
+        foutput = Path(args.output)
 
     if path.suffix == ".s":
         _, dot, graph = extract_asm_dot(path)
@@ -212,19 +202,19 @@ if __name__ == "__main__":
         if graph is not None and not args.dot_only:
             process_serialized_graph(graph, foutput)
 
-        process_asm(path)
+        process_normalized_asm(path, args.keep_trailing)
 
     elif path.suffix == ".log":
         dots, source_clean = extract_log_dots(path)
 
-        foutput_clean = pathlib.Path(str(foutput) + "_clean.log")
+        foutput_clean = Path(str(foutput) + "_clean.log")
         foutput_clean.write_text(source_clean)
 
         if not args.omit_diff:
             dots = diff_dots(dots)
         for i, dot in enumerate(dots):
             serial_str = f"_{i:04d}"
-            foutput_serial = pathlib.Path(str(foutput) + serial_str)
+            foutput_serial = Path(str(foutput) + serial_str)
             process_dot(
                 dot,
                 foutput_serial,

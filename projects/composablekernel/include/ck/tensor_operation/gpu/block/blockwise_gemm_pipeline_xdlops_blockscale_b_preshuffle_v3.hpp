@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -152,6 +152,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
     using Base::MakeCGridDescriptor_G_M0_N0_M1_N1_M2_M3_M4_N2;
     using Base::MakeCGridDescriptor_M0_N0_M1_N1_M2_M3_M4_N2;
     using Base::MWaves;
+    using Base::WaveSize;
 
     static constexpr index_t PrefetchStages        = 2;
     static constexpr index_t LocalPrefetchStages   = 2;
@@ -166,7 +167,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
         constexpr index_t M1 = TileDesc_M0_M1_M2_K{}.GetLength(Number<1>{});
         constexpr index_t M2 = TileDesc_M0_M1_M2_K{}.GetLength(Number<2>{});
         constexpr index_t K2 = KPack / KGroup;
-        constexpr index_t K1 = 64 / NPerXDL;
+        constexpr index_t K1 = WaveSize / NPerXDL;
         constexpr index_t K0 = KRepeat * KGroup;
 
         return transform_tensor_descriptor(
@@ -703,10 +704,12 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
                             });
                         });
 
-                        // We have to 1 stage early sync the lds for workaround the compiler
-                        // limitation
-                        if constexpr(m0.value == (MRepeat - LocalPrefetchStages - 1))
+                        // Compiler issue. Previously the sync was done one stage earlier to fix it.
+                        // Problem shows up again with latest compiler so we sync at the correct
+                        // iteration and then we force the instructions before the sync
+                        if constexpr(m0.value == (MRepeat - LocalPrefetchStages))
                         {
+                            __builtin_amdgcn_sched_barrier(0); // force all instructions before this
                             block_sync_lds();
                         }
 
@@ -832,6 +835,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
 
                 if constexpr(m0.value == (MRepeat - LocalPrefetchStages))
                 {
+                    __builtin_amdgcn_sched_barrier(0); // force all instructions before this
                     block_sync_lds();
                 }
 

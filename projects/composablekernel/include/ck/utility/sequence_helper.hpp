@@ -1,8 +1,9 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
+#include "ck/utility/functional4.hpp"
 #include "ck/utility/tuple.hpp"
 
 namespace ck {
@@ -32,6 +33,23 @@ template <index_t... Is>
 __host__ __device__ constexpr auto to_sequence(Tuple<Number<Is>...>)
 {
     return Sequence<Is...>{};
+}
+
+// Functor wrapper for merge_sequences to enable reuse across call sites
+struct merge_sequences_functor
+{
+    template <typename... Seqs>
+    __host__ __device__ constexpr auto operator()(Seqs... seqs) const
+    {
+        return merge_sequences(seqs...);
+    }
+};
+
+// Unpacks tuple of sequences and merges them into a single sequence
+template <typename TupleOfSequences>
+__host__ __device__ constexpr auto unpack_and_merge_sequences(TupleOfSequences tuple_of_sequences)
+{
+    return unpack(merge_sequences_functor{}, tuple_of_sequences);
 }
 
 } // namespace ck

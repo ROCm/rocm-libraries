@@ -40,608 +40,523 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<unsigned int arch, class data_type, class enable = void>
-struct default_select_predicate_config : default_partition_config_base<data_type, false>::type
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<512, 4>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<512, 6>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<256, 30>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<256, 4>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<512, 4>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<512, 8>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<256, 30>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<512, 24>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<384, 6>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<128, 14>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<192, 22>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<512, 4>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<384, 6>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<128, 14>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<128, 30>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<256, 28>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<256, 4>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<384, 7>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<384, 18>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<256, 4>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<384, 7>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<384, 18>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<384, 28>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<256, 7>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<256, 15>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<256, 24>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<256, 3>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<256, 7>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<192, 15>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<256, 26>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<256, 24>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<128, 7>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<256, 15>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<256, 24>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<256, 3>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<128, 7>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<256, 14>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<256, 26>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<256, 24>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<128, 6>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<512, 10>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<256, 20>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<256, 3>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<512, 5>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<512, 10>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<256, 20>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<256, 24>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<128, 7>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<256, 15>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<256, 24>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<256, 3>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<128, 7>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<256, 14>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<256, 26>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<256, 24>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : select_config<512, 7>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : select_config<512, 15>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2))>> : select_config<512, 30>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : select_config<384, 4>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : select_config<512, 7>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : select_config<512, 15>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : select_config<512, 30>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_select_predicate_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 1))>> : select_config<512, 24>
-{};
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 6}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {256, 30}
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 30}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {128, 14}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {192, 22}
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {128, 14}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 30}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 28}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 7}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {384, 18}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 7}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 18}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 28}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 7}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 15}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 3}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 7}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 15}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 26}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 7}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 15}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 3}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 7}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 26}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 6}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 10}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {256, 20}
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 3}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 5}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 10}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 20}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return partition_config_params{
+            {512, 30}
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 30}
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto select_predicate_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    return select_predicate_config_picker<
+        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+        data_type>();
+}
+
+// All the existing configs should be auto generated
+using select_predicate_targets
+    = comp_targets<comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>,
+                   comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 

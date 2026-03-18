@@ -2,12 +2,13 @@
   "version": 3,
   "configurePresets": [
     {
-      "name": "opt-rocm",
-      "displayName": "/opt/rocm Config",
-      "description": "Sets compiler and prefix path for /opt/rocm install",
+      "name": "default:release",
+      "displayName": "Configure release build with installation to /opt/rocm",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
         "CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm",
+        "CMAKE_INSTALL_PREFIX": "/opt/rocm",
         "CMAKE_BUILD_TYPE": "Release",
         "ROCROLLER_ENABLE_FETCH": "ON"
       }
@@ -16,7 +17,7 @@
       "name": "asan",
       "displayName": "Address Sanitizer",
       "description": "Build with asan",
-      "inherits": "opt-rocm",
+      "inherits": "default:release",
       "cacheVariables": {
         "ROCROLLER_ENABLE_ASAN": "ON"
       }
@@ -25,7 +26,7 @@
       "name": "precheckin",
       "displayName": "Precheckin Config",
       "description": "Config used in precheckin build",
-      "inherits": "opt-rocm",
+      "inherits": "default:release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ROCROLLER_ENABLE_YAML_CPP": "OFF",
@@ -36,7 +37,7 @@
       "name": "amd-mrisa",
       "displayName": "AMD MR ISAs",
       "description": "Do not use pregenerated arch defs",
-      "inherits": "opt-rocm",
+      "inherits": "default:release",
       "cacheVariables": {
         "ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF": "OFF"
       }
@@ -45,18 +46,17 @@
       "name": "coverage",
       "displayName": "Coverage",
       "description": "Build with coverage",
-      "inherits": "opt-rocm",
+      "inherits": "default:release",
       "cacheVariables": {
         "ROCROLLER_BUILD_SHARED_LIBS": "OFF",
-        "ROCROLLER_ENABLE_COVERAGE": "ON",
-        "ROCROLLER_ENABLE_LLD": "ON"
+        "ROCROLLER_ENABLE_COVERAGE": "ON"
       }
     },
     {
       "name": "docs",
       "displayName": "Documentation",
       "description": "Build documentation",
-      "inherits": "opt-rocm",
+      "inherits": "default:release",
       "cacheVariables": {
         "ROCROLLER_ENABLE_DOCS": "ON"
       }
@@ -65,7 +65,7 @@
       "name": "codeql",
       "displayName": "Codeql",
       "description": "Configure for codeql build",
-      "inherits": "opt-rocm",
+      "inherits": "default:release",
       "cacheVariables": {
         "ROCROLLER_ENABLE_TEST_DISCOVERY": "OFF"
       }

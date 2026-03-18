@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,16 +25,11 @@
 #include "rocsparse_internal_spmat_print.hpp"
 #include "rocsparse_convert_array.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_float16.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
-    inline std::ostream& operator<<(std::ostream& out, const _Float16& x)
-    {
-        out << (float)x;
-        return out;
-    }
-
     template <typename T>
     static rocsparse_status internal_dnvec_print(std::ostream& out, int64_t nmemb, const void* h)
     {
@@ -293,6 +288,44 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmat_get_format(descr, &format));
     switch(format)
     {
+    case rocsparse_format_sell:
+    {
+        int64_t              m;
+        int64_t              n;
+        int64_t              nnz;
+        int64_t              sell_slice_size;
+        int64_t              sell_colval_size;
+        const void*          ptr;
+        const void*          ind;
+        const void*          val;
+        rocsparse_indextype  ptr_type;
+        rocsparse_indextype  ind_type;
+        rocsparse_index_base base;
+        rocsparse_datatype   val_type;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_const_sell_get(descr,
+                                                           &m,
+                                                           &n,
+                                                           &nnz,
+                                                           &sell_slice_size,
+                                                           &sell_colval_size,
+                                                           &ptr,
+                                                           &ind,
+                                                           &val,
+                                                           &ptr_type,
+                                                           &ind_type,
+                                                           &base,
+                                                           &val_type));
+        out << "- format           : " << rocsparse::enum_utils::to_string(format) << std::endl;
+        out << "- m                : " << m << std::endl;
+        out << "- n                : " << n << std::endl;
+        out << "- nnz              : " << nnz << std::endl;
+        out << "- sell_slice_size  : " << sell_slice_size << std::endl;
+        out << "- sell_colval_size : " << sell_colval_size << std::endl;
+        out << "- ptr_type  : " << rocsparse::enum_utils::to_string(ptr_type) << std::endl;
+        out << "- ind_type  : " << rocsparse::enum_utils::to_string(ind_type) << std::endl;
+        out << "- data_type : " << rocsparse::enum_utils::to_string(val_type) << std::endl;
+        break;
+    }
     case rocsparse_format_bell:
     {
         int64_t              m;
@@ -328,7 +361,6 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
         break;
     }
     case rocsparse_format_ell:
-
     {
         int64_t              m;
         int64_t              n;

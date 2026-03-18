@@ -1,38 +1,15 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2019-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
-
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 from __future__ import print_function
+
+import argparse
 import grp
 import os
 import subprocess
-import argparse
 from pathlib import Path
-import sys
 
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
@@ -186,10 +163,25 @@ def parseArgs():
     return parser.parse_args()
 
 
+def buildx_available():
+    try:
+        subprocess.run(
+            ["docker", "buildx", "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def buildImage(dockerfile, name, context="./", *args):
-    printAndRun(
-        ["docker", "build", "-t", name, "-f", dockerfile] + list(args) + [context]
-    )
+    build_command = ["docker", "build"]
+    if buildx_available():
+        build_command = ["docker", "buildx", "build"]
+
+    printAndRun(build_command + ["-t", name, "-f", dockerfile] + list(args) + [context])
 
 
 def get_render_group():

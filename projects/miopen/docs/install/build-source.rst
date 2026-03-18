@@ -151,7 +151,7 @@ You can build the library from the ``build`` directory using the ``Release`` con
 .. code:: shell
 
    cmake --build . --config Release
-   
+
 or
 
 .. code:: shell
@@ -183,7 +183,7 @@ To build the driver, use the ``MIOpenDriver`` target:
 .. code:: shell
 
    cmake --build . --config Release --target MIOpenDriver
-   
+
 or
 
 .. code:: shell
@@ -198,7 +198,7 @@ To run tests, use the ``check`` target:
 .. code:: shell
 
    cmake --build . --config Release --target check
-   
+
 or
 
 .. code:: shell
@@ -230,60 +230,35 @@ To format the code per commit, install githooks:
 Storing large file using Git Large File Storage
 =========================================================
 
-Git Large File Storage (LFS) replaces large files, such as audio samples, videos, datasets, and graphics
-with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses Git
-LFS to store large files, such as kernel database files (``*.kdb``), which are normally > 0.5 GB.
+`Data Versioning System (DVS) <https://dvc.org/>`_ replaces large files, such as audio samples, videos, datasets, and 
+graphics with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses DVC to 
+store large files, such as kernel database files (``*.kdb``), which are normally > 0.5 GB.
 
-To install Git LFS, use these commands:
+To install DVC, use the `instructions provided for your platform here <https://dvc.org/doc/install>`_.
 
-.. code:: shell
-
-   sudo apt install git-lfs
-   git lfs install
-
-In the Git repository where you want to use Git LFS, track the file type using the following code. If the
-file type is already being tracked, you can skip this step:
+You can `pull <https://dvc.org/doc/command-reference/pull>`_ all large files or a single large file using:
 
 .. code:: shell
 
-   git lfs track "*.file_type"
-   git add .gitattributes
+   dvc pull
 
-To pull all files or a single large file, use:
-
-.. code:: shell
-
-   git lfs pull --exclude=
- 
 or
 
 .. code:: shell
 
-   git lfs pull --exclude= --include "filename"
+   dvc pull "filename"
 
-Update the large files and push to GitHub using the following sequence of commands:
 
-.. code:: shell
-
-   git add my_large_files
-   git commit -m "the message"
-   git push
+If you are familiar with using Git LFS, a key difference with DVC is that you must manually run ``dvc pull`` after you 
+switch branches or merge changes in Git to ensure any large binaries are kept in sync with your checkout.
 
 Installing the dependencies manually
 ===============================================================
 
-If you're using Ubuntu v16, you can install the ``Boost`` packages using:
+If you're using Ubuntu, you can install the ``BZip2`` packages using:
 
 .. code:: shell
 
-   sudo apt-get install libboost-dev
-   sudo apt-get install libboost-system-dev
-   sudo apt-get install libboost-filesystem-dev
-
-.. note::
-
-   By default, MIOpen attempts to build with Boost statically linked libraries. To build
-   with dynamically linked Boost libraries, use the ``-DBoost_USE_STATIC_LIBS=Off`` flag during the
-   configuration stage. However, this is not recommended.
+   sudo apt-get install libbz2-dev
 
 You must install the ``half`` header from the `half website <http://half.sourceforge.net/>`_.

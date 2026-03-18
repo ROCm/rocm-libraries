@@ -199,66 +199,7 @@ rocsparse_status rocsparse_csrgeam_nnz(rocsparse_handle          handle,
 *
 *  \par Example
 *  This example adds two CSR matrices.
-*  \code{.c}
-*  // Initialize scalar multipliers
-*  float alpha = 1.0f;
-*  float beta  = 1.0f;
-*
-*  // Create matrix descriptors
-*  rocsparse_mat_descr descr_A;
-*  rocsparse_mat_descr descr_B;
-*  rocsparse_mat_descr descr_C;
-*
-*  rocsparse_create_mat_descr(&descr_A);
-*  rocsparse_create_mat_descr(&descr_B);
-*  rocsparse_create_mat_descr(&descr_C);
-*
-*  // Set pointer mode
-*  rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host);
-*
-*  // Obtain number of total non-zero entries in C and row pointers of C
-*  rocsparse_int nnz_C;
-*  hipMalloc((void**)&csr_row_ptr_C, sizeof(rocsparse_int) * (m + 1));
-*
-*  rocsparse_csrgeam_nnz(handle,
-*                        m,
-*                        n,
-*                        descr_A,
-*                        nnz_A,
-*                        csr_row_ptr_A,
-*                        csr_col_ind_A,
-*                        descr_B,
-*                        nnz_B,
-*                        csr_row_ptr_B,
-*                        csr_col_ind_B,
-*                        descr_C,
-*                        csr_row_ptr_C,
-*                        &nnz_C);
-*
-*  // Compute column indices and values of C
-*  hipMalloc((void**)&csr_col_ind_C, sizeof(rocsparse_int) * nnz_C);
-*  hipMalloc((void**)&csr_val_C, sizeof(float) * nnz_C);
-*
-*  rocsparse_scsrgeam(handle,
-*                     m,
-*                     n,
-*                     &alpha,
-*                     descr_A,
-*                     nnz_A,
-*                     csr_val_A,
-*                     csr_row_ptr_A,
-*                     csr_col_ind_A,
-*                     &beta,
-*                     descr_B,
-*                     nnz_B,
-*                     csr_val_B,
-*                     csr_row_ptr_B,
-*                     csr_col_ind_B,
-*                     descr_C,
-*                     csr_val_C,
-*                     csr_row_ptr_C,
-*                     csr_col_ind_C);
-*  \endcode
+*  \snippet example_rocsparse_csrgeam.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

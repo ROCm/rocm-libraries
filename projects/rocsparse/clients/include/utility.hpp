@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
 
+#include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
@@ -193,12 +194,6 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     return static_cast<size_t>(0);
 }
 
-inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
-{
-    os_ << (float)that_;
-    return os_;
-}
-
 /*! \brief  local handle which is automatically created and destroyed  */
 class rocsparse_local_handle
 {
@@ -209,7 +204,7 @@ public:
         : capture_started(false)
         , graph_testing(false)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_handle(&this->handle);
         if(status != rocsparse_status_success)
@@ -221,7 +216,7 @@ public:
         : capture_started(false)
         , graph_testing(arg.graph_test)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_handle(&this->handle);
         if(status != rocsparse_status_success)
@@ -231,7 +226,7 @@ public:
     }
     ~rocsparse_local_handle()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_handle(this->handle);
     }
@@ -248,7 +243,7 @@ public:
 
     void rocsparse_stream_begin_capture()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(!(this->graph_testing))
         {
@@ -271,7 +266,7 @@ public:
 
     void rocsparse_stream_end_capture(rocsparse_int runs = 1)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(!(this->graph_testing))
         {
@@ -323,7 +318,7 @@ class rocsparse_local_mat_descr
 public:
     rocsparse_local_mat_descr()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_mat_descr(&this->descr);
         if(status != rocsparse_status_success)
@@ -334,7 +329,7 @@ public:
 
     ~rocsparse_local_mat_descr()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_mat_descr(this->descr);
     }
@@ -358,7 +353,7 @@ class rocsparse_local_mat_info
 public:
     rocsparse_local_mat_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
         if(status != rocsparse_status_success)
@@ -368,7 +363,7 @@ public:
     }
     ~rocsparse_local_mat_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_mat_info(this->info);
     }
@@ -376,7 +371,7 @@ public:
     // Sometimes useful to reset local info
     void reset()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_mat_info(this->info);
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
@@ -405,7 +400,7 @@ class rocsparse_local_color_info
 public:
     rocsparse_local_color_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
         if(status != rocsparse_status_success)
@@ -415,7 +410,7 @@ public:
     }
     ~rocsparse_local_color_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_color_info(this->info);
     }
@@ -423,7 +418,7 @@ public:
     // Sometimes useful to reset local info
     void reset()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_color_info(this->info);
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
@@ -468,7 +463,7 @@ class rocsparse_local_hyb_mat
 public:
     rocsparse_local_hyb_mat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_hyb_mat(&this->hyb);
         if(status != rocsparse_status_success)
@@ -478,7 +473,7 @@ public:
     }
     ~rocsparse_local_hyb_mat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_hyb_mat(this->hyb);
     }
@@ -508,7 +503,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_spvec_descr(
             &this->descr, size, nnz, indices, values, idx_type, idx_base, compute_type);
@@ -519,7 +514,7 @@ public:
     }
     ~rocsparse_local_spvec()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
         {
@@ -554,7 +549,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_coo_descr(&this->descr,
                                                                    m,
@@ -595,7 +590,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_coo_aos_descr(
             &this->descr, m, n, nnz, coo_ind, coo_val, idx_type, idx_base, compute_type);
@@ -624,7 +619,7 @@ public:
                           rocsparse_datatype   compute_type,
                           bool                 csc_format = false)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(csc_format == false)
         {
@@ -698,7 +693,7 @@ public:
                           rocsparse_datatype   compute_type,
                           rocsparse_format     format)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(format == rocsparse_format_bsr)
         {
@@ -755,7 +750,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_bell_descr(&this->descr,
                                                                     m,
@@ -774,6 +769,76 @@ public:
         }
     }
 
+    template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
+    explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                h.bdir,
+                                h.bdim,
+                                h.width,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                h.base,
+                                get_datatype<T>())
+    {
+    }
+
+    rocsparse_local_spmat(int64_t              m,
+                          int64_t              n,
+                          int64_t              nnz,
+                          int64_t              sell_slice_size,
+                          int64_t              sell_colval_size,
+                          void*                sell_slice_offsets,
+                          void*                sell_col_ind,
+                          void*                sell_val,
+                          rocsparse_indextype  sell_slice_offsets_type,
+                          rocsparse_indextype  sell_col_ind_type,
+                          rocsparse_index_base idx_base,
+                          rocsparse_datatype   compute_type)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+        const rocsparse_status status = rocsparse_create_sell_descr(&this->descr,
+                                                                    m,
+                                                                    n,
+                                                                    nnz,
+                                                                    sell_slice_size,
+                                                                    sell_colval_size,
+                                                                    sell_slice_offsets,
+                                                                    sell_col_ind,
+                                                                    sell_val,
+                                                                    sell_slice_offsets_type,
+                                                                    sell_col_ind_type,
+                                                                    idx_base,
+                                                                    compute_type);
+
+        if(status != rocsparse_status_success)
+        {
+            throw(status);
+        }
+    }
+
+    template <memory_mode::value_t MODE,
+              typename T,
+              typename I = rocsparse_int,
+              typename J = rocsparse_int>
+    explicit rocsparse_local_spmat(sell_matrix<MODE, T, I, J>& h)
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                h.nnz,
+                                h.sell_slice_size,
+                                h.sell_colval_size,
+                                h.ptr,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                get_indextype<J>(),
+                                h.base,
+                                get_datatype<T>())
+    {
+    }
+
     rocsparse_local_spmat(int64_t              m,
                           int64_t              n,
                           void*                ell_col_ind,
@@ -783,7 +848,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_ell_descr(
             &this->descr, m, n, ell_col_ind, ell_val, ell_width, idx_type, idx_base, compute_type);
@@ -799,10 +864,10 @@ public:
             h.m, h.n, h.ind, h.val, h.width, get_indextype<I>(), h.base, get_datatype<T>())
     {
     }
-
+    rocsparse_local_spmat() {}
     ~rocsparse_local_spmat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
             rocsparse_destroy_spmat_descr(this->descr);
@@ -825,9 +890,10 @@ class rocsparse_local_dnvec
     rocsparse_dnvec_descr descr{};
 
 public:
+    rocsparse_local_dnvec(){};
     rocsparse_local_dnvec(int64_t size, void* values, rocsparse_datatype compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status
             = rocsparse_create_dnvec_descr(&this->descr, size, values, compute_type);
@@ -843,9 +909,15 @@ public:
     {
     }
 
+    template <memory_mode::value_t MODE, typename T>
+    explicit rocsparse_local_dnvec(dense_vector<MODE, T>& h)
+        : rocsparse_local_dnvec(h.size(), h.data(), get_datatype<T>())
+    {
+    }
+
     ~rocsparse_local_dnvec()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
             rocsparse_destroy_dnvec_descr(this->descr);
@@ -875,7 +947,7 @@ public:
                           rocsparse_datatype compute_type,
                           rocsparse_order    order)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_dnmat_descr(
             &this->descr, rows, cols, ld, values, compute_type, order);
@@ -893,7 +965,7 @@ public:
 
     ~rocsparse_local_dnmat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
             rocsparse_destroy_dnmat_descr(this->descr);
@@ -920,6 +992,9 @@ double get_time_us(void);
 
 /*! \brief Return path of this executable */
 std::string rocsparse_exepath();
+
+/*! \brief Return path of rocsparse_gentest.py file */
+std::string rocsparse_gentestpath();
 
 /*! \brief Return path where the test data file (rocsparse_test.data) is located */
 std::string rocsparse_datapath();
@@ -1000,48 +1075,5 @@ namespace rocsparse_clients
     }
 
 }
-
-#define ROCSPARSE_CLIENTS_RUN_BENCHMARK(handle, arguments_, gpu_time_used_, func_)                 \
-    if(arguments_.iters_inner == 0)                                                                \
-    {                                                                                              \
-        std::cerr << "error " << __FUNCTION__ << ": arguments_.iters_inner is zero." << std::endl; \
-        CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);                                     \
-    }                                                                                              \
-                                                                                                   \
-    if(arguments_.iters == 0)                                                                      \
-    {                                                                                              \
-        std::cerr << "error " << __FUNCTION__ << ": arguments_.iters is zero." << std::endl;       \
-        CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);                                     \
-    }                                                                                              \
-                                                                                                   \
-    const int32_t n_cold_calls = 2;                                                                \
-    const int32_t n_sub_calls  = arguments_.iters_inner;                                           \
-    const int32_t n_calls      = arguments_.iters;                                                 \
-                                                                                                   \
-    hipStream_t stream;                                                                            \
-    rocsparse_get_stream(handle, &stream);                                                         \
-                                                                                                   \
-    for(int32_t iter = 0; iter < n_cold_calls; ++iter)                                             \
-    {                                                                                              \
-        CHECK_ROCSPARSE_ERROR(func_);                                                              \
-    }                                                                                              \
-                                                                                                   \
-    std::vector<double> gpu_time(n_calls);                                                         \
-                                                                                                   \
-    rocsparse_clients::timer t(stream);                                                            \
-    for(int32_t iter = 0; iter < n_calls; ++iter)                                                  \
-    {                                                                                              \
-        t.start();                                                                                 \
-        for(int32_t iter2 = 0; iter2 < n_sub_calls; ++iter2)                                       \
-        {                                                                                          \
-            std::ignore = func_;                                                                   \
-        }                                                                                          \
-        const double t_microseconds = (t.stop() * 1000);                                           \
-        gpu_time[iter]              = t_microseconds / n_sub_calls;                                \
-    }                                                                                              \
-                                                                                                   \
-    std::sort(gpu_time.begin(), gpu_time.end());                                                   \
-    const int32_t mid = n_calls / 2;                                                               \
-    gpu_time_used_ = (n_calls % 2 == 0) ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
 
 #endif // UTILITY_HPP

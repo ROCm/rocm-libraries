@@ -36,15 +36,27 @@ void testing_spmv_csr(const Arguments& arg)
     testing_spmv_dispatch<rocsparse_format_csr, I, J, A, X, Y, T>::testing_spmv(arg);
 }
 
-#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                              \
-    template void testing_spmv_csr_bad_arg<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>( \
-        const Arguments& arg);                                                        \
-    template void testing_spmv_csr<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>(const Arguments& arg)
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+void testing_spmv_csr_analysis(const Arguments& arg)
+{
+    testing_spmv_dispatch<rocsparse_format_csr, I, J, A, X, Y, T>::testing_spmv_analysis(arg);
+}
 
-#define INSTANTIATE_MIXED(ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE)                   \
-    template void testing_spmv_csr_bad_arg<ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE>( \
-        const Arguments& arg);                                                        \
-    template void testing_spmv_csr<ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg)
+#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                               \
+    template void testing_spmv_csr_bad_arg<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>(  \
+        const Arguments& arg);                                                         \
+    template void testing_spmv_csr<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>(          \
+        const Arguments& arg);                                                         \
+    template void testing_spmv_csr_analysis<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>( \
+        const Arguments& arg)
+
+#define INSTANTIATE_MIXED(ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE)                    \
+    template void testing_spmv_csr_bad_arg<ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE>(  \
+        const Arguments& arg);                                                         \
+    template void testing_spmv_csr<ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE>(          \
+        const Arguments& arg);                                                         \
+    template void testing_spmv_csr_analysis<ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE>( \
+        const Arguments& arg)
 
 INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
@@ -68,9 +80,18 @@ INSTANTIATE_MIXED(int64_t, int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, _Float16, float);
 INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(
+    int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(
+    int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(int32_t, int32_t, float, double, double, double);
 INSTANTIATE_MIXED(int64_t, int32_t, float, double, double, double);
 INSTANTIATE_MIXED(int64_t, int64_t, float, double, double, double);

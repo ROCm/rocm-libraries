@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Scheduling/CooperativeScheduler.hpp>
 #include <rocRoller/Scheduling/Costs/MinNopsCost.hpp>
@@ -31,21 +8,20 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(CooperativeScheduler);
         static_assert(Component::Component<CooperativeScheduler>);
 
-        inline CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)
+        CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)
             : Scheduler{ctx}
         {
             m_cost = Component::Get<Scheduling::Cost>(cmp, m_ctx);
         }
 
-        inline bool CooperativeScheduler::Match(Argument arg)
+        bool CooperativeScheduler::Match(Argument arg)
         {
             return std::get<0>(arg) == SchedulerProcedure::Cooperative;
         }
 
-        inline std::shared_ptr<Scheduler> CooperativeScheduler::Build(Argument arg)
+        std::shared_ptr<Scheduler> CooperativeScheduler::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -53,7 +29,7 @@ namespace rocRoller
             return std::make_shared<CooperativeScheduler>(std::get<2>(arg), std::get<1>(arg));
         }
 
-        inline std::string CooperativeScheduler::name() const
+        std::string CooperativeScheduler::name() const
         {
             return Name;
         }
@@ -63,7 +39,7 @@ namespace rocRoller
             return true;
         }
 
-        inline Generator<Instruction>
+        Generator<Instruction>
             CooperativeScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
             std::vector<Generator<Instruction>::iterator> iterators;
@@ -74,23 +50,29 @@ namespace rocRoller
             size_t numSeqs = 0;
 
             size_t idx = 0;
-            float  currentCost;
 
             while(true)
             {
                 co_yield handleNewNodes(seqs, iterators);
                 numSeqs = seqs.size();
 
+                float currentCost = 0;
+                bool  lockedOut   = false;
+
                 if(iterators[idx] != seqs[idx].end())
                 {
-                    currentCost = (*m_cost)(iterators[idx]);
+                    auto const& inst = *iterators[idx];
+
+                    lockedOut   = !m_lockstate.isSchedulable(inst, idx);
+                    currentCost = (*m_cost)(inst);
                 }
-                if(iterators[idx] == seqs[idx].end() || currentCost > 0)
+
+                if(iterators[idx] == seqs[idx].end() || lockedOut || currentCost > 0)
                 {
                     size_t origIdx    = idx;
                     float  minCost    = std::numeric_limits<float>::max();
                     int    minCostIdx = -1;
-                    if(iterators[idx] != seqs[idx].end())
+                    if(iterators[idx] != seqs[idx].end() && !lockedOut)
                     {
                         minCost    = currentCost;
                         minCostIdx = idx;
@@ -102,8 +84,10 @@ namespace rocRoller
                     {
                         if(iterators[idx] != seqs[idx].end())
                         {
-                            currentCost = (*m_cost)(iterators[idx]);
-                            if(currentCost < minCost)
+                            auto const& inst = *iterators[idx];
+                            lockedOut        = !m_lockstate.isSchedulable(inst, idx);
+                            currentCost      = (*m_cost)(inst);
+                            if(!lockedOut && currentCost < minCost)
                             {
                                 minCost    = currentCost;
                                 minCostIdx = idx;
@@ -121,10 +105,8 @@ namespace rocRoller
 
                     idx = minCostIdx;
                 }
-                co_yield yieldFromStream(iterators[idx]);
+                co_yield yieldFromStream(iterators[idx], idx);
             }
-
-            m_lockstate.isValid(false);
         }
     }
 }

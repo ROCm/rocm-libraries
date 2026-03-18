@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,17 +48,10 @@
 
 namespace test_utils {
 
-#if ROCPRIM_HAS_INT128_SUPPORT
 template<class T>
 using is_int128 = std::is_same<rocprim::int128_t, typename std::remove_cv<T>::type>;
 template<class T>
 using is_uint128 = std::is_same<rocprim::uint128_t, typename std::remove_cv<T>::type>;
-#else
-template<class T>
-using is_int128 = std::false_type;
-template<class T>
-using is_uint128 = std::false_type;
-#endif // ROCPRIM_HAS_INT128_SUPPORT
 
 template<class T>
 using is_double_custom_type = std::is_same<typename std::remove_cv<T>::type, common::custom_type<double,double,1>>;
@@ -143,7 +136,7 @@ void assert_eq(const std::vector<T>& result,
         if(bit_equal(result[i], expected[i]))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
 
-        protected_assert_eq(result[i], expected[i], i);
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i], expected[i], i));
     }
 }
 
@@ -161,7 +154,7 @@ void assert_eq(const std::vector<common::custom_type<T, T, true>>& result,
         if(bit_equal(result[i].x, expected[i].x) && bit_equal(result[i].y, expected[i].y))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
 
-        protected_assert_eq(result[i], expected[i], i);
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i], expected[i], i));
     }
 }
 
@@ -202,7 +195,7 @@ void assert_eq(const T& result, const T& expected)
     if(bit_equal(result, expected))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
 
-    protected_assert_eq(result, expected);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
 template<class T>
@@ -211,7 +204,7 @@ void assert_eq(const common::custom_type<T, T, true>& result,
 {
     if(bit_equal(result.x, expected.x) && bit_equal(result.y, expected.y))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-    protected_assert_eq(result, expected);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
 template<>
@@ -271,7 +264,7 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        protected_assert_eq(result[i], expected[i], i);
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i], expected[i], i));
     }
 }
 
@@ -307,13 +300,13 @@ auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
 template<class T>
 auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
                  const std::vector<common::custom_type<T, T, true>>& expected,
-                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
+                 const float) -> typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        protected_assert_eq(result[i].x, expected[i].x, i);
-        protected_assert_eq(result[i].y, expected[i].y, i);
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i].x, expected[i].x, i));
+        ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result[i].y, expected[i].y, i));
     }
 }
 
@@ -349,10 +342,10 @@ auto assert_near(const T& result, const T& expected, const float percent)
 }
 
 template<class T>
-auto assert_near(const T& result, const T& expected, const float)
-    -> typename std::enable_if<std::is_integral<T>::value>::type
+auto assert_near(const T& result, const T& expected, const float) ->
+    typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
-    protected_assert_eq(result, expected);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
 template<class T, std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value ||
@@ -372,22 +365,28 @@ auto assert_near(const common::custom_type<T, T, true>& result,
 {
     auto diff1 = std::abs(percent * expected.x);
     auto diff2 = std::abs(percent * expected.y);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.x, expected.x, diff1);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.y, expected.y, diff2);
+    if(!bit_equal(result.x, expected.x))
+    {
+        ASSERT_NEAR(result.x, expected.x, diff1);
+    }
+    if(!bit_equal(result.y, expected.y))
+    {
+        ASSERT_NEAR(result.y, expected.y, diff2);
+    }
 }
 
 template<class T>
 auto assert_near(const common::custom_type<T, T, true>& result,
                  const common::custom_type<T, T, true>& expected,
-                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
+                 const float) -> typename std::enable_if<rocprim::is_integral<T>::value>::type
 {
-    protected_assert_eq(result.x, expected.x);
-    protected_assert_eq(result.y, expected.y);
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result.x, expected.x));
+    ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result.y, expected.y));
 }
 
 template<class T>
 auto assert_near(const T& result, const T& expected, const float /*percent*/) ->
-    typename std::enable_if<!std::is_integral<T>::value && !std::is_floating_point<T>::value
+    typename std::enable_if<!rocprim::is_integral<T>::value && !std::is_floating_point<T>::value
                             && !(std::is_same<T, rocprim::bfloat16>::value
                                  || std::is_same<T, rocprim::half>::value)>::type
 {

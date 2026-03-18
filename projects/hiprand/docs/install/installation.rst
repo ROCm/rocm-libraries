@@ -28,12 +28,6 @@ For Ubuntu and Debian:
 
    sudo apt-get install hiprand
 
-For CentOS-based systems:
-
-.. code-block:: shell
-
-   sudo yum install hiprand
-
 For SLES:
 
 .. code-block:: shell
@@ -52,17 +46,11 @@ This section provides the information required to build hipRAND from source.
 Requirements
 ----------------------------
 
-To build hipRAND, CMake version 3.16 or later is required.
-
-Additionally, to build hipRAND for the ROCm platform, the following components are required:
+To build hipRAND for the ROCm platform, CMake version 3.16 or later is required,
+along with the following components:
 
 * `ROCm Software <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_ (version 5.0.0 or later)
 * `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_
-
-To build hipRAND for the CUDA platform, the following applications are required:
-
-* The CUDA toolkit (version 11.5.1 or newer)
-* cuRAND (included in the CUDA Toolkit)
 
 Downloading the source code
 ----------------------------
@@ -142,19 +130,19 @@ To build hipRAND, use CMake with the following configuration:
     # Install
     [sudo] make install
 
-Where ``<compiler>`` should be set to ``hipcc`` or ``amdclang`` for ROCm or to a regular C++ compiler such as ``g++`` on a CUDA platform.
+Where ``<compiler>`` should be set to ``hipcc`` or ``amdclang`` for ROCm.
 The default build configuration is ``Release``.
 
 Here are the CMake options:
 
-* ``BUILD_WITH_LIB``: Determines whether to build hipRAND with the rocRAND or cuRAND backend. If it's set to ``CUDA``, hipRAND is built using the cuRAND backend. Otherwise, the rocRAND backend is used.
 * ``BUILD_FORTRAN_WRAPPER``: Builds the Fortran wrapper when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_TEST``: Builds the hipRAND tests when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_BENCHMARK``: Builds the hipRAND benchmarks when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_ADDRESS_SANITIZER``: Builds with address sanitization enabled when set to ``ON``. Defaults to ``OFF``.
 * ``ROCRAND_PATH``: Specifies a rocRAND install other than the default system installed version.
 * ``DOWNLOAD_ROCRAND``: Downloads and installs rocRAND in the build directory when set to ``ON``. Defaults to ``OFF``.
-* ``DEPENDENCIES_FORCE_DOWNLOAD``: Downloads and builds the dependencies instead of using the system-installed dependencies when set to ``ON``. Defaults to ``OFF``.
+* ``EXTERNAL_DEPS_FORCE_DOWNLOAD``: Downloads and builds the external dependencies (everything except rocRAND) instead of using the system-installed dependencies when set to ``ON``. Defaults to ``OFF``.
+* ``ROCRAND_FETCH_METHOD``. Set this to the method to use to download rocRAND. Can be set to ``PACKAGE``, ``DOWNLOAD``, or ``MONOREPO``. Set to ``MONOREPO`` if rocRAND isn't already installed and you're building hipRAND from within a clone of the `rocm-libraries <https://github.com/ROCm/rocm-libraries/>`_ repository that also includes rocRAND. Set to ``DOWNLOAD`` if rocRAND isn't installed and you aren't in a clone of the ``rocm-libraries`` repository that includes rocRAND. ``DOWNLOAD`` will clone the repository using sparse checkout so that only the necessary files are downloaded. Set to ``PACKAGE`` if rocRAND is already installed. If you specify ``PACKAGE`` but rocRAND isn't installed, the files will be downloaded using the same method as the ``DOWNLOAD`` option. The default method is ``PACKAGE``.
 
 If you are using ``ROCRAND_PATH`` or ``DOWNLOAD_ROCRAND`` when rocRAND is already installed in the default location,
 you must use the ``CMAKE_NO_SYSTEM_FROM_IMPORTED=ON`` option to configure the project.

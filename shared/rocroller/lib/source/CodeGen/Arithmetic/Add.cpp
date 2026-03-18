@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/AddInstruction.hpp>
@@ -32,20 +9,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::Int32);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Int32);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::M0, DataType::UInt32);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::UInt32);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::UInt32);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::Int64);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Int64);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Half);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Halfx2);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::BFloat16);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Float);
-    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Double);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Add>>
         GetGenerator<Expression::Add>(Register::ValuePtr dst,
@@ -165,12 +128,10 @@ namespace rocRoller
         co_yield get2DwordsScalar(l0, l1, lhs);
         co_yield get2DwordsScalar(r0, r1, rhs);
 
-        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Int64 add, locking SCC"));
-
-        co_yield ScalarAddUInt32(m_context, dest->subset({0}), l0, r0);
-        co_yield ScalarAddUInt32CarryInOut(m_context, dest->subset({1}), l1, r1);
-
-        co_yield(Instruction::Unlock("End of Int64 add, unlocking SCC"));
+        co_yield ScalarAddUInt32(m_context, dest->subset({0}), l0, r0)
+            .lock(Scheduling::Dependency::SCC, "Start of Int64 add, locking SCC");
+        co_yield ScalarAddUInt32CarryInOut(m_context, dest->subset({1}), l1, r1)
+            .unlock("End of Int64 add, unlocking SCC");
     }
 
     template <>
@@ -224,20 +185,17 @@ namespace rocRoller
                       || (l1->regType() == Register::Type::Literal
                           && !m_context->targetArchitecture().isSupportedConstantValue(l1));
 
-        if(useVCC)
-            co_yield(
-                Instruction::Lock(Scheduling::Dependency::VCC, "Start of Int64 add, locking VCC"));
+        auto dependency = useVCC ? Scheduling::Dependency::VCC : Scheduling::Dependency::Count;
 
         auto carry
             = useVCC ? m_context->getVCC() : Register::Value::WavefrontPlaceholder(m_context, 1);
 
         co_yield VectorAddUInt32CarryOut(
-            m_context, dest->subset({0}), carry, l0, r0, "least significant half");
+            m_context, dest->subset({0}), carry, l0, r0, "least significant half")
+            .lock(dependency, "Start of Int64 add, locking VCC");
         co_yield VectorAddUInt32CarryInOut(
-            m_context, dest->subset({1}), carry, carry, l1, r1, "most significant half");
-
-        if(useVCC)
-            co_yield(Instruction::Unlock("End of Int64 add, Unlocking VCC."));
+            m_context, dest->subset({1}), carry, carry, l1, r1, "most significant half")
+            .unlock(dependency, "End of Int64 add, Unlocking VCC.");
     }
 
     template <>

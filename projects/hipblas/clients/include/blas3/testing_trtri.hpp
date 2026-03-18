@@ -113,7 +113,7 @@ void testing_trtri(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dA.memcheck());
     CHECK_DEVICE_ALLOCATION(dinvA.memcheck());
 
-    double             gpu_time_used, hipblas_error;
+    double             gpu_time_used{0}, hipblas_error{0};
     hipblasLocalHandle handle(arg);
 
     // Initial Data on CPU

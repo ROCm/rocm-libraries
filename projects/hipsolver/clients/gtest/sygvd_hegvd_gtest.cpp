@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -90,7 +90,7 @@ class SYGVD_HEGVD : public ::TestWithParam<sygvd_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -120,6 +120,14 @@ class SYGVD_FORTRAN : public SYGVD_HEGVD<API_FORTRAN>
 };
 
 class HEGVD_FORTRAN : public SYGVD_HEGVD<API_FORTRAN>
+{
+};
+
+class SYGVD_COMPAT : public SYGVD_HEGVD<API_COMPAT>
+{
+};
+
+class HEGVD_COMPAT : public SYGVD_HEGVD<API_COMPAT>
 {
 };
 
@@ -165,6 +173,26 @@ TEST_P(HEGVD_FORTRAN, __double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
+TEST_P(SYGVD_COMPAT, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(SYGVD_COMPAT, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(HEGVD_COMPAT, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(HEGVD_COMPAT, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          SYGVD,
 //                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range)));
@@ -195,4 +223,20 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEGVD_FORTRAN,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(type_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          SYGVD_COMPAT,
+//                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYGVD_COMPAT,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(type_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          HEGVD_COMPAT,
+//                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEGVD_COMPAT,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(type_range)));

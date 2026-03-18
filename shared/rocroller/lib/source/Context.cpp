@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Context.hpp>
 
@@ -47,8 +24,12 @@
 namespace rocRoller
 {
     Context::Context()
-        : m_scratchAllocator(Expression::literal(0u))
     {
+        // Initialize scratch sizes for each policy with zero
+        for(size_t i = 0; i < static_cast<size_t>(Operations::ScratchPolicy::Count); ++i)
+        {
+            m_scratchSizes[i] = Expression::literal(0u);
+        }
     }
 
     ContextPtr Context::ForDefaultHipDevice(std::string const&   kernelName,
@@ -287,14 +268,18 @@ namespace rocRoller
         m_kernel = assemblyKernel;
     }
 
-    Expression::ExpressionPtr Context::getScratchAmount() const
+    Expression::ExpressionPtr Context::allocateScratch(Operations::ScratchPolicy policy,
+                                                       Expression::ExpressionPtr size)
     {
-        return m_scratchAllocator;
+        auto idx            = static_cast<size_t>(policy);
+        auto currentOffset  = m_scratchSizes[idx];
+        m_scratchSizes[idx] = simplify(m_scratchSizes[idx] + size);
+        return currentOffset;
     }
 
-    void Context::allocateScratch(Expression::ExpressionPtr size)
+    Expression::ExpressionPtr Context::getScratchAmount(Operations::ScratchPolicy policy) const
     {
-        m_scratchAllocator = simplify(m_scratchAllocator + size);
+        return m_scratchSizes[static_cast<size_t>(policy)];
     }
 
     void Context::scheduleCopy(Instruction const& inst)

@@ -1,31 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#ifdef ROCROLLER_USE_LLVM
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
 
@@ -342,7 +320,7 @@ namespace llvm
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {
                 float floatVal = value;
-                ScalarTraits<float>::output(value, ctx, out);
+                ScalarTraits<float>::output(floatVal, ctx, out);
             }
 
             static StringRef input(StringRef scalar, void* ctx, T& value)
@@ -359,6 +337,32 @@ namespace llvm
             static QuotingType mustQuote(StringRef ref)
             {
                 return ScalarTraits<float>::mustQuote(ref);
+            }
+        };
+
+        template <>
+        struct ScalarTraits<rocRoller::Raw32>
+        {
+            static void output(const rocRoller::Raw32& value, void* ctx, llvm::raw_ostream& out)
+            {
+                auto outputVal = static_cast<uint32_t>(value);
+                ScalarTraits<float>::output(outputVal, ctx, out);
+            }
+
+            static StringRef input(StringRef scalar, void* ctx, rocRoller::Raw32& value)
+            {
+                uint32_t inputVal = 0u;
+
+                auto rv = ScalarTraits<uint32_t>::input(scalar, ctx, inputVal);
+
+                value = rocRoller::Raw32(inputVal);
+
+                return rv;
+            }
+
+            static QuotingType mustQuote(StringRef ref)
+            {
+                return ScalarTraits<std::string>::mustQuote(ref);
             }
         };
 
@@ -389,5 +393,39 @@ namespace llvm
             }
         };
 
+        // Explicit vector traits to ensure they're available for LLVM
+        template <>
+        struct SequenceTraits<std::vector<int>>
+        {
+            static size_t size(IO& io, std::vector<int>& seq)
+            {
+                return seq.size();
+            }
+            static int& element(IO& io, std::vector<int>& seq, size_t index)
+            {
+                if(index >= seq.size())
+                    seq.resize(index + 1);
+                return seq[index];
+            }
+            static const bool flow = true;
+        };
+
+        template <>
+        struct SequenceTraits<std::vector<unsigned int>>
+        {
+            static size_t size(IO& io, std::vector<unsigned int>& seq)
+            {
+                return seq.size();
+            }
+            static unsigned int& element(IO& io, std::vector<unsigned int>& seq, size_t index)
+            {
+                if(index >= seq.size())
+                    seq.resize(index + 1);
+                return seq[index];
+            }
+            static const bool flow = true;
+        };
+
     } // namespace yaml
 } // namespace llvm
+#endif

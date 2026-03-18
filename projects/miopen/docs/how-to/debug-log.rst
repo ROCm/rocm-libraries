@@ -43,6 +43,18 @@ environmental variables to control logging. Both variables are disabled by defau
 * ``MIOPEN_ENABLE_LOGGING_ELAPSED_TIME``: Adds a timestamp to each log line that indicates the
   time elapsed (in milliseconds) since the previous log message.
 
+* ``MIOPEN_ENABLE_LOGGING_DATE_TIME``: Adds a timestamp to each log line that indicates the
+  system time (with milliseconds).
+
+* ``MIOPEN_WARN_SEARCH``: Elevate log messages for Search to warnings.
+
+* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer.
+  If ``MIOPEN_LOG_LEVEL`` is less than 6, then log messages will be buffered.
+  The buffered logs will be dumped to a log file when MIOpen logs an error message,
+  or an error is thrown by MIOpen.
+  This log can be found in ``/tmp/miopen_error_<pid>``.
+  This feature can be disabled by setting this value to 0.
+
 .. note::
 
   If you require technical support, include the console log that is produced from these settings:

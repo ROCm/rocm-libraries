@@ -16,7 +16,12 @@ The rocSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 
 .. note::
 
-   The rocSPARSE repository for ROCm 6.4.2 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
+   The rocSPARSE repository for ROCm 6.4.3 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
+
+.. note::
+   For portability, ROCm provides the `hipSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_ library.
+   hipSPARSE includes a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE).
+   For documentation and examples, see the `hipSPARSE documentation <https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/>`_.
 
 For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 
@@ -34,11 +39,11 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
   .. grid-item-card:: Conceptual
 
     * :doc:`rocSPARSE design <./conceptual/rocsparse-design>`
+    * :doc:`Storage formats <./conceptual/storage-formats-sparse>`
 
   .. grid-item-card:: How to
 
     * :doc:`Use rocSPARSE <./how-to/using-rocsparse>`
-    * :doc:`Contribute to rocSPARSE <./how-to/contribute>`
 
   .. grid-item-card:: Examples
 
@@ -66,5 +71,6 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
     * :ref:`reproducibility`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the rocSPARSE code base, see :doc:`Contribute to rocSPARSE <./contribute>`.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -34,6 +11,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform_fwd.hpp>
 
@@ -61,10 +39,75 @@ namespace rocRoller
                                                        &WalkableControlGraph};
             std::vector<std::string>     m_transforms;
 
+            std::unordered_map<int, rocRoller::KernelGraph::CoordinateGraph::Transformer>
+                m_transformers;
+
+            /**
+             * @brief Set expression using a ForLoop op in a given transformer
+             *
+             */
+            void setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
+                                           int                           forLoopOp);
+
+            /**
+             * @brief Set expression using a SetCoordinate op in a given transformer
+             *
+             */
+            void setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
+                                               int                           setCoordinateOp);
+
         public:
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
+
+            /**
+            * Modelled addresses for ops with memory access.
+            * Set by @ref rocRoller::KernelGraph::ModelAddresses transform.
+            */
+            std::unordered_map<int, std::vector<size_t>> modelledAddresses;
+
+            /**
+            * Set up the coordinate graph and transducer for existing transformers.
+            */
+            void initializeTransformersForCodeGen(rocRoller::Expression::ExpressionTransducer);
+
+            /**
+            *  Build a transformer for a given operation in control graph if the transformer
+            *  does not exist, otherwise return existing transformer.
+            */
+            CoordinateGraph::Transformer buildTransformer(int op);
+
+            /**
+            *  Build a transformer for a given operation in control graph. If the transformer
+            *  exists, it will be re-built.
+            */
+            CoordinateGraph::Transformer buildTransformer(int op, IgnoreCachePolicy const);
+
+            /**
+            *  Build transformers for all operations in control graph. Rebuild transformers
+            *  if they already exist.
+            */
+            void buildAllTransformers();
+
+            /**
+            *  Set expression of an op's transformer using a given coordinate and expression.
+            */
+            void updateTransformer(int op, int coord, Expression::ExpressionPtr expr);
+
+            std::unordered_map<int, CoordinateGraph::Transformer> const& getAllTransformers() const
+            {
+                return m_transformers;
+            }
+
+            /**
+            *  Set both control and coordinate graphs to be restricted mode.
+            */
+            void setRestricted()
+            {
+                control.setRestricted();
+                coordinates.setRestricted();
+            }
 
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 
@@ -122,7 +165,7 @@ namespace rocRoller
          *
          * @ingroup KernelGraph
          */
-        KernelGraph translate(CommandPtr);
+        KernelGraph translate(CommandPtr, CommandParametersPtr params = nullptr);
 
         /**
          * Generate assembly from a KernelGraph.

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -76,6 +53,10 @@ namespace ExpressionTest
             auto expr11 = Expression::fuseTernary((a << b) + b);
             auto expr12 = expr3 != expr7;
 
+            auto expr13
+                = Expression::positionalArgument(2, Register::Type::Vector, DataType::Int64);
+            auto expr14 = expr13 + expr1;
+
             SECTION("toString()")
             {
                 CHECK(toString(expr1) == "Add(1:I, 2:I)I");
@@ -96,6 +77,9 @@ namespace ExpressionTest
                 CHECK(toString(expr11) == "ShiftLAdd(1:I, 2:I, 2:I)I");
                 CHECK(toString(expr12)
                       == "NotEqual(" + toString(expr3) + ", " + toString(expr7) + ")BL" + waveBits);
+
+                CHECK(toString(expr13) == "PositionalArgument(2)I64");
+                CHECK(toString(expr14) == "Add(PositionalArgument(2)I64, Add(1:I, 2:I)I)I64");
             }
 
             SECTION("evaluationTimes()")

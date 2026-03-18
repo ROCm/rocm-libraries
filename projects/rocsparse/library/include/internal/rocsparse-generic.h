@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,11 +41,15 @@
 #include "generic/rocsparse_sparse_to_sparse.h"
 #include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
+#include "generic/rocsparse_spic0.h"
+#include "generic/rocsparse_spilu0.h"
 #include "generic/rocsparse_spitsv.h"
 #include "generic/rocsparse_spmm.h"
 #include "generic/rocsparse_spmv.h"
 #include "generic/rocsparse_spsm.h"
 #include "generic/rocsparse_spsv.h"
+#include "generic/rocsparse_sptrsm.h"
+#include "generic/rocsparse_sptrsv.h"
 #include "generic/rocsparse_spvv.h"
 #include "generic/rocsparse_v2_spmv.h"
 

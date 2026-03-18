@@ -29,6 +29,7 @@ import shutil
 import argparse
 from copy import deepcopy
 
+from Tensile import __version__
 from Tensile.SolutionStructs.Naming import getSolutionNameMin
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
@@ -88,9 +89,15 @@ def sanitizeSolutions(solList):
             sol["StaggerUStride"] = 0
             sol["_staggerStrideShift"] = 0
 
+from Tensile.Common.GlobalParameters import defaultSolution, defaultInternalSupportParams
+from Tensile.Common import assignParameterWithDefault
+
 def reNameSolutions(data):
     solList = data[5]
     for sol in solList:
+        # Assign solution state from config, filling missing from the defaultSolution
+        for key in defaultSolution:
+            assignParameterWithDefault(sol, key, sol, defaultSolution)
         sol["ProblemType"] = data[4]
         sol["SolutionNameMin"] = getSolutionNameMin(sol,splitGSU=False)
         sol["KernelNameMin"] = getKernelNameMin(sol,splitGSU=False)
@@ -333,6 +340,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
             "sizes: %d, solutions: %d, kernels: %d"%(len(incData[7]),numSolutions,numKernels))
 
         mergedData, *stats = mergeLogic(oriData, incData, forceMerge, noEff)
+        mergedData[0] = {"MinimumRequiredVersion": "%s"%__version__}
         msg(stats[0], "size(s) and", stats[1], "solution(s) added,", stats[2], "solution(s) removed.", \
             len(mergedData[7]), "sizes and", len(mergedData[5]), "solutions")
         with open(os.path.join(outputPath, basename), "w") as outFile:

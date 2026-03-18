@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <algorithm>
 
@@ -141,7 +118,10 @@ namespace rocRollerTest
                 {
                     co_yield_(Instruction::Comment("Extract f8 from packed F8"));
                     co_yield generateOp<Expression::BitFieldExtract>(
-                        v_temp, v_a, Expression::BitFieldExtract{{}, F8Type, f8_idx * 8, 8});
+                        v_temp,
+                        v_a,
+                        Expression::BitFieldExtract{
+                            {}, F8Type, static_cast<uint32_t>(f8_idx * 8), 8});
 
                     co_yield_(Instruction::Comment("Convert to float"));
                     co_yield generateOp<Expression::Convert>(
@@ -314,22 +294,29 @@ namespace rocRollerTest
             auto bpo = CeilDivide(
                 DataTypeInfo::Get(result_ptr->variableType().dataType).elementBits, 8u);
 
-            auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-            co_yield bufDesc->setup();
-            co_yield bufDesc->setSize(Register::Value::Literal(N));
+            Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+            bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
 
+            auto bufferRegs = Register::Value::Placeholder(
+                m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+            co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+            bufferExpr       = bufferRegs->expression();
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
             auto vgprSerial = m_context->kernel()->workitemIndex()[0];
 
-            co_yield bufDesc->setBasePointer(s_a);
             for(int i = 0; i < N; ++i)
             {
                 co_yield m_context->mem()->loadBuffer(
-                    v_temp->element({i}), vgprSerial, i, bufDesc, bufInstOpts, 1);
+                    v_temp->element({i}), vgprSerial, i, bufferRegs, bufInstOpts, 1);
             }
-            co_yield bufDesc->setBasePointer(s_result);
-            co_yield m_context->mem()->storeBuffer(v_temp, vgprSerial, 0, bufDesc, bufInstOpts, N);
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
+            co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+
+            co_yield m_context->mem()->storeBuffer(
+                v_temp, vgprSerial, 0, bufferRegs, bufInstOpts, N);
         };
 
         m_context->schedule(kb());

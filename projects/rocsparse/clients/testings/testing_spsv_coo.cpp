@@ -135,8 +135,8 @@ void testing_spsv_coo(const Arguments& arg)
     host_vector<T> hy_gold(M);
 
     // Initialize data on CPU
-    rocsparse_init<T>(hx, M, 1, 1);
-    rocsparse_init<T>(hy_1, M, 1, 1);
+    rocsparse_init<T>(hx, M, 1, 1, arg.convert_to_int);
+    rocsparse_init<T>(hy_1, M, 1, 1, arg.convert_to_int);
 
     hy_2    = hy_1;
     hy_gold = hy_1;
@@ -196,9 +196,9 @@ void testing_spsv_coo(const Arguments& arg)
         handle, trans_A, dalpha, A, x, y2, ttype, alg, preprocess, nullptr, dbuffer));
 
     //
-    // Set the buffer to some values.
+    // The buffer must be be non persistent, let's put garbage in it.
     //
-    CHECK_HIP_ERROR(hipMemset(dbuffer, 143, buffer_size));
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 255 - 1, buffer_size));
 
     if(arg.unit_check)
     {

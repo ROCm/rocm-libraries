@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -75,6 +52,22 @@ namespace rocRoller::KernelGraph
             return a.id < b.id;
         }
 
+        struct UnrollStride
+        {
+            std::string unrollStride;
+            int         unrollDimension;
+
+            bool operator<=>(UnrollStride const& other) const = default;
+        };
+
+        struct BaseOffset
+        {
+            std::string base;
+            int         subdimension;
+
+            bool operator<=>(BaseOffset const& other) const = default;
+        };
+
         struct TypeAndNaryArgument
         {
             std::string  id;
@@ -96,49 +89,18 @@ namespace rocRoller::KernelGraph
             return a.id < b.id;
         }
 
-        enum class ComputeIndexArgument : int
-        {
-            TARGET = 0,
-            INCREMENT,
-            BASE,
-            OFFSET,
-            STRIDE,
-            BUFFER,
-
-            Count
-        };
-
-        std::string   toString(ComputeIndexArgument cia);
-        std::ostream& operator<<(std::ostream&, ComputeIndexArgument const&);
-
-        struct ComputeIndex
-        {
-            ComputeIndexArgument argument;
-            int                  index = 0;
-
-            bool operator==(ComputeIndex const& other) const
-            {
-                return this->index == other.index && this->argument == other.argument;
-            }
-        };
-
-        bool inline operator<(ComputeIndex const& a, ComputeIndex const& b)
-        {
-            if(a.argument == b.argument)
-                return a.index < b.index;
-            return a.argument < b.argument;
-        }
-
         using ConnectionSpec = std::variant<std::monostate,
                                             JustNaryArgument,
-                                            ComputeIndex,
                                             TypeAndSubDimension,
-                                            TypeAndNaryArgument>;
+                                            TypeAndNaryArgument,
+                                            UnrollStride,
+                                            BaseOffset>;
 
         std::string   name(ConnectionSpec const& cs);
         std::string   toString(ConnectionSpec const& cs);
         std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
 
+        NaryArgument getNaryArgument(Connections::ConnectionSpec const& conn);
     }
 
     struct DeferredConnection
@@ -147,13 +109,19 @@ namespace rocRoller::KernelGraph
         int                         coordinate;
     };
 
+    template <typename T, typename SpecType>
+    inline DeferredConnection makeConnection(int coordinate, int sdim = 0)
+    {
+        DeferredConnection rv;
+        rv.connectionSpec = SpecType{name<T>(), sdim};
+        rv.coordinate     = coordinate;
+        return rv;
+    }
+
     template <typename T>
     inline DeferredConnection DC(int coordinate, int sdim = 0)
     {
-        DeferredConnection rv;
-        rv.connectionSpec = Connections::TypeAndSubDimension{name<T>(), sdim};
-        rv.coordinate     = coordinate;
-        return rv;
+        return makeConnection<T, Connections::TypeAndSubDimension>(coordinate, sdim);
     }
 
     /**
@@ -270,6 +238,12 @@ namespace rocRoller::KernelGraph
         std::vector<Connection> getCoordinateConnections(int coordinate) const;
 
         /**
+         * @brief Get the subdimension of the coordinate that is
+         * connected to the control operation
+         */
+        int getConnectionSubdimension(int control, int coordinate) const;
+
+        /**
          * @brief Emit DOT representation of connections.
          *
          * Currently, addLabels will use the hash id for any connections which makes this representation
@@ -299,6 +273,8 @@ namespace rocRoller::KernelGraph
     };
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn);
+
+    NaryArgument getNaryArgument(ControlToCoordinateMapper::Connection const& conn);
 
 }
 

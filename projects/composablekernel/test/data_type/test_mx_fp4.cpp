@@ -1,9 +1,11 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "gtest/gtest.h"
 #include "ck/library/utility/device_memory.hpp"
 #include "ck/utility/scaled_type_convert.hpp"
+
+using ::ck::DeviceMem;
 
 using ck::e8m0_bexp_t;
 using ck::float16_t;
@@ -212,8 +214,8 @@ TEST(MXFP4, HostScaledConvert)
     auto i = 256 * 16;
 
     // f4x2 -> f32x2
-    EXPECT_EQ(out[i++], 1.0f);
     EXPECT_EQ(out[i++], -4.0f);
+    EXPECT_EQ(out[i++], 1.0f);
 
     // f32x2 -> f4x2
     // RNE
@@ -296,8 +298,8 @@ TEST(MXFP4, DeviceScaledConvert)
     auto i = 256 * 16;
 
     // f4x2 -> f32x2
-    EXPECT_EQ(out[i++], 1.0f);
     EXPECT_EQ(out[i++], -4.0f);
+    EXPECT_EQ(out[i++], 1.0f);
 
     // f32x2 -> f4x2
     // RNE

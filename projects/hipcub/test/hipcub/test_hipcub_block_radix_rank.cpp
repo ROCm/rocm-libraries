@@ -31,13 +31,14 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_exchange.hpp"
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_radix_rank.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/util_type.hpp"
+#include <hipcub/block/block_exchange.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_radix_rank.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/util_type.hpp>
 
 #include <bitset>
+#include <numeric>
 
 template<class Key,
          unsigned int BlockSize,
@@ -471,6 +472,7 @@ void test_radix_rank()
                            d_ranks_output,
                            start_bit,
                            radix_bits);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         std::vector<int> ranks_output(expected.size());
@@ -595,7 +597,6 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
 
     const size_t pfs_size       = (1 << RadixBits);
     const size_t pfs_offset     = (blockIdx.x * pfs_size) + (threadIdx.x * bins_tracked_per_thread);
-    const size_t pfs_total_size = pfs_size * blockDim.x;
 
     for(size_t i = 0; i < bins_tracked_per_thread; i++)
     {
@@ -603,6 +604,25 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
             prefix_sum_output[pfs_offset + i] = prefix_sum_storage[i];
     }
 }
+
+#if defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE < 9)
+
+/**
+ * name this function fall_back_exclusive_scan to prevent
+ * ambiguous name error 
+ */
+template <typename It, typename OutIt, typename T>
+void fall_back_exclusive_scan(It first, It last, OutIt out, T init)
+{
+    // Fallback implementation for exclusive scan if gcc version is < 9
+    for (; first != last; ++first)
+    {
+        *out++ = init;
+        init += *first;
+    }
+}
+
+#endif // (_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE < 9)
 
 template<typename TestFixture, RadixRankAlgorithm Algorithm>
 void test_radix_rank_with_prefix_sum_output()
@@ -620,7 +640,7 @@ void test_radix_rank_with_prefix_sum_output()
     constexpr unsigned     end_bit          = start_bit + radix_bits;
     constexpr size_t       items_per_block  = block_size * items_per_thread;
 
-    if constexpr(std::is_same_v<key_type, unsigned long long>)
+    if constexpr(std::is_same<key_type, unsigned long long>::value)
     {
 
         // Given block size not supported
@@ -702,10 +722,17 @@ void test_radix_rank_with_prefix_sum_output()
 
                     ++histogram[bit_rep];
                 }
-                std::exclusive_scan(histogram.begin(),
-                                    histogram.end(),
-                                    pfs_expected.begin() + pfs_offset,
-                                    0);
+                #if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE >= 9))
+                    std::exclusive_scan(histogram.begin(),
+                                        histogram.end(),
+                                        pfs_expected.begin() + pfs_offset,
+                                        0);
+                #else
+                    fall_back_exclusive_scan(histogram.begin(),
+                                        histogram.end(),
+                                        pfs_expected.begin() + pfs_offset,
+                                        0);
+                #endif
             }
 
             // Preparing device
@@ -736,6 +763,7 @@ void test_radix_rank_with_prefix_sum_output()
                                d_ranks_output,
                                d_prefix_sum_output,
                                start_bit);
+            HIP_CHECK(hipGetLastError());
 
             // Getting results to host
             std::vector<int> ranks_output(expected.size());

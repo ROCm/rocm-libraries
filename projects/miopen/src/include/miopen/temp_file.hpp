@@ -33,11 +33,11 @@
 
 namespace miopen {
 
-class MIOPEN_INTERNALS_EXPORT TempFile
+class TempFile
 {
 public:
-    TempFile(const std::string& path_infix);
-    TempFile(TempFile&& other) noexcept = default;
+    MIOPEN_INTERNALS_EXPORT TempFile(const std::string& path_infix);
+    TempFile(TempFile&& other) noexcept            = default;
     TempFile& operator=(TempFile&& other) noexcept = default;
 
     const std::string& GetPathInfix() const { return path_infix; }

@@ -177,17 +177,17 @@ struct CKArgs
             bias_strides = {K, 0, 1, 0, 0, 0};
 
             filter_stride   = {ProblemInterpreter::GetAdjustedConvolutionStrideD(problem),
-                             ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                             ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                               ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
+                               ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
             filter_dilation = {ProblemInterpreter::GetAdjustedConvolutionDilationD(problem),
                                ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                                ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
             lPadding        = {ProblemInterpreter::GetInputLeftPadD(problem),
-                        ProblemInterpreter::GetInputLeftPadH(problem),
-                        ProblemInterpreter::GetInputLeftPadW(problem)};
+                               ProblemInterpreter::GetInputLeftPadH(problem),
+                               ProblemInterpreter::GetInputLeftPadW(problem)};
             rPadding        = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
-                        ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                        ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                               ProblemInterpreter::GetAdjustedInputRightPadH(problem),
+                               ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
         }
         else
         {
@@ -209,18 +209,18 @@ struct CKArgs
             bias_strides = {K, 0, 1, 0, 0};
 
             filter_stride   = {ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                             ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                               ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
             filter_dilation = {ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                                ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
             lPadding        = {ProblemInterpreter::GetInputLeftPadH(problem),
-                        ProblemInterpreter::GetInputLeftPadW(problem)};
+                               ProblemInterpreter::GetInputLeftPadW(problem)};
             rPadding        = {ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                        ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                               ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
         }
     }
 
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&)                 = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -674,7 +674,7 @@ GetSolutionForDimensionality(const FusionContext& ctx,
     using Layouts = LayoutsSelector<NDimSpatial>;
     return MakeSolutionGroupConvImplicitGemmXdlops(
         conv_problem,
-        [&](auto data_type_val) {
+        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
             (void)data_type_val;
             return InitInvokerFactoryFwdNCHW<NDimSpatial,
                                              false,
@@ -687,7 +687,7 @@ GetSolutionForDimensionality(const FusionContext& ctx,
                                              miopen::fusion::FusionInvokeParams>(
                 ctx, conv_problem, config.kernel_id);
         },
-        [&](auto data_type_val) {
+        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
             (void)data_type_val;
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGFwdBiasActivPtrs<NDimSpatial,

@@ -39,7 +39,7 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
                 TBB::tbb
         )
     endif()
-    
+
     if (NOT WIN32)
       foreach(gpu_target ${GPU_TARGETS})
           target_link_libraries(${TEST_TARGET}
@@ -62,9 +62,10 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
         )
     endforeach()
     else()
-        add_relative_test(${TEST_TARGET} ${TEST_TARGET})
+        add_relative_test(${TEST_TARGET} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
         set_tests_properties(${TEST_TARGET}
             PROPERTIES
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS "hip"
         )
     endif()

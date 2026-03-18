@@ -1,10 +1,13 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include <iostream>
 #include <string>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -13,7 +16,15 @@ void CK_TILE_ERROR(Args&&... args) noexcept
 {
     std::ostringstream oss;
     (oss << ... << args);
-    std::cerr << "[ERROR] " << oss.str() << std::endl;
+    std::cerr << "[CK_TILE_ERROR] " << oss.str() << std::endl;
+}
+
+template <typename... Args>
+void CK_TILE_INFO(Args&&... args) noexcept
+{
+    std::ostringstream oss;
+    (oss << ... << args);
+    std::cout << "[CK_TILE_INFO] " << oss.str() << std::endl;
 }
 
 namespace internal {
@@ -206,3 +217,4 @@ void UpdateEnvVar(EnvVar, const std::string_view& val)
 // environment variable to enable logging:
 // export CK_TILE_LOGGING=ON or CK_TILE_LOGGING=1 or CK_TILE_LOGGING=ENABLED
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_LOGGING)
+#pragma clang diagnostic pop

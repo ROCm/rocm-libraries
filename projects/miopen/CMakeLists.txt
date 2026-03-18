@@ -1,29 +1,10 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required( VERSION 3.15 )
+
+#Add a name for the rocm-libraries location
+set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -71,17 +52,17 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
-project ( MIOpen C CXX )
+project(MIOpen CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 
 find_package(Threads REQUIRED)
-find_package(ROCM 0.7.3 REQUIRED PATHS /opt/rocm)
 
+find_package(ROCmCMakeBuildTools)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
 include(ROCMSetupVersion)
@@ -104,6 +85,8 @@ set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 # By default build shared libraries
 option(BUILD_SHARED_LIBS "Create shared libraries" ON)
 
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen now depends on SQLite as well
     find_package(SQLite3 REQUIRED)
@@ -120,9 +103,12 @@ option( BUILD_DEV "Build for development only" OFF)
 option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
+option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
-option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" OFF)
-message(STATUS "MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM ${MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM}")
+option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
+if(MIOPEN_INCBIN)
+    enable_language(ASM)
+endif()
 
 # Strip symbols for release
 if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
@@ -130,9 +116,8 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.4.1)
+rocm_setup_version(VERSION 3.5.1)
 
-list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 include(TargetFlags)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -152,7 +137,7 @@ else()
     set(MIOPEN_DEFAULT_BACKEND "OpenCL")
 endif()
 
-if(NOT WIN32 AND NOT MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
+if(NOT WIN32)
     include(CheckCXXLinkerFlag)
     check_cxx_linker_flag(-lstdc++fs HAS_LIB_STD_FILESYSTEM)
 endif()
@@ -201,7 +186,7 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     OpenCL HIP HIPOC HIPNOGPU)
-
+    
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
@@ -334,15 +319,16 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
-            file(READ "${CMAKE_SOURCE_DIR}/requirements.txt" REQUIREMENTS_TXT_CONTENTS)
-            string(REGEX MATCH "ROCm/composable_kernel@([a-fA-F0-9]+)" _match "${REQUIREMENTS_TXT_CONTENTS}")
+            execute_process (
+                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
+                OUTPUT_VARIABLE _match
+            )
             if(_match)
-                string(REGEX REPLACE "ROCm/composable_kernel@([a-fA-F0-9]+).*" "\\1" COMPOSABLE_KERNEL_HASH "${_match}")
-                message(STATUS "Parsed composable_kernel hash from requirements.txt: ${COMPOSABLE_KERNEL_HASH}")
+                message(STATUS "Found composablekernel in requirements.txt")
             else()
-                message(FATAL_ERROR "Could not find ROCm/composable_kernel@<hash> in requirements.txt")
+                message(FATAL_ERROR "Could not find composablekernel in requirements.txt")
             endif()
-            miopen_add_dependency(composable_kernel HASH ${COMPOSABLE_KERNEL_HASH} options NO_LOCAL)
+            miopen_add_dependency(composable_kernel options NO_LOCAL)
         else()
             find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
         endif()
@@ -392,7 +378,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         message(STATUS "Build without hipbBLASLt")
     endif()
 else()
-    #CK is only enabled when HIP backend is selected   
+    #CK is only enabled when HIP backend is selected
     set(MIOPEN_USE_COMPOSABLEKERNEL Off)
     if(MIOPEN_USE_HIPRTC)
         message(FATAL_ERROR "HIPRTC cannot be used without HIP backend")
@@ -484,17 +470,6 @@ if(MIOPEN_USE_HIPRTC)
     find_package(hiprtc REQUIRED)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
 endif()
-
-option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-set(BOOST_COMPONENTS filesystem)
-if(MIOPEN_BUILD_DRIVER)
-    # boost core is a header only component that can't be found by find_package
-    # list(APPEND BOOST_COMPONENTS core)
-endif()
-
-# The FindBoost module has been removed since CMake 3.30. Use the Boost 1.83 configuration file instead.
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-find_package(Boost REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
@@ -611,6 +586,8 @@ else()
     set(PERFDB_SUFFIX ".txt")
 endif()
 
+# Per-GPU database artifact installation (PDB's, FDB's KDB's)
+
 function(unpack_db db_bzip2_file)
     get_filename_component(__fname ${db_bzip2_file} NAME_WLE)
     add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}
@@ -634,65 +611,66 @@ function(unpack_db db_bzip2_file)
     set(__fname ${__fname} PARENT_SCOPE)
 endfunction()
 
-file(GLOB PERF_DB_BZIP_FILES CONFIGURE_DEPENDS "${KERNELS_SOURCE_DIR}/*.db.bz2" "${KERNELS_SOURCE_DIR}/*.db.txt.bz2")
-file(GLOB FIND_DB_BZIP_FILES CONFIGURE_DEPENDS "${KERNELS_SOURCE_DIR}/*.fdb.txt.bz2")
-
-foreach(DB_BZIP_FILE ${PERF_DB_BZIP_FILES} ${FIND_DB_BZIP_FILES})
-    unpack_db(${DB_BZIP_FILE})
-    if(MIOPEN_EMBED_DB STREQUAL "" AND NOT MIOPEN_DISABLE_SYSDB AND NOT ENABLE_ASAN_PACKAGING)
-        install(FILES ${KERNELS_BINARY_DIR}/${__fname}
-                DESTINATION ${DATABASE_INSTALL_DIR})
-    endif()
-endforeach()
-
-# Begin KDB package creation
-
 function(install_kdb FILE_NAME COMPONENT_NAME)
     if(EXISTS "${FILE_NAME}")
-        file(READ ${FILE_NAME} __contents LIMIT 7)
-        get_filename_component(__fname ${FILE_NAME} NAME_WLE)
-        if(__contents MATCHES "version")
-            list(APPEND LFS_MISSING_FILES ${__fname})
-        else()
-            unpack_db(${FILE_NAME})
-            if( NOT ENABLE_ASAN_PACKAGING )
-                if( NOT MIOPEN_TEST_DBSYNC )
-                    set(__component_name COMPONENT ${COMPONENT_NAME})
-                endif()
-                rocm_install(FILES ${KERNELS_BINARY_DIR}/${__fname}
-                            DESTINATION ${DATABASE_INSTALL_DIR}
-                            ${__component_name})
+        unpack_db(${FILE_NAME})
+        if( NOT ENABLE_ASAN_PACKAGING )
+            if( NOT MIOPEN_TEST_DBSYNC )
+                set(__component_name COMPONENT ${COMPONENT_NAME})
             endif()
+            rocm_install(FILES ${KERNELS_BINARY_DIR}/${__fname}
+                        DESTINATION ${DATABASE_INSTALL_DIR}
+                        ${__component_name})
         endif()
     else()
-        list(APPEND LFS_MISSING_FILES ${FILE_NAME})
+        list(APPEND DVC_MISSING_FILES ${FILE_NAME})
     endif()
-    set(LFS_MISSING_FILES ${LFS_MISSING_FILES} PARENT_SCOPE)
+    set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
 endfunction()
 
-# Both the lists below should be in sync always
+function(install_gpu_databases gfx_target)
+    message(STATUS "Adding support for installing ${gfx_target} database artifacts")
+    get_property(_targets GLOBAL PROPERTY MIOPEN_INSTALL_GPU_DATABASES)
+    if("${gfx_target}" IN_LIST _targets)
+        message(FATAL_ERROR "AMDGPU target ${gfx_target} already defined")
+    endif()
+    
+    set(KDB_FILENAME "${gfx_target}.kdb.bz2")
+    if(${KDB_FILENAME} IN_LIST KDB_BZ2_FILES)
+        set(KDB_COMPONENT_NAME "${gfx_target}kdb")
+        install_kdb(${KERNELS_SOURCE_DIR}/${KDB_FILENAME} ${KDB_COMPONENT_NAME})
+    endif()
+    set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
+
+    file(GLOB PERF_DB_BZIP_FILES CONFIGURE_DEPENDS "${KERNELS_SOURCE_DIR}/${gfx_target}*.db.bz2" "${KERNELS_SOURCE_DIR}/${gfx_target}*.db.txt.bz2")
+    file(GLOB FIND_DB_BZIP_FILES CONFIGURE_DEPENDS "${KERNELS_SOURCE_DIR}/${gfx_target}*.fdb.txt.bz2")
+
+    foreach(DB_BZIP_FILE ${PERF_DB_BZIP_FILES} ${FIND_DB_BZIP_FILES})
+        unpack_db(${DB_BZIP_FILE})
+        if(MIOPEN_EMBED_DB STREQUAL "" AND NOT MIOPEN_DISABLE_SYSDB AND NOT ENABLE_ASAN_PACKAGING)
+            install(FILES ${KERNELS_BINARY_DIR}/${__fname}
+                    DESTINATION ${DATABASE_INSTALL_DIR})
+        endif()
+    endforeach()
+endfunction()
+
+# The default behaviour when no list of AMDGPU targets is supplied should be to
+# install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
+# was added.
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030)
+set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
+
+# This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
-set(COMPONENT_LST gfx942kdb gfx90akdb gfx1030kdb gfx908kdb gfx906kdb gfx900kdb)
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.17)
-    foreach(__file __component IN ZIP_LISTS KDB_BZ2_FILES COMPONENT_LST)
-        install_kdb(${KERNELS_SOURCE_DIR}/${__file} ${__component})
-    endforeach()
-else()
-    # TODO: Upgrade minimum CMake to version 3.17+ and use IN ZIP_LISTS instead
-    list(LENGTH KDB_BZ2_FILES __length)
-    math(EXPR __high "${__length} - 1")
-    foreach(__index RANGE ${__high})
-        list(GET COMPONENT_LST ${__index} __component)
-        list(GET KDB_BZ2_FILES ${__index} __file)
-        install_kdb(${KERNELS_SOURCE_DIR}/${__file} ${__component})
-    endforeach()
-endif()
+foreach(_gfx_target ${MIOPEN_INSTALL_GPU_DATABASES})
+    install_gpu_databases(${_gfx_target})
+endforeach()
 
-if(LFS_MISSING_FILES)
-    string(REPLACE ";" ", " __lfs_missing_files "${LFS_MISSING_FILES}")
-    message(WARNING "GIT LFS files not pulled down, skipped: ${__lfs_missing_files}")
-    set(MIOPEN_NO_LFS_PULLED TRUE CACHE INTERNAL "")
+if(DVC_MISSING_FILES)
+    string(REPLACE ";" ", " __dvc_missing_files "${DVC_MISSING_FILES}")
+    message(WARNING "DVC files not pulled down, skipped: ${__dvc_missing_files}")
+    set(MIOPEN_NO_DVC_PULLED TRUE CACHE INTERNAL "")
 else()
     set(CPACK_COMPONENTS_ALL ${COMPONENT_LST})
 endif()

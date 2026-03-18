@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,21 +45,20 @@ hipsparseStatus_t hipsparseSpruneCsr2csr_bufferSize(hipsparseHandle_t         ha
                                                     const int*                csrColIndC,
                                                     size_t*                   pBufferSizeInBytes)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_sprune_csr2csr_buffer_size((rocsparse_handle)handle,
-                                             m,
-                                             n,
-                                             nnzA,
-                                             (const rocsparse_mat_descr)descrA,
-                                             csrValA,
-                                             csrRowPtrA,
-                                             csrColIndA,
-                                             threshold,
-                                             (const rocsparse_mat_descr)descrC,
-                                             csrValC,
-                                             csrRowPtrC,
-                                             csrColIndC,
-                                             pBufferSizeInBytes));
+    return hipsparseSpruneCsr2csr_bufferSizeExt(handle,
+                                                m,
+                                                n,
+                                                nnzA,
+                                                descrA,
+                                                csrValA,
+                                                csrRowPtrA,
+                                                csrColIndA,
+                                                threshold,
+                                                descrC,
+                                                csrValC,
+                                                csrRowPtrC,
+                                                csrColIndC,
+                                                pBufferSizeInBytes);
 }
 
 hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSize(hipsparseHandle_t         handle,
@@ -77,21 +76,20 @@ hipsparseStatus_t hipsparseDpruneCsr2csr_bufferSize(hipsparseHandle_t         ha
                                                     const int*                csrColIndC,
                                                     size_t*                   pBufferSizeInBytes)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dprune_csr2csr_buffer_size((rocsparse_handle)handle,
-                                             m,
-                                             n,
-                                             nnzA,
-                                             (const rocsparse_mat_descr)descrA,
-                                             csrValA,
-                                             csrRowPtrA,
-                                             csrColIndA,
-                                             threshold,
-                                             (const rocsparse_mat_descr)descrC,
-                                             csrValC,
-                                             csrRowPtrC,
-                                             csrColIndC,
-                                             pBufferSizeInBytes));
+    return hipsparseDpruneCsr2csr_bufferSizeExt(handle,
+                                                m,
+                                                n,
+                                                nnzA,
+                                                descrA,
+                                                csrValA,
+                                                csrRowPtrA,
+                                                csrColIndA,
+                                                threshold,
+                                                descrC,
+                                                csrValC,
+                                                csrRowPtrC,
+                                                csrColIndC,
+                                                pBufferSizeInBytes);
 }
 
 hipsparseStatus_t hipsparseSpruneCsr2csr_bufferSizeExt(hipsparseHandle_t         handle,

@@ -238,7 +238,7 @@
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_UserArgs_shortname0_gfx950
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -461,7 +461,7 @@
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -684,7 +684,7 @@
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -907,7 +907,7 @@
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname1_gfx950
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1130,7 +1130,7 @@
     SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1248,8 +1248,6 @@
     - [2, 0]
   - - [10240, 8192, 1, 8192]
     - [3, 0]
-  - - [28672, 32768, 1, 4096]
-    - [3, 0]
   - - [4096, 28672, 1, 32768]
     - [2, 0]
   - - [4096, 32768, 1, 28672]
@@ -1257,12 +1255,6 @@
   - - [14336, 4096, 1, 32768]
     - [1, 0]
   - - [14336, 32768, 1, 4096]
-    - [1, 0]
-  - - [4096, 32768, 1, 14336]
-    - [2, 0]
-  - - [4096, 32768, 1, 4096]
-    - [2, 0]
-  - - [6144, 32768, 1, 4096]
     - [1, 0]
   - - [4096, 32768, 1, 6144]
     - [2, 0]

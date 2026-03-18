@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
 
@@ -88,6 +65,39 @@ namespace rocRoller
 
     namespace Scheduling
     {
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {.nops               = 10000.,
+                                                       .vmcnt              = 0,
+                                                       .lgkmcnt            = 0,
+                                                       .vmQueueLen         = 0,
+                                                       .vectorQueueSat     = 0,
+                                                       .ldsQueueSat        = 0,
+                                                       .lgkmQueueLen       = 0,
+                                                       .stallCycles        = 1000.0,
+                                                       .notMFMA            = 0,
+                                                       .isMFMA             = 0,
+                                                       .isSMEM             = 0,
+                                                       .isSControl         = 0,
+                                                       .isSALU             = 10,
+                                                       .isVMEMRead         = 0,
+                                                       .isVMEMWrite        = 0,
+                                                       .isLDSRead          = 0,
+                                                       .isLDSWrite         = 0,
+                                                       .isVALU             = 10,
+                                                       .isACCVGPRWrite     = 0,
+                                                       .isACCVGPRRead      = 0,
+                                                       .newSGPRs           = 0,
+                                                       .newVGPRs           = 0,
+                                                       .highWaterMarkSGPRs = 0,
+                                                       .highWaterMarkVGPRs = 0,
+                                                       .fractionOfSGPRs    = 0,
+                                                       .fractionOfVGPRs    = 0,
+                                                       .outOfRegisters     = 1000000000.0,
+                                                       .zeroFreeBarriers   = true,
+                                                       .vmemCycles         = 64,
+                                                       .vmemQueueSize      = 3,
+                                                       .dsmemCycles        = 32,
+                                                       .dsmemQueueSize     = 3};
+
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
                                             .vmcnt              = 526.093932290615,
                                             .lgkmcnt            = 885.6074246484375,
@@ -205,16 +215,15 @@ namespace rocRoller
                                             .outOfRegisters     = 1000000000.0,
                                             .zeroFreeBarriers   = true};
 
-        RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
 
-        inline LinearWeightedCost::LinearWeightedCost(ContextPtr ctx)
+        LinearWeightedCost::LinearWeightedCost(ContextPtr ctx, CostFunction fn)
             : Cost{ctx}
-            , m_weights(loadWeights(ctx))
+            , m_weights(loadWeights(ctx, fn))
         {
         }
 
-        Weights LinearWeightedCost::loadWeights(ContextPtr ctx) const
+        Weights LinearWeightedCost::loadWeights(ContextPtr ctx, CostFunction fn) const
         {
             auto settingsFile = Settings::getInstance()->get(Settings::SchedulerWeights);
             if(!settingsFile.empty())
@@ -236,13 +245,22 @@ namespace rocRoller
             {
                 auto const& arch = ctx->targetArchitecture().target();
 
+                if(fn == CostFunction::LinearWeightedSimple)
+                {
+                    if(!arch.isCDNA4GPU())
+                        Log::warn("Architecture {} not tested for simplifed weights.",
+                                  arch.toString());
+
+                    return GFX950_SIMPLIFIED_WEIGHTS;
+                }
+
                 if(arch.isCDNA1GPU())
                     return GFX908_WEIGHTS;
                 else if(arch.isCDNA2GPU())
                     return GFX90A_WEIGHTS;
                 else if(arch.isCDNA3GPU())
                     return GFX942_WEIGHTS;
-                else if(arch.isCDNA35GPU())
+                else if(arch.isCDNA4GPU())
                     return GFX950_WEIGHTS;
                 else
                 {
@@ -259,26 +277,30 @@ namespace rocRoller
             return m_weights;
         }
 
-        inline bool LinearWeightedCost::Match(Argument arg)
+        bool LinearWeightedCost::Match(Argument arg)
         {
-            return std::get<0>(arg) == CostFunction::LinearWeighted;
+            auto [costFn, ctx] = arg;
+            return costFn == CostFunction::LinearWeighted
+                   || costFn == CostFunction::LinearWeightedSimple;
         }
 
-        inline std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
+        std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<LinearWeightedCost>(std::get<1>(arg));
+            auto [costFn, ctx] = arg;
+
+            return std::make_shared<LinearWeightedCost>(ctx, costFn);
         }
 
-        inline std::string LinearWeightedCost::name() const
+        std::string LinearWeightedCost::name() const
         {
             return Name;
         }
 
-        inline float LinearWeightedCost::cost(Instruction const&       inst,
-                                              InstructionStatus const& status) const
+        float LinearWeightedCost::cost(Instruction const&       inst,
+                                       InstructionStatus const& status) const
         {
 
             auto nops = static_cast<float>(status.nops);
@@ -306,35 +328,31 @@ namespace rocRoller
                 lgkmcnt    = 1 + maxLgkmcnt - cnt;
             }
 
-            int vmQueueLen = status.waitLengths.at(GPUWaitQueueType::LoadQueue)
-                             + status.waitLengths.at(GPUWaitQueueType::StoreQueue);
+            int vmQueueLen
+                = status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::LoadQueue))
+                  + status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::StoreQueue));
             float vectorQueueSat = std::max(vmQueueLen - m_weights.vmQueueLen, 0);
-            int   kmQueueLen     = status.waitLengths.at(GPUWaitQueueType::SMemQueue)
-                             + status.waitLengths.at(GPUWaitQueueType::DSQueue);
+            int   kmQueueLen
+                = status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::SMemQueue))
+                  + status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::DSQueue));
             float ldsQueueSat = std::max(kmQueueLen - m_weights.lgkmQueueLen, 0);
 
-            float newSGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));
-            float newVGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Vector));
-            float highWaterMarkSGPRs = status.highWaterMarkRegistersDelta.at(
-                static_cast<size_t>(Register::Type::Scalar));
-            float highWaterMarkVGPRs = status.highWaterMarkRegistersDelta.at(
-                static_cast<size_t>(Register::Type::Vector));
+            float newSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);
+            float newVGPRs = status.allocatedRegisters.at(Register::Type::Vector);
+            float highWaterMarkSGPRs
+                = status.highWaterMarkRegistersDelta.at(Register::Type::Scalar);
+            float highWaterMarkVGPRs
+                = status.highWaterMarkRegistersDelta.at(Register::Type::Vector);
 
             float notMFMA = inst.getOpCode().find("mfma") == std::string::npos ? 1.0f : 0.0f;
 
-            float fractionOfSGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));
-            float remainingSGPRs
-                = status.remainingRegisters.at(static_cast<size_t>(Register::Type::Scalar));
+            float fractionOfSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);
+            float remainingSGPRs  = status.remainingRegisters.at(Register::Type::Scalar);
             if(remainingSGPRs > 0)
                 fractionOfSGPRs /= remainingSGPRs;
 
-            float fractionOfVGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Vector));
-            float remainingVGPRs
-                = status.remainingRegisters.at(static_cast<size_t>(Register::Type::Vector));
+            float fractionOfVGPRs = status.allocatedRegisters.at(Register::Type::Vector);
+            float remainingVGPRs  = status.remainingRegisters.at(Register::Type::Vector);
             if(remainingVGPRs > 0)
                 fractionOfVGPRs /= remainingVGPRs;
 

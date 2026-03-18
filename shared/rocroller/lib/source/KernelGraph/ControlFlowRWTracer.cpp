@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -50,64 +27,37 @@ namespace rocRoller::KernelGraph
         template <Expression::CUnary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.arg)
-            {
-                call(expr.arg);
-            }
+            call(expr.arg);
         }
 
         template <Expression::CBinary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.rhs)
-            {
-                call(expr.rhs);
-            }
+            call(expr.lhs);
+            call(expr.rhs);
         }
 
         void operator()(Expression::ScaledMatrixMultiply const& expr)
         {
-            if(expr.matA)
-            {
-                call(expr.matA);
-            }
-            if(expr.matB)
-            {
-                call(expr.matB);
-            }
-            if(expr.matC)
-            {
-                call(expr.matC);
-            }
-            if(expr.scaleA)
-            {
-                call(expr.scaleA);
-            }
-            if(expr.scaleB)
-            {
-                call(expr.scaleB);
-            }
+            call(expr.matA);
+            call(expr.matB);
+            call(expr.matC);
+            call(expr.scaleA);
+            call(expr.scaleB);
         }
 
         template <Expression::CTernary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.r1hs)
-            {
-                call(expr.r1hs);
-            }
-            if(expr.r2hs)
-            {
-                call(expr.r2hs);
-            }
+            call(expr.lhs);
+            call(expr.r1hs);
+            call(expr.r2hs);
+        }
+
+        template <Expression::CNary Expr>
+        void operator()(Expr const& expr)
+        {
+            std::ranges::for_each(expr.operands, [this](auto const& op) { call(op); });
         }
 
         void operator()(Expression::DataFlowTag const& expr)
@@ -173,10 +123,99 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    std::set<int> ControlFlowRWTracer::getCoordinateDependencies(int coordinate) const
+    {
+        if(!m_dependenciesBuilt)
+        {
+            Throw<FatalError>("Dependencies not built. Call buildDependencies() first.");
+        }
+
+        auto it = m_dependencies.find(coordinate);
+        if(it != m_dependencies.end())
+        {
+            return it->second;
+        }
+
+        return {};
+    }
+
+    //
+    // This assumes that: the trace is ordered and records for the
+    // same control operation are consecutive.
+    //
+    void ControlFlowRWTracer::buildDependencies()
+    {
+        if(m_dependenciesBuilt)
+            return;
+
+        m_dependencies.clear();
+
+        // Single pass through the trace to build backward dependencies
+        auto it = m_trace.begin();
+        while(it != m_trace.end())
+        {
+            int currentControl = it->control;
+
+            std::unordered_set<int> writtenCoords;
+            std::unordered_set<int> readCoords;
+
+            // Collect all reads and writes for the current operation
+            while(it != m_trace.end() && it->control == currentControl)
+            {
+                if(it->rw == WRITE || it->rw == READWRITE)
+                {
+                    writtenCoords.insert(it->coordinate);
+                }
+                if(it->rw == READ || it->rw == READWRITE)
+                {
+                    readCoords.insert(it->coordinate);
+                }
+                ++it;
+            }
+
+            // For each coordinate being written
+            for(int written : writtenCoords)
+            {
+                // Collect all coordinates this write depends on (including transitive)
+                std::unordered_set<int> allDeps;
+
+                for(int read : readCoords)
+                {
+                    if(written == read)
+                        continue;
+
+                    allDeps.insert(read);
+
+                    // Add transitive dependencies
+                    if(m_dependencies.contains(read))
+                        allDeps.insert(m_dependencies[read].begin(), m_dependencies[read].end());
+                }
+
+                // Update backward dependencies for the written coordinate
+                m_dependencies[written].insert(allDeps.begin(), allDeps.end());
+            }
+        }
+
+        m_dependenciesBuilt = true;
+    }
+
+    std::vector<ControlFlowRWTracer::ReadWriteRecord> ControlFlowRWTracer::opReadWrite(int op) const
+    {
+        std::vector<ControlFlowRWTracer::ReadWriteRecord> rv;
+        std::copy_if(m_trace.begin(),
+                     m_trace.end(),
+                     std::back_inserter(rv),
+                     [op](ControlFlowRWTracer::ReadWriteRecord x) { return op == x.control; });
+        return rv;
+    }
+
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        if(control < 0 || coordinate < 0)
-            return;
+        AssertFatal(control > 0 && coordinate > 0,
+                    ShowValue(control),
+                    ShowValue(coordinate),
+                    ShowValue(rw));
+
         m_trace.push_back({control, coordinate, rw});
 
         if(m_graph.coordinates.getElementType(coordinate) == Graph::ElementType::Node)
@@ -207,6 +246,31 @@ namespace rocRoller::KernelGraph
                 continue;
             if(m_graph.coordinates.exists(c.coordinate))
                 m_trace.push_back({control, c.coordinate, rw});
+        }
+    }
+
+    // It can be removed once trackConnections can be used
+    void ControlFlowRWTracer::trackOffsetAndStride(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            auto maybeStride = m_graph.coordinates.get<Stride>(c.coordinate).has_value();
+            auto maybeOffset = m_graph.coordinates.get<Offset>(c.coordinate).has_value();
+            if(maybeStride || maybeOffset)
+            {
+                trackRegister(control, c.coordinate, rw);
+            }
+        }
+    }
+
+    void ControlFlowRWTracer::trackBuffer(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            if(m_graph.coordinates.get<Buffer>(c.coordinate).has_value())
+                trackRegister(control, c.coordinate, rw);
         }
     }
 
@@ -269,6 +333,7 @@ namespace rocRoller::KernelGraph
     {
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.expression);
+
         for(auto src : visitor.tags)
         {
             trackRegister(tag, src, ReadWrite::READ);
@@ -284,11 +349,6 @@ namespace rocRoller::KernelGraph
         {
             m_trace.push_back({tag, c.coordinate, ReadWrite::READ});
         }
-    }
-
-    void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
-    {
-        // Already in a Scope
     }
 
     void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
@@ -344,8 +404,8 @@ namespace rocRoller::KernelGraph
         // typically involve: incrementing loop counters and
         // offsets.  Loop counters are scoped already.
         //
-        // Offsets are created "inside" ComputeIndex nodes and are
-        // used in other nodes like LoadTiled.  These "inside"
+        // Offsets are created by AssignIndexExpressions and are
+        // used in other nodes like LoadTiled.  These
         // references do not explicitly appear in the graph.
         //
         // If we examine loop increment operations and "track" an
@@ -369,8 +429,8 @@ namespace rocRoller::KernelGraph
         // auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
         // generate(init);
 
-        // auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
-        // generate(incr);
+        auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
+        generate(incr);
 
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.condition);
@@ -402,6 +462,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, lds, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadLinear const& op, int tag)
@@ -426,14 +487,19 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
     {
+        auto user = m_graph.mapper.get<User>(tag);
 
         auto dst = m_graph.mapper.get<MacroTile>(tag);
 
         dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
                   .value_or(dst);
 
-        trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, user, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+
+        trackConnections(tag, {user, dst}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
@@ -520,6 +586,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, lds, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadTileDirect2LDS const& op, int tag)
@@ -529,6 +596,8 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, source, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {source, dst}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
@@ -547,6 +616,8 @@ namespace rocRoller::KernelGraph
 
         trackRegister(tag, src, ReadWrite::READ);
         trackConnections(tag, {src}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
+        trackBuffer(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)
@@ -577,8 +648,7 @@ namespace rocRoller::KernelGraph
         auto src = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, src, ReadWrite::READ);
 
-        auto dst
-            = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+        auto dst = m_graph.mapper.get(tag, NaryArgument::DEST);
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 

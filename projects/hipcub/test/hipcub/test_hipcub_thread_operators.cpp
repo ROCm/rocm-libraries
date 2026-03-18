@@ -692,6 +692,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
         HIP_CHECK(hipFree(d_keys_expected));
         HIP_CHECK(hipFree(d_expected));
         HIP_CHECK(hipFree(d_unique_keys_expected));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 }
 
@@ -740,8 +741,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
     using IteratorType
-        = hipcub::TransformInputIterator<output_type, hipcub::CastOp<output_type>, input_type*>;
-
+        = rocprim::transform_iterator<input_type*, hipcub::CastOp<output_type>, output_type>;
     const std::vector<size_t> sizes = get_sizes();
     for(auto input_size : sizes)
     {

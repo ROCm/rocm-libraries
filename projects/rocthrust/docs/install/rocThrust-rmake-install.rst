@@ -6,9 +6,11 @@
 Building and installing rocThrust on Windows with rmake.py
 ********************************************************************
 
-You can use ``rmake.py`` to build and install rocThrust on Windows. You can also use `CMake <./rocThrust-install-with-cmake.html>`_ if you want more build and installation options. 
+You can use ``rmake.py`` to build and install rocThrust on Windows. You can also use `CMake <./rocThrust-install-with-cmake.html>`_ if you want more build and installation options.
 
-``rmake.py`` is located in the ``rocThrust`` root directory. To build and install rocThrust with ``rmake.py``, run:
+:doc:`Clone the rocThrust project <./rocThrust-install-overview>`. ``rmake.py`` will be located in the ``rocthrust`` root directory.
+
+To build and install rocThrust with ``rmake.py``, run:
 
 .. code:: shell
 
@@ -22,10 +24,14 @@ The ``-c`` option builds all clients, including the unit tests:
 
     python rmake.py -c
 
+:doc:`CMake build options <./rocThrust-install-with-cmake>` can be passed to the ``rmake.py`` script using the ``--cmake-darg`` option:
+
+.. code:: shell 
+
+    python rmake.py -ci --cmake-darg THRUST_HOST_SYSTEM=OMP --cmake-darg THRUST_DEVICE_SYSTEM=OMP
+
 To see a complete list of ``rmake.py`` options, run:
 
 .. code-block:: shell
 
     python rmake.py --help
-
- 

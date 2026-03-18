@@ -443,6 +443,8 @@ namespace hipsparse
             return rocsparse_datatype_i32_r;
         case HIP_R_16F:
             return rocsparse_datatype_f16_r;
+        case HIP_R_16BF:
+            return rocsparse_datatype_bf16_r;
         case HIP_R_32F:
             return rocsparse_datatype_f32_r;
         case HIP_R_64F:
@@ -466,6 +468,8 @@ namespace hipsparse
             return HIP_R_32I;
         case rocsparse_datatype_f16_r:
             return HIP_R_16F;
+        case rocsparse_datatype_bf16_r:
+            return HIP_R_16BF;
         case rocsparse_datatype_f32_r:
             return HIP_R_32F;
         case rocsparse_datatype_f64_r:
@@ -496,6 +500,8 @@ namespace hipsparse
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
             return rocsparse_spmv_alg_csr_stream;
+        case HIPSPARSE_SPMV_SELL_ALG1:
+            return rocsparse_spmv_alg_sell;
         default:
             throw "Non existent hipsparseSpMVAlg_t";
         }
@@ -642,6 +648,8 @@ namespace hipsparse
             return rocsparse_format_coo_aos;
         case HIPSPARSE_FORMAT_BLOCKED_ELL:
             return rocsparse_format_bell;
+        case HIPSPARSE_FORMAT_SLICED_ELL:
+            return rocsparse_format_sell;
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -661,6 +669,8 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_COO_AOS;
         case rocsparse_format_bell:
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
+        case rocsparse_format_sell:
+            return HIPSPARSE_FORMAT_SLICED_ELL;
         default:
             throw "Non existent rocsparse_format";
         }

@@ -1,0 +1,94 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 2
+    },
+    "configurePresets": [
+        {
+            "name": "default:release",
+            "description": "Configure release build with installation to /opt/rocm",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocm"
+            }
+        },
+        {
+            "name": "mxdatagenerator",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator"
+            }
+        },
+        {
+            "name": "rocroller",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller"
+            }
+        },
+        {
+            "name": "origami",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "origami"
+            }
+        },
+        {
+            "name": "hipblaslt",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;origami;hipblas-common;hipblaslt"
+            }
+        },
+        {
+            "name": "rocprim",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "rocprim"
+            }
+        },
+        {
+            "name": "rocrand",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
+            }
+        },
+        {
+            "name": "hipdnn",
+            "description": "Build hipdnn only",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn"
+            }
+        },
+        {
+            "name": "miopen-provider",
+            "description": "Build hipdnn and miopen-provider",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;miopen-provider"
+            }
+        },
+        {
+            "name": "hipblaslt-provider",
+            "description": "Build hipdnn and hipblaslt-provider",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipblaslt-provider"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "default",
+            "displayName": "Default build preset",
+            "description": "Build using the default preset",
+            "configurePreset": "default:release"
+        }
+    ]
+}

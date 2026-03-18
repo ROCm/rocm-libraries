@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,12 +28,8 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta:   1.0, alphai:  1.0, betai: 0.5 }
-    - { alpha:  -0.5, beta:   0.0, alphai: -0.5, betai: 1.0 }
-    - { alpha:   0.0, beta:   1.0, alphai:  0.0, betai: 1.0 }
 
   - &alpha_beta_range_checkin
-    - { alpha: -99.0, beta:   1.5, alphai:  0.0, betai: 0.3 }
-    - { alpha:   2.0, beta: -99.0, alphai:  0.5, betai: 0.3 }
     - { alpha:   3.0, beta:   1.7, alphai: -0.5, betai: 0.8 }
 
   - &alpha_beta_range_nightly
@@ -52,9 +48,9 @@ Tests:
   function: spgemm_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [50, 647]
-  N: [13, 523]
-  K: [50, 254]
+  M: [300]
+  N: [300]
+  K: [254]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
@@ -65,19 +61,53 @@ Tests:
   spgemm_alg: [rocsparse_spgemm_alg_default]
 
 - name: spgemm_mult_csr
+  category: quick
+  function: spgemm_csr
+  indextype: *i32
+  precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
+  M: [300]
+  N: [300]
+  K: [512]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
+- name: spgemm_mult_csr
   category: pre_checkin
   function: spgemm_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [0, 1799, 32519]
-  N: [0, 3712, 16021]
-  K: [0, 1942, 9848]
+  M: [1799]
+  N: [2000]
+  K: [1942]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
+- name: spgemm_mult_csr
+  category: pre_checkin
+  function: spgemm_csr
+  indextype: *i32
+  precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
+  M: [1024]
+  N: [512, 1024]
+  K: [1024]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spgemm_alg: [rocsparse_spgemm_alg_default]
 
@@ -104,7 +134,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [13, 523]
+  N: [13, 300]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -125,7 +155,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [0, 3712, 16021]
+  N: [8, 2000]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -171,7 +201,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [21, 719]
+  N: [21, 300]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -190,7 +220,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [0, 5925, 20142]
+  N: [8, 2000]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]

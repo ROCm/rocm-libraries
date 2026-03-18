@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -34,7 +34,8 @@ bool profile_batchnorm_backward_impl(bool do_verification,
                                      const std::vector<size_t> inOutLengths,
                                      const std::vector<int> reduceDims,
                                      bool haveSavedMeanInvVar,
-                                     double epsilon)
+                                     double epsilon,
+                                     index_t instance_index = -1)
 {
     if(inOutLengths.size() != Rank || reduceDims.size() != NumBatchNormReduceDim)
     {
@@ -61,6 +62,27 @@ bool profile_batchnorm_backward_impl(bool do_verification,
             invariant_length *= inOutLengths[dim];
         };
     }
+
+    using PassThroughOp = ck::tensor_operation::element_wise::PassThrough;
+
+    // add device batchnorm-backward instances
+    using DeviceOp = ck::tensor_operation::device::DeviceBatchNormBwd<XDataType,
+                                                                      DxDataType,
+                                                                      DxDataType,
+                                                                      AccDataType,
+                                                                      ScaleDataType,
+                                                                      DscaleDbiasDataType,
+                                                                      MeanVarDataType,
+                                                                      PassThroughOp,
+                                                                      Rank,
+                                                                      NumBatchNormReduceDim>;
+
+    // get device op instances
+    const auto instance_ptrs =
+        ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+            DeviceOp>::GetInstances();
+
+    std::cout << "found " << instance_ptrs.size() << " instances" << std::endl;
 
     // input data of the batchnorm backward algorithm
     Tensor<XDataType> x(inOutLengths);
@@ -190,27 +212,6 @@ bool profile_batchnorm_backward_impl(bool do_verification,
 
     std::copy(reduceDims.begin(), reduceDims.end(), arrReduceDims.begin());
 
-    using PassThroughOp = ck::tensor_operation::element_wise::PassThrough;
-
-    // add device batchnorm-backward instances
-    using DeviceOp = ck::tensor_operation::device::DeviceBatchNormBwd<XDataType,
-                                                                      DxDataType,
-                                                                      DxDataType,
-                                                                      AccDataType,
-                                                                      ScaleDataType,
-                                                                      DscaleDbiasDataType,
-                                                                      MeanVarDataType,
-                                                                      PassThroughOp,
-                                                                      Rank,
-                                                                      NumBatchNormReduceDim>;
-
-    // get device op instances
-    const auto instance_ptrs =
-        ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-            DeviceOp>::GetInstances();
-
-    std::cout << "found " << instance_ptrs.size() << " instances" << std::endl;
-
     std::string best_instance_name;
     float best_avg_time   = std::numeric_limits<float>::max();
     float best_gb_per_sec = 0;
@@ -293,6 +294,11 @@ bool profile_batchnorm_backward_impl(bool do_verification,
         if(inst_ptr->IsSupportedArgument(argument_ptr.get()))
         {
             num_kernel++;
+            if((instance_index != -1) && (instance_index + 1 != num_kernel))
+            {
+                // skip test if instance_index is specified
+                continue;
+            }
         }
         else
         {
@@ -382,7 +388,11 @@ bool profile_batchnorm_backward_impl(bool do_verification,
         std::cout << "Error: No kernel is applicable" << std::endl;
         return false;
     }
-
+    if (instance_index != -1)
+    {
+        std::cout << "batchnorm_backward_instance (" << instance_index << "/" << num_kernel
+            << "): Passed" << std::endl;
+    }
     return pass;
 }
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,21 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_adjacent_find.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_adjacent_find.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP
 #include <hip/hip_runtime.h>
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/types.hpp>
 #endif
 
-// C++ Standard Library
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -42,7 +40,7 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(T, P) executor.queue_instance(device_adjacent_find_benchmark<T, P>());
+#define CREATE_BENCHMARK(T, P) executor.queue<device_adjacent_find_benchmark<T, P>>();
 
 #define CREATE_ADJACENT_FIND_BENCHMARKS(T) \
     CREATE_BENCHMARK(T, 1)                 \
@@ -51,32 +49,33 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
+    primbench::settings settings;
+    settings.size                 = 2 * primbench::GiB;
+    settings.min_gpu_ms_per_batch = 100;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    using custom_float2          = common::custom_type<float, float>;
-    using custom_double2         = common::custom_type<double, double>;
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_char_double     = common::custom_type<char, double>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
     // Tuned types
-    CREATE_ADJACENT_FIND_BENCHMARKS(int8_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int16_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int32_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int64_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::half)
-    CREATE_ADJACENT_FIND_BENCHMARKS(float)
-    CREATE_ADJACENT_FIND_BENCHMARKS(double)
     CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::int128_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int64_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int32_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int16_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int8_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(double)
+    CREATE_ADJACENT_FIND_BENCHMARKS(float)
+    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
     CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::uint128_t)
 
-    // Custom types
-    CREATE_ADJACENT_FIND_BENCHMARKS(custom_float2)
-    CREATE_ADJACENT_FIND_BENCHMARKS(custom_double2)
-    CREATE_ADJACENT_FIND_BENCHMARKS(custom_int2)
-    CREATE_ADJACENT_FIND_BENCHMARKS(custom_char_double)
-    CREATE_ADJACENT_FIND_BENCHMARKS(custom_longlong_double)
+    // Not tuned custom types
+    CREATE_ADJACENT_FIND_BENCHMARKS(custom_f32_f32)
+    CREATE_ADJACENT_FIND_BENCHMARKS(custom_f64_f64)
+    CREATE_ADJACENT_FIND_BENCHMARKS(custom_i32_i32)
+    CREATE_ADJACENT_FIND_BENCHMARKS(custom_i8_f64)
+    CREATE_ADJACENT_FIND_BENCHMARKS(custom_i64_f64)
+    #endif
 #endif
 
     executor.run();

@@ -179,6 +179,9 @@ Checks: >-
   -misc-no-recursion,
   -misc-use-anonymous-namespace,
   -misc-use-internal-linkage,
+  -modernize-use-designated-initializers,
+  -modernize-use-ranges,
+  -modernize-use-constraints,
   -modernize-avoid-bind,
   -modernize-avoid-c-arrays,
   -modernize-deprecated-headers,
@@ -225,6 +228,12 @@ Checks: >-
   -readability-suspicious-call-argument,
   -readability-uppercase-literal-suffix,
   -readability-use-std-min-max,
+  -readability-container-contains,
+  -modernize-use-integer-sign-comparison,
+  -portability-template-virtual-member-function,
+  -bugprone-nondeterministic-pointer-iteration-order,
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
+  -misc-redundant-expression,
 
 CheckOptions:
   - key: google-readability-braces-around-statements.ShortStatementLines

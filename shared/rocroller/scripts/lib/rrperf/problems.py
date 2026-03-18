@@ -1,35 +1,14 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-import pathlib
-from dataclasses import dataclass, field, fields, asdict
-from typing import List
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
+from typing import Any
+
 import yaml
+from rrperf.utils import get_dataclass_id
 
-
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def field_dict(cls, obj):
@@ -53,6 +32,31 @@ def convert_class_params(cls, obj):
             setattr(obj, f.name, getattr(obj, f.name))
 
 
+@dataclass(unsafe_hash=True)
+class MNKTuple:
+    """M/N/K tuple"""
+
+    m: int
+    n: int
+    k: int
+
+    def __str__(self):
+        return f"{self.m}x{self.n}x{self.k}"
+
+
+@dataclass(unsafe_hash=True)
+class MKNLTuple:
+    """MxK/NxL tuple"""
+
+    m: int
+    k: int
+    n: int
+    l: int
+
+    def __str__(self):
+        return f"{self.m}x{self.k}/{self.n}x{self.l}"
+
+
 @dataclass
 class RRPerfResult:
     """Base class for timing results.
@@ -61,17 +65,85 @@ class RRPerfResult:
     contain timers or counters.
     """
 
-    client: str = field(repr=False)
-    path: pathlib.Path = field(repr=False, hash=False)
+    resultType: str = field(repr=False)
+    path: Path = field(repr=False, hash=False)
 
     kernelGenerate: int = field(repr=False, hash=False)
     kernelAssemble: int = field(repr=False, hash=False)
-    kernelExecute: List[int] = field(repr=False, hash=False)
+    kernelExecute: list[int] = field(repr=False, hash=False)
 
     device: int = field(repr=False, hash=False, compare=False, default=0)
 
     checked: bool = field(repr=False, hash=False, compare=False, default=False)
     correct: bool = field(repr=False, hash=False, compare=False, default=True)
+
+    sgprCount: int = field(repr=False, hash=False, compare=False, default=0)
+    vgprCount: int = field(repr=False, hash=False, compare=False, default=0)
+    agprCount: int = field(repr=False, hash=False, compare=False, default=0)
+
+    ldsBytes: int = field(repr=False, hash=False, compare=False, default=0)
+
+
+@dataclass(unsafe_hash=True)
+class TypeParameters:
+    """All types that are part of the problem description"""
+
+    type_A: str = "float"
+    type_B: str = "float"
+    type_C: str = "float"
+    type_D: str = "float"
+    type_acc: str = "float"
+
+    trans_A: str = "N"
+    trans_B: str = "N"
+
+    scale_A: str = "None"
+    scaleType_A: str = "None"
+    scale_B: str = "None"
+    scaleType_B: str = "None"
+
+    # If scale_A or scale_B is Separate, scaleBlockSize
+    # needs to be set to a valid block size (e.g. 32)
+    scaleBlockSize: int = -1
+    scaleSkipPermlane: str = "None"  # None, PreSwizzleScale, PreSwizzleScaleGFX950
+
+    def __init__(self, typeParams: Any | None = None, **kwargs):
+        if isinstance(typeParams, TypeParameters):
+            for f in fields(self):
+                setattr(self, f.name, getattr(typeParams, f.name))
+        elif typeParams is not None:
+            raise TypeError(
+                f"Expected TypeParameters or None, got {type(typeParams).__name__}"
+            )
+
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise AttributeError(f"Unknown field: {key}")
+
+    def asArgs(self) -> list[str]:
+        rv: list[str] = []
+        for f in fields(self):
+            rv.append(f"--{f.name}={self.__getattribute__(f.name)}")
+        return rv
+
+
+@dataclass(unsafe_hash=True)
+class GPUArchitectureTarget:
+    """GPUArchitectureTarget"""
+
+    ArchString: str = ""
+    Xnack: bool = False
+    Sramecc: bool = False
+
+    def asArgs(self) -> list[str]:
+        if len(self.ArchString) == 0:
+            return []
+        arch = self.ArchString
+        arch += ":xnack+" if self.Xnack else ""
+        arch += ":sramecc+" if self.Sramecc else ""
+        return ["--arch=" + arch]
 
 
 #
@@ -88,14 +160,17 @@ class GEMMProblem:
     alpha: float = 2.0
     beta: float = 0.5
 
-    type_A: str = "float"
-    type_B: str = "float"
-    type_C: str = "float"
-    type_D: str = "float"
-    type_acc: str = "float"
+    types: TypeParameters = TypeParameters()
 
-    trans_A: str = "N"
-    trans_B: str = "N"
+    scaleValue_A: float = 1.0
+    scaleValue_B: float = 1.0
+
+    initMode_A: str = "Bounded"
+    initMode_B: str = "Bounded"
+    initMode_C: str = "Bounded"
+
+    workgroupMappingDim: int = -1
+    workgroupMappingValue: int = -1
 
     def __post_init__(self):
         convert_class_params(GEMMProblem, self)
@@ -114,50 +189,42 @@ class GEMMSolution:
     wave_k: int = -1
     wave_b: int = -1
 
-    workgroup_size_x: int = 64 * 2
-    workgroup_size_y: int = 2
-    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroup_size_x: int = -1
+    workgroup_size_y: int = -1
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
-    loadLDS_A: bool = True
-    loadLDS_B: bool = True
-    storeLDS_D: bool = True
+    load_A: str = "BufferToLDSViaVGPR"
+    load_B: str = "BufferToLDSViaVGPR"
+    store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
     betaInFma: bool = True
 
-    direct2LDS_A: bool = False
-    direct2LDS_B: bool = False
+    padLDS_A: tuple[int, int] = (0, 0)
+    padLDS_B: tuple[int, int] = (0, 0)
 
     scheduler: str = "Priority"
+    schedulerCost: str = "LinearWeighted"
 
     prefetch: bool = True
     prefetchInFlight: int = 2
     prefetchLDSFactor: int = 0
     prefetchMixMemOps: bool = False
 
-    scale_A: str = "None"
-    scale_B: str = "None"
+    loadScale_A: str = "BufferToVGPR"
+    loadScale_B: str = "BufferToVGPR"
 
-    scaleType_A: str = "None"
-    scaleType_B: str = "None"
-
-    scaleSkipPermlane: bool = False
-
-    # If scale_A or scale_B is Separate, scaleBlockSize
-    # needs to be set to a valid block size (e.g. 32)
-    scaleBlockSize: int = -1
-
-    loadLDSScale_A: bool = False
-    loadLDSScale_B: bool = False
     swizzleScale: bool = False
+    swizzleTileSize: MKNLTuple = MKNLTuple(0, 0, 0, 0)
     prefetchScale: bool = False
+    pretileScale: bool = False
 
-    streamK: bool = False
+    streamK: str = "None"
     numWGs: int = 0
-    streamKTwoTile: bool = False
+
+    architecture: GPUArchitectureTarget = GPUArchitectureTarget()
+    tailLoops: bool = True
+
+    version: str = ""
 
     def __post_init__(self):
         convert_class_params(GEMMSolution, self)
@@ -171,17 +238,25 @@ class GEMM(GEMMProblem, GEMMSolution):
     numOuter: int = 1
     numInner: int = 10
 
-    visualize: bool = False
+    noCheck: bool = False
 
-    match_memory_access: bool = True
+    visualize: bool = False
 
     def __post_init__(self):
         convert_class_params(GEMM, self)
 
     @property
+    def id(self):
+        return get_dataclass_id(self)
+
+    @property
     def run_invariant_token(self):
+        # Build metadata (e.g. git commit tag) should not affect cross-run matching.
+        # Excluding version keeps GEMM comparisons stable across different commits.
+        solution_fields = field_dict(GEMMSolution, self)
+        solution_fields.pop("version", None)
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
-            GEMMSolution(**field_dict(GEMMSolution, self))
+            GEMMSolution(**solution_fields)
         )
 
     @property
@@ -230,24 +305,25 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
         return "gemm"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
     def command(
         self, generate_only=False, architecture=None, **extra_args
-    ) -> List[str]:
+    ) -> list[str]:
 
         specialNames = {
             "output": "yaml",
             "numWarmUp": "num_warmup",
             "numOuter": "num_outer",
             "numInner": "num_inner",
+            "swizzleTileSize": "sts",
         }
 
         command = "client/rocroller-gemm"
@@ -257,28 +333,33 @@ class GEMMRun(GEMM):
                 return specialNames[key]
             return key
 
-        arg_dict = {argName(key): value for key, value in asdict(self).items()}
-        for key, value in extra_args.items():
-            arg_dict[key] = value
+        if architecture is not None:
+            self.architecture.ArchString = architecture
+
+        arg_dict = {
+            argName(key): value
+            for key, value in (
+                (f.name, getattr(self, f.name)) for f in fields(self.__class__)
+            )
+        }
+        arg_dict.update(extra_args)
 
         if generate_only:
             for attr in ["yaml", "num_warmup", "num_inner", "num_outer"]:
                 arg_dict.pop(attr)
+        arg_dict.pop("version")
 
-        args = [
-            (
-                f"--{key}={','.join(map(str, value))}"
-                if isinstance(value, tuple)
-                else f"--{key}={value}"
-            )
-            for key, value in arg_dict.items()
-        ]
+        args = []
+        for key, value in arg_dict.items():
+            if hasattr(value, "asArgs"):
+                args.extend(value.asArgs())
+            elif isinstance(value, tuple):
+                args.append(f"--{key}={','.join(map(str, value))}")
+            else:
+                args.append(f"--{key}={str(value)}")
 
         if generate_only:
             args.append("generate")
-
-        if architecture is not None:
-            args.extend(["--arch", architecture])
 
         return [command] + args
 
@@ -299,25 +380,25 @@ class GEMMResult(GEMM, RRPerfResult):
             "K": self.K,
             "PREC": "".join(
                 [
-                    {"half": "h", "float": "f"}[getattr(self, "type_" + x)]
+                    {"half": "h", "float": "f"}[getattr(self.types, "type_" + x)]
                     for x in ["A", "B", "C", "D", "acc"]
                 ]
             ),
-            "AB": self.trans_A + self.trans_B,
+            "AB": self.types.trans_A + self.types.trans_B,
             "m": self.mac_m,
             "n": self.mac_n,
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
-            "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
-            "Direct2LDS": TF(self.direct2LDS_A) + TF(self.direct2LDS_B),
+            "Load_A": TF(self.load_A),
+            "Load_B": TF(self.load_B),
+            "Store_D": self.store,
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + str(self.numWGs),
-            "2TSK": TF(self.streamKTwoTile),
+            "SK": self.streamK + "/" + str(self.numWGs),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -338,6 +419,10 @@ class CodeGen:
 
     numWarmUp: int = 2
     numRuns: int = 10
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -387,16 +472,16 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
         return "codegen"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
-    def command(self) -> List[str]:
+    def command(self) -> list[str]:
         retval = [
             "client/rocroller-codegen-stress",
             "--inst_count=" + str(self.instCount),
@@ -420,18 +505,18 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    config: Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property
     def group(self):
         return "gemm"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
-    def command(self, **extra_args) -> List[str]:
+    def command(self, **extra_args) -> list[str]:
         command = str(repo_dir / "scripts" / "benchmark_tensile")
 
         arg_dict = asdict(self)
@@ -459,8 +544,8 @@ class TensileRun(GEMM):
 #
 
 _client_to_result_class = {
-    "GEMMv00": GEMMResult,
-    "CodeGenv00": CodeGenResult,
+    "GEMM": GEMMResult,
+    "CodeGen": CodeGenResult,
 }
 
 _base_to_run_class = {
@@ -469,14 +554,101 @@ _base_to_run_class = {
 }
 
 
-def load_results(path: pathlib.Path):
+def _is_nested_gemm_result(result: dict) -> bool:
+    return any(key in result for key in ("problem", "solution", "benchmark"))
+
+
+def _flatten_nested_gemm_result(result: dict) -> dict:
+    """
+    Flatten nested GEMM result sections into legacy top-level keys.
+
+    Merge order matches the old writer's effective behavior:
+    problem -> solution -> benchmark, where later sections override earlier values.
+    """
+    flattened = {
+        key: value
+        for key, value in result.items()
+        if key not in ("problem", "solution", "benchmark")
+    }
+
+    for key in ("problem", "solution", "benchmark"):
+        section = result.get(key)
+        if isinstance(section, dict):
+            flattened.update(section)
+
+    return flattened
+
+
+def cast_missing_parameters(result):
+    """
+    Cast parameters in previous GEMMResult version into existing parameters
+
+    Args:
+        result: a dictionary with parameters (keys) and their values
+
+    """
+    if "workgroupMapping" in result:
+
+        assert (
+            len(result["workgroupMapping"]) == 2
+        ), "workgroupMapping should contain a dimension and a value"
+
+        wgmDim = result["workgroupMapping"][0]
+        wgmValue = result["workgroupMapping"][1]
+
+        del result["workgroupMapping"]
+
+        result["workgroupMappingDim"] = wgmDim
+        result["workgroupMappingValue"] = wgmValue
+
+    # Remove old/deprecated
+    for attr in ["unroll_x", "unroll_y"]:
+        if attr in result:
+            del result[attr]
+
+    if "storeLDS_D" in result:
+        storeLDS_D = result["storeLDS_D"]
+        del result["storeLDS_D"]
+        result["store"] = (
+            "VGPRToGlobalMemoryViaLDSWithBuffer"
+            if storeLDS_D
+            else "VGPRToGlobalMemoryWithBuffer"
+        )
+
+    # Convert old streamK bool fields to new streamK string enum
+    if "streamKTwoTile" in result or "streamKTwoTileDPFirst" in result:
+        old_streamK = result.get("streamK", False)
+        old_twoTile = result.pop("streamKTwoTile", False)
+        old_dpFirst = result.pop("streamKTwoTileDPFirst", False)
+
+        if old_twoTile:
+            result["streamK"] = "TwoTile"
+        elif old_dpFirst:
+            result["streamK"] = "TwoTileDPFirst"
+        elif old_streamK:
+            result["streamK"] = "Standard"
+        else:
+            result["streamK"] = "None"
+
+    if "matchMemoryAccess" in result:
+        del result["matchMemoryAccess"]
+
+
+def load_results(path: Path):
     """
     Load results from a YAML file `path` and return an array of RESULT objects.
     """
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
-        ResultClass = _client_to_result_class[r["client"]]
+        if r is None:
+            continue
+
+        r = dict(r)
+        ResultClass = _client_to_result_class[r["resultType"]]
+        if r.get("resultType") == "GEMM" and _is_nested_gemm_result(r):
+            r = _flatten_nested_gemm_result(r)
         r.pop("path", None)
+        cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))
     return rv
 

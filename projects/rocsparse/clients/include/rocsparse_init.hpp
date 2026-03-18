@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,15 +37,33 @@
 // for complex number, the real/imag part would be initialized with the same value
 
 // Initialize vector with random values
+// If use_exact is false (default value), the values will be random floating point values
+// If use_exact is true, the values will be integers in the range [a, b]
+template <typename T>
+void rocsparse_init_1d_array(
+    T* A, size_t size, bool use_exact = false, T a = static_cast<T>(0), T b = static_cast<T>(1));
+
 template <typename T>
 void rocsparse_init(T*     A,
                     size_t M,
                     size_t N,
                     size_t lda,
+                    bool   use_exact   = false,
                     size_t stride      = 0,
                     size_t batch_count = 1,
                     T      a           = static_cast<T>(0),
                     T      b           = static_cast<T>(1));
+
+// Initialize vector with random floating point values
+template <typename T>
+void rocsparse_init_inexact(T*     A,
+                            size_t M,
+                            size_t N,
+                            size_t lda,
+                            size_t stride      = 0,
+                            size_t batch_count = 1,
+                            T      a           = static_cast<T>(0),
+                            T      b           = static_cast<T>(1));
 
 // Initialize vector with random integer values
 template <typename T>
@@ -58,15 +76,37 @@ void rocsparse_init_exact(T*     A,
                           int    a           = 1,
                           int    b           = 10);
 
+// Initialize vector with random values
+// If use_exact is false (default value), the values will be random floating point values
+// If use_exact is true, the values will be integers in the range [a, b]
+template <typename T>
+void rocsparse_init_1d_array(std::vector<T>& A,
+                             size_t          size,
+                             bool            use_exact = false,
+                             T               a         = static_cast<T>(0),
+                             T               b         = static_cast<T>(1));
+
 template <typename T>
 void rocsparse_init(std::vector<T>& A,
                     size_t          M,
                     size_t          N,
                     size_t          lda,
+                    bool            use_exact   = false,
                     size_t          stride      = 0,
                     size_t          batch_count = 1,
                     T               a           = static_cast<T>(0),
                     T               b           = static_cast<T>(1));
+
+// Initialize vector with random floating point values
+template <typename T>
+void rocsparse_init_inexact(std::vector<T>& A,
+                            size_t          M,
+                            size_t          N,
+                            size_t          lda,
+                            size_t          stride      = 0,
+                            size_t          batch_count = 1,
+                            T               a           = static_cast<T>(0),
+                            T               b           = static_cast<T>(1));
 
 // Initialize vector with random integer values
 template <typename T>
@@ -536,5 +576,16 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                         J                    l,
                                         J                    u,
                                         J                    uu);
+
+/* ==================================================================================== */
+/*! \brief Set all entries in an array to 1.0 for numerical stability with low-precision types */
+template <typename T>
+inline void set_array_to_ones(T* data, int64_t size)
+{
+    for(int64_t i = 0; i < size; ++i)
+    {
+        data[i] = static_cast<T>(1.0);
+    }
+}
 
 #endif // ROCSPARSE_INIT_HPP

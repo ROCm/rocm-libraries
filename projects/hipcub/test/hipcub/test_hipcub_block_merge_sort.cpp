@@ -23,9 +23,9 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_merge_sort.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_merge_sort.hpp>
+#include <hipcub/block/block_store.hpp>
 
 #include <algorithm>
 #include <string>
@@ -155,6 +155,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
                            0,
                            device_keys_output,
                            compare_function());
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -279,6 +280,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
             compare_op,
             valid_items,
             default_val);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(hipMemcpy(host_keys_output,
                             device_keys_input,
@@ -411,6 +413,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
             device_keys_output,
             device_values_output,
             compare_op);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -458,12 +461,20 @@ void stable_sort_kernel(T* device_input, CompareOp compare_op)
         device_input[offset + i] = input[i];
 }
 
+template<class T>
+struct custom_type_elem_id
+{
+    T      elem;
+    size_t id;
+};
+
 TYPED_TEST(HipcubBlockMergeSort, StableSort)
 {
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     using T                           = typename TestFixture::params::key_type;
     using compare_function            = typename TestFixture::params::compare_function;
+    using custom_type                 = custom_type_elem_id<T>;
     constexpr size_t items_per_block  = items_per_thread * block_size;
     constexpr size_t grid_size        = 113;
     const size_t     size             = grid_size * items_per_block;
@@ -473,11 +484,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSort)
     {
         GTEST_SKIP();
     }
-    struct custom_type
-    {
-        T      elem;
-        size_t id;
-    };
 
     custom_type* host_input    = new custom_type[size];
     custom_type* host_expected = new custom_type[size];
@@ -514,6 +520,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSort)
         0,
         device_input,
         compare_op);
+    HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(
         hipMemcpy(host_input, device_input, sizeof(custom_type) * size, hipMemcpyDeviceToHost));
@@ -652,6 +659,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValues)
             device_keys_output,
             device_values_output,
             compare_op);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -712,6 +720,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     using compare_function            = typename TestFixture::params::compare_function;
     using T                           = typename TestFixture::params::key_type;
+    using custom_type                 = custom_type_elem_id<T>;
     constexpr int items_per_block     = items_per_thread * block_size;
     constexpr int grid_size           = 113;
 
@@ -721,12 +730,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     {
         GTEST_SKIP();
     }
-
-    struct custom_type
-    {
-        T      elem;
-        size_t id;
-    };
 
     constexpr size_t size = grid_size * items_per_block;
 
@@ -801,6 +804,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
             compare_op,
             valid_items,
             default_val);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(hipMemcpy(host_keys_output,
                             device_keys_input,
@@ -895,9 +899,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     T*           host_keys_input   = new T[size];
     T*           host_values_input = new T[size];
 
-    T* host_keys_expected   = new T[size];
-    T* host_values_expected = new T[size];
-
     T* device_keys_input;
     T* device_values_input;
     HIP_CHECK(hipMalloc(&device_keys_input, sizeof(T) * size));
@@ -969,6 +970,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
             compare_op,
             valid_items,
             default_val);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(
             hipMemcpy(host_keys_input, device_keys_input, sizeof(T) * size, hipMemcpyDeviceToHost));

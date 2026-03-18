@@ -37,31 +37,31 @@
 extern "C" {
 #endif
 /*! \ingroup library_module
- *  \brief Perform softmax on given tensor.
+ *  \brief Perform softmax on a given tensor.
  *
  *  \details
- *  This function computes softmax on given 2D-tensor along specified dimension.
+ *  This function computes softmax on a given 2D-tensor along a specified dimension.
  *
  *  @param[in]
- *  datatype Datatype of input/output tensor, currently support HIP_R_32F only.
+ *  datatype Data type of the input and output tensors. Only supports HIP_R_32F.
  *
  *  @param[in]
- *  m The first dimension of input/output tensor.
+ *  m The first dimension of the input and output tensors.
  *
  *  @param[in]
- *  n The second dimension of input/output tensor. Currently only values less than or equal to 256 are supported.
+ *  n The second dimension of the input and output tensors. Only supports values less than or equal to 256.
  *
  *  @param[in]
  *  dim Specified dimension to perform softmax on. Currently 1 is the only valid value.
  *
  *  @param[in]
- *  input input tensor buffer.
+ *  input Input tensor buffer.
  *
  *  @param[in]
  *  stream The HIP stream where all the GPU work will be submitted.
  *
  *  @param[out]
- *  output output tensor buffer.
+ *  output Output tensor buffer.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p n is greater than 256.
@@ -76,40 +76,40 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
                                                      hipStream_t stream);
 
 /*! \ingroup library_module
- *  \brief Perform 2-D layernorm on with source input tensor and result output tensor.
+ *  \brief Perform 2-D layernorm on a source input tensor, with the result placed in the output tensor.
  *
  *  \details
- *  This function computes layernorm on given 2D-tensor.
+ *  This function computes layernorm on a given 2D-tensor.
  *
  *  @param[in]
- *  datatype Datatype of input/output tensor, currently support HIP_R_32F only.
+ *  datatype Data type of the input and output tensors. Only supports HIP_R_32F.
  *
  *  @param[out]
- *  output output tensor buffer. can't be nullptr.
+ *  output Output tensor buffer. Can't be a nullptr.
  *
  *  @param[out]
- *  mean tensor buffer. can't be nullptr.
+ *  mean Tensor buffer. Can't be a nullptr.
  *
  *  @param[out]
- *  invvar tensor buffer. 1 / sqrt(std).  can't be nullptr.
+ *  invvar Tensor buffer. 1 / sqrt(std).  Can't be a nullptr.
  *
  *  @param[in]
- *  input tensor buffer. can't be nullptr.
+ *  input Tensor buffer. Can't be a nullptr.
  *
  *  @param[in]
- *  m The first dimension of input/output tensor.
+ *  m The first dimension of the input and output tensors.
  *
  *  @param[in]
- *  n The second dimension of input/output tensor.
+ *  n The second dimension of the input and output tensors.
  *
  *  @param[in]
- *  eps for sqrt to avoid inf value.
+ *  eps For sqrt to avoid inf value.
  *
  *  @param[in]
- *  gamma tensor buffer. nullptr means calculation doesn't involve gamma.
+ *  gamma Tensor buffer. nullptr means the calculation doesn't involve gamma.
  *
  *  @param[in]
- *  beta tensor buffer. nullptr means calculation doesn't involve beta.
+ *  beta Tensor buffer. nullptr means the calculation doesn't involve beta.
  *
  *  @param[in]
  *  stream The HIP stream where all the GPU work will be submitted.
@@ -117,7 +117,7 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
  *
  *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p m is greater than 4096.
- *  \retval HIPBLAS_STATUS_NOT_SUPPORTED if \p datatype is not HIP_R_32F.
+ *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not HIP_R_32F.
  */
 HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
                                                        void*       output,
@@ -132,28 +132,28 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
                                                        hipStream_t stream);
 
 /*! \ingroup library_module
- *  \brief Perform absmax on given 2-D tensor and output one value absmax(tensor) value.
+ *  \brief Perform absmax on a given 2-D tensor and output one absmax(tensor) value.
  *
  *  \details
- *  This function computes amax on given 2D-tensor.
+ *  This function computes amax on a given 2D-tensor.
  *
  *  @param[in]
- *  datatype Datatype of input tensor, currently support HIP_R_32F and HIP_R_16F only.
+ *  datatype Data type of the input tensor. Only supports HIP_R_32F and HIP_R_16F.
  *
  *  @param[in]
- *  outDatatype Datatype of output tensor, currently support HIP_R_32F and HIP_R_16F only.
+ *  outDatatype Data type of the output tensor. Only supports HIP_R_32F and HIP_R_16F.
  *
  *  @param[out]
- *  output Amax tensor buffer. can't be nullptr.
+ *  output Amax tensor buffer. Can't be a nullptr.
  *
  *  @param[in]
- *  input 2-D tensor buffer. can't be nullptr.
+ *  input 2-D tensor buffer. Can't be a nullptr.
  *
  *  @param[in]
- *  m The first dimension of input/output tensor.
+ *  m The first dimension of the input and output tensors.
  *
  *  @param[in]
- *  n The second dimension of input/output tensor.
+ *  n The second dimension of the input and output tensors.
  *
  *  @param[in]
  *  stream The HIP stream where all the GPU work will be submitted.
@@ -161,7 +161,7 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
  *
  *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p m or n is 0, or input or output is nullptr.
- *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not (HIP_R_32F or HIP_R_16F).
+ *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not HIP_R_32F or HIP_R_16F.
  */
 HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
                                                   const hipDataType outDatatype,

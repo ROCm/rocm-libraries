@@ -30,9 +30,6 @@
 #include <miopen/env.hpp>
 #include <miopen/conv/invokers/gen_x_w_y_pad.hpp>
 
-// LWPMIOPEN-1392: Disabling failing deprecated Ocl solvers for Gfx11 and Gfx12
-#define WORKAROUND_LWPMIOPEN_1392 (HIP_PACKAGE_VERSION_FLAT >= 6004000000)
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD)
 
 namespace miopen {
@@ -44,21 +41,10 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 bool ConvOclDirectFwd::IsApplicable(const ExecutionContext& ctx,
                                     const ProblemDescription& problem) const
 {
-// Disable this solver due to random GPU memory access faults on gfx11 and gfx12
-#if WORKAROUND_LWPMIOPEN_1392
-    {
-        const auto device = ctx.GetStream().GetTargetProperties().Name();
-        if(miopen::StartsWith(device, "gfx11") || miopen::StartsWith(device, "gfx12"))
-        {
-            if(!env::enabled(MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD))
-                return false;
-        }
-    }
-#endif
-
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD))
         return false;
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
     if(!ctx.use_opencl_convolutions)
         return false;
@@ -333,7 +319,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(result.out_pix_tile1 == 0 || result.out_pix_tile0 == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("result.out_pix_tile1 == 0 || result.out_pix_tile0 == 0");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
     result.grp_tile0 = std::max(8, (result.in_tile0 / result.out_pix_tile0));
     result.grp_tile1 = std::max(8, (result.in_tile1 / result.out_pix_tile1));
@@ -346,7 +333,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(alu_tiles_sz > 256 || alu_tiles_sz == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("need out pix size ajustments (alu_tiles_sz > 256 || alu_tiles_sz == 0)");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
 
     int n_alus_total = (result.grp_tile0 * result.grp_tile1);
@@ -357,7 +345,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(result.n_stacks == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("result.n_stacks == 0");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
     int n_alus_perstack = (n_alus_total + result.n_stacks - 1) / result.n_stacks;
 
@@ -478,7 +467,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(n_out_tiles_perstack == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("n_out_tiles_perstack == 0");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
     size_t gbl_wk1 =
         group_counts >= 2

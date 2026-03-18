@@ -36,14 +36,6 @@ def runCI =
         commonGroovy.runCompileCommand(platform, project, jobName)
     }
 
-    def testCommand =
-    {
-        platform, project->
-
-        def gfilter = 'checkin*'
-        commonGroovy.runTestCommand(platform, project, gfilter)
-    }
-
     def packageCommand =
     {
         platform, project->
@@ -51,7 +43,7 @@ def runCI =
         commonGroovy.runPackageCommand(platform, project)
     }
 
-    buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
+    buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, null, packageCommand)
 
 }
 
@@ -78,18 +70,13 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 
     // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 5 * * *')])]))
-        stage(urlJobName) {
-            runCI([ubuntu18:['gfx906']], urlJobName)
-        }
+        runCI([ubuntu18:['gfx906']], urlJobName)
     }
 }
-

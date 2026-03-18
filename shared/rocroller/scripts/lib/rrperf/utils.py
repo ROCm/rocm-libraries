@@ -1,33 +1,13 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import datetime
 import functools
+import json
 import os
 import subprocess
-
+from dataclasses import asdict, fields
+from hashlib import sha1
 from pathlib import Path
 
 import rrperf
@@ -92,11 +72,20 @@ def get_build_dir() -> Path:
     varname = "ROCROLLER_BUILD_DIR"
     if varname in os.environ:
         return Path(os.environ[varname])
-    default = rrperf.git.top() / "build"
+    default = rrperf.git.top() / "shared" / "rocroller" / "build"
     if default.is_dir():
         return default
 
     raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
+
+
+def get_dataclass_id(obj):
+    obj_dict = asdict(obj)
+    for f in fields(obj):
+        if not f.compare:
+            del obj_dict[f.name]
+    data_str = json.dumps(obj_dict, sort_keys=True)
+    return sha1(data_str.encode()).hexdigest()
 
 
 @functools.cache

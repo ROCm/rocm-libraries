@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1228,6 +1228,79 @@ rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* 
 /**@}*/
 
 /*! \ingroup aux_module
+ *  \brief Create a sparse sliced ELL matrix descriptor
+ *  \details
+ *  \p rocsparse_create_sell_descr creates a sparse slice ELL matrix descriptor. It should be
+ *  destroyed at the end using \p rocsparse_destroy_spmat_descr.
+ *
+ *  Currently the only routine that supports the sliced ELL format is \ref rocsparse_spmv.
+ *
+ *  @param[out]
+ *  descr                   the pointer to the sparse sliced ELL matrix descriptor.
+ *  @param[in]
+ *  rows                    number of rows in the sliced ELL matrix.
+ *  @param[in]
+ *  cols                    number of columns in the sliced ELL matrix
+ *  @param[in]
+ *  nnz                     number of non-zeros in the sliced ELL matrix.
+ *  @param[in]
+ *  sell_slice_size         slice size in the sliced ELL matrix.
+ *  @param[in]
+ *  sell_colval_size        size of the column and value arrays in the sliced ELL matrix.
+ *  @param[in]
+ *  sell_slice_offsets      slice offsets into column and value arrays (must be array of length \p nslices+1 where \p nslice=m/sell_slice_size ).
+ *  @param[in]
+ *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  @param[in]
+ *  sell_val                values of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  @param[in]
+ *  sell_slice_offsets_type \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
+ *  @param[in]
+ *  sell_col_ind_type       \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
+ *  @param[in]
+ *  idx_base                \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
+ *  @param[in]
+ *  data_type               \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
+ *                          \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p sell_slice_offsets or \p sell_col_ind or \p sell_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz pr \p sell_slice_size or \p sell_colval_size is invalid.
+ *  \retval rocsparse_status_invalid_value if \p idx_type or \p idx_base or \p data_type is invalid.
+ */
+/**@{*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_sell_descr(rocsparse_spmat_descr* descr,
+                                             int64_t                rows,
+                                             int64_t                cols,
+                                             int64_t                nnz,
+                                             int64_t                sell_slice_size,
+                                             int64_t                sell_colval_size,
+                                             void*                  sell_slice_offsets,
+                                             void*                  sell_col_ind,
+                                             void*                  sell_val,
+                                             rocsparse_indextype    sell_slice_offsets_type,
+                                             rocsparse_indextype    sell_col_ind_type,
+                                             rocsparse_index_base   idx_base,
+                                             rocsparse_datatype     data_type);
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_const_sell_descr(rocsparse_const_spmat_descr* descr,
+                                                   int64_t                      rows,
+                                                   int64_t                      cols,
+                                                   int64_t                      nnz,
+                                                   int64_t                      sell_slice_size,
+                                                   int64_t                      sell_colval_size,
+                                                   const void*                  sell_slice_offsets,
+                                                   const void*                  sell_col_ind,
+                                                   const void*                  sell_val,
+                                                   rocsparse_indextype  sell_slice_offsets_type,
+                                                   rocsparse_indextype  sell_col_ind_type,
+                                                   rocsparse_index_base idx_base,
+                                                   rocsparse_datatype   data_type);
+/**@}*/
+
+/*! \ingroup aux_module
  *  \brief Destroy a sparse matrix descriptor
  *
  *  \details
@@ -1380,7 +1453,7 @@ rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr);
  *  @param[in]
  *  data_size_in_bytes   input data size.
  *  @param[out]
- *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1393,7 +1466,7 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
                                             rocsparse_spgeam_input input,
                                             const void*            data,
                                             size_t                 data_size_in_bytes,
-                                            rocsparse_error*       error);
+                                            rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
  *  \brief Get the requested \ref rocsparse_spgeam_output data from the SpGEAM descriptor
@@ -1409,7 +1482,7 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
  *  @param[in]
  *  data_size_in_bytes   output data size.
  *  @param[out]
- *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1468,7 +1541,7 @@ rocsparse_status rocsparse_destroy_spmv_descr(rocsparse_spmv_descr descr);
    *  @param[in]
    *  size_in_bytes input value size in bytes.
    *  @param[out]
-   *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+   *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_pointer if \p descr or \p in is invalid.
@@ -1482,6 +1555,452 @@ rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle,
                                           const void*          in,
                                           size_t               size_in_bytes,
                                           rocsparse_error*     error);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsv.
+*
+*  \details
+*  \p rocsparse_create_sptrsv_descr creates the descriptor of the \ref rocsparse_sptrsv_buffer_size and
+*  \ref rocsparse_sptrsv routines.
+
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_sptrsv_descr        pointer to the descriptor of the Sptrsv routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsv_descr_create(rocsparse_handle        handle,
+                                               rocsparse_sptrsv_descr* p_sptrsv_descr,
+                                               rocsparse_error*        p_error);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsv.
+*
+*  \details
+*  \p rocsparse_destroy_sptrsv_descr destroys the descriptor of the \ref rocsparse_sptrsv_buffer_size and
+*  \ref rocsparse_sptrsv routines.
+*
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  sptrsv_descr        descriptor of the sptrsv routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsv_descr_destroy(rocsparse_handle       handle,
+                                                rocsparse_sptrsv_descr sptrsv_descr,
+                                                rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsv.
+*
+*  \details
+*  \p rocsparse_create_sptrsv_descr creates the descriptor of the \ref rocsparse_sptrsv_buffer_size and
+*  \ref rocsparse_sptrsv routines.
+
+*  @param[out]
+*  descr        pointer to the descriptor of the SpTRSV routine.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_sptrsv_descr(rocsparse_sptrsv_descr* descr);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsv.
+*
+*  \details
+*  \p rocsparse_destroy_sptrsv_descr destroys the descriptor of the \ref rocsparse_sptrsv_buffer_size and
+*  \ref rocsparse_sptrsv routines.
+*
+*  @param[in]
+*  descr        descriptor of the sptrsv routine.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_destroy_sptrsv_descr(rocsparse_sptrsv_descr descr);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_sptrsv_input data in the SpTRSV descriptor
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpTRSV descriptor.
+ *  @param[in]
+ *  input       value of \ref rocsparse_sptrsv_input.
+ *  @param[in]
+ *  data        input data
+ *  @param[in]
+ *  data_size_in_bytes   input data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsv_set_input(rocsparse_handle       handle,
+                                            rocsparse_sptrsv_descr descr,
+                                            rocsparse_sptrsv_input input,
+                                            const void*            data,
+                                            size_t                 data_size_in_bytes,
+                                            rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+ *  \brief Get the requested \ref rocsparse_sptrsv_output data from the SpTRSV descriptor
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpTRSV descriptor.
+ *  @param[in]
+ *  output      value of \ref rocsparse_sptrsv_output.
+ *  @param[out]
+ *  data        output data
+ *  @param[in]
+ *  data_size_in_bytes   output data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p output is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsv_get_output(rocsparse_handle        handle,
+                                             rocsparse_sptrsv_descr  descr,
+                                             rocsparse_sptrsv_output output,
+                                             void*                   data,
+                                             size_t                  data_size_in_bytes,
+                                             rocsparse_error*        p_error);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsm.
+*
+*  \details
+*  \p rocsparse_create_sptrsm_descr creates the descriptor of the \ref rocsparse_sptrsm_buffer_size and
+*  \ref rocsparse_sptrsm routines.
+
+*  @param[out]
+*  descr        pointer to the descriptor of the SpTRSM routine.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_sptrsm_descr(rocsparse_sptrsm_descr* descr);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsm.
+*
+*  \details
+*  \p rocsparse_destroy_sptrsm_descr destroys the descriptor of the \ref rocsparse_sptrsm_buffer_size and
+*  \ref rocsparse_sptrsm routines.
+*
+*  @param[in]
+*  descr        descriptor of the sptrsm routine.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_destroy_sptrsm_descr(rocsparse_sptrsm_descr descr);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_sptrsm_input data in the SpTRSM descriptor
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpTRSM descriptor.
+ *  @param[in]
+ *  input      value of \ref rocsparse_sptrsm_input.
+ *  @param[in]
+ *  data        input data
+ *  @param[in]
+ *  data_size   input data size.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsm_set_input(rocsparse_handle       handle,
+                                            rocsparse_sptrsm_descr descr,
+                                            rocsparse_sptrsm_input input,
+                                            const void*            data,
+                                            size_t                 data_size,
+                                            rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+ *  \brief Get the requested \ref rocsparse_sptrsm_output data from the SpTRSM descriptor
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpTRSM descriptor.
+ *  @param[in]
+ *  output      value of \ref rocsparse_sptrsm_output.
+ *  @param[out]
+ *  data        output data
+ *  @param[in]
+ *  data_size_in_bytes   output data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p output is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsm_get_output(rocsparse_handle        handle,
+                                             rocsparse_sptrsm_descr  descr,
+                                             rocsparse_sptrsm_output output,
+                                             void*                   data,
+                                             size_t                  data_size_in_bytes,
+                                             rocsparse_error*        p_error);
+
+/*! \ingroup aux_module
+*  \brief Create SpIC0 descriptor.
+*
+*  \details
+*  \p rocsparse_spic0_descr_create creates the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_spic0_descr        pointer to the descriptor of the Spic0 routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+*
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spic0_descr_create(rocsparse_handle       handle,
+                                              rocsparse_spic0_descr* p_spic0_descr,
+                                              rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+*  \brief Destroy SpIC0 descriptor.
+*
+*  \details
+*  \p rocsparse_spic0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
+*
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  spic0_descr        descriptor of the spic0 routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spic0_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_spic0_descr spic0_descr,
+                                               rocsparse_error*      p_error);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_spic0_input data in the SpIC0 descriptor
+ *
+ *  \note
+ *  -     \ref rocsparse_spic0_input_alg is \ref rocsparse_spic0_alg, and can only be set before applying any phase.
+ *  -     \ref rocsparse_spic0_input_compute_datatype is \ref rocsparse_datatype, and can only be set before applying any phase. For now, it must be of value type of A.
+ *  -     \ref rocsparse_spic0_input_analysis_policy is \ref rocsparse_analysis_policy, and can only be set before applying any phase.
+ *  -     \ref rocsparse_spic0_input_singularity_tolerance is a device/host double pointer. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spic0_input_boost_enable is an int32_t.
+ *  -     \ref rocsparse_spic0_input_boost_value is a pointer to a scalar of value type of A. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spic0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle.
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  spic0_descr       the pointer to the SpIC0 descriptor.
+ *  @param[in]
+ *  spic0_input       value of \ref rocsparse_spic0_input.
+ *  @param[in]
+ *  input        input data
+ *  @param[in]
+ *  input_size_in_bytes   input data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spic0_set_input(rocsparse_handle      handle,
+                                           rocsparse_spic0_descr spic0_descr,
+                                           rocsparse_spic0_input spic0_input,
+                                           const void*           input,
+                                           size_t                input_size_in_bytes,
+                                           rocsparse_error*      p_error);
+
+/*! \ingroup aux_module
+ *  \brief Get the requested \ref rocsparse_spic0_output data from the SpIC0 descriptor
+ *  \note
+ *  -     \ref rocsparse_spic0_output_singularity is \ref rocsparse_singularity, it will be considered as an array of size batch_count.
+ *  -     \ref rocsparse_spic0_output_singularity_position is int64_t, it will be considered as an array of size batch_count.
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  spic0_descr       the pointer to the SpIC0 descriptor.
+ *  @param[in]
+ *  spic0_output      value of \ref rocsparse_spic0_output.
+ *  @param[out]
+ *  output        output data
+ *  @param[in]
+ *  output_size_in_bytes   output data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p output is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spic0_get_output(rocsparse_handle       handle,
+                                            rocsparse_spic0_descr  spic0_descr,
+                                            rocsparse_spic0_output spic0_output,
+                                            void*                  output,
+                                            size_t                 output_size_in_bytes,
+                                            rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+*  \brief Create SpILU0 descriptor.
+*
+*  \details
+*  \p rocsparse_spilu0_descr_create creates the descriptor of the configuration of the sparse Incomplete LU of level 0.
+
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_spilu0_descr        pointer to the descriptor of the Spilu0 routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+*
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spilu0_descr_create(rocsparse_handle        handle,
+                                               rocsparse_spilu0_descr* p_spilu0_descr,
+                                               rocsparse_error*        p_error);
+
+/*! \ingroup aux_module
+*  \brief Destroy SpILU0 descriptor.
+*
+*  \details
+*  \p rocsparse_spilu0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
+*
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  spilu0_descr        descriptor of the spilu0 routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spilu0_descr_destroy(rocsparse_handle       handle,
+                                                rocsparse_spilu0_descr spilu0_descr,
+                                                rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_spilu0_input data in the SpILU0 descriptor
+ *
+ *  \note
+ *  -     \ref rocsparse_spilu0_input_alg is \ref rocsparse_spilu0_alg, and can only be set before applying any phase.
+ *  -     \ref rocsparse_spilu0_input_compute_datatype is \ref rocsparse_datatype, and can only be set before applying any phase. For now, it must be of value type of A.
+ *  -     \ref rocsparse_spilu0_input_analysis_policy is \ref rocsparse_analysis_policy, can only be set before applying any phase.
+ *  -     \ref rocsparse_spilu0_input_singularity_tolerance is a device/host double pointer. Its device mode is determined from the \ref rocsparse_handle. No batched tolerances can be specified.
+ *  -     \ref rocsparse_spilu0_input_boost_enable is a host int32_t, 1 to enable, 0 to disable
+ *  -     \ref rocsparse_spilu0_input_boost_value is a pointer to a scalar of value type of A. Its device mode is determined from the \ref rocsparse_handle. No batched boost values can be specified.
+ *  -     \ref rocsparse_spilu0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle. No batched boost tolerances can be specified.
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  spilu0_descr       the pointer to the SpILU0 descriptor.
+ *  @param[in]
+ *  spilu0_input       value of \ref rocsparse_spilu0_input.
+ *  @param[in]
+ *  input        input data
+ *  @param[in]
+ *  input_size_in_bytes   input data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spilu0_set_input(rocsparse_handle       handle,
+                                            rocsparse_spilu0_descr spilu0_descr,
+                                            rocsparse_spilu0_input spilu0_input,
+                                            const void*            input,
+                                            size_t                 input_size_in_bytes,
+                                            rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+ *  \brief Get the requested \ref rocsparse_spilu0_output data from the SpILU0 descriptor
+ *  \note
+ *  -     \ref rocsparse_spilu0_output_singularity is \ref rocsparse_singularity, it will be considered as an array of size batch_count.
+ *  -     \ref rocsparse_spilu0_output_singularity_position is int64_t, it will be considered as an array of size batch_count.
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  spilu0_descr       the pointer to the SpILU0 descriptor.
+ *  @param[in]
+ *  spilu0_output      value of \ref rocsparse_spilu0_output.
+ *  @param[out]
+ *  output        output data
+ *  @param[in]
+ *  output_size_in_bytes   output data size in bytes.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p output is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
+                                             rocsparse_spilu0_descr  spilu0_descr,
+                                             rocsparse_spilu0_output spilu0_output,
+                                             void*                   output,
+                                             size_t                  output_size_in_bytes,
+                                             rocsparse_error*        p_error);
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor
@@ -1830,6 +2349,77 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
                                           const void**                ell_col_ind,
                                           const void**                ell_val,
                                           rocsparse_indextype*        idx_type,
+                                          rocsparse_index_base*       idx_base,
+                                          rocsparse_datatype*         data_type);
+/**@}*/
+
+/*! \ingroup aux_module
+ *  \brief Get the fields of the sparse sliced ELL matrix descriptor
+ *  \details
+ *  \p rocsparse_sell_get gets the fields of the sparse sliced ELL matrix descriptor
+ *
+ *  @param[in]
+ *  descr                  the pointer to the sparse sliced ELL matrix descriptor.
+ *  @param[out]
+ *  rows                   number of rows in the sliced ELL matrix.
+ *  @param[out]
+ *  cols                   number of columns in the sliced ELL matrix
+ *  @param[out]
+ *  nnz                    number of non-zeros in the sliced ELL matix.
+ *  @param[out]
+ *  sell_slice_size        slice size in the sliced ELL matrix.
+ *  @param[out]
+ *  sell_colval_size       actual number of elements stored in the sliced ELL matrix.
+ *  @param[out]
+ *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1
+ *                         where \p nslices=(rows-1)/sell_slice_size+1 ).
+ *  @param[out]
+ *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  @param[out]
+ *  sell_val                values of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  @param[out]
+ *  sell_slice_offsets_type \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
+ *  @param[out]
+ *  sell_col_ind_type       \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
+ *  @param[out]
+ *  idx_base                \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
+ *  @param[out]
+ *  data_type               \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
+ *                          \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p sell_slice_offsets or \p sell_col_ind or \p sell_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz or \p sell_colval_size or \p sell_slice_size is invalid.
+ *  \retval rocsparse_status_invalid_value if \p sell_slice_offsets_type or \p sell_col_ind_type or \p idx_base or \p data_type is invalid.
+ */
+/**@{*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
+                                    int64_t*                    rows,
+                                    int64_t*                    cols,
+                                    int64_t*                    nnz,
+                                    int64_t*                    sell_slice_size,
+                                    int64_t*                    sell_colval_size,
+                                    void**                      sell_slice_offsets,
+                                    void**                      sell_col_ind,
+                                    void**                      sell_val,
+                                    rocsparse_indextype*        sell_slice_offsets_type,
+                                    rocsparse_indextype*        sell_col_ind_type,
+                                    rocsparse_index_base*       idx_base,
+                                    rocsparse_datatype*         data_type);
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
+                                          int64_t*                    rows,
+                                          int64_t*                    cols,
+                                          int64_t*                    nnz,
+                                          int64_t*                    sell_slice_size,
+                                          int64_t*                    sell_colval_size,
+                                          const void**                sell_slice_offsets,
+                                          const void**                sell_col_ind,
+                                          const void**                sell_val,
+                                          rocsparse_indextype*        sell_slice_offsets_type,
+                                          rocsparse_indextype*        sell_col_ind_type,
                                           rocsparse_index_base*       idx_base,
                                           rocsparse_datatype*         data_type);
 /**@}*/
@@ -2589,6 +3179,44 @@ rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr d
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
+                                                   rocsparse_int         batch_count,
+                                                   int64_t               batch_stride);
+
+/*! \ingroup aux_module
+ *  \brief Get the batch count and batch stride from the dense vector descriptor
+ *
+ *  @param[in]
+ *  descr        the pointer to the dense vector descriptor.
+ *  @param[out]
+ *  batch_count  the batch count in the dense vector.
+ *  @param[out]
+ *  batch_stride the batch stride in the dense vector.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
+                                                   rocsparse_int*              batch_count,
+                                                   int64_t*                    batch_stride);
+
+/*! \ingroup aux_module
+ *  \brief Set the batch count and batch stride in the dense vector descriptor
+ *
+ *  @param[inout]
+ *  descr        the pointer to the dense vector descriptor.
+ *  @param[in]
+ *  batch_count  the batch count in the dense vector.
+ *  @param[in]
+ *  batch_stride the batch stride in the dense vector.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
                                                    rocsparse_int         batch_count,
                                                    int64_t               batch_stride);
 

@@ -26,7 +26,8 @@ rocBLAS is supported on the same Windows versions and toolchains that HIP SDK su
 Installing prebuilt packages
 ============================
 
-rocBLAS can be installed on Windows 10 or 11 using the AMD HIP SDK installer.
+rocBLAS can be installed on Windows using the :doc:`AMD HIP SDK installer <rocm-install-on-windows:index>`.
+For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
 
 The simplest way to use rocBLAS in your code is to use CMake. To install rocBLAS on Windows, follow these steps:
 
@@ -228,6 +229,7 @@ listed in this table.
    "``./rmake.py -c``", "Build the library and client in your local directory. It is assumed the dependencies have been installed."
    "``./rmake.py -idc``", "Build the library dependencies, client dependencies, library, and client, then build and install the rocBLAS package. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
    "``./rmake.py -ic``", "Build and install the rocBLAS package and build the client. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
+   "``./rmake.py -t /path/to/Tensile``", "``tensile_tag.txt`` has been deprecated so use this option to build a folder that has a different Tensile commit than the rocBLAS commit."
 
 Building the clients without the library
 ----------------------------------------

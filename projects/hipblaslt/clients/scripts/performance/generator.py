@@ -21,6 +21,7 @@
 import logging
 
 from dataclasses import dataclass, field
+from subprocess import run, PIPE
 from pathlib import Path as path
 from typing import Dict, List, Mapping, Generator
 
@@ -51,7 +52,7 @@ class ProblemSet:
             p.benchType = self.benchType
             yield p
 
-def load_suite(suite):
+def load_suite(suite, problems_dir=None):
     """Load performance suite from suites.py."""
 
     tdef = top / 'suites.py'
@@ -59,18 +60,78 @@ def load_suite(suite):
     code = compile(tdef.read_text(), str(tdef), 'exec')
     ns = {}
     exec(code, ns)
-    return ns[suite]
+    
+    if suite == 'all' and problems_dir is not None:
+        return lambda: ns[suite](problems_dir)
+    else:
+        return ns[suite]
 
 @dataclass
 class SuiteProblemGenerator:
     suite_names: List[str]
     suites: Mapping[str, Generator[ProblemSet, None,
                                    None]] = field(default_factory=dict)
+    problems_dir: str = None  # Add problems directory parameter
+
+    # default arch is gfx942 when no argument is set and query is failed
+    target_arch_static: str = "gfx942"
+
+    @staticmethod
+    def detectISA():
+        # TODO- currently this is for PTS only. If we'd like to make it generic,
+        # we need to select correct exec from "rocm_agent_enumerator", "amdgpu-arch", "hipinfo"
+        enumerator = "/opt/rocm/bin/rocm_agent_enumerator"
+        process = run([enumerator], stdout=PIPE)
+        for line in process.stdout.decode().split("\n"):
+            archStr = line.strip()
+            if "gfx" in archStr:
+                print(f"Info: Auto Detected GPU with ISA: {archStr}")
+                SuiteProblemGenerator.target_arch_static = archStr
+                break
+        if process.returncode:
+            print(f"{enumerator} exited with code {process.returncode}, using default arch gfx942")
 
     def __post_init__(self):
         for name in self.suite_names:
-            self.suites[name] = load_suite(name)
+            self.suites[name] = load_suite(name, self.problems_dir)
 
     def generate_problemSet(self):
         for g in self.suites.values():
             yield from g()
+
+@dataclass
+class ShellScriptProblemGenerator:
+    sh_filename: str = None
+    bench_exec: str = None
+    benchCMDs: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # print("sh file: " + str(self.sh_filename))
+        # print("bench_exec: " + str(self.bench_exec))
+        # load file and readline
+        try:
+            with open(self.sh_filename, 'r') as sh_file:
+                # Iterate over each line in the file
+                for cmd in sh_file:
+                    cmd = cmd.strip()
+                    # skip invalid line
+                    if cmd.startswith("#") or cmd.count("hipblaslt-bench") == 0:
+                        continue
+                    # --verfiy will output other values, not supported yet
+                    if cmd.count("verfiy") > 0 or cmd.count("-v") > 0:
+                        print(f'--verify or -v is not supported, skip bench.')
+                        continue
+
+                    cmd = cmd.replace("./hipblaslt-bench", str(self.bench_exec))
+                    # print("parsed cmd: " + cmd)
+                    self.benchCMDs.append(cmd)
+
+        except FileNotFoundError:
+            print(f'Error: The file {self.sh_filename} was not found.')
+
+        except Exception as e:
+            print(f'An error occurred: {e}')
+
+    def iterate_cmd(self):
+        for cmd in self.benchCMDs:
+            yield cmd

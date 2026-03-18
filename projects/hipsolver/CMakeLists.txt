@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -46,39 +46,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# This finds the rocm-cmake project, and installs it if not found
-# rocm-cmake contains common cmake code for rocm projects to help setup and install
-set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-find_package(ROCM 0.7.3 CONFIG QUIET PATHS /opt/rocm)
-if(NOT ROCM_FOUND)
-  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-  set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")
-  set(rocm_cmake_path "${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}")
-  set(rocm_cmake_archive "${rocm_cmake_path}.zip")
-  file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" STATUS status LOG log)
+# Add our CMake helper files to the lookup path
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-  list(GET status 0 status_code)
-  list(GET status 1 status_string)
+# Get rocm-cmake
+include(get-rocm-cmake)
 
-  if(status_code EQUAL 0)
-    message(STATUS "downloading... done")
-  else()
-    message(FATAL_ERROR "error: downloading\n'${rocm_cmake_url}' failed
-    status_code: ${status_code}
-    status_string: ${status_string}
-    log: ${log}\n")
-  endif()
-
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzvf "${rocm_cmake_archive}"
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-  execute_process(COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag})
-  execute_process(COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-  find_package(ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake)
-endif()
-
+# Include the rocm-cmake components we use
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
@@ -87,7 +61,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.0.0")
+set(VERSION_STRING "3.3.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -107,7 +81,6 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
-option(USE_CUDA "Look for CUDA and use that as a backend if found" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 
@@ -136,25 +109,40 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-
-# Find CUDA if the user wants a CUDA version.
-if(USE_CUDA)
-  find_package(CUDA REQUIRED)
+# Deprecated USE_CUDA option
+if(DEFINED USE_CUDA)
+  if(USE_CUDA)
+    set(ENV{HIP_PLATFORM} nvidia)
+    set(HIP_PLATFORM nvidia CACHE STRING "HIP platform (e.g., amd or nvidia)")
+    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=nvidia)")
+  else()
+    set(ENV{HIP_PLATFORM} amd)
+    set(HIP_PLATFORM amd CACHE STRING "HIP platform (e.g., amd or nvidia)")
+    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=amd)")
+  endif()
 endif()
 
 # Hip headers required of all clients; clients use hip to allocate device memory
-if(USE_CUDA)
-  # Append cmake path for hip (for convenience)
-  # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-  list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake)
-  find_package(HIP MODULE REQUIRED)
+find_package(hip CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+
+# support for cuda backend with hip < 6.0
+if(NOT hip_FOUND)
+    find_package(HIP MODULE REQUIRED)
+    list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
+    set(ENV{HIP_PLATFORM} nvidia)
+    if (NOT HIP_PLATFORM)
+      set(HIP_PLATFORM nvidia)
+    endif()
 else()
-  find_package(hip REQUIRED CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+    if(NOT HIP_PLATFORM)
+      set(HIP_PLATFORM amd)
+    endif()
 endif()
 
-if(USE_CUDA)
-  list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
+if(HIP_PLATFORM STREQUAL nvidia)
+  find_package(CUDA REQUIRED)
 endif()
+
 
 # Append our library helper cmake path
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
@@ -169,8 +157,27 @@ include(armor-config)
 
 # FOR OPTIONAL CODE COVERAGE
 if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage)
+  target_compile_options(hipsolver-common
+    INTERFACE
+    -g
+    -O0
+    -fprofile-instr-generate
+    -fcoverage-mapping)
+  target_link_options(hipsolver-common
+    INTERFACE
+    -fprofile-instr-generate)
+endif()
+
+include(CMakeDependentOption)
+cmake_dependent_option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY
+  "Build with file/folder reorg backward compatibility enabled" OFF "NOT WIN32" OFF)
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+  rocm_wrap_header_dir(
+    ${CMAKE_SOURCE_DIR}/library/include
+    PATTERNS "*.h"
+    GUARDS SYMLINK WRAPPER
+    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
+  )
 endif()
 
 if(WIN32)
@@ -218,9 +225,9 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
 endif()
 
 # Package specific CPACK vars
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.30.0)
+  set(rocsolver_minimum 3.33.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
@@ -269,7 +276,7 @@ endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
 # Give hipsolver compiled for CUDA backend a different name
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(package_name hipsolver)
 else()
   set(package_name hipsolver-alt)
@@ -287,42 +294,45 @@ rocm_create_package(
 
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
-# > make coverage_cleanup (clean coverage related files.)
-# > make coverage GTEST_FILTER=<>
-# will run:
-#  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-#  > make coverage_output (generate html documentation)
+# make coverage
 if(BUILD_CODE_COVERAGE)
   set(coverage_test ./clients/staging/hipsolver-test)
 
-  # Run coverage analysis
-  add_custom_target(coverage_analysis
-     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-     COMMAND ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
-     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  add_custom_target(
+    code_cov_tests
+    DEPENDS hipsolver-test
+    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipSOLVER-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
-  add_dependencies(coverage_analysis hipsolver)
-
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  add_custom_target(coverage_output
-      DEPENDS coverage_analysis
-      COMMAND mkdir -p lcoverage
-      COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-      COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-      COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-      COMMAND chmod +x llvm-gcov.sh
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
   )
 
-  # Generate coverage output.
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml --ignore-errors source lcoverage/main_coverage.info --output-directory lcoverage
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
   )
 
-  add_custom_target(coverage DEPENDS coverage_output)
+  add_custom_target(
+    coverage
+    DEPENDS code_cov_tests
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipSOLVER-coverage_*.profraw -o ./coverage-report/hipSOLVER.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 
   # Coverage cleanup
   add_custom_target(coverage_cleanup
@@ -330,3 +340,4 @@ if(BUILD_CODE_COVERAGE)
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
+

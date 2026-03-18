@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -328,10 +328,10 @@ namespace rocsparse
                                    - idx_base)
                                 : 0;
 
-                const T v = (k < row_end) ? rocsparse::conj_val(
+                const T v = (k < row_end) ? static_cast<T>(rocsparse::conj_val(
                                 rocsparse::nontemporal_load(
                                     csr_val + k + columns_values_batch_stride_A * batch),
-                                conj_A)
+                                conj_A))
                                           : static_cast<T>(0);
 
                 for(uint32_t i = 0; i < SUBWFSIZE; ++i)
@@ -671,10 +671,10 @@ namespace rocsparse
                                - idx_base)
                             : 0;
 
-            const T v = (k < row_end) ? rocsparse::conj_val(
+            const T v = (k < row_end) ? static_cast<T>(rocsparse::conj_val(
                             rocsparse::nontemporal_load(csr_val + k
                                                         + columns_values_batch_stride_A * batch),
-                            conj_A)
+                            conj_A))
                                       : static_cast<T>(0);
 
             for(uint32_t i = 0; i < SUBWFSIZE; ++i)
@@ -863,13 +863,16 @@ namespace rocsparse
             return;
         }
 
+        // Compute size of dense_C for 4-argument atomic_add
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
+
         const J       cid  = lid + hipBlockIdx_y * WF_SIZE;
         const int64_t colB = cid * ldb;
 
         __shared__ T shared_B[BLOCKSIZE / WF_SIZE][WF_SIZE];
         shared_B[wid][lid]
             = (cid < N) ? rocsparse::conj_val(dense_B[row + colB + batch_stride_B * batch], conj_B)
-                        : static_cast<T>(0);
+                        : static_cast<B>(0);
 
         __threadfence_block();
         const I row_start = csr_row_ptr[row + offsets_batch_stride_A * batch] - idx_base;
@@ -886,8 +889,10 @@ namespace rocsparse
             {
                 for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
                 {
-                    rocsparse::atomic_add(&dense_C[col + (i + hipBlockIdx_y * WF_SIZE) * ldc
-                                                   + batch_stride_C * batch],
+                    rocsparse::atomic_add(dense_C,
+                                          col + (i + hipBlockIdx_y * WF_SIZE) * ldc
+                                              + batch_stride_C * batch,
+                                          dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
             }
@@ -895,8 +900,10 @@ namespace rocsparse
             {
                 for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
                 {
-                    rocsparse::atomic_add(&dense_C[col * ldc + (i + hipBlockIdx_y * WF_SIZE)
-                                                   + batch_stride_C * batch],
+                    rocsparse::atomic_add(dense_C,
+                                          col * ldc + i + hipBlockIdx_y * WF_SIZE
+                                              + batch_stride_C * batch,
+                                          dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
             }
@@ -945,12 +952,15 @@ namespace rocsparse
             return;
         }
 
+        // Compute size of dense_C for 4-argument atomic_add
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
+
         __shared__ T shared_B[BLOCKSIZE / WF_SIZE][WF_SIZE];
 
         shared_B[wid][lid]
             = (cid < N)
                   ? rocsparse::conj_val(dense_B[ldb * row + cid + batch_stride_B * batch], conj_B)
-                  : static_cast<T>(0);
+                  : static_cast<B>(0);
 
         __threadfence_block();
         const I row_start = csr_row_ptr[row + offsets_batch_stride_A * batch] - idx_base;
@@ -967,8 +977,10 @@ namespace rocsparse
             {
                 for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
                 {
-                    rocsparse::atomic_add(&dense_C[col + (i + hipBlockIdx_y * WF_SIZE) * ldc
-                                                   + batch_stride_C * batch],
+                    rocsparse::atomic_add(dense_C,
+                                          col + (i + hipBlockIdx_y * WF_SIZE) * ldc
+                                              + batch_stride_C * batch,
+                                          dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
             }
@@ -976,8 +988,10 @@ namespace rocsparse
             {
                 for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
                 {
-                    rocsparse::atomic_add(&dense_C[col * ldc + (i + hipBlockIdx_y * WF_SIZE)
-                                                   + batch_stride_C * batch],
+                    rocsparse::atomic_add(dense_C,
+                                          col * ldc + i + hipBlockIdx_y * WF_SIZE
+                                              + batch_stride_C * batch,
+                                          dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
             }

@@ -45,7 +45,7 @@
 //
 //   "Q" + radix + "i" + i + "j" + j + "R"/"I"
 //
-// where i and j are the row/col indicies of the DFT matrix A
+// where i and j are the row/col indices of the DFT matrix A
 // corresponding to the radix and R/I is the real/imaginary part.
 // More specifically:
 //

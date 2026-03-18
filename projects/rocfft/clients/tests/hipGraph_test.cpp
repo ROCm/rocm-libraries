@@ -22,6 +22,7 @@
 #include "../../shared/arithmetic.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
+#include "../../shared/params_gen.h"
 #include "../../shared/rocfft_against_fftw.h"
 #include "../../shared/rocfft_params.h"
 #include "rocfft/rocfft.h"
@@ -87,7 +88,7 @@ static void init_input_data(size_t                              N,
     if(device_data.alloc(Nbytes) != hipSuccess)
         throw std::bad_alloc();
 
-    EXPECT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
+    ASSERT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
               hipSuccess);
 }
 
@@ -102,7 +103,7 @@ static void init_data(size_t N, T init_val, std::vector<T>& host_data, gpubuf_t<
     if(device_data.alloc(Nbytes) != hipSuccess)
         throw std::bad_alloc();
 
-    EXPECT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
+    ASSERT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
               hipSuccess);
 }
 
@@ -271,6 +272,12 @@ static void compare_data(const std::vector<rocfft_complex<float>>& original_host
 
 TEST(rocfft_UnitTest, hipGraph_execution)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     hipGraph_t     graph      = nullptr;
     hipGraphExec_t graph_exec = nullptr;
 
@@ -310,7 +317,7 @@ TEST(rocfft_UnitTest, hipGraph_execution)
     rocfft_plan plan_inv;
     create_inverse_fft_plan(N, plan_inv);
 
-    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     hipStream_wrapper_t stream;
     hipStream_wrapper_t other_stream;
@@ -375,7 +382,7 @@ TEST(rocfft_UnitTest, hipGraph_execution)
         ASSERT_EQ(hipGraphLaunch(graph_exec, stream), hipSuccess);
 
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
-    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+    stream.free();
 
     // check for correctness of the output data
     compare_data(host_mem_in, device_mem_out);
@@ -386,5 +393,5 @@ TEST(rocfft_UnitTest, hipGraph_execution)
     fill(host_mem_counter_modified.begin(), host_mem_counter_modified.end(), num_graph_launches);
     compare_data_exact_match<size_t>(other_stream, host_mem_counter_modified, device_mem_counter);
 
-    ASSERT_EQ(hipStreamDestroy(other_stream), hipSuccess);
+    other_stream.free();
 }

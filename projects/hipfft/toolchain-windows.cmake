@@ -31,21 +31,24 @@ else()
   set(rocm_bin "C:/hip/bin")
 endif()
 
-set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
-set(CMAKE_C_COMPILER "${rocm_bin}/clang.exe")
+if( NOT DEFINED CMAKE_CXX_COMPILER )
+  set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
+endif()
+if( NOT DEFINED CMAKE_C_COMPILER )
+  set(CMAKE_C_COMPILER "${rocm_bin}/clang.exe")
+endif()
 
 # our usage flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DWIN32 -D_CRT_SECURE_NO_WARNINGS")
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -D_CRT_SECURE_NO_WARNINGS")
 
 # flags for clang direct use
 
 # -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllexport' is not supported [-Wignored-attributes] which is used by msvc compiler
-# -Wno-unknown-attributes to avoid warning: unknown attribute '__dllimport__' ignored [-Wunknown-attributes], in boost
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-attributes -Wno-unknown-attributes")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHIP_CLANG_HCC_COMPAT_MODE=1 -DBOOST_USE_WINDOWS_H -DNOMINMAX")
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -Wno-ignored-attributes")
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -DHIP_CLANG_HCC_COMPAT_MODE=1 -DNOMINMAX")
 
 # args also in hipcc.bat
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fms-extensions -fms-compatibility -D__HIP_ROCclr__=1 -D__HIP_PLATFORM_AMD__=1")
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -fms-extensions -fms-compatibility -D__HIP_ROCclr__=1")
 
 if (DEFINED ENV{VCPKG_PATH})
   file(TO_CMAKE_PATH "$ENV{VCPKG_PATH}" VCPKG_PATH)

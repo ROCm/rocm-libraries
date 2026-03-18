@@ -120,7 +120,9 @@ public:
         this->block_offset          = num_items_;    // Initialize past-the-end
         this->block_end             = num_items_;    // Initialize past-the-end
         this->num_items             = num_items_;
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         this->total_tiles           = static_cast<int>(hipcub::DivideAndRoundUp(num_items_, tile_items));
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         this->grid_size             = min(total_tiles, max_grid_size);
         int avg_tiles_per_block     = total_tiles / grid_size;
         // leftover grains go to big blocks:
@@ -136,10 +138,10 @@ public:
      * for a "raking" access pattern in which each thread block is assigned a
      * consecutive sequence of input tiles.
      */
-    template <int TILE_ITEMS>
-    __device__ __forceinline__ void BlockInit(
-        int block_id,
-        Int2Type<GRID_MAPPING_RAKE> /*strategy_tag*/)
+    template<int TILE_ITEMS>
+    HIPCUB_DEVICE
+    HIPCUB_FORCEINLINE void BlockInit(int block_id,
+                                      detail::int_constant_t<GRID_MAPPING_RAKE> /*strategy_tag*/)
     {
         block_stride = TILE_ITEMS;
         if (block_id < big_shares)
@@ -163,10 +165,10 @@ public:
      * pattern in which each thread block is assigned a consecutive sequence
      * of input tiles.
      */
-    template <int TILE_ITEMS>
-    __device__ __forceinline__ void BlockInit(
-        int block_id,
-        Int2Type<GRID_MAPPING_STRIP_MINE> /*strategy_tag*/)
+    template<int TILE_ITEMS>
+    HIPCUB_DEVICE
+    HIPCUB_FORCEINLINE void
+        BlockInit(int block_id, detail::int_constant_t<GRID_MAPPING_STRIP_MINE> /*strategy_tag*/)
     {
         block_stride = grid_size * TILE_ITEMS;
         block_offset = (block_id * TILE_ITEMS);
@@ -179,12 +181,11 @@ public:
      * pattern in which the input tiles assigned to each thread block are
      * separated by a stride equal to the the extent of the grid.
      */
-    template <
-        int TILE_ITEMS,
-        GridMappingStrategy STRATEGY>
-    __device__ __forceinline__ void BlockInit()
+    template<int TILE_ITEMS, GridMappingStrategy STRATEGY>
+    HIPCUB_DEVICE
+    HIPCUB_FORCEINLINE void BlockInit()
     {
-        BlockInit<TILE_ITEMS>(blockIdx.x, Int2Type<STRATEGY>());
+        BlockInit<TILE_ITEMS>(blockIdx.x, detail::int_constant_t<STRATEGY>());
     }
 
 
@@ -193,10 +194,11 @@ public:
      * pattern in which each thread block is assigned a consecutive sequence
      * of input tiles.
      */
-    template <int TILE_ITEMS>
-    __device__ __forceinline__ void BlockInit(
-        OffsetT block_offset,                       ///< [in] Threadblock begin offset (inclusive)
-        OffsetT block_end)                          ///< [in] Threadblock end offset (exclusive)
+    template<int TILE_ITEMS, typename OffsetT1 = OffsetT>
+    HIPCUB_DEVICE
+    HIPCUB_FORCEINLINE void
+        BlockInit(OffsetT1 block_offset, ///< [in] Threadblock begin offset (inclusive)
+                  OffsetT1 block_end) ///< [in] Threadblock end offset (exclusive)
     {
         this->block_offset = block_offset;
         this->block_end = block_end;

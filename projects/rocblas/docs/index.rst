@@ -12,7 +12,7 @@ rocBLAS is the ROCm Basic Linear Algebra Subprograms (BLAS) library. rocBLAS is 
 This documentation set contains instructions for installing, understanding, and using the rocBLAS library.
 To learn more, see :doc:`./what-is-rocblas`
 
-The rocBLAS public repository is located at 
+The rocBLAS public repository is located at
 `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_.
 
 .. note::
@@ -33,12 +33,12 @@ The rocBLAS public repository is located at
   .. grid-item-card:: Conceptual
 
     * :doc:`rocBLAS design notes <./conceptual/rocblas-design-notes>`
+    * :doc:`BLAS operations introduction <./conceptual/blas-operations-intro>`
 
   .. grid-item-card:: How To
 
     * :doc:`Program with rocBLAS <./how-to/Programmers_Guide>`
     * :doc:`Use logging with rocBLAS <./how-to/logging-in-rocblas>`
-    * :doc:`Contribute to rocBLAS <./how-to/Contributors_Guide>`
 
   .. grid-item-card:: Examples
 
@@ -51,7 +51,6 @@ The rocBLAS public repository is located at
     * :ref:`api-reference-guide`
 
 To contribute to the documentation, see `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the rocBLAS code base, see :doc:`Contribute to rocBLAS <./contribute>`.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-

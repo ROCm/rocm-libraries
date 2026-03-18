@@ -76,6 +76,7 @@ void testStreamCapture()
 
     // Launch kernel
     hipLaunchKernelGGL(increment, dim3(1), dim3(1), 0, stream, d_data);
+    HIP_CHECK(hipGetLastError());
 
     // Transfer result back to host
     HIP_CHECK(hipMemcpyAsync(&h_data, d_data, sizeof(int), hipMemcpyDeviceToHost, stream));
@@ -99,10 +100,10 @@ void testStreamCapture()
     ASSERT_EQ(h_data, num_launches);
 
     // Clean up
+    HIP_CHECK(hipFreeAsync(d_data, stream));
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipGraphExecDestroy(instance));
-    HIP_CHECK(hipFree(d_data));
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 void testManualConstruction()
@@ -159,10 +160,10 @@ void testManualConstruction()
     ASSERT_EQ(h_data, num_launches);
 
     // Clean up
+    HIP_CHECK(hipFreeAsync(d_data, stream));
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipGraphExecDestroy(instance));
-    HIP_CHECK(hipFree(d_data));
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 void testStreamCaptureWithAtomics()
@@ -193,6 +194,7 @@ void testStreamCaptureWithAtomics()
 
     // Launch kernel
     hipLaunchKernelGGL(atomicIncrement, dim3(num_blocks), dim3(num_threads), 0, stream, d_data);
+    HIP_CHECK(hipGetLastError());
 
     // Transfer result back to host
     HIP_CHECK(hipMemcpyAsync(&h_data, d_data, sizeof(int), hipMemcpyDeviceToHost, stream));
@@ -217,10 +219,10 @@ void testStreamCaptureWithAtomics()
     ASSERT_EQ(h_data, num_launches * num_blocks * num_threads);
 
     // Clean up
+    HIP_CHECK(hipFreeAsync(d_data, stream));
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipGraphExecDestroy(instance));
-    HIP_CHECK(hipFree(d_data));
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TEST(TestHipGraphBasic, CaptureFromStream)

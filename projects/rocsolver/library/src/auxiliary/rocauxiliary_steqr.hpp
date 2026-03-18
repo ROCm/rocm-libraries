@@ -80,11 +80,11 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
     rocsolver_hybrid_storage<S, rocblas_int, S*> hWork;
     rocsolver_hybrid_storage<T, rocblas_int, U> hC;
 
-    ROCBLAS_CHECK(hD.init_async(n, dD, strideD, batch_count, stream));
-    ROCBLAS_CHECK(hE.init_async(n - 1, dE, strideE, batch_count, stream));
-    ROCBLAS_CHECK(hInfo.init_async(1, dInfo, 1, batch_count, stream));
-    ROCBLAS_CHECK(hWork.init_async(2 * n, dWork, strideW, 1, stream));
-    ROCBLAS_CHECK(hC.init_pointers_only(dC, strideC, batch_count, stream));
+    ROCBLAS_CHECK(hD.init_async(n, dD, 0, strideD, batch_count, stream));
+    ROCBLAS_CHECK(hE.init_async(n - 1, dE, 0, strideE, batch_count, stream));
+    ROCBLAS_CHECK(hInfo.init_async(1, dInfo, 0, 1, batch_count, stream));
+    ROCBLAS_CHECK(hWork.init_async(2 * n, dWork, 0, strideW, 1, stream));
+    ROCBLAS_CHECK(hC.init_pointers_only(dC, shiftC, strideC, batch_count, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
     rocblas_int blocks = (n - 1) / BS1 + 1;
@@ -804,8 +804,8 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
     // Initialize identity matrix
     if(evect == rocblas_evect_tridiagonal)
     {
-        rocblas_int blocks = (n - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+        rocblas_int blocks = (n - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                                 stream, n, n, C, shiftC, ldc, strideC);
     }
 
@@ -829,15 +829,11 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
         }
         else
         {
-            int device;
-            HIP_CHECK(hipGetDevice(&device));
-            hipDeviceProp_t deviceProperties;
-            HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
+            const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
-            ROCSOLVER_LAUNCH_KERNEL((steqr_kernel<T>), dim3(1, batch_count),
-                                    dim3(deviceProperties.warpSize), 0, stream, n, D + shiftD,
-                                    strideD, E + shiftE, strideE, C, shiftC, ldc, strideC, info,
-                                    (S*)work_stack, 30 * n, eps, ssfmin, ssfmax);
+            ROCSOLVER_LAUNCH_KERNEL((steqr_kernel<T>), dim3(1, batch_count), dim3(props->warpSize),
+                                    0, stream, n, D + shiftD, strideD, E + shiftE, strideE, C, shiftC,
+                                    ldc, strideC, info, (S*)work_stack, 30 * n, eps, ssfmin, ssfmax);
         }
     }
 
