@@ -1381,14 +1381,16 @@ struct FmhaBwdOGradDotOKernel
 
         ck_tile::index_t nhead_stride_do;
         ck_tile::index_t nhead_stride_o;
-        ck_tile::index_t nhead_stride_d;
+        // LSE and D always share the same layout; this stride covers both.
+        ck_tile::index_t nhead_stride_lsed;
     };
 
     struct FmhaBwdOGradDotOBatchModeKargs : FmhaBwdOGradDotOCommonKargs
     {
         ck_tile::index_t batch_stride_do;
         ck_tile::index_t batch_stride_o;
-        ck_tile::index_t batch_stride_d;
+        // LSE and D always share the same layout; this stride covers both.
+        ck_tile::index_t batch_stride_lsed;
     };
 
     struct FmhaBwdOGradDotOGroupModeKargs : FmhaBwdOGradDotOCommonKargs
@@ -1417,10 +1419,10 @@ struct FmhaBwdOGradDotOKernel
               ck_tile::index_t stride_o,
               ck_tile::index_t nhead_stride_do,
               ck_tile::index_t nhead_stride_o,
-              ck_tile::index_t nhead_stride_d,
+              ck_tile::index_t nhead_stride_lsed,
               ck_tile::index_t batch_stride_do,
               ck_tile::index_t batch_stride_o,
-              ck_tile::index_t batch_stride_d)
+              ck_tile::index_t batch_stride_lsed)
     {
         Kargs kargs{{o_ptr,
                      do_ptr,
@@ -1436,10 +1438,10 @@ struct FmhaBwdOGradDotOKernel
                      stride_o,
                      nhead_stride_do,
                      nhead_stride_o,
-                     nhead_stride_d},
+                     nhead_stride_lsed},
                     batch_stride_do,
                     batch_stride_o,
-                    batch_stride_d};
+                    batch_stride_lsed};
 
         return kargs;
     }
@@ -1462,7 +1464,7 @@ struct FmhaBwdOGradDotOKernel
               ck_tile::index_t stride_o,
               ck_tile::index_t nhead_stride_do,
               ck_tile::index_t nhead_stride_o,
-              ck_tile::index_t nhead_stride_d)
+              ck_tile::index_t nhead_stride_lsed)
     {
         Kargs kargs{{o_ptr,
                      do_ptr,
@@ -1478,7 +1480,7 @@ struct FmhaBwdOGradDotOKernel
                      stride_o,
                      nhead_stride_do,
                      nhead_stride_o,
-                     nhead_stride_d},
+                     nhead_stride_lsed},
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_q_ptr),
                     reinterpret_cast<const int32_t*>(cu_seqlen_q_ptr)};
@@ -1512,18 +1514,18 @@ struct FmhaBwdOGradDotOKernel
 
         const index_t i_m0 = amd_wave_read_first_lane(i_tile_m * kM0);
 
-        long_index_t batch_offset_o  = 0;
-        long_index_t batch_offset_do = 0;
-        long_index_t batch_offset_d  = 0;
+        long_index_t batch_offset_o    = 0;
+        long_index_t batch_offset_do   = 0;
+        long_index_t batch_offset_lsed = 0;
 
         if constexpr(kIsGroupMode)
         {
             // get starting offset for each batch
             const long_index_t query_start = kargs.seqstart_q_ptr[i_batch];
 
-            batch_offset_o  = query_start * kargs.stride_o;
-            batch_offset_do = query_start * kargs.stride_do;
-            batch_offset_d  = query_start;
+            batch_offset_o    = query_start * kargs.stride_o;
+            batch_offset_do   = query_start * kargs.stride_do;
+            batch_offset_lsed = query_start;
 
             // Priority: cu_seqlen_q_ptr > seqlen_q_ptr > physical_seqlen_q
             if(kargs.cu_seqlen_q_ptr != nullptr)
@@ -1551,9 +1553,9 @@ struct FmhaBwdOGradDotOKernel
         }
         else
         {
-            batch_offset_o  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
-            batch_offset_do = static_cast<long_index_t>(i_batch) * kargs.batch_stride_do;
-            batch_offset_d  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_d;
+            batch_offset_o    = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+            batch_offset_do   = static_cast<long_index_t>(i_batch) * kargs.batch_stride_do;
+            batch_offset_lsed = static_cast<long_index_t>(i_batch) * kargs.batch_stride_lsed;
         }
 
         // Read per-head sink score and convert to log2 domain so the pipeline can use exp2.
@@ -1573,12 +1575,12 @@ struct FmhaBwdOGradDotOKernel
                                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_do +
                                       batch_offset_do;
         const LSEDataType* lse_ptr = reinterpret_cast<const LSEDataType*>(kargs.lse_ptr) +
-                                     static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_d +
-                                     batch_offset_d;
+                                     static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_lsed +
+                                     batch_offset_lsed;
 
         DDataType* d_ptr = reinterpret_cast<DDataType*>(kargs.d_ptr) +
-                           static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_d +
-                           batch_offset_d;
+                           static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_lsed +
+                           batch_offset_lsed;
 
         // O/dO/D DRAM and DRAM window
         const auto o_dram = [&]() {
