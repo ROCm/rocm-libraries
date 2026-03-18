@@ -22,6 +22,7 @@ add_library(
     descriptors/BatchnormOperationDescriptor.cpp
     descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
+    descriptors/BlockScaleDequantizeOperationDescriptor.cpp
     descriptors/BlockScaleQuantizeOperationDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
