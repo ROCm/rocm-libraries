@@ -194,6 +194,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
     // -- Verify conv operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
+    EXPECT_EQ(node->name, "conv_fprop_op");
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->attributes.type, NodeAttrType::ConvolutionFwdAttributes);
 

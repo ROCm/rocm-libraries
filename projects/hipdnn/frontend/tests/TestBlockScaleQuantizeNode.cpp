@@ -860,3 +860,10 @@ TEST(TestBlockScaleQuantizeNode, GatherHipdnnTensors)
 
     EXPECT_EQ(allTensors.size(), 3);
 }
+
+TEST(TestBlockScaleQuantizeNode, GetNodeTypeReturnsBlockScaleQuantize)
+{
+    GraphAttributes graphAttrs;
+    BlockScaleQuantizeNode node(BlockScaleQuantizeAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BLOCK_SCALE_QUANTIZE);
+}

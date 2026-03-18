@@ -9,11 +9,12 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionFpropPacker.hpp>
+#include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode>
+class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode, NodeType::CONVOLUTION_FPROP>
 {
 public:
     ConvFpropAttributes attributes;
@@ -22,6 +23,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvFpropAttributes convAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackConvFpropOperation(opDesc, tensorMap, convAttr));
+        attributes = std::move(convAttr);
+        return {};
     }
 
     Error pre_validate_node() const override

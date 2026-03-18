@@ -105,5 +105,13 @@ public:
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
+
+    hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t /*handle*/,
+                                                 size_t* /*numPluginPaths*/,
+                                                 char** /*pluginPaths*/,
+                                                 size_t* /*maxStringLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
 };
 }

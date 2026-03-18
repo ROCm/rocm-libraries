@@ -93,6 +93,7 @@ TEST(TestBatchnormInferenceNode, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    batchnormAttributes = BatchnormInferenceAttributes{};
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
     BatchnormInferenceNode nodeWithX(std::move(batchnormAttributesCopy), graphAttributes);
@@ -671,4 +672,11 @@ TEST(TestBatchnormInferenceNode, PreValidateAccepts5DSpatialDimensionEqualsOne)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Inference mode should accept N*D*H*W=1 for 5D tensors (matches PyTorch behavior)";
+}
+
+TEST(TestBatchnormInferenceNode, GetNodeTypeReturnsBatchnormInference)
+{
+    GraphAttributes graphAttrs;
+    BatchnormInferenceNode node(BatchnormInferenceAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_INFERENCE);
 }

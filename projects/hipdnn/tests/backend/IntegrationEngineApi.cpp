@@ -50,7 +50,7 @@ TEST_F(IntegrationEngineApi, SetEngineOperationGraph)
                                         HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_graph),
+                                        static_cast<const void*>(&_graph)),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     test_util::createTestGraph(&_graph, _handle);
@@ -59,7 +59,7 @@ TEST_F(IntegrationEngineApi, SetEngineOperationGraph)
                                         HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_graph),
+                                        static_cast<const void*>(&_graph)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -113,7 +113,7 @@ TEST_F(IntegrationEngineApi, GetEngineOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &graph),
+                                        static_cast<void*>(&graph)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_NE(graph, nullptr);
 

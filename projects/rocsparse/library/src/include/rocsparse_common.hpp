@@ -2739,4 +2739,44 @@ namespace rocsparse
         }
         return local_done;
     }
+
+    template <typename T>
+    __device__ __forceinline__ T assign_ilu0_boost_value(const T& value, const T& boost_value);
+
+    template <>
+    __device__ __forceinline__ double assign_ilu0_boost_value(const double& value,
+                                                              const double& boost_value)
+    {
+        return boost_value;
+        //  To wait for signed assignement like:
+        //  return std::signbit(value) ? -boost_value : boost_value;
+    }
+
+    template <>
+    __device__ __forceinline__ float assign_ilu0_boost_value(const float& value,
+                                                             const float& boost_value)
+    {
+        return boost_value;
+        //  To wait for signed assignement like:
+        //  return std::signbit(value) ? -boost_value : boost_value;
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_float_complex assign_ilu0_boost_value(
+        const rocsparse_float_complex& value, const rocsparse_float_complex& boost_value)
+    {
+        return boost_value;
+        //  To wait for signed assignement like:
+        //  return ( value / std::abs(value) ) * boost_value;
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_double_complex assign_ilu0_boost_value(
+        const rocsparse_double_complex& value, const rocsparse_double_complex& boost_value)
+    {
+        return boost_value;
+        //  To wait for signed assignement like:
+        //  return ( value / std::abs(value) ) * boost_value;
+    }
+
 }
