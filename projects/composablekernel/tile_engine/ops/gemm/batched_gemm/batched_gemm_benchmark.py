@@ -47,7 +47,7 @@ class GemmBenchmark:
         }
 
         # Parse the kernel name pattern:
-        # benchmark_batched_gemm_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_128x128x32_2x2x1_16x16x16
+        # benchmark_batched_gemm_fp16_rcr_compv4_cshuffle_intrawave_False_False_False_False_128x128x32_2x2x1_16x16x16
         parts = name.split("_")
 
         if len(parts) >= 8 and parts[0] == "benchmark" and parts[1] == "batched" and parts[2] == "gemm":

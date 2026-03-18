@@ -49,7 +49,7 @@
     "trait_config": {
         "pipeline": {
             "values": [
-                "compv3"
+                "compv4"
             ]
         },
         "scheduler": {

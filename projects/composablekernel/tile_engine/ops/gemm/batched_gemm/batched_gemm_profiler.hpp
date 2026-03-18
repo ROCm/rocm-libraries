@@ -12,6 +12,11 @@
 
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/ops/gemm.hpp"
+
+#ifdef BATCHED_GEMM_SINGLE_INSTANCE_HPP
+#include BATCHED_GEMM_SINGLE_INSTANCE_HPP
+#endif
+
 #include "batched_gemm_benchmark.hpp"
 
 class GemmProfiler
@@ -114,27 +119,12 @@ class GemmProfiler
             b_b_k_n.SetZero();
         }
 
-        if(gemm_problem.structured_sparsity_)
-        {
-            ck_tile::AdjustToStructuredSparsity<ADataType>{}(a_b_m_k);
-        }
-
         ck_tile::DeviceMem a_b_m_k_dev_buf(a_b_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_b_k_n_dev_buf(b_b_k_n.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_b_m_n_dev_buf(c_b_m_n_dev_result.get_element_space_size_in_bytes());
 
-        if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
-        {
-            ck_tile::HostTensor<BDataType> b_b_k_n_dev = b_b_k_n;
-            ck_tile::permute_vectors_i4x4_b(b_b_k_n_dev);
-            b_b_k_n_dev_buf.ToDevice(b_b_k_n_dev.data());
-        }
-        else
-        {
-            b_b_k_n_dev_buf.ToDevice(b_b_k_n.data());
-        }
-
         a_b_m_k_dev_buf.ToDevice(a_b_m_k.data());
+        b_b_k_n_dev_buf.ToDevice(b_b_k_n.data());
         c_b_m_n_dev_buf.SetZero();
         c_b_m_n_dev_result.SetZero();
 

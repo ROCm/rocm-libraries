@@ -450,6 +450,7 @@ class GemmKernelBuilder:
             "gemm_multi_abd",
             "grouped_gemm",
             "batched_contraction",
+            "batched_gemm",
         ]:
             # Map pipeline names to the correct pipeline implementation
             pipeline_impl_map = {
@@ -558,6 +559,7 @@ class GemmKernelBuilder:
             "gemm_preshuffle",
             "grouped_gemm",
             "mx_gemm",
+            "batched_gemm",
         ]:
             a_layout, b_layout, c_layout = get_abc_layouts(self.layout)
 
@@ -644,6 +646,7 @@ struct SelectedKernel {{
             "gemm_preshuffle",
             "grouped_gemm",
             "mx_gemm",
+            "batched_gemm",
         ]:
             instance_code += f"""
     static constexpr bool UsePersistentKernel = {"true" if persistent in [True, "true"] else "false"};
@@ -675,6 +678,7 @@ struct SelectedKernel {{
             "gemm_preshuffle",
             "grouped_gemm",
             "mx_gemm",
+            "batched_gemm",
         ]:
             instance_code = """
 
@@ -988,7 +992,7 @@ struct SelectedKernel {{
         """
 
         if epilogue == "cshuffle":
-            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
+            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "batched_gemm"]:
                 instance_code += self.populate_cshuffle_gemm_universal()
             elif self.kernel_name_prefix == "gemm_multi_d":
                 instance_code += self.populate_cshuffle_gemm_multi_d()
@@ -997,7 +1001,7 @@ struct SelectedKernel {{
             elif self.kernel_name_prefix == "mx_gemm":
                 instance_code += self.populate_cshuffle_mx_gemm()
         else:  # default epilogue
-            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm"]:
+            if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "batched_gemm"]:
                 instance_code += self.populate_default_gemm_universal()
             elif self.kernel_name_prefix == "gemm_multi_d":
                 instance_code += self.populate_default_gemm_multi_d()

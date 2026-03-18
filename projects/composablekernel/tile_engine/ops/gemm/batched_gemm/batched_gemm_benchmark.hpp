@@ -15,8 +15,15 @@
 #include "ck_tile/host.hpp"
 #include "batched_gemm_common.hpp"
 
+#ifdef BATCHED_GEMM_SINGLE_INSTANCE_HPP
+#include BATCHED_GEMM_SINGLE_INSTANCE_HPP
+#endif
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
+// Generated batched GEMM instance headers provide ADataType/BDataType/AccDataType/CDataType and
+// ALayout/BLayout/CLayout for the single-kernel benchmark path.
 
 enum class Metric
 {
