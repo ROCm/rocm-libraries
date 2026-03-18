@@ -37,10 +37,11 @@ inline Error setDescriptorAttrString(hipdnnBackendDescriptor_t desc,
 }
 
 // Sets a vector-valued attribute on a backend descriptor.
+template <typename T>
 inline Error setDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
                                   hipdnnBackendAttributeName_t attrName,
                                   hipdnnBackendAttributeType_t attrType,
-                                  const std::vector<int64_t>& values,
+                                  const std::vector<T>& values,
                                   const std::string& errorContext)
 {
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
