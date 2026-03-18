@@ -2622,10 +2622,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.vgprPool.checkIn(tP["gpr"]["subIterReg"])
         tP["gpr"]["subIterReg"] = None
 
+    # addresses
+    if not forceNoTileCode:
+      # Addresses A(MXSA)
+      if not tdmA:
+        module.addComment1("global read addresses: addresses a")
+        module.add(self.graAddresses(kernel, tensorParametersA))
+      if not tdmA and kernel["ProblemType"]["MXBlockA"]:
+        module.addComment1("global read addresses: addresses mxsa")
+        module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
+      # Addresses Metadata
+      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+        module.addComment1("global read addresses: addresses metadata")
+        module.add(self.graAddresses(kernel, tPM))
+      # Addresses B(MXSB)
+      if not tdmB and kernel["ProblemType"]["MXBlockB"]:
+        module.addComment1("global read addresses: addresses mxsb")
+        module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+      if not tdmB:
+        module.addComment1("global read addresses: addresses b")
+        module.add(self.graAddresses(kernel, tensorParametersB))
+
+    # workgroup SGPRs no longer needed
+    if not tdmA:
+      module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
+
     # Final offsets A(MXSA)
     if not tdmA:
-      # workgoup SGPRs no longer needed
-      module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
       module.addComment1("global read addresses: final offsets a")
       module.add(self.graFinalOffsets(kernel, tensorParametersA))
       # releaseTensorTmpGprs(tensorParametersA)
@@ -2649,27 +2672,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.dontAppendCode = False
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
-
-    # addresses
-    if not forceNoTileCode:
-      # Addresses A(MXSA)
-      if not tdmA:
-        module.addComment1("global read addresses: addresses a")
-        module.add(self.graAddresses(kernel, tensorParametersA))
-      if not tdmA and kernel["ProblemType"]["MXBlockA"]:
-        module.addComment1("global read addresses: addresses mxsa")
-        module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-      # Addresses Metadata
-      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        module.addComment1("global read addresses: addresses metadata")
-        module.add(self.graAddresses(kernel, tPM))
-      # Addresses B(MXSB)
-      if not tdmB and kernel["ProblemType"]["MXBlockB"]:
-        module.addComment1("global read addresses: addresses mxsb")
-        module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
-      if not tdmB:
-        module.addComment1("global read addresses: addresses b")
-        module.add(self.graAddresses(kernel, tensorParametersB))
 
     # Add increment code
     gsuComponent = Component.GSU.find(self)
