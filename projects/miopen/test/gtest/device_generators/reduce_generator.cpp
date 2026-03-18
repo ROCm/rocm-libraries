@@ -9,7 +9,7 @@ namespace test::gtest {
 template <typename T>
 __device__ __forceinline__ T CastFromDouble(double x)
 {
-    if constexpr(std::is_same_v<T, __half> || std::is_same_v<T, hip_bfloat16>)
+    if constexpr(std::is_same_v<T, __half> || std::is_same_v<T, __hip_bfloat16>)
         return static_cast<T>(static_cast<float>(x));
     else
         return static_cast<T>(x);
@@ -18,9 +18,9 @@ __device__ __forceinline__ T CastFromDouble(double x)
 template <typename T>
 __device__ __forceinline__ T MakeReduceValue(uint32_t primary_raw,
                                              uint32_t secondary_raw,
-                                             size_t index,
+                                             std::size_t index,
                                              const TensorShapeInfo& shape,
-                                             miopenReduceTensorOp_t op,
+                                             int op,
                                              uint64_t max_val)
 {
     const double sign = checkerboard_sign(index, shape);
@@ -29,7 +29,7 @@ __device__ __forceinline__ T MakeReduceValue(uint32_t primary_raw,
 
     double final_val = 0.0;
 
-    switch(op)
+    switch(static_cast<miopenReduceTensorOp_t>(op))
     {
     // Data generation used by ADD/AVG, data is distributed around 1.0 rather than 0.0,
     // very low probability to get a reduced result of zero-value.
@@ -79,19 +79,15 @@ __device__ __forceinline__ T MakeReduceValue(uint32_t primary_raw,
 }
 
 template <typename T>
-__global__ void ReduceGeneratorKernel(T* output,
-                                      size_t n,
-                                      uint64_t seed,
-                                      miopenReduceTensorOp_t op,
-                                      uint64_t max_val,
-                                      TensorShapeInfo shape)
+__global__ void ReduceGeneratorKernel(
+    T* output, std::size_t n, uint64_t seed, int op, uint64_t max_val, TensorShapeInfo shape)
 {
-    const size_t logical_tid    = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const size_t logical_stride = static_cast<size_t>(gridDim.x) * blockDim.x;
+    const auto logical_tid    = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const auto logical_stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
 
-    for(size_t chunk = logical_tid;; chunk += logical_stride)
+    for(auto chunk = logical_tid;; chunk += logical_stride)
     {
-        const size_t base = chunk * 4;
+        const std::size_t base = chunk * 4;
         if(base >= n)
             break;
 
@@ -106,7 +102,7 @@ __global__ void ReduceGeneratorKernel(T* output,
 #pragma unroll
         for(int lane = 0; lane < 4; ++lane)
         {
-            const size_t i = base + static_cast<size_t>(lane);
+            const auto i = base + static_cast<std::size_t>(lane);
             if(i >= n)
                 break;
 
@@ -118,9 +114,9 @@ __global__ void ReduceGeneratorKernel(T* output,
 
 template <typename T>
 void ReduceGenerator(T* output,
-                     size_t n,
+                     std::size_t n,
                      uint64_t seed,
-                     miopenReduceTensorOp_t op,
+                     int op,
                      uint64_t max_val,
                      const int* lengths,
                      int ndims,
@@ -131,9 +127,9 @@ void ReduceGenerator(T* output,
 
     constexpr int threadsPerBlock = 256;
     // 4 because we generate 4 values via rocrand4
-    const size_t chunk_count    = (n + 3) / 4;
-    const int numBlocks         = ComputeNumBlocks<T>(chunk_count);
-    const TensorShapeInfo shape = MakeTensorShapeInfo(lengths, ndims);
+    const std::size_t chunk_count = (n + 3) / 4;
+    const int numBlocks           = ComputeNumBlocks<T>(chunk_count);
+    const TensorShapeInfo shape   = MakeTensorShapeInfo(lengths, ndims);
 
     using DeviceT = typename ToDeviceType<T>::type;
     ReduceGeneratorKernel<DeviceT><<<numBlocks, threadsPerBlock, 0, stream>>>(
@@ -144,9 +140,9 @@ void ReduceGenerator(T* output,
 
 template <typename T>
 void ReduceGenerator(T* output,
-                     size_t n,
+                     std::size_t n,
                      uint64_t seed,
-                     miopenReduceTensorOp_t op,
+                     int op,
                      uint64_t max_val,
                      const miopen::TensorDescriptor& desc,
                      hipStream_t stream)
@@ -156,44 +152,44 @@ void ReduceGenerator(T* output,
 }
 
 template void ReduceGenerator<double>(double* output,
-                                      size_t n,
+                                      std::size_t n,
                                       uint64_t seed,
-                                      miopenReduceTensorOp_t op,
+                                      int op,
                                       uint64_t max_val,
                                       const miopen::TensorDescriptor& desc,
                                       hipStream_t stream);
 template void ReduceGenerator<float>(float* output,
-                                     size_t n,
+                                     std::size_t n,
                                      uint64_t seed,
-                                     miopenReduceTensorOp_t op,
+                                     int op,
                                      uint64_t max_val,
                                      const miopen::TensorDescriptor& desc,
                                      hipStream_t stream);
 template void ReduceGenerator<bfloat16>(bfloat16* output,
-                                        size_t n,
+                                        std::size_t n,
                                         uint64_t seed,
-                                        miopenReduceTensorOp_t op,
+                                        int op,
                                         uint64_t max_val,
                                         const miopen::TensorDescriptor& desc,
                                         hipStream_t stream);
 template void ReduceGenerator<half_float::half>(half_float::half* output,
-                                                size_t n,
+                                                std::size_t n,
                                                 uint64_t seed,
-                                                miopenReduceTensorOp_t op,
+                                                int op,
                                                 uint64_t max_val,
                                                 const miopen::TensorDescriptor& desc,
                                                 hipStream_t stream);
 template void ReduceGenerator<int8_t>(int8_t* output,
-                                      size_t n,
+                                      std::size_t n,
                                       uint64_t seed,
-                                      miopenReduceTensorOp_t op,
+                                      int op,
                                       uint64_t max_val,
                                       const miopen::TensorDescriptor& desc,
                                       hipStream_t stream);
 template void ReduceGenerator<int32_t>(int32_t* output,
-                                       size_t n,
+                                       std::size_t n,
                                        uint64_t seed,
-                                       miopenReduceTensorOp_t op,
+                                       int op,
                                        uint64_t max_val,
                                        const miopen::TensorDescriptor& desc,
                                        hipStream_t stream);

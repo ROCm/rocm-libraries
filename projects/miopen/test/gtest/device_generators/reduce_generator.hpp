@@ -4,7 +4,7 @@
 #ifndef GUARD_MIOPEN_REDUCE_GENERATOR_HPP
 #define GUARD_MIOPEN_REDUCE_GENERATOR_HPP
 
-#include <miopen/miopen.h>
+#include <cstdint>
 
 class bfloat16;
 
@@ -15,6 +15,8 @@ struct TensorDescriptor;
 namespace half_float {
 class half;
 } // namespace half_float
+
+using hipStream_t = struct ihipStream_t*;
 
 namespace test::gtest {
 
@@ -32,55 +34,30 @@ namespace test::gtest {
  */
 template <typename T>
 void ReduceGenerator(T* output,
-                     size_t n,
+                     std::size_t n,
                      uint64_t seed,
-                     miopenReduceTensorOp_t op,
+                     int op,
                      uint64_t max_val,
                      const miopen::TensorDescriptor& desc,
                      hipStream_t stream);
 
-extern template void ReduceGenerator<float>(float*,
-                                            size_t,
-                                            uint64_t,
-                                            miopenReduceTensorOp_t,
-                                            uint64_t,
-                                            const miopen::TensorDescriptor&,
-                                            hipStream_t);
-extern template void ReduceGenerator<double>(double*,
-                                             size_t,
-                                             uint64_t,
-                                             miopenReduceTensorOp_t,
-                                             uint64_t,
-                                             const miopen::TensorDescriptor&,
-                                             hipStream_t);
+extern template void ReduceGenerator<float>(
+    float*, std::size_t, uint64_t, int, uint64_t, const miopen::TensorDescriptor&, hipStream_t);
+extern template void ReduceGenerator<double>(
+    double*, std::size_t, uint64_t, int, uint64_t, const miopen::TensorDescriptor&, hipStream_t);
 extern template void ReduceGenerator<half_float::half>(half_float::half*,
-                                                       size_t,
+                                                       std::size_t,
                                                        uint64_t,
-                                                       miopenReduceTensorOp_t,
+                                                       int,
                                                        uint64_t,
                                                        const miopen::TensorDescriptor&,
                                                        hipStream_t);
-extern template void ReduceGenerator<bfloat16>(bfloat16*,
-                                               size_t,
-                                               uint64_t,
-                                               miopenReduceTensorOp_t,
-                                               uint64_t,
-                                               const miopen::TensorDescriptor&,
-                                               hipStream_t);
-extern template void ReduceGenerator<int8_t>(int8_t*,
-                                             size_t,
-                                             uint64_t,
-                                             miopenReduceTensorOp_t,
-                                             uint64_t,
-                                             const miopen::TensorDescriptor&,
-                                             hipStream_t);
-extern template void ReduceGenerator<int32_t>(int32_t*,
-                                              size_t,
-                                              uint64_t,
-                                              miopenReduceTensorOp_t,
-                                              uint64_t,
-                                              const miopen::TensorDescriptor&,
-                                              hipStream_t);
+extern template void ReduceGenerator<bfloat16>(
+    bfloat16*, std::size_t, uint64_t, int, uint64_t, const miopen::TensorDescriptor&, hipStream_t);
+extern template void ReduceGenerator<int8_t>(
+    int8_t*, std::size_t, uint64_t, int, uint64_t, const miopen::TensorDescriptor&, hipStream_t);
+extern template void ReduceGenerator<int32_t>(
+    int32_t*, std::size_t, uint64_t, int, uint64_t, const miopen::TensorDescriptor&, hipStream_t);
 
 } // namespace test::gtest
 
