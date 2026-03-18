@@ -479,17 +479,40 @@ protected:
     }
 };
 
+/**
+ * @brief Check if device has legacy TunaNet model support (2D only)
+ * @param device GPU device name (e.g., "gfx908", "gfx90a")
+ * @return true if legacy 2D TunaNet models exist for this device
+ */
+static bool HasLegacyTunaNetSupport(const std::string& device)
+{
+    // Legacy 2D TunaNet models exist for these architectures only
+    return (device == "gfx908" || device == "gfx90a");
+}
+
+/**
+ * @brief Check if device has ND TunaNet model support (2D and 3D)
+ * @param device GPU device name (e.g., "gfx942", "gfx950")
+ * @return true if ND TunaNet models exist for this device
+ */
+static bool HasNDTunaNetSupport(const std::string& device)
+{
+    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures
+    return (device == "gfx942" || device == "gfx950");
+}
+
 std::unique_ptr<Model> GetModel(const std::string& device)
 {
-    // 2D models only - 3D models handled separately in PredictSolver
-    if(device == "gfx950")
-        return std::make_unique<Gfx942Model>(); // use gfx942 model for gfx950 until we have a
-                                                // gfx950 model
-    if(device == "gfx942")
-        return std::make_unique<Gfx942Model>();
+    // Legacy 2D models only - caller should check HasLegacyTunaNetSupport() first
+    // No default fallback to avoid using inappropriate models for unsupported architectures
     if(device == "gfx90a")
         return std::make_unique<Gfx90aModel>();
-    return std::make_unique<Gfx908Model>(); // default model if GPU-specific model is not available
+    if(device == "gfx908")
+        return std::make_unique<Gfx908Model>();
+
+    // No model for unsupported architectures - return nullptr to trigger WTI fallback
+    MIOPEN_LOG_I2("No legacy TunaNet model for device: " << device);
+    return nullptr;
 }
 
 /**
@@ -681,9 +704,8 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                     const ExecutionContext& ctx,
                                     const std::string& device)
 {
-    const bool is3d   = problem.Is3d();
-    const bool is2d   = problem.Is2d();
-    const bool use_nd = is2d || is3d;
+    const bool is3d = problem.Is3d();
+    const bool is2d = problem.Is2d();
 
     // Check cache FIRST - avoids expensive model creation if we have cached results
     auto cached_result = GetCachedPrediction(problem, device, is3d);
@@ -692,37 +714,49 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         return cached_result;
     }
 
-    if(use_nd)
+    // Strategy:
+    // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
+    // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
+    // 3. Return empty vector to trigger WTI fallback for unsupported architectures
+
+    // Try ND model first (preferred for gfx942/gfx950)
+    if((is2d || is3d) && HasNDTunaNetSupport(device))
     {
-        int dim = is3d ? 3 : 2;
-        // 3D or 2D path: Use TunaNetND model
+        int dim                        = is3d ? 3 : 2;
         std::unique_ptr<ModelND> model = GetNDModel(device, dim);
-        if(!model || !model->IsProblemSupported(problem, ctx))
+
+        if(model && model->IsProblemSupported(problem, ctx))
         {
-            return {}; // Fallback: empty vector
+            MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
+            std::vector<float> predictions = model->Forward(problem);
+            return ProcessAndCachePredictions(
+                problem, device, true, predictions, model->GetSolverMap());
         }
-
-        MIOPEN_LOG_I2("Evaluating ND TunaNet");
-        std::vector<float> predictions = model->Forward(problem);
-
-        return ProcessAndCachePredictions(
-            problem, device, use_nd, predictions, model->GetSolverMap());
+        // If ND model failed for this architecture, don't try legacy - go to WTI
+        MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
+        return {};
     }
-    else
+
+    // Fall back to legacy 2D model (for gfx908/gfx90a only)
+    if(is2d && HasLegacyTunaNetSupport(device))
     {
-        // old 2D path: Use original TunaNet model
         std::unique_ptr<Model> model = GetModel(device);
-        if(!model || !model->IsProblemSupported(problem, ctx))
+
+        if(model && model->IsProblemSupported(problem, ctx))
         {
-            return {}; // Fallback: empty vector
+            MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
+            std::vector<float> predictions = model->Forward(problem);
+            return ProcessAndCachePredictions(
+                problem, device, false, predictions, model->metadata.solver_map);
         }
-
-        MIOPEN_LOG_I2("Evaluating TunaNet");
-        std::vector<float> predictions = model->Forward(problem);
-
-        return ProcessAndCachePredictions(
-            problem, device, false, predictions, model->metadata.solver_map);
+        MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+        return {};
     }
+
+    // No TunaNet model available for this device/problem combination
+    // Return empty vector to trigger WTI fallback
+    MIOPEN_LOG_I2("No TunaNet model available for " << device << ", falling back to WTI");
+    return {};
 }
 
 // MetadataND implementation moved to metadata_nd.cpp
@@ -941,32 +975,32 @@ protected:
 
 std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim)
 {
-    MIOPEN_LOG_I2("GetNDModel called for device: " << device);
+    MIOPEN_LOG_I2("GetNDModel called for device: " << device << " dim: " << dim);
 
-    // List of devices with ND TunaNet models
-    if(device == "gfx942" || device == "gfx950")
+    // Check if device is supported using the centralized helper function
+    if(!HasNDTunaNetSupport(device))
     {
-        try
-        {
-            // Pass device name to constructor - it will append "_3d" internally if 3D
-            auto model = std::make_unique<TunaNetNDModel>(device, dim);
-            MIOPEN_LOG_I2("Successfully created ND model for device: " << device);
-            return model;
-        }
-        catch(const std::exception& e)
-        {
-            MIOPEN_LOG_E("Exception during ND model construction: " << e.what());
-            return nullptr;
-        }
-        catch(...)
-        {
-            MIOPEN_LOG_E("Unknown exception during ND model construction");
-            return nullptr;
-        }
+        MIOPEN_LOG_I2("Device " << device << " not supported for ND models");
+        return nullptr;
     }
 
-    MIOPEN_LOG_I2("Device " << device << " not supported for ND models");
-    return nullptr;
+    try
+    {
+        // Pass device name to constructor - it will append "_3d" internally if 3D
+        auto model = std::make_unique<TunaNetNDModel>(device, dim);
+        MIOPEN_LOG_I2("Successfully created ND model for device: " << device);
+        return model;
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_E("Exception during ND model construction: " << e.what());
+        return nullptr;
+    }
+    catch(...)
+    {
+        MIOPEN_LOG_E("Unknown exception during ND model construction");
+        return nullptr;
+    }
 }
 
 } // namespace immed_mode
