@@ -28,31 +28,10 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
-#include <process.h>
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 #include <mutex>
 
 #include "include/logger.hpp"
-
-// Cross-platform safe file opening
-FILE* safeFopen(const char* filename, const char* mode)
-{
-#ifdef _WIN32
-    FILE* file = nullptr;
-    if(fopen_s(&file, filename, mode) == 0)
-    {
-        return file;
-    }
-    return nullptr;
-#else
-    return fopen(filename, mode);
-#endif
-}
+#include "include/platform.hpp"
 
 namespace hiptensor
 {
@@ -249,20 +228,10 @@ namespace hiptensor
         // Retrieve the time information
         time(&t);
 
-        // Cross-platform safe localtime
-#ifdef _WIN32
-        if(localtime_s(&tmInfo, &t) != 0)
+        if(!hiptensor::safeLocaltime(&t, &tmInfo))
         {
-            // If localtime_s fails, zero out the struct
             memset(&tmInfo, 0, sizeof(tmInfo));
         }
-#else
-        if(localtime_r(&t, &tmInfo) == nullptr)
-        {
-            // If localtime_r fails, zero out the struct
-            memset(&tmInfo, 0, sizeof(tmInfo));
-        }
-#endif
 
         // Format the timestamp string
         // YYYY-MM-DD HH:MM:SS
@@ -297,13 +266,7 @@ namespace hiptensor
     /* static */
     int32_t Logger::appPid()
     {
-        // App PID won't generally change
-        static int pid =
-#ifdef _WIN32
-            _getpid();
-#else
-            getpid();
-#endif
+        static int pid = hiptensor::getProcessId();
         return pid;
     }
 

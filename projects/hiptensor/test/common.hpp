@@ -28,8 +28,11 @@
 
 #include <filesystem>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <hiptensor/hiptensor.h>
 
 #include <hiptensor/internal/hiptensor_utility.hpp>
 
@@ -69,10 +72,29 @@ namespace hiptensor
         std::mt19937                    gen(rd());
         std::uniform_int_distribution<> dis(100000, 999999);
 
-        std::filesystem::path temp_dir      = std::filesystem::temp_directory_path();
-        std::string           temp_filename = prefix + std::to_string(dis(gen)) + ".tmp";
+        std::filesystem::path temp_dir    = std::filesystem::temp_directory_path();
+        constexpr int         maxAttempts = 10;
+        for(int i = 0; i < maxAttempts; i++)
+        {
+            std::filesystem::path candidate
+                = temp_dir / (prefix + std::to_string(dis(gen)) + ".tmp");
+            if(!std::filesystem::exists(candidate))
+            {
+                return candidate.string();
+            }
+        }
+        throw std::runtime_error("Failed to generate a unique temporary filename after "
+                                 + std::to_string(maxAttempts) + " attempts");
+    }
 
-        return (temp_dir / temp_filename).string();
+    // Redirect logger output to the null device to silence it during tests
+    inline void silenceLogger()
+    {
+#ifdef _WIN32
+        hiptensorLoggerOpenFile("NUL");
+#else
+        hiptensorLoggerOpenFile("/dev/null");
+#endif
     }
 
 } // namespace hiptensor

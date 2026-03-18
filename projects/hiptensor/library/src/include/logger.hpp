@@ -29,12 +29,8 @@
 #include <cstdio>
 #include <mutex>
 
-#include <hiptensor/hiptensor.h>
-
+#include "platform.hpp"
 #include "singleton.hpp"
-
-// Cross-platform safe file opening function
-HIPTENSOR_EXPORT FILE* safeFopen(const char* filename, const char* mode);
 
 namespace hiptensor
 {

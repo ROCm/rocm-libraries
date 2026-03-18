@@ -140,6 +140,7 @@ add_subdirectory(reduction)
 set(HIPTENSOR_CORE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/platform.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/performance.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp

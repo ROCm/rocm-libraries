@@ -49,9 +49,9 @@ namespace hiptensor
         , mLogFilename("")
     {
         // Override HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR with environment variable if present
-        if(const char* stride_env = getEnvironmentVariable("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR"))
+        if(auto stride_env = getEnvironmentVariable("HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR"))
         {
-            std::string upper = stride_env;
+            std::string upper = *stride_env;
             std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
             if(upper.compare("ON") == 0)
             {

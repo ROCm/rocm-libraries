@@ -76,11 +76,7 @@ namespace hiptensor
     {
         reset();
         // Handle our own outputs
-#ifdef _WIN32
-        hiptensorLoggerOpenFile("NUL");
-#else
-        hiptensorLoggerOpenFile("/dev/null");
-#endif
+        hiptensor::silenceLogger();
         hiptensorLoggerSetCallback(logMessage);
     }
 
