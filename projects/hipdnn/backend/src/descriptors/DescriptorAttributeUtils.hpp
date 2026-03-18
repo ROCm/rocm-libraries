@@ -63,6 +63,59 @@ void getString(const std::string& source,
                const char* errorPrefix);
 
 template <typename T>
+void setScalarVector(std::vector<T>& target,
+                     hipdnnBackendAttributeType_t expectedType,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "setScalarVector requires a trivially copyable type");
+    checkSetArgs(expectedType, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount > 0,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount must be positive");
+    target.resize(static_cast<size_t>(elementCount));
+    std::memcpy(target.data(), arrayOfElements, static_cast<size_t>(elementCount) * sizeof(T));
+}
+
+template <typename T>
+void getScalarVector(const std::vector<T>& source,
+                     hipdnnBackendAttributeType_t expectedType,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "getScalarVector requires a trivially copyable type");
+    checkGetArgs(expectedType, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = static_cast<int64_t>(source.size());
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    auto copyCount = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
+    if(elementCount != nullptr)
+    {
+        *elementCount = static_cast<int64_t>(copyCount);
+    }
+    std::memcpy(arrayOfElements, source.data(), copyCount * sizeof(T));
+}
+
+template <typename T>
 void setScalar(T& target,
                hipdnnBackendAttributeType_t expectedType,
                hipdnnBackendAttributeType_t attributeType,
