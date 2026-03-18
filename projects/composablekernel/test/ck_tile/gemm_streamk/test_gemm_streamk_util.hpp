@@ -85,9 +85,9 @@ class TestCkTileStreamK : public ::testing::Test
     static constexpr ck_tile::index_t K_Tile = std::tuple_element_t<9, Tuple>::value;
     static constexpr bool Persistent         = std::tuple_element_t<10, Tuple>::value;
     static constexpr auto PipelineType       = std::tuple_element_t<11, Tuple>::value;
+    static constexpr auto ReductionStrategy  = std::tuple_element_t<12, Tuple>::value;
 
-    template <ck_tile::StreamKReductionStrategy ReductionStrategy,
-              bool PadM       = true,
+    template <bool PadM       = true,
               bool PadN       = true,
               bool PadK       = true,
               bool Preshuffle = false,
@@ -269,8 +269,7 @@ class TestCkTileStreamK : public ::testing::Test
                                       stride_C};
 
         ck_tile::index_t num_accumulations_per_tile =
-            invoke_streamk<ck_tile::StreamKReductionStrategy::Atomic>(
-                args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
+            invoke_streamk<>(args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
 
         c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
