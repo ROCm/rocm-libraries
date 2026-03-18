@@ -108,7 +108,11 @@ namespace TensileLite
                         }
                     );
                 }
+                // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
                 m_modules.clear();
+                m_loadedModuleNames.clear();
+                m_loadedCOFiles.clear();
+                m_kernels.clear();
                 HIP_CHECK_RETURN_WITH_LOG(hipModuleLoad(&module, path.c_str()),
                     [&](hipError_t error_t) {
                         std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl
