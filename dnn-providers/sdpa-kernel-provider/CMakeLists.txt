@@ -206,6 +206,6 @@ install(TARGETS sdpa_kernel_plugin EXPORT sdpa-kernel-plugin
 # Install pre-compiled ASM kernel binaries (.co files)
 # Preserves the subdirectory structure (gfx942/fmha_v3_fwd/MI300/...)
 install(DIRECTORY src/asm/asm_kernels/
-        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/asm_kernels
+        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/sdpa_kernel_provider/asm_kernels
         FILES_MATCHING PATTERN "*.co"
 )
