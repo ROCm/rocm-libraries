@@ -27,7 +27,7 @@
 #include <iostream>
 #include <string>
 
-#include "custom_csv_formater.hpp"
+#include "custom_csv_formatter.hpp"
 #include <fstream>
 
 #define HIP_CHECK(condition)                                                            \
