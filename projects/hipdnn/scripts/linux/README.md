@@ -1,22 +1,22 @@
-# TheRock Developer Bootstrap Scripts (Linux)
+# hipDNN Linux Scripts
 
-Scripts for building hipDNN and its DNN provider plugins from source using
-[TheRock](https://github.com/ROCm/TheRock) build infrastructure. TheRock
-downloads prebuilt CI artifacts for the full ROCm stack and lets you
-selectively rebuild individual components from source.
+Developer scripts for building, testing, and working with hipDNN on Linux.
 
-## Prerequisites
+## Scripts
 
-- A clone of [TheRock](https://github.com/ROCm/TheRock)
-- Python 3.9+
-- CMake and Ninja
-- `pip install meson` (or install it in TheRock's `.venv` — see below)
+### `rock_dev_bootstrap.sh`
 
-## Quick Start
+Automates building hipDNN and its DNN provider plugins from source using
+[TheRock](https://github.com/ROCm/TheRock) build infrastructure. Downloads
+prebuilt CI artifacts for the full ROCm stack and lets you selectively rebuild
+individual components from source.
 
-Copy `rock_dev_bootstrap.sh` into your TheRock checkout, then:
+**Prerequisites:** A TheRock clone, Python 3.9+, CMake, Ninja.
+
+**Quick start:**
 
 ```bash
+# Copy the script into your TheRock checkout, then:
 cd /path/to/TheRock
 
 # 1. Download prebuilt CI artifacts (one-time setup)
@@ -32,42 +32,6 @@ source .venv/bin/activate
 ./rock_dev_bootstrap.sh build --gpu gfx90a
 ```
 
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `bootstrap [run-id]` | Download prebuilt CI artifacts. Auto-detects the latest nightly if no run ID is given. |
-| `configure [components...]` | Remove `.prebuilt` markers for the listed components and run cmake. Defaults to all components if none specified. |
-| `build [components...]` | Build configured components with ninja. |
-| `rebuild [components...]` | Expunge (full clean) then rebuild components. |
-
-## Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--gpu <family>` | `gfx94X-dcgpu` | GPU architecture family (e.g. `gfx90a`, `gfx94X-dcgpu`). |
-| `--build-dir <dir>` | `~/therock-build-<gpu>` | Build output directory. |
-| `--workflow <file>` | `ci_nightly.yml` | GitHub Actions workflow to search for artifacts. |
-
-## Available Components
-
-| Component | Description |
-|-----------|-------------|
-| `hipdnn` | Core hipDNN library |
-| `miopenprovider` | MIOpen backend DNN provider plugin |
-| `hipblasltprovider` | hipBLASLt backend DNN provider plugin |
-| `hipkernelprovider` | HIP kernel backend DNN provider plugin |
-
-## Notes
-
-- **Python venv:** The `bootstrap` command creates a `.venv` in the TheRock
-  repo and installs dependencies (including `meson`). You must activate this
-  venv before running `configure` so that cmake can find `meson` on PATH.
-- **GitHub auth:** Without `gh auth` or a `GITHUB_TOKEN`, artifact search
-  requests are unauthenticated and may be rate-limited. Set up authentication
-  for faster, more reliable bootstrapping.
-- **Build directory:** Each GPU family gets its own build directory
-  (`~/therock-build-gfx90a`, `~/therock-build-gfx94X`, etc.). You can
-  override this with `--build-dir`.
-- **Incremental builds:** After the initial build, re-running `build` only
-  recompiles changed files. Use `rebuild` for a full clean rebuild.
+Run `./rock_dev_bootstrap.sh --help` for full usage details including
+available commands (`bootstrap`, `configure`, `build`, `rebuild`), GPU family
+options, and component list.
