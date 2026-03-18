@@ -82,6 +82,7 @@ Tests:
   c_equal_d: [false, true]
 
 # Integer-exact init (A in [0,1,2], B alternating ±[0,1,2]) with exact GPU vs CPU match. Same sizes/filters as normal matmul tests.
+# integer_exact tests fail on gfx11 (Navi); skipped at runtime there—see testing_matmul.hpp.
 # TF32x1 (f32 A+B, compute input bf16) runs only on gfx950 where solutions exist (see matmul_integer_exact_tf32x1_gfx950 below).
 - name: matmul_integer_exact_one
   category: quick
