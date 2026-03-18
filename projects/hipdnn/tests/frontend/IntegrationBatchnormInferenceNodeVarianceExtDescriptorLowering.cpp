@@ -326,13 +326,13 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
         << "Epsilon tensor UID " << bnFwd->epsilon_tensor_uid << " not found in graph tensors";
 
     // All seven tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids = {bnFwd->x_tensor_uid,
-                                            bnFwd->mean_tensor_uid,
-                                            bnFwd->variance_tensor_uid,
-                                            bnFwd->scale_tensor_uid,
-                                            bnFwd->bias_tensor_uid,
-                                            bnFwd->y_tensor_uid,
-                                            bnFwd->epsilon_tensor_uid};
+    std::unordered_set<int64_t> const nodeUids = {bnFwd->x_tensor_uid,
+                                                  bnFwd->mean_tensor_uid,
+                                                  bnFwd->variance_tensor_uid,
+                                                  bnFwd->scale_tensor_uid,
+                                                  bnFwd->bias_tensor_uid,
+                                                  bnFwd->y_tensor_uid,
+                                                  bnFwd->epsilon_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 7u) << "BN node tensor UIDs are not distinct";
 }
 

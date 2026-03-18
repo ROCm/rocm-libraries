@@ -231,7 +231,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_TENSOR_PARAM_DIMS)).set_stride(toVec(K_TENSOR_PARAM_STRIDES));
 
-    BatchnormBackwardAttributes bnBwdAttrs;
+    BatchnormBackwardAttributes const bnBwdAttrs;
 
     auto [dx, dscale, dbias] = graph->batchnorm_backward(dy, x, scale, bnBwdAttrs);
     dx->set_output(true);
@@ -288,12 +288,12 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
         << "DBias tensor UID " << bnBwd->dbias_tensor_uid << " not found in graph tensors";
 
     // All six tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids = {bnBwd->dy_tensor_uid,
-                                            bnBwd->x_tensor_uid,
-                                            bnBwd->scale_tensor_uid,
-                                            bnBwd->dx_tensor_uid,
-                                            bnBwd->dscale_tensor_uid,
-                                            bnBwd->dbias_tensor_uid};
+    std::unordered_set<int64_t> const nodeUids = {bnBwd->dy_tensor_uid,
+                                                  bnBwd->x_tensor_uid,
+                                                  bnBwd->scale_tensor_uid,
+                                                  bnBwd->dx_tensor_uid,
+                                                  bnBwd->dscale_tensor_uid,
+                                                  bnBwd->dbias_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 6u) << "BatchnormBackward node tensor UIDs are not distinct";
 }
 
