@@ -285,7 +285,10 @@ bwd_result fmha_bwd_run(mode_enum mode,
         get_lengths(o_perm, shape_batch, nhead, shape_seqlen_q, hdim_v));
     ck_tile::HostTensor<LSEDataType> lse_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
-    ck_tile::HostTensor<LSEDataType> sink_host(std::array<ck_tile::index_t, 2>{shape_batch, nhead});
+    ck_tile::HostTensor<LSEDataType> sink_host(
+        sink_grad ? std::array<ck_tile::index_t, 2>{shape_batch, nhead}
+                  : std::array<ck_tile::index_t, 2>{1, 1} /* dummy when sink is disabled */);
+    if(sink_grad)
     {
         std::uniform_real_distribution<float> sink_dist(30.0f, 60.0f);
         sink_host.ForEach(

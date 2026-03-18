@@ -40,7 +40,7 @@ struct BlockFmhaBwdOGradDotO
     // atomic_sink_grad_ptr: per-head accumulator in global memory; nullptr disables sink path.
     CK_TILE_HOST_DEVICE void operator()(const ODramBlockWindowTmp& o_dram_block_window_tmp,
                                         const OGradDramBlockWindowTmp& do_dram_block_window_tmp,
-                                        const LSEDramBlockWindowTmp& ls_e_dram_block_window_tmp,
+                                        const LSEDramBlockWindowTmp& lse_dram_block_window_tmp,
                                         DDramBlockWindowTmp& d_dram_block_window_tmp,
                                         const LSEDataType sink_value,
                                         float p_undrop,
@@ -52,6 +52,10 @@ struct BlockFmhaBwdOGradDotO
                                remove_cvref_t<typename OGradDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<DDataType, remove_cvref_t<typename DDramBlockWindowTmp::DataType>>,
             "wrong!");
+        // atomic_sink_grad_ptr is reinterpret_cast to float* in the sink path;
+        // ensure LSEDataType is float so the cast is well-defined.
+        static_assert(std::is_same_v<LSEDataType, float>,
+                      "sink gradient atomicAdd requires LSEDataType == float");
 
         static_assert(kBlockSize == ODramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kBlockSize ==
@@ -107,9 +111,9 @@ struct BlockFmhaBwdOGradDotO
                     o.get_tile_distribution().get_static_tile_distribution_encoding(),
                     sequence<1>{}));
             auto lse_dram_window =
-                make_tile_window(ls_e_dram_block_window_tmp.get_bottom_tensor_view(),
-                                 ls_e_dram_block_window_tmp.get_window_lengths(),
-                                 ls_e_dram_block_window_tmp.get_window_origin(),
+                make_tile_window(lse_dram_block_window_tmp.get_bottom_tensor_view(),
+                                 lse_dram_block_window_tmp.get_window_lengths(),
+                                 lse_dram_block_window_tmp.get_window_origin(),
                                  lse_dstr);
             auto lse_ = load_tile(lse_dram_window);
 
