@@ -86,15 +86,7 @@ private:
     // so the subsequent copy call can use requestedElementCount as the buffer size.
     mutable int64_t _pendingStringCopyIndex = -1;
 
-    // Private helpers — set
-    void setKnobId(hipdnnBackendAttributeType_t attributeType,
-                   int64_t elementCount,
-                   const void* arrayOfElements);
-
-    void setDescription(hipdnnBackendAttributeType_t attributeType,
-                        int64_t elementCount,
-                        const void* arrayOfElements);
-
+    // Private helpers — complex logic that can't be inlined into the switch
     void setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                          int64_t elementCount,
                          const void* arrayOfElements);
@@ -107,36 +99,9 @@ private:
                          int64_t elementCount,
                          const void* arrayOfElements);
 
-    void setStride(hipdnnBackendAttributeType_t attributeType,
-                   int64_t elementCount,
-                   const void* arrayOfElements);
-
-    void setDeprecated(hipdnnBackendAttributeType_t attributeType,
-                       int64_t elementCount,
-                       const void* arrayOfElements);
-
-    void setValidValuesInt(hipdnnBackendAttributeType_t attributeType,
-                           int64_t elementCount,
-                           const void* arrayOfElements);
-
     void setValidValuesString(hipdnnBackendAttributeType_t attributeType,
                               int64_t elementCount,
                               const void* arrayOfElements);
-
-    void setStringMaxLength(hipdnnBackendAttributeType_t attributeType,
-                            int64_t elementCount,
-                            const void* arrayOfElements);
-
-    // Private helpers — get
-    void getKnobId(hipdnnBackendAttributeType_t attributeType,
-                   int64_t requestedElementCount,
-                   int64_t* elementCount,
-                   void* arrayOfElements) const;
-
-    void getDescription(hipdnnBackendAttributeType_t attributeType,
-                        int64_t requestedElementCount,
-                        int64_t* elementCount,
-                        void* arrayOfElements) const;
 
     void getDefaultValue(hipdnnBackendAttributeType_t attributeType,
                          int64_t requestedElementCount,
@@ -153,30 +118,10 @@ private:
                          int64_t* elementCount,
                          void* arrayOfElements) const;
 
-    void getStride(hipdnnBackendAttributeType_t attributeType,
-                   int64_t requestedElementCount,
-                   int64_t* elementCount,
-                   void* arrayOfElements) const;
-
-    void getDeprecated(hipdnnBackendAttributeType_t attributeType,
-                       int64_t requestedElementCount,
-                       int64_t* elementCount,
-                       void* arrayOfElements) const;
-
-    void getValidValuesInt(hipdnnBackendAttributeType_t attributeType,
-                           int64_t requestedElementCount,
-                           int64_t* elementCount,
-                           void* arrayOfElements) const;
-
     void getValidValuesString(hipdnnBackendAttributeType_t attributeType,
                               int64_t requestedElementCount,
                               int64_t* elementCount,
                               void* arrayOfElements) const;
-
-    void getStringMaxLength(hipdnnBackendAttributeType_t attributeType,
-                            int64_t requestedElementCount,
-                            int64_t* elementCount,
-                            void* arrayOfElements) const;
 
     void getDefaultValueType(hipdnnBackendAttributeType_t attributeType,
                              int64_t requestedElementCount,

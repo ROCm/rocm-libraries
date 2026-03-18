@@ -55,6 +55,14 @@ void setString(std::string& target,
                const void* arrayOfElements,
                const char* errorPrefix);
 
+void setBoundedString(std::string& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      int64_t maxLength,
+                      const char* errorPrefix,
+                      int64_t minLength = 0);
+
 void getString(const std::string& source,
                hipdnnBackendAttributeType_t attributeType,
                int64_t requestedElementCount,
@@ -155,6 +163,15 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* errorPrefix);
+
+// setOptionalScalar/getOptionalScalar are templated on flatbuffers::Optional<T>.
+// This works with std::optional<T> members because flatbuffers aliases Optional to
+// std::optional when FLATBUFFERS_USE_STD_OPTIONAL is defined. If a FlatBuffers upgrade
+// changes this, the static_assert below will fire with a clear message.
+static_assert(std::is_same_v<flatbuffers::Optional<int>, std::optional<int>>,
+              "flatbuffers::Optional must alias std::optional for these overloads "
+              "to work with std::optional members; add explicit std::optional overloads "
+              "if this changes");
 
 template <hipdnnBackendAttributeType_t ExpectedType, typename T>
 void setOptionalScalar(flatbuffers::Optional<T>& target,

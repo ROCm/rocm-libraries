@@ -3,6 +3,7 @@
 
 #include "KnobSettingDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
@@ -43,7 +44,13 @@ void KnobSettingDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeN
     switch(attributeName)
     {
     case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE:
-        setKnobId(attributeType, elementCount, arrayOfElements);
+        setBoundedString(_knobId,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         MAX_KNOB_ID_LENGTH,
+                         "KnobSettingDescriptor::setAttribute()",
+                         1);
         break;
     case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE:
         setKnobValue(attributeType, elementCount, arrayOfElements);
@@ -54,32 +61,6 @@ void KnobSettingDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeN
             std::string("KnobSettingDescriptor::setAttribute() is not supported for attribute ")
                 + hipdnn_backend::hipdnnGetAttributeNameString(attributeName) + ".");
     }
-}
-
-void KnobSettingDescriptor::setKnobId(hipdnnBackendAttributeType_t attributeType,
-                                      int64_t elementCount,
-                                      const void* arrayOfElements)
-{
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "KnobSettingDescriptor::setAttribute(): "
-                   "attributeType is not HIPDNN_TYPE_CHAR");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "KnobSettingDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_LT(elementCount,
-                static_cast<int64_t>(1),
-                HIPDNN_STATUS_BAD_PARAM,
-                "KnobSettingDescriptor::setAttribute(): "
-                "elementCount must be > 0 (knob ID must not be empty)");
-    THROW_IF_TRUE(elementCount > MAX_KNOB_ID_LENGTH,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "KnobSettingDescriptor::setAttribute(): "
-                  "elementCount exceeds MAX_KNOB_ID_LENGTH ("
-                      + std::to_string(MAX_KNOB_ID_LENGTH) + ")");
-
-    _knobId
-        = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
 }
 
 void KnobSettingDescriptor::setKnobValue(hipdnnBackendAttributeType_t attributeType,
@@ -166,7 +147,12 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
     switch(attributeName)
     {
     case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE:
-        getKnobId(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        getString(_knobId,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "KnobSettingDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE:
         getKnobValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
@@ -176,39 +162,6 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
             HIPDNN_STATUS_NOT_SUPPORTED,
             std::string("KnobSettingDescriptor::getAttribute() is not supported for attribute ")
                 + hipdnn_backend::hipdnnGetAttributeNameString(attributeName) + ".");
-    }
-}
-
-void KnobSettingDescriptor::getKnobId(hipdnnBackendAttributeType_t attributeType,
-                                      int64_t requestedElementCount,
-                                      int64_t* elementCount,
-                                      void* arrayOfElements) const
-{
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "KnobSettingDescriptor::getAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-
-    THROW_IF_LT(requestedElementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                "KnobSettingDescriptor::getAttribute(): requestedElementCount is negative");
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "KnobSettingDescriptor::getAttribute(): elementCount is null");
-        *elementCount = static_cast<int64_t>(_knobId.size() + 1);
-        return;
-    }
-
-    auto maxSize = static_cast<size_t>(requestedElementCount);
-    hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-        static_cast<char*>(arrayOfElements), _knobId.c_str(), maxSize);
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = static_cast<int64_t>(std::min(_knobId.size() + 1, maxSize));
     }
 }
 

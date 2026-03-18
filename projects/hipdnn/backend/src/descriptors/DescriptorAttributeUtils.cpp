@@ -97,6 +97,25 @@ void setString(std::string& target,
         = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
 }
 
+void setBoundedString(std::string& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      int64_t maxLength,
+                      const char* errorPrefix,
+                      int64_t minLength)
+{
+    THROW_IF_TRUE(elementCount < minLength,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(errorPrefix)
+                      + ": elementCount must be >= " + std::to_string(minLength));
+    THROW_IF_TRUE(elementCount > maxLength,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(errorPrefix) + ": elementCount exceeds maximum length ("
+                      + std::to_string(maxLength) + ")");
+    setString(target, attributeType, elementCount, arrayOfElements, errorPrefix);
+}
+
 void getString(const std::string& source,
                hipdnnBackendAttributeType_t attributeType,
                int64_t requestedElementCount,

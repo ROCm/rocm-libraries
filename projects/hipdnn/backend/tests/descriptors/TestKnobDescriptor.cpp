@@ -865,8 +865,8 @@ TEST_F(TestKnobDescriptor, SetDescriptionZeroCountClears)
 {
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, HIPDNN_TYPE_CHAR, 5, "hello"));
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(
-        HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, HIPDNN_TYPE_CHAR, 0, nullptr));
+    ASSERT_NO_THROW(
+        getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_DESCRIPTION, HIPDNN_TYPE_CHAR, 0, ""));
     makeFinalized();
 
     int64_t size = 0;
