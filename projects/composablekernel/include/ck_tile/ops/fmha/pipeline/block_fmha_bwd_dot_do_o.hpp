@@ -114,14 +114,17 @@ struct BlockFmhaBwdOGradDotO
             auto lse_ = load_tile(lse_dram_window);
 
             // Compute per-query contribution: -P_sink[q] * D[q]
-            // where P_sink[q] = exp(sink_value - lse[q])
+            // where P_sink[q] = exp2(sink_value - log2e*lse[q])
+            // sink_value has already been pre-multiplied by log2e at the kernel call site,
+            // so exp2(sink_value - log2e*lse) == exp(raw_sink - lse).
+            // exp2 maps directly to the v_exp_f32 hardware instruction on AMD GPUs.
             // Always accumulate in float regardless of DDataType to avoid precision loss
             // and to ensure atomicAdd works correctly on all architectures.
             auto sink_val_tensor = make_static_distributed_tensor<float>(d_dstr);
             tile_elementwise_inout(
                 [&](auto& s_out, const auto& l_in, const auto& d_in) {
-                    float p_sink = ck_tile::exp(type_convert<float>(sink_value) -
-                                                type_convert<float>(l_in));
+                    float p_sink = exp2(type_convert<float>(sink_value) -
+                                        log2e_v<float> * type_convert<float>(l_in));
                     s_out        = -p_sink * type_convert<float>(d_in);
                 },
                 sink_val_tensor,

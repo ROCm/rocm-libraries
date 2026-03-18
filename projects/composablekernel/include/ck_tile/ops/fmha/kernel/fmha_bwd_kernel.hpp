@@ -1556,10 +1556,13 @@ struct FmhaBwdOGradDotOKernel
             batch_offset_d  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_d;
         }
 
-        // Read per-head sink score; use -inf when sink is disabled so P_sink -> 0
+        // Read per-head sink score and convert to log2 domain so the pipeline can use exp2.
+        // Pre-multiply by log2e so that exp2(sink_value - log2e*lse) == exp(raw_sink - lse).
+        // -inf is left unchanged (log2e * -inf == -inf) to keep P_sink -> 0 when sink is disabled.
         const LSEDataType sink_value =
             kargs.sink_ptr != nullptr
-                ? kargs.sink_ptr[static_cast<long_index_t>(i_batch) * kargs.nhead + i_nhead]
+                ? log2e_v<LSEDataType> *
+                      kargs.sink_ptr[static_cast<long_index_t>(i_batch) * kargs.nhead + i_nhead]
                 : -numeric<LSEDataType>::infinity();
 
         // for simplicity, batch stride we just modify the pointer
