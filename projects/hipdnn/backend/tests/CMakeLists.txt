@@ -46,6 +46,7 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestGraphDescriptorLifting.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
@@ -66,6 +67,7 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     TestBackendLogger.cpp
+    TestGraphLogger.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestPlugin.cpp

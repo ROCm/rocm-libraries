@@ -87,7 +87,7 @@ inline uint8_t float_to_fp8_e8m0_bits(float f) noexcept
     // Extract float exponent (biased by 127, same as E8M0).
     // After above checks: exp in [0,254] which maps directly to E8M0.
     // Float denormals (exp=0) clamp to E8M0 min (2^-127).
-    uint8_t exp = static_cast<uint8_t>((bits >> 23) & 0xFF);
+    uint8_t const exp = static_cast<uint8_t>((bits >> 23) & 0xFF);
 
     return exp;
 }

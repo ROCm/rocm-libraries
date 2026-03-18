@@ -112,7 +112,7 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        double const epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         // Optional batch statistics tensors

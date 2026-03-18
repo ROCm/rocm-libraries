@@ -172,14 +172,14 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
+        std::size_t const workPerThread = (totalElements + numThreads - 1) / numThreads;
 
         std::vector<JoinableThread> threads(numThreads);
 
         for(std::size_t threadIdx = 0; threadIdx < numThreads; ++threadIdx)
         {
-            std::size_t workBegin = threadIdx * workPerThread;
-            std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
+            std::size_t const workBegin = threadIdx * workPerThread;
+            std::size_t const workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
 
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)

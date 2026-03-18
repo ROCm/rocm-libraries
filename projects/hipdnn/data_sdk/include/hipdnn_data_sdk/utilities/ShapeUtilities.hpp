@@ -68,7 +68,7 @@ inline bool areDimensionsBroadcastCompatible(const std::vector<int64_t>& inputDi
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
                                             const std::vector<int64_t>& strideOrder)
 {
-    size_t numDims = dim.size();
+    size_t const numDims = dim.size();
 
     if(numDims > strideOrder.size())
     {
@@ -143,7 +143,7 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
 // This is the inverse operation of generateStrides.
 inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strides)
 {
-    size_t numDims = strides.size();
+    size_t const numDims = strides.size();
     std::vector<size_t> indices(numDims);
     std::vector<int64_t> strideOrder(numDims);
     std::iota(indices.begin(), indices.end(), 0);
@@ -251,7 +251,7 @@ inline std::vector<int64_t>
                                   const std::vector<int64_t>& targetDims,
                                   std::optional<int64_t> axis = std::nullopt)
 {
-    size_t numDims = referenceStrides.size();
+    size_t const numDims = referenceStrides.size();
 
     // Sort dimension indices by reference strides ascending,
     // with singleton-dimension tiebreaker (singletons sort first)
