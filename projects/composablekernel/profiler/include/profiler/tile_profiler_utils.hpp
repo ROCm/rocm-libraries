@@ -10,7 +10,7 @@ namespace ck_tile::builder::profiling {
 
 namespace ckt = ck_tile::builder::test;
 
-std::vector<int> get_split_k_values(const std::string& split_k)
+inline std::vector<int> get_split_k_values(const std::string& split_k)
 {
     std::vector<int> split_k_list = {/*auto deduce value*/ -1, 1, 2, 4, 8, 16, 32, 64, 128};
 
@@ -31,8 +31,7 @@ std::vector<int> get_split_k_values(const std::string& split_k)
 }
 
 template <auto SIGNATURE>
-std::tuple<double, double>
-get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulated_value)
+inline std::tuple<double, double> get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulated_value)
 {
     using DataType =
         std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
@@ -61,7 +60,7 @@ get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulat
 }
 
 template <auto SIGNATURE>
-auto parse_conv_args(int arg_idx, char* const argv[])
+inline ckt::Args<SIGNATURE> parse_conv_args(int arg_idx, char* const argv[])
 {
     const std::size_t G = static_cast<size_t>(std::stol(argv[arg_idx++]));
     const std::size_t N = static_cast<size_t>(std::stol(argv[arg_idx++]));
