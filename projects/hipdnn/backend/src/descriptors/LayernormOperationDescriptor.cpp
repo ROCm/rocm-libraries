@@ -35,8 +35,8 @@ void LayernormOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormOperationDescriptor::finalize() failed: forward_phase not set");
 
-    bool hasMean = _meanDesc != nullptr;
-    bool hasInvVariance = _invVarianceDesc != nullptr;
+    bool const hasMean = _meanDesc != nullptr;
+    bool const hasInvVariance = _invVarianceDesc != nullptr;
     THROW_IF_TRUE(
         hasMean != hasInvVariance,
         HIPDNN_STATUS_BAD_PARAM,

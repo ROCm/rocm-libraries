@@ -107,7 +107,7 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
 {
     const auto& testCase = GetParam();
 
-    Graph graph = createAndBuildSimpleGraph();
+    Graph const graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
     auto result = graph.get_knobs_for_engine(testCase.engineId, knobs);
@@ -175,7 +175,7 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
             const auto& validValues = intConstraint->getValidValues();
             EXPECT_FALSE(validValues.empty())
                 << "test.engine_b.block_size should have valid values";
-            std::unordered_set<int64_t> expectedValues = {8, 16, 32, 64};
+            std::unordered_set<int64_t> const expectedValues = {8, 16, 32, 64};
             EXPECT_EQ(validValues, expectedValues)
                 << "test.engine_b.block_size valid values mismatch";
             EXPECT_EQ(intConstraint->getStep(), 1)
@@ -191,7 +191,7 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
     Graph graph = createAndBuildSimpleGraph();
 
     // Create execution plan with no knob settings (should use defaults)
-    std::vector<KnobSetting> emptySettings;
+    std::vector<KnobSetting> const emptySettings;
 
     auto result = graph.create_execution_plan_ext(testCase.engineId, emptySettings);
     EXPECT_TRUE(result.is_good()) << "Engine " << testCase.engineId
@@ -202,7 +202,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 {
     Graph graph = createAndBuildSimpleGraph();
 
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(80));
     settings.emplace_back("test.float_knob", 0.75);
@@ -216,7 +216,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidBoundaryKnobs)
 {
     Graph graph = createAndBuildSimpleGraph();
 
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
 
     // Query knobs to get constraint information
     std::vector<Knob> knobs;
@@ -268,7 +268,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithOutOfRangeIntKnob)
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set int knob with value outside range (min=0, max=100)
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(150)); // Above max
 
@@ -282,7 +282,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithMisalignedIntKnobStep)
     Graph graph = createAndBuildSimpleGraph();
 
     // test.int_knob has step=10, so valid values are 0, 10, 20, ..., 100
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.int_knob", static_cast<int64_t>(15)); // Not aligned with step
 
@@ -296,7 +296,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidStringKnob)
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set string knob with invalid choice (valid: "fast", "accurate", "balanced")
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.string_knob", std::string("invalid_choice"));
 
@@ -314,7 +314,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set knob that doesn't exist on this engine
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("nonexistent.knob", static_cast<int64_t>(42));
 
@@ -338,7 +338,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 
     Graph graph = createAndBuildSimpleGraph();
 
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settings;
     settings.emplace_back("test.deprecated_knob", static_cast<int64_t>(5));
 
@@ -363,7 +363,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
     Graph graph = createAndBuildSimpleGraph();
 
     // Set shared knob for Engine A
-    int64_t engineIdA = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineIdA = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settingsA;
     settingsA.emplace_back("test.shared.deterministic", static_cast<int64_t>(1));
 
@@ -372,7 +372,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
     EXPECT_TRUE(result.is_good()) << "Engine A should accept shared knob: " << result.get_message();
 
     // Set same shared knob for Engine B
-    int64_t engineIdB = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
+    int64_t const engineIdB = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
     std::vector<KnobSetting> settingsB;
     settingsB.emplace_back("test.shared.deterministic", static_cast<int64_t>(1));
 
@@ -400,7 +400,7 @@ TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
     y->set_name("Y");
 
     // Try to query knobs WITHOUT building the graph first
-    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    int64_t const engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<Knob> knobs;
     auto result = graph.get_knobs_for_engine(engineId, knobs);
 

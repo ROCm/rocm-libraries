@@ -119,7 +119,7 @@ void* SharedLibrary::getSymbol(std::string_view symbolName) const
                                   + std::string(symbolName));
     }
 
-    return platform_utilities::getSymbol(_libraryHandle, symbolName.data());
+    return platform_utilities::getSymbol(_libraryHandle, std::string(symbolName).c_str());
 }
 
 const std::filesystem::path& SharedLibrary::libraryPath() const
