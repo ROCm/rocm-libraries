@@ -99,7 +99,7 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                                static_cast<std::size_t>(1),
                                                std::multiplies<std::size_t>()) *
                                conv_param.N_;
-    
+
     // BWD data doesn't suport split-K autodeduce value -1
     auto split_k_values = get_split_k_values(split_k);
     std::remove(split_k_values.begin(), split_k_values.end(), -1);

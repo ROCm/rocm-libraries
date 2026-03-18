@@ -31,7 +31,8 @@ inline std::vector<int> get_split_k_values(const std::string& split_k)
 }
 
 template <auto SIGNATURE>
-inline std::tuple<double, double> get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulated_value)
+inline std::tuple<double, double>
+get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulated_value)
 {
     using DataType =
         std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
