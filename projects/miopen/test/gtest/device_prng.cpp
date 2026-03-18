@@ -52,7 +52,7 @@ __global__ void philox_kernel(T* out, size_t n, uint64_t seed)
         }
         else
         {
-            out[i] = static_cast<T>(raw);
+            static_assert(false, "Unsupported data type for philox_kernel");
         }
     }
 }
