@@ -194,6 +194,9 @@ typedef enum
     /** @brief Preferred engine ID for execution plan selection (int64_t, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT = 607,
 
+    /** @brief Name of the operation graph (HIPDNN_TYPE_CHAR, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT = 608,
+
     /** @} */
 
     /**
