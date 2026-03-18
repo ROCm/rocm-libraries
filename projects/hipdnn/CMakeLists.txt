@@ -204,6 +204,13 @@ list(
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
+# Disable RTTI in production code and RTTI-free test targets.
+# Public headers must not use typeid, dynamic_cast, or dynamic_pointer_cast.
+set(HIPDNN_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
+
 add_subdirectory(data_sdk)
 add_subdirectory(flatbuffers_sdk)
 

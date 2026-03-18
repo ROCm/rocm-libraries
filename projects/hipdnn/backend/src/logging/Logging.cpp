@@ -34,8 +34,8 @@ namespace
 // initialize() and backendLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
-const std::string S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
-const std::string S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
+constexpr const char* S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
+constexpr const char* S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
 
 // Pattern string for the backend logger.
 // Component name is already included in messages (e.g., "[hipdnn_backend] ..."),
@@ -75,7 +75,7 @@ struct BackendLogState
         hipdnnUserLogCallback_t callback;
         hipdnnUserLogCallbackHandle_t userHandle;
         std::shared_ptr<std::atomic<hipdnnUserLogCallback_t>> callbackHolder;
-        std::shared_ptr<spdlog::sinks::sink> sink;
+        std::shared_ptr<UserCallbackSink> sink;
         hipdnnLogCallbackMode_t mode;
     };
 
@@ -280,10 +280,9 @@ void loggerShutdown()
     // Ensure that any in-progress callbacks have completed before this function returns.
     for(auto& [key, info] : state.userCallbacks)
     {
-        auto* userSink = dynamic_cast<UserCallbackSink*>(info.sink.get());
-        if(userSink != nullptr)
+        if(info.sink != nullptr)
         {
-            userSink->waitForIdle();
+            info.sink->waitForIdle();
         }
     }
 
@@ -434,10 +433,9 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
 
     // Wait until any in-progress callback completes
     // This ensures user can safely destroy data structures after this function returns
-    auto* userSink = dynamic_cast<UserCallbackSink*>(info.sink.get());
-    if(userSink != nullptr)
+    if(info.sink != nullptr)
     {
-        userSink->waitForIdle();
+        info.sink->waitForIdle();
     }
 
     // Remove from dist_sink

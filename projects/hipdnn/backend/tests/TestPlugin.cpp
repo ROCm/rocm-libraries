@@ -79,6 +79,7 @@ protected:
 
 bool TestPluginCallback::s_callbackCalled = false;
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
 const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto PLUGIN_PATH1 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
@@ -91,6 +92,7 @@ const auto FULL_PLUGIN_PATH1
 const auto FULL_PLUGIN_PATH2
     = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
       / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN2_NAME);
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 } // namespace
 
