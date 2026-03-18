@@ -420,8 +420,6 @@ namespace rocsparse
             // Store the rows result in y
             rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
 
-            __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-
             // Mark row as done
             __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
         }

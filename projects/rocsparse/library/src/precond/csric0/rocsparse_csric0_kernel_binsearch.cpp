@@ -195,8 +195,6 @@ namespace rocsparse
             }
         }
 
-        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-
         if(lid == WF_SIZE - 1)
         {
             // Last lane writes "we are done" flag
