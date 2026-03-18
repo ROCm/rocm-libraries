@@ -38,15 +38,15 @@ protected:
 
 TEST_F(TestConvolutionWrwPlan, ExecutePlan)
 {
-    std::vector<int64_t> xDims = {1, 1, 2, 2};
-    std::vector<int64_t> dwDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    std::vector<int64_t> const xDims = {1, 1, 2, 2};
+    std::vector<int64_t> const dwDims = {1, 1, 1, 1};
+    std::vector<int64_t> const dyDims = {1, 1, 2, 2};
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    std::vector<int64_t> const strides = {1, 1};
+    std::vector<int64_t> const dilation = {1, 1};
+    std::vector<int64_t> const padding = {0, 0};
 
-    unsigned int seed = getGlobalTestSeed();
+    unsigned int const seed = getGlobalTestSeed();
     ConvolutionWrwTensorBundle<float> planTensorBundle(
         xDims, dwDims, dyDims, seed, TensorLayout::NHWC);
     ConvolutionWrwTensorBundle<float> directTensorBundle(
@@ -77,8 +77,8 @@ TEST_F(TestConvolutionWrwPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceWrw<float>(),
-                                                           conv::getToleranceWrw<float>());
+    CpuFpReferenceValidation<float> const cpuRefOutputValidation(conv::getToleranceWrw<float>(),
+                                                                 conv::getToleranceWrw<float>());
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.dwTensor, planTensorBundle.dwTensor));
@@ -86,9 +86,9 @@ TEST_F(TestConvolutionWrwPlan, ExecutePlan)
 
 TEST(TestConvolutionWrwPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> xDims = {1, 1, 2, 2};
-    std::vector<int64_t> dwDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    std::vector<int64_t> const xDims = {1, 1, 2, 2};
+    std::vector<int64_t> const dwDims = {1, 1, 1, 1};
+    std::vector<int64_t> const dyDims = {1, 1, 2, 2};
 
     ConvolutionWrwTensorBundle<float> tensorBundle(xDims, dwDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -100,21 +100,23 @@ TEST(TestConvolutionWrwPlanBuilder, PlanConstruction)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        patient;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    bool const result
         = dynamic_cast<ConvolutionWrwPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestConvolutionWrwPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> xDims = {1, 1, 2, 2};
-    std::vector<int64_t> dwDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    std::vector<int64_t> const xDims = {1, 1, 2, 2};
+    std::vector<int64_t> const dwDims = {1, 1, 1, 1};
+    std::vector<int64_t> const dyDims = {1, 1, 2, 2};
 
     ConvolutionWrwTensorBundle<float> tensorBundle(xDims, dwDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -126,14 +128,18 @@ TEST(TestConvolutionWrwPlanBuilder, IsApplicable)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        floatPlanBuilder;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
-        badTypesPlanBuilder;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::HALF,
+                              DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }

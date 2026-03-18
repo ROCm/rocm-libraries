@@ -19,6 +19,7 @@ add_library(
     hipdnn_backend_private
     descriptors/BatchnormBackwardOperationDescriptor.cpp
     descriptors/BatchnormInferenceOperationDescriptor.cpp
+    descriptors/BatchnormOperationDescriptor.cpp
     descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
     descriptors/BlockScaleQuantizeOperationDescriptor.cpp
@@ -44,6 +45,7 @@ add_library(
     descriptors/VariantDescriptor.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp
+    logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
     plugin/EnginePlugin.cpp

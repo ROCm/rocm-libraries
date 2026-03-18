@@ -412,7 +412,7 @@ protected:
             {
                 for(int h = 0; h < 4; ++h)
                 {
-                    float input1Val = TEST_VALUE_5;
+                    float const input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
                     expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
                 }
@@ -448,7 +448,7 @@ protected:
             {
                 for(int h = 0; h < 4; ++h)
                 {
-                    float input1Val = TEST_VALUE_5;
+                    float const input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
                     expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
                 }
@@ -495,7 +495,7 @@ protected:
                 {
                     for(int w = 0; w < 2; ++w)
                     {
-                        float input1Val = TEST_VALUE_1;
+                        float const input1Val = TEST_VALUE_1;
                         auto input2Val = static_cast<float>(
                             (static_cast<float>(c) + 1.0f)
                             * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
@@ -567,16 +567,17 @@ protected:
 
     void testBroadcast5D()
     {
-        std::vector<int64_t> dims1 = {2, 3, 2, 2, 2}; // [N,C,D,H,W] = [2,3,2,2,2]
-        std::vector<int64_t> strides1 = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        std::vector<int64_t> const dims1 = {2, 3, 2, 2, 2}; // [N,C,D,H,W] = [2,3,2,2,2]
+        std::vector<int64_t> const strides1 = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<Input1Type> input1(dims1, strides1);
 
-        std::vector<int64_t> dims2 = {1, 3, 1, 1, 1}; // [1,C,1,1,1] = [1,3,1,1,1]
-        std::vector<int64_t> strides2 = {3, 1, 1, 1, 1}; // Row-major strides for [1,3,1,1,1]
+        std::vector<int64_t> const dims2 = {1, 3, 1, 1, 1}; // [1,C,1,1,1] = [1,3,1,1,1]
+        std::vector<int64_t> const strides2 = {3, 1, 1, 1, 1}; // Row-major strides for [1,3,1,1,1]
         Tensor<Input2Type> input2(dims2, strides2);
 
-        std::vector<int64_t> outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
-        std::vector<int64_t> outputStrides = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        std::vector<int64_t> const outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
+        std::vector<int64_t> const outputStrides
+            = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<OutputType> output(outputDims, outputStrides);
 
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2));
@@ -775,8 +776,8 @@ protected:
             static_cast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
 
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
-        float lowerClip = -TEST_VALUE_2; // -2.0
-        float upperClip = TEST_VALUE_4; // 4.0
+        float const lowerClip = -TEST_VALUE_2; // -2.0
+        float const upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
@@ -841,8 +842,8 @@ protected:
         upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
-        float lowerClip = -TEST_VALUE_2; // -2.0
-        float upperClip = TEST_VALUE_4; // 4.0
+        float const lowerClip = -TEST_VALUE_2; // -2.0
+        float const upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
