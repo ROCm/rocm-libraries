@@ -671,15 +671,14 @@ bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     if(is_gfx11 || is_gfx12)
     {
         // PRIMARY: Memory-bound small problem detection
-        // SWPG < 1M: Low spatial-channel work (memory-bound)
-        // CPG < 256: Low channels (poor reuse)
-        if(spatial_work_per_group < 1000000 && channels_per_group < 256)
+        // SWPG < 1.4M: Low spatial-channel work (memory-bound)
+        // CPG < 320: Low channels (poor reuse)
+        if(spatial_work_per_group < 1400000 && channels_per_group < 320)
             return true;
 
         // SECONDARY: Batch fragmentation detection
-        // SPB < 0.5: Each batch item has < 0.5 pixels of spatial work
-        // This is extreme fragmentation regardless of absolute batch size
-        if(spatial_per_batch < 0.5)
+        // SPB < 0.7: Each batch item has < 0.7 pixels
+        if(spatial_per_batch < 0.7)
             return true;
     }
     else if(is_mi)

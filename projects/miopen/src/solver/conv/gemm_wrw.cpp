@@ -383,14 +383,14 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
     if(is_gfx11 || is_gfx12)
     {
         // PRIMARY: Memory-bound small problem
-        // SWPG < 10k
-        // CPG < 128 is quite low (can use lower threshold since SWPG is so discriminative)
-        if(spatial_work_per_group < 10000 && channels_per_group < 128)
+        // SWPG < 15k: Very low spatial-channel work
+        // CPG < 110: Very low channels
+        if(spatial_work_per_group < 15000 && channels_per_group < 110)
             return true;
 
         // SECONDARY: Extreme batch fragmentation
-        // SPB < 2.0 each batch item has < 2 pixels
-        if(spatial_per_batch < 2.0)
+        // SPB < 3.0: Each batch item has < 3 pixels
+        if(spatial_per_batch < 3.0)
             return true;
     }
     else if(is_mi)
