@@ -177,7 +177,8 @@ TEST(TestTensorAttributes, ValidateFailsOnEmptyDims)
 
 TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
 {
-    std::vector<std::vector<int64_t>> const testDims = {{0, 1}, {1, 0, 1}, {-1, 1, 1}, {1, 1, 1, -1}};
+    std::vector<std::vector<int64_t>> const testDims
+        = {{0, 1}, {1, 0, 1}, {-1, 1, 1}, {1, 1, 1, -1}};
 
     for(const auto& dim : testDims)
     {

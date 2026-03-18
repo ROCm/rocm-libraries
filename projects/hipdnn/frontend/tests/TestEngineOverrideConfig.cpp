@@ -127,7 +127,8 @@ TEST(TestEngineOverrideConfig, WildcardInOneDimension)
 
     for(int64_t const batch : {1, 4, 8, 32})
     {
-        std::vector<std::shared_ptr<TensorAttributes>> const tensors = {makeTensor({batch, 64, 56, 56})};
+        std::vector<std::shared_ptr<TensorAttributes>> const tensors
+            = {makeTensor({batch, 64, 56, 56})};
         auto result = config.matchOperation("conv_fprop", tensors);
         ASSERT_TRUE(result.has_value()) << "batch=" << batch << " should match";
         EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);

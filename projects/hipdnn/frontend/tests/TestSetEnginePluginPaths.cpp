@@ -18,7 +18,8 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
 using namespace ::testing;
 
-namespace {
+namespace
+{
 // GMock matcher: verifies that a const char* const* array contains the expected strings
 MATCHER_P2(pathArrayMatches, expectedPaths, count, "")
 {

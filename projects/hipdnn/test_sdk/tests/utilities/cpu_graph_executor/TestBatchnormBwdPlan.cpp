@@ -110,8 +110,7 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT,
-                            DataType::FLOAT>
-        const bwdPlanBuilder;
+                            DataType::FLOAT> const bwdPlanBuilder;
 
     auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
@@ -187,8 +186,7 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT,
-                            DataType::FLOAT>
-        const floatPlanBuilder;
+                            DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
@@ -197,8 +195,7 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT,
-                            DataType::FLOAT>
-        const badTypesPlanBuilder;
+                            DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();

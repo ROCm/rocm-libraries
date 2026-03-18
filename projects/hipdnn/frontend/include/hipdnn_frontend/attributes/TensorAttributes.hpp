@@ -419,13 +419,15 @@ public:
                 }
                 else if constexpr(std::is_same_v<T, half>)
                 {
-                    hipdnn_data_sdk::data_objects::Float16Value const halfVal(static_cast<float>(arg));
+                    hipdnn_data_sdk::data_objects::Float16Value const halfVal(
+                        static_cast<float>(arg));
                     return {hipdnn_data_sdk::data_objects::TensorValue::Float16Value,
                             builder.CreateStruct(halfVal).Union()};
                 }
                 else if constexpr(std::is_same_v<T, bfloat16>)
                 {
-                    hipdnn_data_sdk::data_objects::BFloat16Value const bfVal(static_cast<float>(arg));
+                    hipdnn_data_sdk::data_objects::BFloat16Value const bfVal(
+                        static_cast<float>(arg));
                     return {hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value,
                             builder.CreateStruct(bfVal).Union()};
                 }

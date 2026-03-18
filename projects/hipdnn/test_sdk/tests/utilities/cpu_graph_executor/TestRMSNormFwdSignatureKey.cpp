@@ -18,23 +18,32 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestRMSNormFwdSignatureKey, EqualityOperator)
 {
-    RMSNormFwdSignatureKey const key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    RMSNormFwdSignatureKey const key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key4{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key3{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key4{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    RMSNormFwdSignatureKey const key5{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key6{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key6{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    RMSNormFwdSignatureKey const key7{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key8{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key7{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key8{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    RMSNormFwdSignatureKey const key9{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key9{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     RMSNormFwdSignatureKey const key10{
         DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
@@ -42,15 +51,21 @@ TEST(TestRMSNormFwdSignatureKey, EqualityOperator)
 
 TEST(TestRMSNormFwdSignatureKey, HashFunction)
 {
-    RMSNormFwdSignatureKey const key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    RMSNormFwdSignatureKey const key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key4{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key5{DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    RMSNormFwdSignatureKey const key6{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
+    RMSNormFwdSignatureKey const key3{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key4{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RMSNormFwdSignatureKey const key6{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
     auto hash4 = key4.hashSelf();

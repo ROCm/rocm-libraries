@@ -15,8 +15,8 @@ namespace hipdnn_test_sdk::utilities
 
 inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 {
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
-        const tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
+        tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     flatbuffers::FlatBufferBuilder builder;
     auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
@@ -129,7 +129,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> const derivedStrides = hipdnn_data_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> const derivedStrides
+        = hipdnn_data_sdk::utilities::getDerivedShape(strides);
     std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
@@ -229,7 +230,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceA
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> const derivedStrides = hipdnn_data_sdk::utilities::getDerivedShape(strides);
+    std::vector<int64_t> const derivedStrides
+        = hipdnn_data_sdk::utilities::getDerivedShape(strides);
     std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
 
     int64_t uid = 1;

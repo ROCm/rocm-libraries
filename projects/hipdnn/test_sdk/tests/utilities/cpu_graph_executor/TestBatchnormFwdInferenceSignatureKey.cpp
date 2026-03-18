@@ -115,7 +115,8 @@ TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    BatchnormFwdInferenceSignatureKey const keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    BatchnormFwdInferenceSignatureKey const keyFromNode(graphWrap.getNode(0),
+                                                        graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

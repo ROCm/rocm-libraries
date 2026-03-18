@@ -78,7 +78,7 @@ TEST_F(TestConvolutionWrwPlan, ExecutePlan)
     patient.execute(variantPack);
 
     CpuFpReferenceValidation<float> const cpuRefOutputValidation(conv::getToleranceWrw<float>(),
-                                                           conv::getToleranceWrw<float>());
+                                                                 conv::getToleranceWrw<float>());
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.dwTensor, planTensorBundle.dwTensor));
@@ -100,8 +100,10 @@ TEST(TestConvolutionWrwPlanBuilder, PlanConstruction)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const patient;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
@@ -126,14 +128,18 @@ TEST(TestConvolutionWrwPlanBuilder, IsApplicable)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const floatPlanBuilder;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
-        const badTypesPlanBuilder;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::HALF,
+                              DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }

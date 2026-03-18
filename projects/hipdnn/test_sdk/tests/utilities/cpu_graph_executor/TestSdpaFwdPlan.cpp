@@ -129,7 +129,8 @@ TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
 
     GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const patient;
+    SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        patient;
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     bool const result
@@ -152,14 +153,14 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
     GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     // Correct data types: applicable
-    SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const floatPlanBuilder;
+    SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        floatPlanBuilder;
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
     // Mismatched data types: not applicable
-    SdpaFwdPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF>
-        const halfPlanBuilder;
+    SdpaFwdPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF> const
+        halfPlanBuilder;
     EXPECT_FALSE(
         halfPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 

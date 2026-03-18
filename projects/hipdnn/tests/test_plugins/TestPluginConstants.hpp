@@ -32,7 +32,7 @@ inline std::string getTestCustomFilepathForPlugin(const char* pluginName)
     namespace fs = std::filesystem;
 
     fs::path const pluginFile = fs::path(getTestPluginCustomDir())
-                          / hipdnn_data_sdk::utilities::getLibraryName(pluginName);
+                                / hipdnn_data_sdk::utilities::getLibraryName(pluginName);
 
     return pluginFile.string();
 }

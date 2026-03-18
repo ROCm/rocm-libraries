@@ -18,7 +18,8 @@ struct ExtractStrideOrderTestCase
 };
 
 // Outside anonymous namespace so ADL finds it for gtest printing
-std::ostream& operator<<(std::ostream& os, const ExtractStrideOrderTestCase& tc) // NOLINT(misc-use-internal-linkage)
+std::ostream& operator<<(std::ostream& os,
+                         const ExtractStrideOrderTestCase& tc) // NOLINT(misc-use-internal-linkage)
 {
     os << "ExtractStrideOrderTestCase(";
     os << " strides: ";
@@ -481,10 +482,10 @@ TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder)
                                                      << recorder.getRecordedLogsAsString();
 
         // Build expected warning message
-        std::string const expectedLogSuffix = "extractStrideOrder(): Stride lengths "
-                                        + vecToString(testCase.strides)
-                                        + " are not unique, the deduced stride order "
-                                        + vecToString(deducedStrideOrder) + " may not be correct.";
+        std::string const expectedLogSuffix
+            = "extractStrideOrder(): Stride lengths " + vecToString(testCase.strides)
+              + " are not unique, the deduced stride order " + vecToString(deducedStrideOrder)
+              + " may not be correct.";
 
         // Verify log contains expected message at WARN level
         EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedLogSuffix))

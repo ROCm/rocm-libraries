@@ -232,7 +232,7 @@ public:
                     {
                         auto dimIdx = static_cast<size_t>(dim);
                         int64_t const tmp = xSpatialIndices[dimIdx] + prePadding[dimIdx]
-                                      - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
+                                            - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
 
                         // Check if the current x position could have contributed to an y element. If the
                         // remainder is non-zero, this combination is not aligned with the stride, so it's not a valid
@@ -367,8 +367,8 @@ public:
                         auto dimIdx = static_cast<size_t>(dim);
 
                         int64_t const tmp = (ySpatialIndices[dimIdx] * strides[dimIdx])
-                                      + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
-                                      - prePadding[dimIdx];
+                                            + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
+                                            - prePadding[dimIdx];
 
                         xSpatialIndices[dimIdx] = tmp;
 

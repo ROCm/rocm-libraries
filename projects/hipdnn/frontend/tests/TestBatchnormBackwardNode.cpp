@@ -94,7 +94,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeMissingValues)
     scaleTensor->set_dim({1, 64, 1, 1});
 
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithAllValues(std::move(batchnormAttributesCopy), graphAttributes);
+    BatchnormBackwardNode const nodeWithAllValues(std::move(batchnormAttributesCopy),
+                                                  graphAttributes);
 
     error = nodeWithAllValues.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);

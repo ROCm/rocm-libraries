@@ -576,7 +576,8 @@ protected:
         Tensor<Input2Type> input2(dims2, strides2);
 
         std::vector<int64_t> const outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
-        std::vector<int64_t> const outputStrides = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        std::vector<int64_t> const outputStrides
+            = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<OutputType> output(outputDims, outputStrides);
 
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2));

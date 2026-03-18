@@ -240,10 +240,10 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
     hipError_t const err = hipMemcpyWithStream(memory.deviceData(),
-                                         array.data(),
-                                         memory.count() * sizeof(float),
-                                         hipMemcpyHostToDevice,
-                                         stream);
+                                               array.data(),
+                                               memory.count() * sizeof(float),
+                                               hipMemcpyHostToDevice,
+                                               stream);
     EXPECT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);
@@ -279,10 +279,10 @@ TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
     hipError_t const err = hipMemcpyWithStream(memory.deviceData(),
-                                         array.data(),
-                                         memory.count() * sizeof(float),
-                                         hipMemcpyHostToDevice,
-                                         stream);
+                                               array.data(),
+                                               memory.count() * sizeof(float),
+                                               hipMemcpyHostToDevice,
+                                               stream);
     EXPECT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);

@@ -58,7 +58,8 @@ TEST(TestLastErrorManager, ErrorSTDStringMessagePerThread)
 TEST(TestLastErrorManager, SetSuccessSTDStringDoesNotSetErrorMessage)
 {
     std::string const errorMessage = "This message should not be set";
-    hipdnnStatus_t const status = LastErrorManager::setLastError(HIPDNN_STATUS_SUCCESS, errorMessage);
+    hipdnnStatus_t const status
+        = LastErrorManager::setLastError(HIPDNN_STATUS_SUCCESS, errorMessage);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     EXPECT_NE(LastErrorManager::getLastError(), errorMessage);

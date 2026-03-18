@@ -414,7 +414,8 @@ TEST_F(TestKnobSettingDescriptor, SetEmptyKnobIdFails)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobIdExceedsMaxLengthFails)
 {
-    std::string const longId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH + 1), 'x');
+    std::string const longId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH + 1),
+                             'x');
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                                              HIPDNN_TYPE_CHAR,
                                                              static_cast<int64_t>(longId.size()),
@@ -444,8 +445,8 @@ TEST_F(TestKnobSettingDescriptor, SetKnobStringValueExceedsMaxLengthFails)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobStringValueAtMaxLengthSucceeds)
 {
-    std::string const maxValue(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH),
-                         'y');
+    std::string const maxValue(
+        static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH), 'y');
     ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(maxValue.size()),

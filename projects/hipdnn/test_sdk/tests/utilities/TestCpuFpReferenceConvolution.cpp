@@ -2473,7 +2473,8 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData2DAsymmetricPadding)
         for(int w = 0; w < 3; ++w)
         {
             float const actual = inputTensor.getHostValue(0, 0, h, w);
-            float const expected = expectedGradients[static_cast<size_t>(h)][static_cast<size_t>(w)];
+            float const expected
+                = expectedGradients[static_cast<size_t>(h)][static_cast<size_t>(w)];
             EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at grad_X(" << h << "," << w << ")";
         }
     }
@@ -2532,8 +2533,9 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DAsymmetricPadding)
             for(int w = 0; w < 2; ++w)
             {
                 float const actual = inputTensor.getHostValue(0, 0, d, h, w);
-                float const expected = expectedGradients[static_cast<size_t>(d)][static_cast<size_t>(h)]
-                                                  [static_cast<size_t>(w)];
+                float const expected
+                    = expectedGradients[static_cast<size_t>(d)][static_cast<size_t>(h)]
+                                       [static_cast<size_t>(w)];
                 EXPECT_FLOAT_EQ(actual, expected)
                     << "Mismatch at grad_X(" << d << "," << h << "," << w << ")";
             }
@@ -2580,7 +2582,8 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DInvalidOutputDim)
     // The expected output height is 1. This test verifies that an exception is thrown.
     Tensor<float> inputTensor({1, 1, 2, 2, 2});
     Tensor<float> const weightTensor({1, 1, 2, 2, 2});
-    Tensor<float> const outputTensor({1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
+    Tensor<float> const outputTensor(
+        {1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
 
     EXPECT_THROW(
         (CpuFpReferenceConvolution::dgrad<float, float, float, float>(
@@ -2600,7 +2603,8 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight3DInvalidOutputDim)
     // The expected output height is 1. This test verifies that an exception is thrown.
     Tensor<float> const inputTensor({1, 1, 2, 2, 2});
     Tensor<float> weightTensor({1, 1, 2, 2, 2});
-    Tensor<float> const outputTensor({1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
+    Tensor<float> const outputTensor(
+        {1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
 
     EXPECT_THROW(
         (CpuFpReferenceConvolution::wgrad<float, float, float, float>(

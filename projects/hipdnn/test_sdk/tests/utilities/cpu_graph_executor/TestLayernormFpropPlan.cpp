@@ -208,8 +208,7 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const patient;
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
@@ -235,8 +234,7 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const floatPlanBuilder;
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
@@ -245,8 +243,7 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
                               DataType::HALF,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const badTypesPlanBuilder;
+                              DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
@@ -272,8 +269,7 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstructionTrainingPhase)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const patient;
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
@@ -300,8 +296,7 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicableTrainingPhase)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const floatPlanBuilder;
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
@@ -310,8 +305,7 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicableTrainingPhase)
                               DataType::FLOAT,
                               DataType::HALF,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const badMeanTypePlanBuilder;
+                              DataType::FLOAT> const badMeanTypePlanBuilder;
     EXPECT_FALSE(
         badMeanTypePlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 }

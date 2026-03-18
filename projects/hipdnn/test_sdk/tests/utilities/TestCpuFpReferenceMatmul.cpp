@@ -75,7 +75,7 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
         hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper const graphWrap(flatbufferGraph.data(),
-                                                                      flatbufferGraph.size());
+                                                                            flatbufferGraph.size());
         EXPECT_TRUE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
     }
 
@@ -96,7 +96,7 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
         hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper const graphWrap(flatbufferGraph.data(),
-                                                                      flatbufferGraph.size());
+                                                                            flatbufferGraph.size());
         EXPECT_FALSE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
     }
 }

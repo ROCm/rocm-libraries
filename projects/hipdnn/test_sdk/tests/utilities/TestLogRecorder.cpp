@@ -482,10 +482,10 @@ TEST_F(TestLogRecorder, SimpleStderrOutputCallbackFormatsAllSeverities)
         const char* expectedOutput;
     };
     std::array<TestCase, 5> const testCases = {{{HIPDNN_SEV_INFO, "[info] test\n"},
-                                          {HIPDNN_SEV_WARN, "[warn] test\n"},
-                                          {HIPDNN_SEV_ERROR, "[error] test\n"},
-                                          {HIPDNN_SEV_FATAL, "[fatal] test\n"},
-                                          {HIPDNN_SEV_OFF, "[off] test\n"}}};
+                                                {HIPDNN_SEV_WARN, "[warn] test\n"},
+                                                {HIPDNN_SEV_ERROR, "[error] test\n"},
+                                                {HIPDNN_SEV_FATAL, "[fatal] test\n"},
+                                                {HIPDNN_SEV_OFF, "[off] test\n"}}};
 
     for(const auto& tc : testCases)
     {

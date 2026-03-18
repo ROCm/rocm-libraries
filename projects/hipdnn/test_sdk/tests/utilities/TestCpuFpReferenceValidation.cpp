@@ -29,7 +29,8 @@ void makeTensorsEqual(T& tensor1, T& tensor2)
 
 TEST(TestCpuFpReferenceValidation, NegativeToleranceThrows)
 {
-    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(-1e-5f), std::invalid_argument);
+    EXPECT_THROW(const CpuFpReferenceValidation<float> refValidation(-1e-5f),
+                 std::invalid_argument);
 }
 
 TEST(TestCpuFpReferenceValidationFp32, BasicTensorUsage)
@@ -54,7 +55,8 @@ TEST(TestCpuFpReferenceValidationFp32, TensorsToleranceDifferent)
     Tensor<float> tensor2(dims);
     tensor1.fillTensorWithRandomValues(-1.0f, 1.0f);
     makeTensorsEqual<Tensor<float>>(tensor1, tensor2);
-    std::vector<int64_t> const indices = {2, 5}; //index 25 because strides are [10, 1] so 10*2 + 1*5 = 25
+    std::vector<int64_t> const indices
+        = {2, 5}; //index 25 because strides are [10, 1] so 10*2 + 1*5 = 25
     tensor2.setHostValue(1000, indices);
 
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));

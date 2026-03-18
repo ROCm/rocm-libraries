@@ -74,7 +74,8 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
     ssize_t const len = readlink("/proc/self/exe", execPath.data(), PATH_MAX);
     ASSERT_NE(len, -1);
 
-    std::filesystem::path const actualExecPath(std::string(execPath.data(), static_cast<size_t>(len)));
+    std::filesystem::path const actualExecPath(
+        std::string(execPath.data(), static_cast<size_t>(len)));
 
     EXPECT_TRUE(std::filesystem::exists(execDir / actualExecPath.filename()));
 }

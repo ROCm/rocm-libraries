@@ -31,8 +31,8 @@ struct HipdnnEnginePluginExecutionContext
 inline const char* apiVersionWithoutTweak()
 {
     static std::string const s_versionStr = std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MAJOR) + "."
-                                      + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MINOR) + "."
-                                      + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_PATCH);
+                                            + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MINOR) + "."
+                                            + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_PATCH);
     return s_versionStr.c_str();
 }
 
@@ -399,7 +399,7 @@ public:
             }
 
             hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper const opGraphWrapper(opGraph->ptr,
-                                                                               opGraph->size);
+                                                                                     opGraph->size);
             hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper const engineConfigWrapper(
                 engineConfig->ptr, engineConfig->size);
 

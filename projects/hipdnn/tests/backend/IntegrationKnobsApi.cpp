@@ -684,7 +684,8 @@ protected:
 
     void setupEngineConfig()
     {
-        int64_t const gidx = hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
+        int64_t const gidx
+            = hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
         ASSERT_EQ(
             hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
             HIPDNN_STATUS_SUCCESS);

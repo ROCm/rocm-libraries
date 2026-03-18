@@ -16,7 +16,7 @@ TEST(TestError, DefaultConstructor)
 TEST(TestError, ParameterizedConstructor)
 {
     hipdnn_frontend::Error const error(hipdnn_frontend::ErrorCode::INVALID_VALUE,
-                                 "Invalid value provided");
+                                       "Invalid value provided");
     EXPECT_EQ(error.get_code(), hipdnn_frontend::ErrorCode::INVALID_VALUE);
     EXPECT_FALSE(error.is_good());
     EXPECT_TRUE(error.is_bad());
@@ -38,7 +38,7 @@ TEST(TestError, EqualityOperators)
 TEST(TestError, CodeEqualityOperators)
 {
     hipdnn_frontend::Error const error(hipdnn_frontend::ErrorCode::INVALID_VALUE,
-                                 "Invalid value provided");
+                                       "Invalid value provided");
 
     EXPECT_TRUE(error == hipdnn_frontend::ErrorCode::INVALID_VALUE);
     EXPECT_FALSE(error == hipdnn_frontend::ErrorCode::ATTRIBUTE_NOT_SET);

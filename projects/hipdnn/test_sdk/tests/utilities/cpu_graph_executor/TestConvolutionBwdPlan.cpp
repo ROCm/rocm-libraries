@@ -108,8 +108,10 @@ TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const patient;
+    ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
@@ -134,14 +136,18 @@ TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const floatPlanBuilder;
+    ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
-        const badTypesPlanBuilder;
+    ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                              DataType::FLOAT,
+                              DataType::HALF,
+                              DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }

@@ -1066,7 +1066,8 @@ struct ConvEquivalenceParams
 };
 
 // Outside anonymous namespace so ADL finds it for gtest printing
-std::ostream& operator<<(std::ostream& os, const ConvEquivalenceParams& p) // NOLINT(misc-use-internal-linkage)
+std::ostream& operator<<(std::ostream& os,
+                         const ConvEquivalenceParams& p) // NOLINT(misc-use-internal-linkage)
 {
     return os << p.name;
 }

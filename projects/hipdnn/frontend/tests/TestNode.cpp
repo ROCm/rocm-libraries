@@ -126,7 +126,7 @@ TEST_P(TestNodePostValidateNodeTensors, Correctness)
           };
 
     std::string const caseString = "Inputs: " + tensorsToString(_attributes.inputs)
-                             + " Outputs: " + tensorsToString(_attributes.outputs);
+                                   + " Outputs: " + tensorsToString(_attributes.outputs);
     FakeNode const node(std::move(_attributes), _graphAttributes);
 
     auto nodes = node.getNodeOutputTensorAttributes();

@@ -79,8 +79,8 @@ TEST(TestRMSNormFwdPlanBuilder, PlanConstruction)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const patient;
+    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
@@ -97,14 +97,14 @@ TEST(TestRMSNormFwdPlanBuilder, IsApplicable)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const floatPlanBuilder;
+    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT>
-        const badTypesPlanBuilder;
+    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT> const
+        badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 }
@@ -176,8 +176,8 @@ TEST(TestRMSNormFwdPlanBuilder, PlanConstructionWithBias)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const patient;
+    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
@@ -194,8 +194,8 @@ TEST(TestRMSNormFwdPlanBuilder, IsApplicableWithBias)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const floatPlanBuilder;
+    RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));

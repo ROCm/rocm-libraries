@@ -173,9 +173,9 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     auto* convOutputData = static_cast<float*>(tempConvOutput.memory().hostData());
     auto* addOutputData = static_cast<float*>(tempAddOutput.memory().hostData());
     size_t const elementCount = static_cast<size_t>(tempConvOutput.dims()[0])
-                          * static_cast<size_t>(tempConvOutput.dims()[1])
-                          * static_cast<size_t>(tempConvOutput.dims()[2])
-                          * static_cast<size_t>(tempConvOutput.dims()[3]);
+                                * static_cast<size_t>(tempConvOutput.dims()[1])
+                                * static_cast<size_t>(tempConvOutput.dims()[2])
+                                * static_cast<size_t>(tempConvOutput.dims()[3]);
 
     for(size_t i = 0; i < elementCount; ++i)
     {

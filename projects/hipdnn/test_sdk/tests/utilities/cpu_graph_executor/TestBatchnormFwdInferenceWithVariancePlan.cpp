@@ -111,8 +111,7 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
-                                                 DataType::FLOAT>
-        const patient;
+                                                 DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
@@ -139,8 +138,7 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
-                                                 DataType::FLOAT>
-        const floatPlanBuilder;
+                                                 DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
@@ -149,8 +147,7 @@ TEST(TestBatchnormFwdWithVariancePlanBuilder, IsApplicable)
                                                  DataType::HALF,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
-                                                 DataType::FLOAT>
-        const badTypesPlanBuilder;
+                                                 DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 

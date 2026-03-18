@@ -148,7 +148,8 @@ TEST(TestBatchnormInferenceNode, PreValidateNodeMissingValues)
     invVarTensor->set_dim({1, 64, 1, 1});
 
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormInferenceNode const nodeWithAllValues(std::move(batchnormAttributesCopy), graphAttributes);
+    BatchnormInferenceNode const nodeWithAllValues(std::move(batchnormAttributesCopy),
+                                                   graphAttributes);
 
     error = nodeWithAllValues.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);

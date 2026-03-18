@@ -115,8 +115,7 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const patient;
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
@@ -144,8 +143,7 @@ TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const floatPlanBuilder;
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
@@ -153,8 +151,7 @@ TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
                               DataType::HALF,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        const badTypesPlanBuilder;
+                              DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();

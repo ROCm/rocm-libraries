@@ -318,11 +318,11 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreserve
 
     // All six tensor UIDs referenced by the node should be distinct
     std::unordered_set<int64_t> const nodeUids = {bnInf->x_tensor_uid,
-                                            bnInf->mean_tensor_uid,
-                                            bnInf->inv_variance_tensor_uid,
-                                            bnInf->scale_tensor_uid,
-                                            bnInf->bias_tensor_uid,
-                                            bnInf->y_tensor_uid};
+                                                  bnInf->mean_tensor_uid,
+                                                  bnInf->inv_variance_tensor_uid,
+                                                  bnInf->scale_tensor_uid,
+                                                  bnInf->bias_tensor_uid,
+                                                  bnInf->y_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 6u) << "Batchnorm inference node tensor UIDs are not distinct";
 }
 

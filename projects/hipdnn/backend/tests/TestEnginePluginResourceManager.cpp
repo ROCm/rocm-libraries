@@ -112,7 +112,8 @@ TEST(TestEnginePluginResourceManager, StaticPluginPathManagementAdditiveLoadingM
 
     auto retrievedPaths = EnginePluginResourceManager::getPluginPaths();
 
-    std::set<std::filesystem::path> const expectedPaths = {"/test/path1", "/test/path2", "/test/path3"};
+    std::set<std::filesystem::path> const expectedPaths
+        = {"/test/path1", "/test/path2", "/test/path3"};
     EXPECT_EQ(retrievedPaths, expectedPaths);
 }
 
@@ -701,8 +702,8 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
 
     std::vector<int64_t> const tensorIds = {1, 2, 3};
     std::vector<const void*> const dataPtrs = {reinterpret_cast<void*>(0x1000),
-                                         reinterpret_cast<void*>(0x2000),
-                                         reinterpret_cast<void*>(0x3000)};
+                                               reinterpret_cast<void*>(0x2000),
+                                               reinterpret_cast<void*>(0x3000)};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
     EXPECT_CALL(*mockPlugin, createHandle())
@@ -739,8 +740,8 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedVariant)
 
     std::vector<int64_t> const tensorIds = {1, 2, 3};
     std::vector<const void*> const dataPtrs = {reinterpret_cast<void*>(0x1000),
-                                         reinterpret_cast<void*>(0x2000),
-                                         reinterpret_cast<void*>(0x3000)};
+                                               reinterpret_cast<void*>(0x2000),
+                                               reinterpret_cast<void*>(0x3000)};
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
     EXPECT_CALL(*mockPlugin, createHandle())

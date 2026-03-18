@@ -78,11 +78,11 @@ TEST_F(IntegrationBackendDescriptor, GetAttributeWithNullDescriptor)
     void* arrayOfElements = nullptr;
 
     hipdnnStatus_t const status = hipdnnBackendGetAttribute(descriptor,
-                                                      attributeName,
-                                                      attributeType,
-                                                      requestedElementCount,
-                                                      &elementCount,
-                                                      arrayOfElements);
+                                                            attributeName,
+                                                            attributeType,
+                                                            requestedElementCount,
+                                                            &elementCount,
+                                                            arrayOfElements);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }

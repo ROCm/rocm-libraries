@@ -26,12 +26,12 @@ TEST_F(TestStringUtil, Fnv1aHashDifferentStringsDifferentHashes)
 {
     // Different strings should produce different hashes
     std::vector<std::string> const testStrings = {"MIOPEN_PLUGIN",
-                                            "VENDOR_FAST_CONV",
-                                            "CPU_REFERENCE_ENGINE",
-                                            "EXAMPLE_PLUGIN_RENAME_THIS",
-                                            "CUSTOM_ENGINE_1",
-                                            "CUSTOM_ENGINE_2",
-                                            "AMD_ROCM_ENGINE"};
+                                                  "VENDOR_FAST_CONV",
+                                                  "CPU_REFERENCE_ENGINE",
+                                                  "EXAMPLE_PLUGIN_RENAME_THIS",
+                                                  "CUSTOM_ENGINE_1",
+                                                  "CUSTOM_ENGINE_2",
+                                                  "AMD_ROCM_ENGINE"};
 
     std::unordered_set<uint64_t> hashes;
     for(const auto& str : testStrings)
@@ -92,20 +92,20 @@ TEST_F(TestStringUtil, Fnv1aHashSpecialCharacters)
     // Test that special characters are treated as distinct regular characters
     // All strings have same base but different special character in the middle
     std::vector<std::string> const specialStrings = {"STRING_CHAR_END",
-                                               "STRING-CHAR-END",
-                                               "STRING.CHAR.END",
-                                               "STRING:CHAR:END",
-                                               "STRING/CHAR/END",
-                                               "STRING CHAR END",
-                                               "STRING@CHAR@END",
-                                               "STRING#CHAR#END",
-                                               "STRING$CHAR$END",
-                                               "STRING%CHAR%END",
-                                               "STRING&CHAR&END",
-                                               "STRING*CHAR*END",
-                                               "STRING+CHAR+END",
-                                               "STRING=CHAR=END",
-                                               "STRING!CHAR!END"};
+                                                     "STRING-CHAR-END",
+                                                     "STRING.CHAR.END",
+                                                     "STRING:CHAR:END",
+                                                     "STRING/CHAR/END",
+                                                     "STRING CHAR END",
+                                                     "STRING@CHAR@END",
+                                                     "STRING#CHAR#END",
+                                                     "STRING$CHAR$END",
+                                                     "STRING%CHAR%END",
+                                                     "STRING&CHAR&END",
+                                                     "STRING*CHAR*END",
+                                                     "STRING+CHAR+END",
+                                                     "STRING=CHAR=END",
+                                                     "STRING!CHAR!END"};
 
     std::unordered_set<uint64_t> hashes;
     for(const auto& str : specialStrings)

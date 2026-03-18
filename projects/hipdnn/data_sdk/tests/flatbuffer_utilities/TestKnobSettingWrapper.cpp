@@ -96,7 +96,8 @@ TEST_F(TestKnobSettingWrapper, ConstructFromBuffer)
 
 TEST_F(TestKnobSettingWrapper, ConstructFromNullPointer)
 {
-    KnobSettingWrapper const wrapper(static_cast<hipdnn_data_sdk::data_objects::KnobSetting*>(nullptr));
+    KnobSettingWrapper const wrapper(
+        static_cast<hipdnn_data_sdk::data_objects::KnobSetting*>(nullptr));
     EXPECT_FALSE(wrapper.isValid());
 }
 

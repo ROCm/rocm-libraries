@@ -67,7 +67,7 @@ TEST_F(TestMatmulPlan, ExecutePlan)
     patient.execute(variantPack);
 
     CpuFpReferenceValidation<float> const cpuRefOutputValidation(matmul::getTolerance<float>(),
-                                                           matmul::getTolerance<float>());
+                                                                 matmul::getTolerance<float>());
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.cTensor, planTensorBundle.cTensor));
 }
@@ -88,25 +88,25 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
     GraphWrapper const graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
 
     // Correct case
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        const floatPlanBuilder;
+    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        floatPlanBuilder;
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     // Mismatched compute data type
-    MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF>
-        const halfPlanBuilder;
+    MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF> const
+        halfPlanBuilder;
     EXPECT_FALSE(halfPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     // Missed tensor in tensorMap
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
-        const badTypesPlanBuilder;
+    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT> const
+        badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 
     // Incorrect tensor data types
-    MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT>
-        const mixedPlanBuilder;
+    MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT> const
+        mixedPlanBuilder;
     EXPECT_FALSE(mixedPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     // Uncompatible node type
@@ -123,14 +123,15 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
     auto flatbufferGraphPointwise
         = std::get<0>(graphPointwiseTuple)->buildFlatbufferOperationGraph();
     GraphWrapper const graphWrapPointwise(flatbufferGraphPointwise.data(),
-                                    flatbufferGraphPointwise.size());
+                                          flatbufferGraphPointwise.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapPointwise.getNode(0),
                                                graphWrapPointwise.getTensorMap()));
 }
 
 TEST(TestMatmulPlanBuilder, BuildNodePlan)
 {
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const patient;
+    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        patient;
 
     // Correct case
     {
@@ -184,10 +185,12 @@ TEST(TestMatmulPlanBuilder, PlanConstruction)
 
     GraphWrapper const graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
 
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const patient;
+    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool const result = dynamic_cast<MatmulPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+    bool const result
+        = dynamic_cast<MatmulPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }

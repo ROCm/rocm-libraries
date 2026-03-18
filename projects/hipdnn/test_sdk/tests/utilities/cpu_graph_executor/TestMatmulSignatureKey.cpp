@@ -18,33 +18,42 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestMatmulSignatureKey, EqualityOperator)
 {
-    MatmulSignatureKey const key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
     MatmulSignatureKey const key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     MatmulSignatureKey const key4{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    MatmulSignatureKey const key5{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     MatmulSignatureKey const key6{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    MatmulSignatureKey const key7{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key8{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key7{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key8{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 }
 
 TEST(TestMatmulSignatureKey, HashFunction)
 {
-    MatmulSignatureKey const key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
     MatmulSignatureKey const key3{DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    MatmulSignatureKey const key4{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key5{DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    MatmulSignatureKey const key4{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    MatmulSignatureKey const key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
     auto hash3 = key3.hashSelf();
     auto hash4 = key4.hashSelf();
@@ -84,7 +93,8 @@ TEST(TestMatmulSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    MatmulSignatureKey const keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
+    MatmulSignatureKey const keyFromNode(
+        graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

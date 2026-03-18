@@ -289,11 +289,11 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
 
     // All six tensor UIDs referenced by the node should be distinct
     std::unordered_set<int64_t> const nodeUids = {bnBwd->dy_tensor_uid,
-                                            bnBwd->x_tensor_uid,
-                                            bnBwd->scale_tensor_uid,
-                                            bnBwd->dx_tensor_uid,
-                                            bnBwd->dscale_tensor_uid,
-                                            bnBwd->dbias_tensor_uid};
+                                                  bnBwd->x_tensor_uid,
+                                                  bnBwd->scale_tensor_uid,
+                                                  bnBwd->dx_tensor_uid,
+                                                  bnBwd->dscale_tensor_uid,
+                                                  bnBwd->dbias_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 6u) << "BatchnormBackward node tensor UIDs are not distinct";
 }
 

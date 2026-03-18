@@ -42,7 +42,8 @@ TEST(TestPointwiseSignatureKey, EqualityOperator)
     // Different input data types
     PointwiseSignatureKey const key7{
         PointwiseMode::ADD, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    PointwiseSignatureKey const key8{PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF};
+    PointwiseSignatureKey const key8{
+        PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key7 == key8);
 
     // Different output data types
@@ -62,7 +63,8 @@ TEST(TestPointwiseSignatureKey, HashFunction)
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    PointwiseSignatureKey const key3{PointwiseMode::SUB, DataType::HALF, DataType::FLOAT, DataType::HALF};
+    PointwiseSignatureKey const key3{
+        PointwiseMode::SUB, DataType::HALF, DataType::FLOAT, DataType::HALF};
     PointwiseSignatureKey const key4{
         PointwiseMode::ADD, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
@@ -185,7 +187,8 @@ TEST(TestPointwiseSignatureKey, UnorderedMapUsage)
         PointwiseMode::ADD, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     PointwiseSignatureKey const key2{
         PointwiseMode::SUB, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    PointwiseSignatureKey const key3{PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF};
+    PointwiseSignatureKey const key3{
+        PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF};
 
     testMap[key1] = 1;
     testMap[key2] = 2;
@@ -211,9 +214,9 @@ TEST(TestPointwiseSignatureKey, UnorderedSetUsage)
     PointwiseSignatureKey const key2{
         PointwiseMode::SIGMOID_FWD, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     PointwiseSignatureKey const key3{PointwiseMode::RELU_FWD,
-                               DataType::FLOAT,
-                               DataType::FLOAT,
-                               DataType::FLOAT}; // Duplicate of key1
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT}; // Duplicate of key1
 
     testSet.insert(key1);
     testSet.insert(key2);
