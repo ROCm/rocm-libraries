@@ -19,27 +19,46 @@
 // THE SOFTWARE.
 
 #include "benchmark_rocrand_utils.hpp"
-#include "cmdparser.hpp"
-
-#include <benchmark/benchmark.h>
 
 #include <hip/hip_runtime.h>
+
 #include <rocrand/rocrand.h>
 #include <rocrand/rocrand_kernel.h>
 #include <rocrand/rocrand_mtgp32_11213.h>
 
-#include "custom_csv_formater.hpp"
-#include <algorithm>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <numeric>
-#include <string>
-#include <vector>
+#include <optional>
 
-#ifndef DEFAULT_RAND_N
-    #define DEFAULT_RAND_N (1024 * 1024 * 128)
-#endif
+enum distribution
+{
+    DISTRIBUTION_UNIFORM,
+    DISTRIBUTION_NORMAL,
+    DISTRIBUTION_LOG_NORMAL,
+    DISTRIBUTION_POISSON,
+    DISTRIBUTION_DISCRETE_POISSON,
+    DISTRIBUTION_DISCRETE_CUSTOM,
+};
+
+constexpr const char* distribution_name(distribution d)
+{
+    switch(d)
+    {
+        case DISTRIBUTION_UNIFORM: return "uniform";
+        case DISTRIBUTION_NORMAL: return "normal";
+        case DISTRIBUTION_LOG_NORMAL: return "log_normal";
+        case DISTRIBUTION_POISSON: return "poisson";
+        case DISTRIBUTION_DISCRETE_POISSON: return "discrete_poisson";
+        case DISTRIBUTION_DISCRETE_CUSTOM: return "discrete_custom";
+    }
+    return "unknown";
+}
+
+constexpr size_t next_power2(size_t x)
+{
+    size_t power = 1;
+    while(power < x)
+        power *= 2;
+    return power;
+}
 
 template<typename EngineState>
 __global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
@@ -54,7 +73,8 @@ void init_kernel(EngineState*             states,
 }
 
 template<typename EngineState, typename T, typename Generator>
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+__global__
+__launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
 {
     const unsigned int state_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -111,9 +131,9 @@ template<typename T, typename Generator>
 __global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
 void generate_kernel(rocrand_state_mtgp32* states, T* data, const size_t size, Generator generator)
 {
-    const unsigned int   state_id = blockIdx.x;
-    unsigned int         index    = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int         stride   = gridDim.x * blockDim.x;
+    const unsigned int state_id = blockIdx.x;
+    unsigned int       index    = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int       stride   = gridDim.x * blockDim.x;
 
     __shared__
     rocrand_state_mtgp32 state;
@@ -566,11 +586,6 @@ struct generator_uint : public generator_type
 {
     typedef unsigned int data_type;
 
-    std::string name()
-    {
-        return "uniform-uint";
-    }
-
     __device__
     data_type operator()(Engine* state) const
     {
@@ -582,11 +597,6 @@ template<typename Engine>
 struct generator_ullong : public generator_type
 {
     typedef unsigned long long int data_type;
-
-    std::string name()
-    {
-        return "uniform-ullong";
-    }
 
     __device__
     data_type operator()(Engine* state) const
@@ -600,11 +610,6 @@ struct generator_uniform : public generator_type
 {
     typedef float data_type;
 
-    std::string name()
-    {
-        return "uniform-float";
-    }
-
     __device__
     data_type operator()(Engine* state) const
     {
@@ -616,11 +621,6 @@ template<typename Engine>
 struct generator_uniform_double : public generator_type
 {
     typedef double data_type;
-
-    std::string name()
-    {
-        return "uniform-double";
-    }
 
     __device__
     data_type operator()(Engine* state) const
@@ -634,11 +634,6 @@ struct generator_normal : public generator_type
 {
     typedef float data_type;
 
-    std::string name()
-    {
-        return "normal-float";
-    }
-
     __device__
     data_type operator()(Engine* state) const
     {
@@ -650,11 +645,6 @@ template<typename Engine>
 struct generator_normal_double : public generator_type
 {
     typedef double data_type;
-
-    std::string name()
-    {
-        return "normal-double";
-    }
 
     __device__
     data_type operator()(Engine* state) const
@@ -668,11 +658,6 @@ struct generator_log_normal : public generator_type
 {
     typedef float data_type;
 
-    std::string name()
-    {
-        return "log-normal-float";
-    }
-
     __device__
     data_type operator()(Engine* state) const
     {
@@ -685,11 +670,6 @@ struct generator_log_normal_double : public generator_type
 {
     typedef double data_type;
 
-    std::string name()
-    {
-        return "log-normal-double";
-    }
-
     __device__
     data_type operator()(Engine* state) const
     {
@@ -700,17 +680,13 @@ struct generator_log_normal_double : public generator_type
 template<typename Engine>
 struct generator_poisson : public generator_type
 {
+    // TODO: REMOVE!
+    generator_poisson(double l) : lambda(l) {}
+
     typedef unsigned int data_type;
 
-    std::string name()
-    {
-        std::stringstream stream;
-        stream << std::fixed << std::setprecision(1) << lambda;
-        return "poisson(lambda=" + stream.str() + ")";
-    }
-
     __device__
-    data_type operator()(Engine* state)
+    data_type operator()(Engine* state) const
     {
         return rocrand_poisson(state, lambda);
     }
@@ -721,14 +697,10 @@ struct generator_poisson : public generator_type
 template<typename Engine>
 struct generator_discrete_poisson : public generator_type
 {
-    typedef unsigned int data_type;
+    // TODO: REMOVE!
+    generator_discrete_poisson(double l) : lambda(l) {}
 
-    std::string name()
-    {
-        std::stringstream stream;
-        stream << std::fixed << std::setprecision(1) << lambda;
-        return "discrete-poisson(lambda=" + stream.str() + ")";
-    }
+    typedef unsigned int data_type;
 
     void create()
     {
@@ -741,7 +713,7 @@ struct generator_discrete_poisson : public generator_type
     }
 
     __device__
-    data_type operator()(Engine* state)
+    data_type operator()(Engine* state) const
     {
         return rocrand_discrete(state, discrete_distribution);
     }
@@ -754,11 +726,6 @@ template<typename Engine>
 struct generator_discrete_custom : public generator_type
 {
     typedef unsigned int data_type;
-
-    std::string name()
-    {
-        return "discrete-custom";
-    }
 
     void create()
     {
@@ -782,7 +749,7 @@ struct generator_discrete_custom : public generator_type
     }
 
     __device__
-    data_type operator()(Engine* state)
+    data_type operator()(Engine* state) const
     {
         return rocrand_discrete(state, discrete_distribution);
     }
@@ -790,248 +757,176 @@ struct generator_discrete_custom : public generator_type
     rocrand_discrete_distribution discrete_distribution;
 };
 
-struct benchmark_context
+template<typename Generator, typename State, typename T, distribution Distribution>
+struct rocrand_device_api_benchmark : public primbench::benchmark_interface
 {
-    size_t              size;
-    size_t              dimensions;
-    size_t              trials;
-    size_t              blocks;
-    size_t              threads;
-    std::vector<double> lambdas;
+    rocrand_device_api_benchmark(Generator             generator, // TODO: REMOVE!
+                                 rocrand_rng_type      engine,
+                                 size_t                blocks,
+                                 size_t                threads,
+                                 size_t                dimensions,
+                                 size_t                offset,
+                                 std::optional<double> poisson_lambda = std::nullopt)
+        : m_generator(generator) // TODO: REMOVE!
+        , m_engine(engine)
+        , m_blocks(blocks)
+        , m_threads(threads)
+        , m_dimensions(dimensions)
+        , m_offset(offset)
+        , m_poisson_lambda(poisson_lambda)
+        // MTGP32 supports a maximum of 200 states.
+        , m_mtgp32_states(std::min((size_t)200, blocks))
+    {
+    }
+
+    primbench::json meta() const override
+    {
+        auto json = primbench::json{}
+                        .add("algo", "rocrand_device_api")
+                        .add("engine", engine_name(m_engine))
+                        .add("type", primbench::name<T>())
+                        .add("distribution", distribution_name(Distribution))
+                        .add("cfg",
+                            primbench::json{}
+                                .add("blocks", m_blocks)
+                                .add("threads", m_threads));
+
+        if constexpr(Distribution == DISTRIBUTION_POISSON
+                     || Distribution == DISTRIBUTION_DISCRETE_POISSON)
+            json.add("poisson_lambda", *m_poisson_lambda);
+
+        return json;
+    }
+
+    void run(primbench::state& state) override
+    {
+        const auto& stream = state.stream;
+
+        const size_t items = state.size;
+
+        primbench::log("Creating generator");
+        m_generator.create();
+
+        primbench::log("Allocating data");
+        T* data;
+        HIP_CHECK(hipMalloc(&data, items * sizeof(T)));
+
+        constexpr unsigned long long int seed   = 12345ULL; // TODO: Use state.seed
+        constexpr unsigned long long int offset = 6789ULL; // TODO: Use m_offset
+
+        primbench::log("Creating runner");
+        runner<State> r(m_dimensions, m_blocks, m_threads, seed, offset);
+
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run([&] { r.generate(m_blocks, m_threads, stream, data, items, m_generator); });
+
+        m_generator.destroy();
+
+        HIP_CHECK(hipFree(data));
+    }
+
+private:
+    Generator             m_generator; // TODO: REMOVE!
+    rocrand_rng_type      m_engine;
+    size_t                m_blocks;
+    size_t                m_threads;
+    size_t                m_dimensions;
+    size_t                m_offset;
+    std::optional<double> m_poisson_lambda; // TODO: USE!
+    size_t                m_mtgp32_states; // TODO: USE!
 };
 
-template<typename Engine, typename Generator>
-void run_benchmark(benchmark::State&        state,
-                   const hipStream_t        stream,
-                   const benchmark_context& context,
-                   Generator                generator)
-{
-    typedef typename Generator::data_type data_type;
+#define QUEUE(generator, T, State, engine, Distribution, ...)                        \
+    executor.queue<rocrand_device_api_benchmark<generator, State, T, Distribution>>( \
+        generator(__VA_ARGS__),                                                      \
+        engine,                                                                      \
+        blocks,                                                                      \
+        threads,                                                                     \
+        dimensions,                                                                  \
+        offset,                                                                      \
+        ##__VA_ARGS__)
 
-    const size_t size       = context.size;
-    const size_t dimensions = context.dimensions;
-    const size_t trials     = context.trials;
-    const size_t blocks     = context.blocks;
-    const size_t threads    = context.threads;
-
-    // Optional initialization of the generator
-    generator.create();
-
-    data_type* data;
-    HIP_CHECK(hipMalloc(&data, size * sizeof(data_type)));
-
-    constexpr unsigned long long int seed   = 12345ULL;
-    constexpr unsigned long long int offset = 6789ULL;
-
-    runner<Engine> r(dimensions, blocks, threads, seed, offset);
-
-    // Warm-up
-    for(size_t i = 0; i < 5; i++)
-    {
-        r.generate(blocks, threads, stream, data, size, generator);
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    // Measurement
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-    for(auto _ : state)
-    {
-        HIP_CHECK(hipEventRecord(start, stream));
-        for(size_t i = 0; i < trials; i++)
-        {
-            r.generate(blocks, threads, stream, data, size, generator);
-        }
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed;
-        HIP_CHECK(hipEventElapsedTime(&elapsed, start, stop));
-
-        state.SetIterationTime(elapsed / 1000.f);
-    }
-    state.SetBytesProcessed(trials * state.iterations() * size * sizeof(data_type));
-    state.SetItemsProcessed(trials * state.iterations() * size);
-
-    // Optional de-initialization of the generator
-    generator.destroy();
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-    HIP_CHECK(hipFree(data));
-}
-
-template<typename Engine, typename Generator>
-void add_benchmark(const benchmark_context&                      context,
-                   const hipStream_t                             stream,
-                   std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                   const std::string&                            name,
-                   Generator                                     generator)
-{
-    static_assert(std::is_trivially_copyable<Generator>::value
-                      && std::is_trivially_destructible<Generator>::value,
-                  "Generator gets copied to device at kernel launch.");
-    const std::string benchmark_name = "device_kernel<" + name + "," + generator.name() + ">";
-    benchmarks.emplace_back(benchmark::RegisterBenchmark(benchmark_name.c_str(),
-                                                         &run_benchmark<Engine, Generator>,
-                                                         stream,
-                                                         context,
-                                                         generator));
-}
-
-template<typename Engine>
-void add_benchmarks(const benchmark_context&                      ctx,
-                    const hipStream_t                             stream,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const rocrand_rng_type                        engine_type)
-{
-    constexpr bool is_64_bits = std::is_same<Engine, rocrand_state_scrambled_sobol64>::value
-                                || std::is_same<Engine, rocrand_state_sobol64>::value
-                                || std::is_same<Engine, rocrand_state_threefry2x64_20>::value
-                                || std::is_same<Engine, rocrand_state_threefry4x64_20>::value;
-
-    const std::string name = engine_name(engine_type);
-
-    if(is_64_bits)
-    {
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_ullong<Engine>());
-    }
-    else
-    {
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_uint<Engine>());
-    }
-
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_uniform<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_uniform_double<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_normal<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_normal_double<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_log_normal<Engine>());
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_log_normal_double<Engine>());
-
-    for(size_t i = 0; i < ctx.lambdas.size(); i++)
-    {
-        generator_poisson<Engine> gen_poisson;
-        gen_poisson.lambda = ctx.lambdas[i];
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, gen_poisson);
-    }
-
-    for(size_t i = 0; i < ctx.lambdas.size(); i++)
-    {
-        generator_discrete_poisson<Engine> gen_discrete_poisson;
-        gen_discrete_poisson.lambda = ctx.lambdas[i];
-        add_benchmark<Engine>(ctx, stream, benchmarks, name, gen_discrete_poisson);
-    }
-
-    add_benchmark<Engine>(ctx, stream, benchmarks, name, generator_discrete_custom<Engine>());
-}
+#define QUEUE_DISTRIBUTIONS(State, engine)                                                         \
+    do                                                                                             \
+    {                                                                                              \
+        if constexpr(std::is_same_v<State, rocrand_state_sobol64>                                  \
+                     || std::is_same_v<State, rocrand_state_scrambled_sobol64>                     \
+                     || std::is_same_v<State, rocrand_state_threefry2x64_20>                       \
+                     || std::is_same_v<State, rocrand_state_threefry4x64_20>)                      \
+        {                                                                                          \
+            QUEUE(generator_ullong<State>,                                                         \
+                  unsigned long long,                                                              \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_UNIFORM);                                                           \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            QUEUE(generator_uint<State>, uint32_t, State, engine, DISTRIBUTION_UNIFORM);           \
+        }                                                                                          \
+                                                                                                   \
+        QUEUE(generator_uniform<State>, float, State, engine, DISTRIBUTION_UNIFORM);               \
+        QUEUE(generator_uniform_double<State>, double, State, engine, DISTRIBUTION_UNIFORM);       \
+        QUEUE(generator_normal<State>, float, State, engine, DISTRIBUTION_NORMAL);                 \
+        QUEUE(generator_normal_double<State>, double, State, engine, DISTRIBUTION_NORMAL);         \
+        QUEUE(generator_log_normal<State>, float, State, engine, DISTRIBUTION_LOG_NORMAL);         \
+        QUEUE(generator_log_normal_double<State>, double, State, engine, DISTRIBUTION_LOG_NORMAL); \
+                                                                                                   \
+        for(double lambda : poisson_lambdas)                                                       \
+        {                                                                                          \
+            QUEUE(generator_poisson<State>,                                                        \
+                  uint32_t,                                                                        \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_POISSON,                                                            \
+                  lambda);                                                                         \
+            QUEUE(generator_discrete_poisson<State>,                                               \
+                  uint32_t,                                                                        \
+                  State,                                                                           \
+                  engine,                                                                          \
+                  DISTRIBUTION_DISCRETE_POISSON,                                                   \
+                  lambda);                                                                         \
+        }                                                                                          \
+                                                                                                   \
+        QUEUE(generator_discrete_custom<State>,                                                    \
+              uint32_t,                                                                            \
+              State,                                                                               \
+              engine,                                                                              \
+              DISTRIBUTION_DISCRETE_CUSTOM);                                                       \
+    }                                                                                              \
+    while(0)
 
 int main(int argc, char* argv[])
 {
-    // get paramaters before they are passed into
-    // benchmark::Initialize()
-    std::string outFormat     = "";
-    std::string filter        = "";
-    std::string consoleFormat = "";
+    primbench::settings settings;
+    settings.size = 128 * 1024 * 1024; // In items
+    primbench::executor executor(argc, argv, settings);
 
-    getFormats(argc, argv, outFormat, filter, consoleFormat);
+    auto blocks     = executor.get<size_t>("blocks", 256, "Number of blocks");
+    auto threads    = executor.get<size_t>("threads", 256, "Threads per block");
+    auto dimensions = executor.get<size_t>("dimensions", 1, "Number of quasi-random dimensions");
+    auto offset     = executor.get<size_t>("offset", 0, "Offset of generated pseudo-random values");
+    auto poisson_lambdas
+        = executor.get<std::vector<double>>("lambda",
+                                            {10.0},
+                                            "Space-separated list of Poisson lambdas");
 
-    benchmark::Initialize(&argc, argv);
+    QUEUE_DISTRIBUTIONS(rocrand_state_lfsr113, ROCRAND_RNG_PSEUDO_LFSR113);
+    QUEUE_DISTRIBUTIONS(rocrand_state_mrg31k3p, ROCRAND_RNG_PSEUDO_MRG31K3P);
+    QUEUE_DISTRIBUTIONS(rocrand_state_mrg32k3a, ROCRAND_RNG_PSEUDO_MRG32K3A);
+    QUEUE_DISTRIBUTIONS(rocrand_state_philox4x32_10, ROCRAND_RNG_PSEUDO_PHILOX4_32_10);
+    QUEUE_DISTRIBUTIONS(rocrand_state_threefry2x32_20, ROCRAND_RNG_PSEUDO_THREEFRY2_32_20);
+    QUEUE_DISTRIBUTIONS(rocrand_state_threefry4x32_20, ROCRAND_RNG_PSEUDO_THREEFRY4_32_20);
+    QUEUE_DISTRIBUTIONS(rocrand_state_threefry2x64_20, ROCRAND_RNG_PSEUDO_THREEFRY2_64_20);
+    QUEUE_DISTRIBUTIONS(rocrand_state_threefry4x64_20, ROCRAND_RNG_PSEUDO_THREEFRY4_64_20);
+    QUEUE_DISTRIBUTIONS(rocrand_state_xorwow, ROCRAND_RNG_PSEUDO_XORWOW);
+    QUEUE_DISTRIBUTIONS(rocrand_state_mtgp32, ROCRAND_RNG_PSEUDO_MTGP32);
+    QUEUE_DISTRIBUTIONS(rocrand_state_sobol32, ROCRAND_RNG_QUASI_SOBOL32);
+    QUEUE_DISTRIBUTIONS(rocrand_state_scrambled_sobol32, ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
+    QUEUE_DISTRIBUTIONS(rocrand_state_sobol64, ROCRAND_RNG_QUASI_SOBOL64);
+    QUEUE_DISTRIBUTIONS(rocrand_state_scrambled_sobol64, ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
 
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_RAND_N, "number of values");
-    parser.set_optional<size_t>("dimensions",
-                                "dimensions",
-                                1,
-                                "number of dimensions of quasi-random values");
-    parser.set_optional<size_t>("trials", "trials", 20, "number of trials");
-    parser.set_optional<size_t>("blocks", "blocks", 256, "number of blocks");
-    parser.set_optional<size_t>("threads", "threads", 256, "number of threads in each block");
-    parser.set_optional<std::vector<double>>(
-        "lambda",
-        "lambda",
-        {10.0},
-        "space-separated list of lambdas of Poisson distribution");
-    parser.run_and_exit_if_error();
-
-    hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-
-    add_common_benchmark_rocrand_info();
-
-    benchmark_context ctx{};
-
-    ctx.size       = parser.get<size_t>("size");
-    ctx.dimensions = parser.get<size_t>("dimensions");
-    ctx.trials     = parser.get<size_t>("trials");
-    ctx.blocks     = parser.get<size_t>("blocks");
-    ctx.threads    = parser.get<size_t>("threads");
-    ctx.lambdas    = parser.get<std::vector<double>>("lambda");
-
-    benchmark::AddCustomContext("size", std::to_string(ctx.size));
-    benchmark::AddCustomContext("dimensions", std::to_string(ctx.dimensions));
-    benchmark::AddCustomContext("trials", std::to_string(ctx.trials));
-    benchmark::AddCustomContext("blocks", std::to_string(ctx.blocks));
-    benchmark::AddCustomContext("threads", std::to_string(ctx.threads));
-
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
-
-    // MT19937 has no kernel implementation
-    add_benchmarks<rocrand_state_lfsr113>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_LFSR113);
-    add_benchmarks<rocrand_state_mrg31k3p>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_MRG31K3P);
-    add_benchmarks<rocrand_state_mrg32k3a>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_MRG32K3A);
-    add_benchmarks<rocrand_state_mtgp32>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_MTGP32);
-    add_benchmarks<rocrand_state_philox4x32_10>(ctx,
-                                                stream,
-                                                benchmarks,
-                                                ROCRAND_RNG_PSEUDO_PHILOX4_32_10);
-    add_benchmarks<rocrand_state_scrambled_sobol32>(ctx,
-                                                    stream,
-                                                    benchmarks,
-                                                    ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
-    add_benchmarks<rocrand_state_scrambled_sobol64>(ctx,
-                                                    stream,
-                                                    benchmarks,
-                                                    ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
-    add_benchmarks<rocrand_state_sobol32>(ctx, stream, benchmarks, ROCRAND_RNG_QUASI_SOBOL32);
-    add_benchmarks<rocrand_state_sobol64>(ctx, stream, benchmarks, ROCRAND_RNG_QUASI_SOBOL64);
-    add_benchmarks<rocrand_state_threefry2x32_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY2_32_20);
-    add_benchmarks<rocrand_state_threefry4x32_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY4_32_20);
-    add_benchmarks<rocrand_state_threefry2x64_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY2_64_20);
-    add_benchmarks<rocrand_state_threefry4x64_20>(ctx,
-                                                  stream,
-                                                  benchmarks,
-                                                  ROCRAND_RNG_PSEUDO_THREEFRY4_64_20);
-    add_benchmarks<rocrand_state_xorwow>(ctx, stream, benchmarks, ROCRAND_RNG_PSEUDO_XORWOW);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    benchmark::BenchmarkReporter* console_reporter  = getConsoleReporter(consoleFormat);
-    benchmark::BenchmarkReporter* out_file_reporter = getOutFileReporter(outFormat);
-
-    std::string spec = (filter == "" || filter == "all") ? "." : filter;
-
-    // Run benchmarks
-    if(outFormat == "") // default case
-        benchmark::RunSpecifiedBenchmarks(console_reporter, spec);
-    else
-        benchmark::RunSpecifiedBenchmarks(console_reporter, out_file_reporter, spec);
-    HIP_CHECK(hipStreamDestroy(stream));
-
-    return 0;
+    executor.run();
 }

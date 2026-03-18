@@ -74,7 +74,7 @@ endfunction()
 
 # rocrand
 add_rocrand_benchmark("rocrand/benchmark_rocrand_host_api.cpp" OFF)
-add_rocrand_benchmark("benchmark_rocrand_device_api.cpp" OFF)
+add_rocrand_benchmark("rocrand/benchmark_rocrand_device_api.cpp" OFF)
 
 # curand
 if(HIP_COMPILER STREQUAL "nvcc")
