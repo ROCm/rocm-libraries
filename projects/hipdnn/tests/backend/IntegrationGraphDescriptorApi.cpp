@@ -14,7 +14,6 @@
 
 using namespace backend_test;
 using namespace hipdnn_tests::constants;
-using hipdnn_data_sdk::data_objects::ConvMode;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 
 class IntegrationGraphDescriptorApi : public ::testing::Test
@@ -44,9 +43,9 @@ TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
 {
     SKIP_IF_NO_DEVICES();
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
         tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "Test GRAPH!",
                                                                   DataTypeSdk::FLOAT,
@@ -132,9 +131,9 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
 {
     // Build a graph via FlatBuffer deserialization
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
         tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "SizeTestGraph",
                                                                   DataTypeSdk::FLOAT,
@@ -187,9 +186,9 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
 {
     // Build a graph via FlatBuffer with known properties
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
         tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "TestGraph",
                                                                   DataTypeSdk::FLOAT,
@@ -247,9 +246,9 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
         tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "BufferSizeTest",
                                                                   DataTypeSdk::FLOAT,
@@ -295,9 +294,9 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuf
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
         tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
                                                                   "OversizedBufferTest",
                                                                   DataTypeSdk::FLOAT,
@@ -342,6 +341,66 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
     // Verify data is valid
     auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
     ASSERT_NE(graphFb, nullptr);
+
+    hipdnnBackendDestroyDescriptor(desc);
+    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
+
+TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Build a FlatBuffer graph with a known name
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> const
+        tensorAttributes;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> const nodes;
+    auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(builder,
+                                                                  "TestGraphName",
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  DataTypeSdk::FLOAT,
+                                                                  &tensorAttributes,
+                                                                  &nodes);
+    builder.Finish(graph);
+    flatbuffers::DetachedBuffer serializedGraph = builder.Release();
+
+    // Deserialize into a backend descriptor
+    hipdnnBackendDescriptor_t desc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &desc, serializedGraph.data(), serializedGraph.size()),
+              HIPDNN_STATUS_SUCCESS);
+
+    // Set handle and finalize
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    // Query name count
+    int64_t count = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(
+                  desc, HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(count, 0);
+
+    // Query name value
+    std::vector<char> nameBuffer(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        count,
+                                        &actualCount,
+                                        nameBuffer.data()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_STREQ(nameBuffer.data(), "TestGraphName");
 
     hipdnnBackendDestroyDescriptor(desc);
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);

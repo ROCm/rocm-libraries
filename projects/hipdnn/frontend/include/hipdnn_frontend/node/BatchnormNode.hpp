@@ -100,7 +100,7 @@ public:
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        int64_t const channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
@@ -126,10 +126,10 @@ public:
         auto nextRunningVar = attributes.get_next_running_variance();
 
         // If any running stat is provided, all must be provided
-        bool hasPrevRunningMean = prevRunningMean != nullptr;
-        bool hasPrevRunningVar = prevRunningVar != nullptr;
-        bool hasNextRunningMean = nextRunningMean != nullptr;
-        bool hasNextRunningVar = nextRunningVar != nullptr;
+        bool const hasPrevRunningMean = prevRunningMean != nullptr;
+        bool const hasPrevRunningVar = prevRunningVar != nullptr;
+        bool const hasNextRunningMean = nextRunningMean != nullptr;
+        bool const hasNextRunningVar = nextRunningVar != nullptr;
 
         if(hasPrevRunningMean || hasPrevRunningVar || hasNextRunningMean || hasNextRunningVar)
         {

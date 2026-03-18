@@ -39,7 +39,7 @@ public:
     // Blocks on the base_sink mutex, which is held during sink_it_().
     void waitForIdle()
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> const lock(mutex_);
     }
 
 protected:
@@ -54,10 +54,10 @@ protected:
         // Format message
         spdlog::memory_buf_t formatted;
         formatter_->format(msg, formatted);
-        std::string message(formatted.data(), formatted.size());
+        std::string const message(formatted.data(), formatted.size());
 
         // Convert spdlog level to hipdnnSeverity_t
-        hipdnnSeverity_t severity = fromSpdlogLevel(msg.level);
+        hipdnnSeverity_t const severity = fromSpdlogLevel(msg.level);
 
         // Call user callback with their handle (exception safe)
         try

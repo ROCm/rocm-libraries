@@ -124,7 +124,7 @@ TEST(TestMatmulAttributes, PackAttributes)
 
 TEST(TestMatmulAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
+    hipdnn_frontend::graph::MatmulAttributes const matmulAttributes;
 
     // Check that tensors are null by default
     EXPECT_EQ(matmulAttributes.get_a(), nullptr);
