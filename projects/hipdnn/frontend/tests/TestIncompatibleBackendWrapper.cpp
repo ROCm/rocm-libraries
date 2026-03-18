@@ -11,7 +11,7 @@ using namespace ::testing;
 
 TEST(TestIncompatibleBackendWrapper, AllFunctionsReturnFailed)
 {
-    IncompatibleBackendWrapper backendWrapper;
+    IncompatibleBackendWrapper const backendWrapper;
 }
 
 TEST(TestIncompatibleBackendWrapper, Create)

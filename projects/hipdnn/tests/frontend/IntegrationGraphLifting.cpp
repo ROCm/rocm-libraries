@@ -284,7 +284,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
+    detail::ScopedHipdnnBackendDescriptor const graphDesc(data.data(), data.size());
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
@@ -430,7 +430,7 @@ TEST_F(IntegrationGraphLifting, EmptyGraphDescriptorReturnsError)
 // given corrupt (garbage) bytes.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 {
-    std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
+    std::vector<uint8_t> const garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
 
     auto graph = std::make_shared<TestableGraph>();
     auto result = graph->deserialize_via_backend(_handle, garbage);
@@ -441,7 +441,7 @@ TEST_F(IntegrationGraphLifting, DeserializeViaBackendCorruptDataReturnsError)
 // given an empty data vector.
 TEST_F(IntegrationGraphLifting, DeserializeViaBackendEmptyDataReturnsError)
 {
-    std::vector<uint8_t> empty;
+    std::vector<uint8_t> const empty;
 
     auto graph = std::make_shared<TestableGraph>();
     auto result = graph->deserialize_via_backend(_handle, empty);

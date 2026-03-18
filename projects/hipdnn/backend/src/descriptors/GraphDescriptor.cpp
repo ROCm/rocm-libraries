@@ -10,6 +10,9 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 
+#include <logging/GraphLogger.hpp>
+#include <unordered_map>
+
 namespace hipdnn_backend
 {
 
@@ -45,6 +48,13 @@ void GraphDescriptor::finalize()
                    "GraphDescriptor::finalize: serialized graph failed verification");
 
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
+
+    if(logging::GraphLogger::isEnabled())
+    {
+        auto serialized = getSerializedGraph();
+        logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
+                                       serialized.size);
+    }
 }
 
 std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGraphFromOperations()
