@@ -20,7 +20,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Benchmarks
+# Get the current branch, or fall back to DETACHED
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE BRANCH_NAME
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(BRANCH_NAME STREQUAL "")
+  set(BRANCH_NAME "DETACHED")
+endif()
+
+# Get the short commit hash
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE COMMIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
 function(add_rocrand_benchmark benchmark_src legacy)
   get_filename_component(BENCHMARK_TARGET ${benchmark_src} NAME_WE)
@@ -43,6 +60,9 @@ function(add_rocrand_benchmark benchmark_src legacy)
   endif()
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
+
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
 
   find_library(AMDSMI_LIB NAMES amd_smi)
   if(AMDSMI_LIB)
