@@ -86,7 +86,7 @@ Tests:
   c_equal_d: [false, true]
 
 # Integer-exact: A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta in {0,-2} (D = 2 A*B or 2 A*B - 2 C). Exact GPU vs CPU.
-# integer_exact: gfx11 runtime skip is off in testing_matmul.hpp (#if 0); turn back on after experiments.
+# On gfx11, integer_exact is skipped at runtime for fp16/bf16 A only; f32/f64 still run (see testing_matmul.hpp).
 # TF32x1 (f32 A+B, compute input bf16) runs only on gfx950 where solutions exist (see matmul_integer_exact_tf32x1_gfx950 below).
 - name: matmul_integer_exact_one
   category: quick

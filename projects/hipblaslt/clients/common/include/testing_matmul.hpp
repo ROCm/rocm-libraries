@@ -1259,19 +1259,17 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
-    // integer_exact: gfx11 skip disabled temporarily—re-enable with #if 1 after experiments.
-    // (Previously: Navi GPU vs CPU exact match failed; general fp16 GEMM on gfx11 still uses wider tol.)
+    // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
+    // f32/f64 (and TF32x1 f32 path) still run on Navi.
     if(arg.initialization == hipblaslt_initialization::integer_exact)
     {
-#if 0
-        if(hipblaslt_get_arch_major() == 11)
+        const bool is_16bit = (tiA == HIP_R_16F || tiA == HIP_R_16BF);
+        if(hipblaslt_get_arch_major() == 11 && is_16bit)
         {
-            hipblaslt_cout << "Skipping integer_exact on gfx11 (Navi)"
+            hipblaslt_cout << "Skipping integer_exact on gfx11 for 16-bit float (fp16/bf16 A)"
                            << std::endl;
             return;
         }
-#endif
-        const bool is_16bit = (tiA == HIP_R_16F || tiA == HIP_R_16BF);
         if(is_16bit)
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
