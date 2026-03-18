@@ -131,8 +131,14 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
         ck::utils::conv::parse_conv_param(num_dim_spatial, conv_params_start_idx, argv);
     std::cout << params << std::endl;
 
-    ck_tile::index_t split_k_index = std::stoi(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
-    const auto& split_k            = std::to_string(split_k_index);
+    auto split_k = std::string(argv[8 + 1 + 4 + 6 * num_dim_spatial]);
+
+    // The bwd data profiler in old CK uses -1 to loop over all split-K values.
+    // We want to have the same API for backward compatibility, but we need to convert it to "all" for the new API.
+    if (split_k == "-1")
+    {
+        split_k = "all";
+    }
 
     if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
