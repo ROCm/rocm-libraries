@@ -10,7 +10,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class ReductionNode : public BaseNode<ReductionNode>
+class ReductionNode : public BaseNode<ReductionNode, NodeType::REDUCTION>
 {
 public:
     ReductionAttributes attributes;

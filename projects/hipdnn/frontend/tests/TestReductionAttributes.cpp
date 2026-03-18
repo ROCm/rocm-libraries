@@ -267,7 +267,7 @@ TEST(TestReductionAttributes, FromFlatBufferIsDeterministicRoundTrip)
     EXPECT_TRUE(restored.get_is_deterministic());
 }
 
-TEST(TestReductionAttributes, Reduction_attributesTypedefExists)
+TEST(TestReductionAttributes, ReductionAttributesTypedefExists)
 {
     // Verify typedef alias exists and works
     Reduction_attributes attrs;
