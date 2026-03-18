@@ -1844,19 +1844,16 @@ TEST(TestCalculatePointwiseTolerance, BackwardToleranceExceedsForward)
 // and isBoundedOutput for code coverage.
 // =================================================================================================
 
-using hipdnn_data_sdk::data_objects::PointwiseMode;
 using hipdnn_data_sdk::data_objects::EnumNamesPointwiseMode;
 using hipdnn_data_sdk::data_objects::EnumValuesPointwiseMode;
+using hipdnn_data_sdk::data_objects::PointwiseMode;
 
 // Verify one representative per error class for correctness
 TEST(TestClassifyPointwiseOp, OnePerClassCorrect)
 {
-    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::ABS),
-              PointwiseErrorClass::BITWISE);
-    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::ADD),
-              PointwiseErrorClass::LINEAR);
-    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::DIV),
-              PointwiseErrorClass::RATIONAL);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::ABS), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::ADD), PointwiseErrorClass::LINEAR);
+    EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::DIV), PointwiseErrorClass::RATIONAL);
     EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::EXP),
               PointwiseErrorClass::TRANSCENDENTAL_FWD);
     EXPECT_EQ(pointwise::classifyPointwiseOp(PointwiseMode::TANH_BWD),
