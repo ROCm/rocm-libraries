@@ -74,6 +74,9 @@ struct SparseCompressTransform
         static constexpr index_t CompressedSize = VecN / CompressionRatio;
         using VecCompressed                     = ext_vector_t<ScalarT, CompressedSize>;
 
+        static_assert(VecN % CompressionRatio == 0, "VecN must be divisible by CompressionRatio");
+        static_assert(CompressedSize > 0, "CompressedSize must be > 0");
+
         idx = detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
         // TODO c++20: Use bit_cast
@@ -82,7 +85,7 @@ struct SparseCompressTransform
 };
 
 /**
- * @struct MmaDefaultTransformsSparse
+ * @class MmaDefaultTransformsSparse
  * @brief Implements the default transforms for Sparse
  *
  * For 2:4 structured sparsity with inline register metadata:
@@ -91,9 +94,10 @@ struct SparseCompressTransform
  *  - CTransform: Pass-through (input accumulator)
  *  - DTransform: Pass-through (output accumulator as-is)
  */
+template <index_t CompressionRatio>
 struct MmaDefaultTransformsSparse
 {
-    using ATransform = SparseCompressTransform<2>;
+    using ATransform = SparseCompressTransform<CompressionRatio>;
     using BTransform = PassThroughTransform;
     using CTransform = PassThroughTransform;
     using DTransform = PassThroughTransform;
@@ -114,7 +118,7 @@ struct MmaTransformsDefaultSelector<MmaOp,
                                     CompilerTarget,
                                     std::enable_if_t<MmaOp::OpFamily == MmaOpFamily::SPARSE>>
 {
-    using SelectedTransforms = MmaDefaultTransformsSparse;
+    using SelectedTransforms = MmaDefaultTransformsSparse<MmaOp::kCompressionRatio>;
 };
 
 } // namespace ck_tile::core::arch::mma

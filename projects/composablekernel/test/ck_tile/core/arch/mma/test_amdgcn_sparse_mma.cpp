@@ -1,8 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <iostream>
+#include <numeric>
 
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
@@ -10,6 +12,9 @@
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
 #include "ck_tile/core/arch/mma/sparse/sparse_mma_pipeline.hpp"
 #include <hip/hip_runtime.h>
+#include "ck_tile/core/numeric/bfloat16.hpp"
+#include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
@@ -297,4 +302,81 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
     HIP_CHECK_ERROR(hipFree(d_b));
     HIP_CHECK_ERROR(hipFree(d_c));
     HIP_CHECK_ERROR(hipFree(d_out));
+}
+
+template <uint32_t CompressionRatio, typename Vec>
+__global__ void test_sparse_transform(void* a, void* idx)
+{
+    using ResultT = decltype(SparseCompressTransform<2>::exec(*static_cast<Vec*>(a),
+                                                              *reinterpret_cast<int32_t*>(idx)));
+    *reinterpret_cast<remove_cvref_t<ResultT>*>(a) =
+        SparseCompressTransform<2>::exec(*static_cast<Vec*>(a), *reinterpret_cast<int32_t*>(idx));
+}
+
+// 1. Basic correctness: valid divisible sizes
+template <int NUM, int RATIO, typename Type>
+void sparse_transform_test_case()
+{
+    int devCount;
+    hipDevice_t dev;
+    HIP_CHECK_ERROR(hipGetDevice(&dev));
+    HIP_CHECK_ERROR(hipGetDeviceCount(&devCount));
+
+    hipDeviceProp_t devProp;
+    HIP_CHECK_ERROR(hipGetDeviceProperties(&devProp, dev));
+
+    auto currentArchId = hip_device_prop_gcn_arch_name_to_amdgcn_target_id(devProp.gcnArchName);
+    bool hasDevice     = static_cast<bool>(devCount > 0);
+
+    // TODO: c++20 add check for arch id
+    if(!hasDevice || (currentArchId == amdgcn_target_id::HOST))
+    {
+        GTEST_SKIP() << "No HIP device found. Skipping test.";
+    }
+
+    std::vector<Type> v(NUM);
+    for(int i = 0; i < NUM; ++i)
+    {
+        v[i] = i % 2 == 0 ? i + 1 : 0;
+    }
+
+    float* d_v;
+    int32_t* d_idx;
+
+    static constexpr auto Size = sizeof(Type) * NUM;
+    HIP_CHECK_ERROR(hipMalloc(&d_v, Size));
+    HIP_CHECK_ERROR(hipMalloc(&d_idx, sizeof(int32_t)));
+
+    // Copy inputs to device
+    HIP_CHECK_ERROR(hipMemcpy(d_v, v.data(), Size, hipMemcpyHostToDevice));
+
+    test_sparse_transform<RATIO, ext_vector_t<Type, NUM>><<<1, 32>>>(d_v, d_idx);
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+
+    std::vector<Type> h_out(NUM / RATIO, static_cast<Type>(0));
+    HIP_CHECK_ERROR(hipMemcpy(h_out.data(), d_v, Size / RATIO, hipMemcpyDeviceToHost));
+    int32_t h_idx;
+    HIP_CHECK_ERROR(hipMemcpy(&h_idx, d_idx, sizeof(float), hipMemcpyDeviceToHost));
+
+    EXPECT_NE(h_idx, -1) << "idx should have been written";
+    if constexpr(NUM == 8)
+    {
+        EXPECT_EQ(h_idx, 0b10001000);
+    }
+    else if constexpr(NUM == 16)
+    {
+        EXPECT_EQ(h_idx, 0b1000100010001000);
+    }
+    for(int i = 0; i < NUM / RATIO; ++i)
+    {
+        EXPECT_EQ(h_out[i], v[i * 2]);
+    }
+}
+
+TEST(SparseTransformsTest, ValidCompressionRatio)
+{
+    // TODO: extend those when new sparse builtins are
+    // introduced and use different type combinations
+    sparse_transform_test_case<8, 2, fp16_t>();
+    sparse_transform_test_case<16, 2, fp16_t>();
 }
