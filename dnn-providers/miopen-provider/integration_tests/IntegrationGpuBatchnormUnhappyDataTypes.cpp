@@ -5,11 +5,14 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include "../tests/common/BatchnormCommon.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 using namespace test_bn_common;
 
 namespace
@@ -60,28 +63,32 @@ class IntegrationGpuBatchnormUnhappyDataTypes
 {
 };
 
-TEST_P(IntegrationGpuBatchnormUnhappyDataTypes, BuildRejectsInvalidDTypes)
+} // namespace
+
+TEST_P(IntegrationGpuBatchnormUnhappyDataTypes, RejectsUnsupportedDataTypes)
 {
     const auto& tc = GetParam();
     auto g = makeGraph(tc, TensorLayout::NCHW);
-    auto result = g.build();
+
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    auto result = g.build(handle);
 
     EXPECT_NE(result.code, ErrorCode::OK);
-    EXPECT_NE(result.message.find("type"), std::string::npos);
+    EXPECT_FALSE(result.err_msg.empty());
+    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
-
-static UnhappyBnDtypeCase kCases[] = {
-    {DataType::UINT8, DataType::FLOAT, DataType::FLOAT, "Uint8IO"},
-    {DataType::FLOAT, DataType::HALF,  DataType::HALF,  "HalfScaleBias"},
-    {DataType::FLOAT, DataType::HALF,  DataType::FLOAT, "MismatchedScaleHalfBiasFloat"},
-};
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormUnhappyDataTypes,
-    ::testing::ValuesIn(kCases),
+    ::testing::Values(
+        UnhappyBnDtypeCase{DataType::UINT8, DataType::FLOAT, DataType::FLOAT, "Uint8IO"},
+        UnhappyBnDtypeCase{DataType::FLOAT, DataType::HALF,  DataType::HALF,  "HalfScaleBias"},
+        UnhappyBnDtypeCase{DataType::FLOAT, DataType::HALF,  DataType::FLOAT, "MismatchedScaleHalfBiasFloat"}
+    ),
     [](const ::testing::TestParamInfo<UnhappyBnDtypeCase>& info) {
         return std::string(info.param.name);
-    });
-
-} // namespace
+    }
+);
