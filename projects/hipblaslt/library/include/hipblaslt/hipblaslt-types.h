@@ -38,9 +38,11 @@
 #endif
 
 #include "hipblaslt_float8.h"
+#if defined(__HIP__)
 #include "hipblaslt_bfloat6.h"
 #include "hipblaslt_float6.h"
 #include "hipblaslt_float4.h"
+#endif
 #include "hipblaslt_e8.h"
 #include "hipblaslt_e5m3.h"
 #include <float.h>
