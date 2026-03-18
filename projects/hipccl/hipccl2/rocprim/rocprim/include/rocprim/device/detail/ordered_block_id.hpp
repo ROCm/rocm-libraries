@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -109,6 +109,16 @@ struct ordered_block_id
         return storage.id;
     }
 
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    id_type& get_async(unsigned int tid, storage_type& storage)
+    {
+        if(tid == 0)
+        {
+            storage.id = ::rocprim::detail::atomic_add(this->id, 1);
+        }
+        return storage.id;
+    }
+
     /// Resets the ordered block id from host. Don't use this if we have an init kernel!
     /// Call `ordered_block_id::reset()` from that kernel instead.
     ROCPRIM_HOST ROCPRIM_INLINE
@@ -164,6 +174,12 @@ struct block_id_wrapper<T, false>
     {
         return ::rocprim::detail::block_id<0>();
     }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    id_type get_async(unsigned int /*tid*/, storage_type& /*storage*/)
+    {
+        return ::rocprim::detail::block_id<0>();
+    }
 };
 
 template<class T>
@@ -212,6 +228,12 @@ struct block_id_wrapper<T, true>
         auto id = ordered_id.get(tid, storage);
         ::rocprim::syncthreads();
         return id;
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    id_type& get_async(unsigned int tid, storage_type& storage)
+    {
+        return ordered_id.get_async(tid, storage);
     }
 
     ::rocprim::detail::ordered_block_id<id_type> ordered_id;
