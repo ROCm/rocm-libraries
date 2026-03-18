@@ -5,7 +5,6 @@
 
 #include "HipdnnAttentionImplementation.h"
 #include "HipdnnBackendAttributeName.h"
-#include "HipdnnOperationType.h"
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
@@ -14,6 +13,7 @@
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnNormFwdPhase.h"
+#include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
 #include "HipdnnStatus.h"
 
