@@ -12,7 +12,9 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # repo + dirs
 SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+THEROCK_DIR = Path(
+    os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
+).resolve()
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR", "")
 platform = os.getenv("RUNNER_OS", "linux").lower()
 

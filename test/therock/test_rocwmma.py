@@ -11,7 +11,9 @@ THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
 AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
 platform = os.getenv("RUNNER_OS").lower()
 SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+THEROCK_DIR = Path(
+    os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
+).resolve()
 
 # GTest sharding
 SHARD_INDEX = os.getenv("SHARD_INDEX", 1)
