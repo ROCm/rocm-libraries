@@ -296,13 +296,16 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 // Checkerboard ±: (i^j)&1 so first element of each row and column alternates
                 // Use an effective stride that is never zero and at least large enough
                 // to contain one full matrix, to avoid division by a potentially zero stride.
+                // Offset PRNG index for B so {0,1,2} magnitudes differ from A (same idx would
+                // correlate via pseudo_random_device).
+                constexpr size_t kBSeedOffset = 1000003; // large prime
                 size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
                 fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda](size_t idx) -> T {
                     auto b        = idx / effective_stride;
                     auto in_batch = idx - b * effective_stride;
                     auto j        = in_batch / lda;
                     auto i        = in_batch - j * lda;
-                    auto value    = small_int_positive<T>(idx);
+                    auto value    = small_int_positive<T>(idx + kBSeedOffset);
                     return (i ^ j) & 1 ? value : negate(value);
                 });
             }
