@@ -84,17 +84,17 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
-        auto gemm           = GEMMProblemF8F6F4{16, 16, 128};
+        auto gemm           = GEMMProblemF8F6F4{32, 32, 64};
         gemm.transA         = "T";
         gemm.transB         = "N";
-        gemm.macM           = 128;
-        gemm.macN           = 32;
+        gemm.macM           = 256;
+        gemm.macN           = 256;
         gemm.macK           = 256;
         gemm.m              = 2 * gemm.macM;
         gemm.n              = 2 * gemm.macN;
         gemm.k              = 4 * gemm.macK;
-        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 1;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
 
         gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
@@ -115,20 +115,7 @@ namespace GEMMTests
 
         gemm.scalePretileA = {32, 8};
         gemm.scalePretileB = {8, 32};
-        gemm.pretileB      = {32, 32};
-
-        gemm.prefetch = true;
-        gemm.prefetchInFlight = 2;
-        gemm.prefetchLDSFactor = 2;
-        gemm.prefetchMixMemOps = true;
-        gemm.unrollK = 2;
-        gemm.prefetchScale = true;
-
-        //gemm.workgroupMappingDim = 0;
-        //gemm.workgroupRemapXCC = true;
-        //gemm.workgroupMappingValue = 2;
-
-        //gemm.streamK = rocRoller::StreamKMode::TwoTileDPFirst;
+        gemm.pretileB      = {128, 128};
 
         basicGEMM<FP4, FP4, float>(gemm);
     }
