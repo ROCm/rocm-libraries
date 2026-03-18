@@ -44,7 +44,7 @@ function(add_benchmark benchmark_src legacy)
   add_executable(${BENCHMARK_TARGET} ${benchmark_src})
 
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 14)
+    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 17)
     set_source_files_properties(${benchmark_src} PROPERTIES LANGUAGE CUDA)
     target_compile_options(${BENCHMARK_TARGET}
       PRIVATE
@@ -64,11 +64,11 @@ function(add_benchmark benchmark_src legacy)
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
 
-  find_library(AMDSMI_LIB NAMES amd_smi)
-  if(AMDSMI_LIB)
-    target_link_libraries(${BENCHMARK_TARGET} ${AMDSMI_LIB})
+  if(HIP_COMPILER STREQUAL "nvcc")
+    target_link_libraries(${BENCHMARK_TARGET} nvidia-ml)
   else()
-    message(FATAL_ERROR "AMD SMI is not installed")
+    find_library(AMDSMI_LIB NAMES amd_smi REQUIRED)
+    target_link_libraries(${BENCHMARK_TARGET} ${AMDSMI_LIB})
   endif()
 
   set_target_properties(${BENCHMARK_TARGET}
@@ -98,7 +98,7 @@ add_benchmark("rocrand/benchmark_rocrand_device_api.cpp" OFF)
 
 # curand
 if(HIP_COMPILER STREQUAL "nvcc")
-  add_benchmark("benchmark_curand_host_api.cpp" OFF)
+  add_benchmark("curand/benchmark_curand_host_api.cpp" OFF)
   add_benchmark("benchmark_curand_device_api.cpp" OFF)
 endif()
 
