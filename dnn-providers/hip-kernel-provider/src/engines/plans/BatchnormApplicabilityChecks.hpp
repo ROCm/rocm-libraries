@@ -8,7 +8,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider
@@ -105,9 +107,20 @@ void checkBatchnormInferenceTensorConfigSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-// --- Batchnorm Type Configuration ---
+void checkBatchnormBackwardTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
-// hip-kernel-provider batchnorm requirements (based on underlying kernel constraints):
+void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormBwdActivationModeSupported(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
 // - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
 // - Affine/Stat/Intermediate tensors: FLOAT only
 struct BnTensorTypes

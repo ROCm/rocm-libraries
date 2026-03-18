@@ -74,4 +74,37 @@ inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
     };
 }
 
+inline std::vector<BatchnormTestCase> getBnBwdTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 14, 14}, seed},
+        {{2, 3, 1, 1}, seed},
+        {{32, 1, 14, 14}, seed},
+        {{32, 3, 1, 14}, seed},
+        {{32, 3, 14, 1}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 16, 112, 112}, seed},
+        {{5, 256, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed},
+        {{16, 3, 8, 14, 14}, seed},
+    };
+}
+
 } // namespace hip_kernel_provider::test_bn_common

@@ -461,4 +461,96 @@ void checkBatchnormInferenceTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, false);
 }
 
+void checkBatchnormBackwardTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    std::vector<int64_t> ioTensorIds
+        = {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
+    std::vector<int64_t> affineTensorIds = {
+        bnBwdAttr.scale_tensor_uid(), bnBwdAttr.dscale_tensor_uid(), bnBwdAttr.dbias_tensor_uid()};
+    std::vector<int64_t> statTensorIds;
+    if(bnBwdAttr.mean_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(bnBwdAttr.mean_tensor_uid().value());
+    }
+    if(bnBwdAttr.inv_variance_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
+    }
+
+    checkBatchnormTensorConfigSupported(
+        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
+}
+
+void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    checkBatchnormBwdActivationModeSupported(actAttr);
+
+    std::vector<int64_t> ioTensorIds
+        = {bnBwdAttr.x_tensor_uid(), actAttr.in_1_tensor_uid().value(), bnBwdAttr.dx_tensor_uid()};
+    std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
+                                            bnBwdAttr.dscale_tensor_uid(),
+                                            bnBwdAttr.dbias_tensor_uid(),
+                                            bnInfAttr.bias_tensor_uid()};
+    std::vector<int64_t> statTensorIds;
+    if(bnBwdAttr.mean_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(bnBwdAttr.mean_tensor_uid().value());
+    }
+    if(bnBwdAttr.inv_variance_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
+    }
+    std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
+                                                  actAttr.in_0_tensor_uid(),
+                                                  actAttr.out_0_tensor_uid(),
+                                                  bnBwdAttr.dy_tensor_uid()};
+
+    checkBatchnormTensorConfigSupported(
+        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, true);
+}
+
+namespace
+{
+
+void checkBatchnormActivationModeSupported(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr, bool isBwd)
+{
+    if(activAttr.operation() == hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY)
+    {
+        return;
+    }
+
+    if(activAttr.operation()
+       == (isBwd ? hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD
+                 : hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD))
+    {
+        if(!activAttr.relu_lower_clip_slope())
+        {
+            return;
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm fused activation does not support Leaky ReLU.");
+    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion.");
+}
+
+} // namespace
+
+void checkBatchnormBwdActivationModeSupported(
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr)
+{
+    checkBatchnormActivationModeSupported(activAttr, true);
+}
+
 } // namespace hip_kernel_provider
