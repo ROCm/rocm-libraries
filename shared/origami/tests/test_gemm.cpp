@@ -1002,7 +1002,7 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
 
       // Test 3: Test with different problem sizes and different config
       problem                             = make_problem(8193, 2047, 4096);
-      config                              = make_config(128, 128, 128, 32, 32, 8, 1);
+      config                              = make_config(128, 128, 128, 32, 32, 8, false, 1);
       auto result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
       if (gpu_arch == 942)
         REQUIRE(result_different_problem_sizes == Approx(0.4868).epsilon(1e-3));
@@ -1010,7 +1010,7 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
         REQUIRE(result_different_problem_sizes == Approx(0.484).epsilon(1e-3));
 
       problem                        = make_problem(8193, 4093, 1024);
-      config                         = make_config(64, 128, 128, 32, 32, 8, 1);
+      config                         = make_config(64, 128, 128, 32, 32, 8, false, 1);
       result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
       if (gpu_arch == 942)
         REQUIRE(result_different_problem_sizes == Approx(0.649).epsilon(1e-3));
@@ -1018,7 +1018,7 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
         REQUIRE(result_different_problem_sizes == Approx(0.6458).epsilon(1e-3));
 
       problem = make_problem(8193, 2047, 4096);
-      config  = make_config(256, 128, 64, 32, 32, 8, 1);
+      config  = make_config(256, 128, 64, 32, 32, 8, false, 1);
       result_different_problem_sizes =
           origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
       if (gpu_arch == 942)
@@ -1027,7 +1027,7 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
         REQUIRE(result_different_problem_sizes == Approx(0.9065).epsilon(1e-3));
 
       problem = make_problem(8193, 4093, 1024);
-      config  = make_config(128, 256, 128, 32, 32, 8, 1);
+      config  = make_config(128, 256, 128, 32, 32, 8, false, 1);
       result_different_problem_sizes =
           origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
       if (gpu_arch == 942)
@@ -1037,7 +1037,7 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
 
       // Test 4: Test edge cases (very small/large problems)
       problem                = make_problem(10, 11, 253);
-      config                 = make_config(256, 256, 64, 32, 32, 8, 1);
+      config                 = make_config(256, 256, 64, 32, 32, 8, false, 1);
       auto result_edge_cases = origami::estimate_l2_hit(problem, hardware, config, 1);
       REQUIRE(result_edge_cases == 0.0);
 

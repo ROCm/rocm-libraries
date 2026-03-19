@@ -77,11 +77,10 @@ namespace rocRoller
 
             spdlog::set_default_logger(defaultLog);
 
-            LogLevel    logLevel   = settings->get(Settings::LogLvl);
-            std::string s_logLevel = toString(logLevel);
-            if(s_logLevel != "None")
+            LogLevel logLevel = settings->get(Settings::LogLvl);
+            if(logLevel != LogLevel::None)
             {
-                spdlog::cfg::helpers::load_levels(s_logLevel);
+                defaultLog->set_level(convertLogLevel(logLevel));
             }
 
             return true;

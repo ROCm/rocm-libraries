@@ -3,11 +3,18 @@
 
 #pragma once
 
+#include "HipdnnAttentionImplementation.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
+#include "HipdnnNormFwdPhase.h"
+#include "HipdnnPointwiseMode.h"
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 
 namespace hipdnn_backend
 {
@@ -22,5 +29,26 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type);
 // Converts between C-API hipdnnConvolutionMode_t and SDK ConvMode enum values.
 hipdnn_data_sdk::data_objects::ConvMode toSdkConvMode(hipdnnConvolutionMode_t mode);
 hipdnnConvolutionMode_t fromSdkConvMode(hipdnn_data_sdk::data_objects::ConvMode mode);
+
+// Converts between C-API hipdnnPointwiseMode_t and SDK PointwiseMode enum values.
+hipdnn_data_sdk::data_objects::PointwiseMode toSdkPointwiseMode(hipdnnPointwiseMode_t mode);
+hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode mode);
+
+// Converts between C-API hipdnnDiagonalAlignment_t and SDK DiagonalAlignment enum values.
+hipdnn_data_sdk::data_objects::DiagonalAlignment
+    toSdkDiagonalAlignment(hipdnnDiagonalAlignment_t mode);
+hipdnnDiagonalAlignment_t
+    fromSdkDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment mode);
+
+// Converts between C-API hipdnnAttentionImplementation_t and SDK AttentionImplementation enum
+// values.
+hipdnn_data_sdk::data_objects::AttentionImplementation
+    toSdkAttentionImplementation(hipdnnAttentionImplementation_t mode);
+hipdnnAttentionImplementation_t
+    fromSdkAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation mode);
+
+// Converts between C-API hipdnnNormFwdPhase_t and SDK NormFwdPhase enum values.
+hipdnn_data_sdk::data_objects::NormFwdPhase toSdkNormFwdPhase(hipdnnNormFwdPhase_t phase);
+hipdnnNormFwdPhase_t fromSdkNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase phase);
 
 } // namespace hipdnn_backend

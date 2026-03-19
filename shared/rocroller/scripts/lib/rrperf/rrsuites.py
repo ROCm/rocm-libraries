@@ -1,20 +1,19 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import pathlib
 from itertools import product
+from pathlib import Path
 from typing import Generator
 
 from rrperf.problems import (
     CodeGenRun,
     GEMMRun,
     MKNLTuple,
-    TensileRun,
     TypeParameters,
 )
 from rrperf.utils import rocm_gfx
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 fp4fp4_fp32 = TypeParameters(
     type_A="fp4",
@@ -488,30 +487,6 @@ def hgemm_no_store_LDS():
         )
 
 
-def tensile_guidepost():
-    yield TensileRun(
-        config=str(
-            repo_dir
-            / "test"
-            / "unit"
-            / "GemmGuidePost"
-            / "HGemmGuidePost_Optimized.yaml"
-        ),
-    )
-
-
-def tensile_sgemm_guidepost():
-    yield TensileRun(
-        config=str(
-            repo_dir
-            / "test"
-            / "unit"
-            / "GemmGuidePost"
-            / "GemmGuidePost_Optimized.yaml"
-        ),
-    )
-
-
 def streamk_sweep():
     # Prefetch configurations: (prefetch, prefetchInFlight, prefetchLDSFactor)
     prefetchConfigs = [(False, 0, 0)] + [(True, 2, 2)]
@@ -694,11 +669,6 @@ def scalar_is_zero():
         workgroup_size_x=64,
         workgroup_size_y=4,
     )
-
-
-def tensile_benchmarks():
-    yield from tensile_guidepost()
-    yield from tensile_sgemm_guidepost()
 
 
 def codegen():

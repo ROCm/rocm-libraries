@@ -966,7 +966,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 6
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -1004,7 +1004,7 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4229,7 +4229,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 5
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -4263,7 +4263,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 24
+    WorkGroupMapping: 6
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -5388,7 +5388,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 6
+    StreamKXCCMapping: 2
     SubGroup0: 8
     SubGroup1: 16
     SubGroupA: 8
@@ -5424,7 +5424,7 @@
     WavefrontSize: 64
     WorkGroup: [32, 4, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 4
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -5852,7 +5852,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 6
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5888,7 +5888,7 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 4
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -8884,7 +8884,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 6
+    StreamKXCCMapping: 2
     SubGroup0: 8
     SubGroup1: 16
     SubGroupA: 8
@@ -11017,7 +11017,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 5
+    StreamKXCCMapping: 2
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11054,8 +11054,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 4
-    WorkGroupMappingXCC: 16
+    WorkGroupMapping: 3
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]

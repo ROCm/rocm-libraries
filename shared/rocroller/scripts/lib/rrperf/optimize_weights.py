@@ -27,11 +27,10 @@ import itertools
 import math
 import multiprocessing
 import os
-import pathlib
 import random
 import subprocess
 from dataclasses import asdict, dataclass, field, fields
-from typing import List, Tuple
+from pathlib import Path
 
 import numpy as np
 import rrperf
@@ -43,7 +42,7 @@ gpus = {}
 mp_pool = None
 
 
-def instantiate_gpus(idxs: List[int]):
+def instantiate_gpus(idxs: list[int]):
     global gpus, mp_pool  # noqa: disable=F824
     for idx in idxs:
         gpus[idx] = multiprocessing.Lock()
@@ -52,7 +51,7 @@ def instantiate_gpus(idxs: List[int]):
         mp_pool = None
 
 
-def acquire_lock() -> Tuple[int, multiprocessing.Lock]:
+def acquire_lock() -> tuple[int, multiprocessing.Lock]:
     global gpus  # noqa: disable=unused-variable
     for i in range(100):
         for id, lock in gpus.items():
@@ -320,7 +319,7 @@ def bench_star(arg):
 
 
 def bench(
-    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: WeightsABC
+    thedir: Path, problem: rrperf.problems.GEMMRun, weights: WeightsABC
 ) -> Result:
     device, lock = acquire_lock()
 
@@ -379,7 +378,7 @@ def bench(
         lock.release()
 
 
-def sanity_check(results: List[Result]):
+def sanity_check(results: list[Result]):
     rnorms = {r.rnorm for r in results if r.passed}
     print(f"RNorms: {rnorms}")
     if len(rnorms) != 1:
@@ -390,7 +389,7 @@ def sanity_check(results: List[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> Tuple[List[WeightsABC], List[WeightsABC]]:
+def split_old_new_results(weights) -> tuple[list[WeightsABC], list[WeightsABC]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
@@ -405,10 +404,10 @@ def split_old_new_results(weights) -> Tuple[List[WeightsABC], List[WeightsABC]]:
 
 
 def generation(
-    output_dir: pathlib.Path,
+    output_dir: Path,
     problem: rrperf.problems.GEMMRun,
-    weights: List[WeightsABC],
-) -> List[Result]:
+    weights: list[WeightsABC],
+) -> list[Result]:
     global prev_results  # noqa: disable=F824
 
     already_ran, to_run = split_old_new_results(weights)
@@ -434,7 +433,7 @@ def generation(
 
 
 def read_gen_results(resfile: str):
-    resfile = pathlib.Path(resfile)
+    resfile = Path(resfile)
     with resfile.open() as f:
         data = yaml.safe_load(f)
 
@@ -444,7 +443,7 @@ def read_gen_results(resfile: str):
         return list(map(res, data))
 
 
-def write_generation(thedir: pathlib.Path, name, results: List[Result]):
+def write_generation(thedir: Path, name, results: list[Result]):
     data = list([val.dict for val in results])
     datafile = thedir / f"results_{name}.yaml"
     with datafile.open("w") as f:
@@ -453,7 +452,7 @@ def write_generation(thedir: pathlib.Path, name, results: List[Result]):
 
 
 def new_inputs(
-    all_results: List[Result],
+    all_results: list[Result],
     population,
     num_parents,
     num_random,
@@ -543,7 +542,7 @@ def genetic(args):
         close_pool()
 
 
-def find_most_different_outputs(results: List[Result], n: int = 5):
+def find_most_different_outputs(results: list[Result], n: int = 5):
     n = min(n, len(results))
     if n <= 0:
         return
@@ -617,7 +616,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--output",
         "-o",
         dest="output_dir",
-        type=pathlib.Path,
+        type=Path,
         required=True,
         help="Directory to store results.",
     )
