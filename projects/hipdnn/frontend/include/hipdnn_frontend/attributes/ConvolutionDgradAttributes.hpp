@@ -41,6 +41,8 @@ namespace hipdnn_frontend::graph
 class ConvDgradAttributes : public Attributes<ConvDgradAttributes>
 {
 public:
+    ConvDgradAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {

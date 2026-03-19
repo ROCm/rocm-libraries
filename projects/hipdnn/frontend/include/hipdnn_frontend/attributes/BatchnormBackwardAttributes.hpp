@@ -54,6 +54,8 @@ namespace hipdnn_frontend::graph
 class BatchnormBackwardAttributes : public Attributes<BatchnormBackwardAttributes>
 {
 public:
+    BatchnormBackwardAttributes() = default;
+
     enum class InputNames
     {
         DY = 0,

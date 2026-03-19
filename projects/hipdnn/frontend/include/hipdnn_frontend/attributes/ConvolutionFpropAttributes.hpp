@@ -48,6 +48,8 @@ namespace hipdnn_frontend::graph
 class ConvFpropAttributes : public Attributes<ConvFpropAttributes>
 {
 public:
+    ConvFpropAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {

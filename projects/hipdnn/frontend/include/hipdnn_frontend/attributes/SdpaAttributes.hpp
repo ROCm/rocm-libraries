@@ -62,6 +62,8 @@ namespace hipdnn_frontend::graph
 class SdpaAttributes : public Attributes<SdpaAttributes>
 {
 public:
+    SdpaAttributes() = default;
+
     // NOLINTBEGIN(readability-identifier-naming)
     enum class InputNames
     {
