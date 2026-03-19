@@ -63,9 +63,8 @@ private:
     std::string _knobId;
     std::string _description;
 
-    // Default value (polymorphic: int64, double, or string)
+    // Default value (polymorphic: int64, double, or string); NONE until set
     hipdnn_data_sdk::data_objects::KnobValueUnion _defaultValue;
-    bool _defaultValueSet = false;
 
     // Deprecation flag
     bool _deprecated = false;

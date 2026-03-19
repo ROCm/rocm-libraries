@@ -24,9 +24,9 @@ void KnobDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "KnobDescriptor::finalize() failed: Knob ID is not set.");
 
-    THROW_IF_FALSE(_defaultValueSet,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "KnobDescriptor::finalize() failed: Default value is not set.");
+    THROW_IF_TRUE(_defaultValue.type == hipdnn_data_sdk::data_objects::KnobValue::NONE,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "KnobDescriptor::finalize() failed: Default value is not set.");
 
     // Validate that constraint fields match the default value type.
     // Reject mixed-type constraint sets that do not correspond to the default value type.
@@ -277,7 +277,6 @@ void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                   arrayOfElements,
                   "KnobDescriptor::setAttribute()");
         _defaultValue.Set(intVal);
-        _defaultValueSet = true;
         break;
     }
     case HIPDNN_TYPE_DOUBLE:
@@ -290,7 +289,6 @@ void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                   arrayOfElements,
                   "KnobDescriptor::setAttribute()");
         _defaultValue.Set(floatVal);
-        _defaultValueSet = true;
         break;
     }
     case HIPDNN_TYPE_CHAR:
@@ -303,7 +301,6 @@ void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                          MAX_STRING_VALUE_LENGTH,
                          "KnobDescriptor::setAttribute()");
         _defaultValue.Set(std::move(strVal));
-        _defaultValueSet = true;
         break;
     }
     default:
@@ -410,12 +407,13 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "KnobDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT:
-        getInt64Vector(_validValuesInt,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "KnobDescriptor::getAttribute()");
+        getScalarVector(_validValuesInt,
+                        HIPDNN_TYPE_INT64,
+                        attributeType,
+                        requestedElementCount,
+                        elementCount,
+                        arrayOfElements,
+                        "KnobDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING:
         getValidValuesString(attributeType, requestedElementCount, elementCount, arrayOfElements);
