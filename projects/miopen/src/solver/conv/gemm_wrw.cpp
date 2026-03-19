@@ -134,12 +134,12 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                      = problem.GetBatchSize();
-    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
-    auto g                      = problem.GetGroupCount();
-    auto spatial_per_batch      = s / b;
-    auto channels_per_group     = c / g;
+    auto b                  = problem.GetBatchSize();
+    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                  = problem.GetGroupCount();
+    auto spatial_per_batch  = s / b;
+    auto channels_per_group = c / g;
 
     if(is_gfx11 || is_gfx12)
     {
@@ -374,9 +374,9 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                      = problem.GetBatchSize();
-    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
-    auto spatial_per_batch      = s / b;
+    auto b                 = problem.GetBatchSize();
+    auto s                 = problem.GetOutHeight() * problem.GetOutWidth();
+    auto spatial_per_batch = s / b;
 
     if(is_gfx11 || is_gfx12)
     {
