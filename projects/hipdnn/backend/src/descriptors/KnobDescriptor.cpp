@@ -235,11 +235,12 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         }
         else
         {
-            setInt64Vector(_validValuesInt,
-                           attributeType,
-                           elementCount,
-                           arrayOfElements,
-                           "KnobDescriptor::setAttribute()");
+            setScalarVector(_validValuesInt,
+                            HIPDNN_TYPE_INT64,
+                            attributeType,
+                            elementCount,
+                            arrayOfElements,
+                            "KnobDescriptor::setAttribute()");
         }
         break;
     case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING:
@@ -328,8 +329,16 @@ void KnobDescriptor::setValidValuesString(hipdnnBackendAttributeType_t attribute
 
     if(elementCount == 0)
     {
-        // Append an empty string
-        _validValuesString.emplace_back();
+        if(arrayOfElements == nullptr)
+        {
+            // nullptr with elementCount=0: clear the list (mirrors VALID_VALUES_INT semantics)
+            _validValuesString.clear();
+        }
+        else
+        {
+            // non-null pointer with elementCount=0: append an empty string
+            _validValuesString.emplace_back();
+        }
         return;
     }
 
@@ -438,9 +447,7 @@ void KnobDescriptor::getDefaultValue(hipdnnBackendAttributeType_t attributeType,
     switch(_defaultValue.type)
     {
     case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-    {
-        const auto value = _defaultValue.AsIntValue()->value;
-        getScalar(value,
+        getScalar(_defaultValue.AsIntValue()->value,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   requestedElementCount,
@@ -448,11 +455,8 @@ void KnobDescriptor::getDefaultValue(hipdnnBackendAttributeType_t attributeType,
                   arrayOfElements,
                   "KnobDescriptor::getAttribute()");
         break;
-    }
     case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-    {
-        const auto value = _defaultValue.AsFloatValue()->value;
-        getScalar(value,
+        getScalar(_defaultValue.AsFloatValue()->value,
                   HIPDNN_TYPE_DOUBLE,
                   attributeType,
                   requestedElementCount,
@@ -460,7 +464,6 @@ void KnobDescriptor::getDefaultValue(hipdnnBackendAttributeType_t attributeType,
                   arrayOfElements,
                   "KnobDescriptor::getAttribute()");
         break;
-    }
     case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
         getString(_defaultValue.AsStringValue()->value,
                   attributeType,

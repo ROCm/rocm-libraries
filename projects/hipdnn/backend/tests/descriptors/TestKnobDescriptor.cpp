@@ -126,6 +126,18 @@ TEST_F(TestKnobDescriptor, SetKnobIdAsChar)
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(knobId.size()),
                                                   knobId.c_str()));
+    setInt64Default(0);
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    int64_t count = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_INFO_TYPE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+    ASSERT_EQ(count, static_cast<int64_t>(knobId.size() + 1));
+
+    std::vector<char> buf(static_cast<size_t>(count));
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_INFO_TYPE, HIPDNN_TYPE_CHAR, count, nullptr, buf.data()));
+    ASSERT_EQ(std::string(buf.data()), knobId);
 }
 
 TEST_F(TestKnobDescriptor, SetKnobIdWrongTypeFails)
@@ -769,10 +781,12 @@ TEST_F(TestKnobDescriptor, GetValidValuesStringOutOfRangeFails)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountAppendsEmpty)
+TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountNonNullAppendsEmpty)
 {
+    // elementCount=0 with non-null pointer: append an empty string
+    const char* empty = "";
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, nullptr));
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, empty));
     setKnobId("test_knob");
     setStringDefault("default");
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -787,6 +801,26 @@ TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountAppendsEmpty)
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
         HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 1, &strSize, nullptr));
     ASSERT_EQ(strSize, 1);
+}
+
+TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountNullClears)
+{
+    // Add some values, then clear with elementCount=0 + nullptr
+    const std::string val = "option_a";
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(val.size()),
+                                                  val.c_str()));
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, nullptr));
+    setKnobId("test_knob");
+    setStringDefault("default");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    int64_t count = 99;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+    ASSERT_EQ(count, 0); // list was cleared
 }
 
 // ============================================================================
