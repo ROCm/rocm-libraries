@@ -82,8 +82,6 @@ template <MmaPipelineOptionFlags::Type Flags_, typename Derived>
 struct MmaPipelineBase
 {
     static constexpr auto Flags = MmaPipelineOptionFlags(Flags_);
-    // TODO: Implement those cases
-    static_assert(!(Flags & MmaPipelineOptionFlag::C_TRANSPOSE), "Flag not yet implemented");
 
     private:
     template <typename DstT, typename SrcT>
@@ -128,7 +126,11 @@ struct MmaPipelineBase
         {
             // TODO: c++20: Call template functions with MmaPipelineOptionFlags directly
             auto pre = Derived::template preApply<Flags_>(
-                std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
+                hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>() ? std::forward<VecTB>(b)
+                                                              : std::forward<VecTA>(a),
+                hasFlag<MmaPipelineOptionFlag::C_TRANSPOSE>() ? std::forward<VecTA>(a)
+                                                              : std::forward<VecTB>(b),
+                std::forward<VecTC>(accum));
             Derived::execImpl(pre);
             return Derived::template postApply<Flags_>(std::move(pre));
         }

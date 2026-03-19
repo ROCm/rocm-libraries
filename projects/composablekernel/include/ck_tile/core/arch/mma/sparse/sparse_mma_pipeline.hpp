@@ -12,6 +12,11 @@
 
 namespace ck_tile::core::arch::mma {
 
+namespace sparse::detail {
+// TODO: c++20: return MmaPipelineOptionFlags directly]
+constexpr inline int getFlags() { return static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A); }
+} // namespace sparse::detail
+
 template <typename ADataType,
           typename BDataType,
           typename CDataType,
@@ -34,11 +39,9 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct SparseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A), // TODO: c++20: use MmaPipelineOptionFlags directly
-                                          SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>
+struct SparseMma : public MmaPipelineBase<sparse::detail::getFlags(), SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A), // TODO: c++20: use MmaPipelineOptionFlags directly
-                                 SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>;
+    using Base = MmaPipelineBase<sparse::detail::getFlags(), SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>;
     // clang-format on
 
     using FragWiseMmaOp = MmaOp; // Expose the selected MmaOp
@@ -65,7 +68,7 @@ struct SparseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag
     template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static decltype(auto) preApply(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        static_assert(Flags == MmaPipelineOptionFlags(MmaPipelineOptionFlag::COMPRESS_A));
+        static_assert(MmaPipelineOptionFlags(Flags).testFlag(MmaPipelineOptionFlag::COMPRESS_A));
         static_assert(
             std::is_same_v<ATransform, SparseCompressTransform<MmaOp::kCompressionRatio>>);
 
@@ -88,7 +91,7 @@ struct SparseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag
     template <MmaPipelineOptionFlags::Type Flags, typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static decltype(auto) postApply(std::tuple<VecTA, VecTB, VecTC, int32_t>&& vecs)
     {
-        static_assert(Flags == MmaPipelineOptionFlags(MmaPipelineOptionFlag::COMPRESS_A));
+        static_assert(MmaPipelineOptionFlags(Flags).testFlag(MmaPipelineOptionFlag::COMPRESS_A));
 
         auto& [a_frag, b_frag, c_frag, idx] = vecs;
         // Convert native vector results back to the output fragment format
