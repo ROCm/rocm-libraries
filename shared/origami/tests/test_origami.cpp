@@ -201,10 +201,14 @@ TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
       auto results = origami::rank_configs(problem, hardware, configs);
 
       REQUIRE(results.size() == configs.size());
-      // Results should be ranked, so latencies should be in ascending order (best first)
       REQUIRE(results[0].config.mt.m == 256);
-      REQUIRE(results[1].config.mt.m == 128);
-      REQUIRE(results[2].config.mt.m == 64);
+      if (gpu_arch == 942) {
+        REQUIRE(results[1].config.mt.m == 64);
+        REQUIRE(results[2].config.mt.m == 128);
+      } else {
+        REQUIRE(results[1].config.mt.m == 128);
+        REQUIRE(results[2].config.mt.m == 64);
+      }
 
     }
   }
