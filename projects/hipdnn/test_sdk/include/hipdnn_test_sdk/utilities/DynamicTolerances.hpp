@@ -44,7 +44,7 @@ inline double computeGamma(uint64_t k, double epsilon)
 {
     constexpr double NU_THRESHOLD = 0.01;
 
-    double nU = 2.0 * static_cast<double>(k) * epsilon;
+    const double nU = 2.0 * static_cast<double>(k) * epsilon;
 
     if(nU < NU_THRESHOLD)
     {
@@ -638,8 +638,8 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
     }
 
     // Extract reduction dimension K (last dim of A, second-to-last dim of B)
-    int64_t k = aDims[aDims.size() - 1];
-    int64_t bRows = bDims[bDims.size() - 2];
+    const int64_t k = aDims[aDims.size() - 1];
+    const int64_t bRows = bDims[bDims.size() - 2];
 
     if(k != bRows)
     {
@@ -655,12 +655,12 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
     auto numberOfAccumulations = static_cast<uint64_t>(k);
 
     // Compute infinity-norms of input matrices (max absolute row sum)
-    double normA = computeMatrixInfNorm<InputType>(a);
-    double normB = computeMatrixInfNorm<InputType>(b);
+    const double normA = computeMatrixInfNorm<InputType>(a);
+    const double normB = computeMatrixInfNorm<InputType>(b);
 
     // Apply Higham's error bound: max_ij |error_ij| <= γ_k * ||A||_inf * ||B||_inf
     auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
-    double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
+    const double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
 
     constexpr double GAMMA_MAX = 0.5;
     if(gamma >= GAMMA_MAX)
@@ -683,7 +683,7 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
         // Each element loses precision proportional to epsilon when cast.
         // Worst-case error contribution from input casting:
         //   Error ≈ 2 * ||A||_inf * ||B||_inf * epsilon
-        double castingError = 2.0 * normA * normB * epsilon;
+        const double castingError = 2.0 * normA * normB * epsilon;
         accumulatedTolerance += castingError;
     }
 
@@ -697,12 +697,12 @@ float calculateMatmulTolerance(ITensor& a, ITensor& b)
     {
         // The error is bounded by the precision of the OutputType at the final accumulated value.
         // Maximum possible output magnitude: ||A||_inf * ||B||_inf
-        double maxPossibleOutputValue = normA * normB;
+        const double maxPossibleOutputValue = normA * normB;
         castTolerance = maxPossibleOutputValue * outputEpsilon;
     }
 
     // Total tolerance is the sum of accumulation error and casting errors
-    double totalTolerance = accumulatedTolerance + castTolerance;
+    const double totalTolerance = accumulatedTolerance + castTolerance;
 
     // Check if totalTolerance exceeds the maximum representable value of OutputType
     if(totalTolerance > static_cast<double>(std::numeric_limits<OutputType>::max()))
