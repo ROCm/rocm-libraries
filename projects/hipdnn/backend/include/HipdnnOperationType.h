@@ -28,4 +28,15 @@ typedef enum
     HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD = 5, ///< Batch normalization backward pass
     HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE
     = 6, ///< Batch normalization inference with variance
+    HIPDNN_OPERATION_TYPE_BATCHNORM = 7, ///< Batch normalization training forward
+    HIPDNN_OPERATION_TYPE_POINTWISE = 8, ///< Pointwise operation
+    HIPDNN_OPERATION_TYPE_MATMUL = 9, ///< Matrix multiplication
+    HIPDNN_OPERATION_TYPE_RMSNORM = 10, ///< RMS normalization
+    HIPDNN_OPERATION_TYPE_LAYERNORM = 11, ///< Layer normalization
+    HIPDNN_OPERATION_TYPE_SDPA_FORWARD = 12, ///< Scaled dot-product attention forward
+    HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE = 13, ///< Block scale quantization
+    HIPDNN_OPERATION_TYPE_SDPA_BACKWARD = 14, ///< Scaled dot-product attention backward
+    HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE = 15, ///< Block scale dequantization
+    HIPDNN_OPERATION_TYPE_CUSTOM_OP = 16, ///< Custom operation
+    HIPDNN_OPERATION_TYPE_REDUCTION = 17, ///< Reduction operation
 } hipdnnOperationType_t;
