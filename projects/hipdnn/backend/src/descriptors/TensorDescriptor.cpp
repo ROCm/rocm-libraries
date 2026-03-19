@@ -251,15 +251,7 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
         break;
     }
     case DataType::UINT8:
-    {
-        _data.value.Set(Float8Value(bytes[0]));
-        break;
-    }
     case DataType::INT8:
-    {
-        _data.value.Set(Float8Value(bytes[0]));
-        break;
-    }
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
     {

@@ -35,8 +35,8 @@ void BatchnormBackwardOperationDescriptor::finalize()
                   "BatchnormBackwardOperationDescriptor::finalize() failed: compute data type not "
                   "set");
 
-    bool hasMean = _meanDesc != nullptr;
-    bool hasInvVariance = _invVarianceDesc != nullptr;
+    const bool hasMean = _meanDesc != nullptr;
+    const bool hasInvVariance = _invVarianceDesc != nullptr;
     THROW_IF_TRUE(
         hasMean != hasInvVariance,
         HIPDNN_STATUS_BAD_PARAM,

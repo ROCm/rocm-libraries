@@ -28,7 +28,7 @@
 
 #include "device_properties.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/sysinfo.h>
@@ -118,7 +118,7 @@ private:
     void update()
     {
         std::unique_lock lock(host_memory_mutex);
-#ifdef WIN32
+#ifdef _WIN32
         MEMORYSTATUSEX info;
         info.dwLength = sizeof(info);
         if(!GlobalMemoryStatusEx(&info))
