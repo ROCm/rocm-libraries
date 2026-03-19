@@ -37,10 +37,11 @@ template <typename ADataType,
 struct SparseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A), // TODO: c++20: use MmaPipelineOptionFlags directly
                                           SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>
 {
-    static_assert(MmaOpTraits<MmaOp>::IsSupported && MmaOpTraits<MmaOp>::IsSparse);
     using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A), // TODO: c++20: use MmaPipelineOptionFlags directly
                                  SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>;
     // clang-format on
+
+    using FragWiseMmaOp = MmaOp; // Expose the selected MmaOp
 
     // Calculate the uncompressed A vector type
     struct InternalAVecCalculator

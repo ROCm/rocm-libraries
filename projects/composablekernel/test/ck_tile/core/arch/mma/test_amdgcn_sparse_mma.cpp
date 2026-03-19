@@ -185,30 +185,26 @@ __global__ void test_sparse_accum_over_k(void* a, void* b, void* c, void* out)
                                                        CompilerTarget,
                                                        MmaOpFamily::SPARSE>::SelectedOp;
 
-    using MmaTraits = MmaOpTraits<MmaOp>;
+    using Pipeline =
+        SparseMma<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget>;
 
-    if constexpr(MmaTraits::IsSupported)
+    using AVecType = typename Pipeline::AVecType;
+    using BVecType = typename Pipeline::BVecType;
+    using CVecType = typename Pipeline::CVecType;
+
+    static constexpr uint32_t kIters = WaveTileK / MmaOp::kK;
+
+    // Initialize the accumulator
+    CVecType result = *reinterpret_cast<CVecType*>(c);
+
+    // Accumulate input AxB over FragK/BlockK iterations
+    for(uint32_t i = 0; i < kIters; ++i)
     {
-        using Pipeline = SparseMma<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, CompilerTarget>;
-
-        using AVecType = typename Pipeline::AVecType;
-        using BVecType = typename Pipeline::BVecType;
-        using CVecType = typename Pipeline::CVecType;
-
-        static constexpr uint32_t kIters = WaveTileK / MmaOp::kK;
-
-        // Initialize the accumulator
-        CVecType result = *reinterpret_cast<CVecType*>(c);
-
-        // Accumulate input AxB over FragK/BlockK iterations
-        for(uint32_t i = 0; i < kIters; ++i)
-        {
-            result = Pipeline::exec(
-                *reinterpret_cast<AVecType*>(a), *reinterpret_cast<BVecType*>(b), result);
-        }
-
-        *reinterpret_cast<CVecType*>(out) = result;
+        result = Pipeline::exec(
+            *reinterpret_cast<AVecType*>(a), *reinterpret_cast<BVecType*>(b), result);
     }
+
+    *reinterpret_cast<CVecType*>(out) = result;
 }
 
 // Live test on real hardware for sparse selection and execution.

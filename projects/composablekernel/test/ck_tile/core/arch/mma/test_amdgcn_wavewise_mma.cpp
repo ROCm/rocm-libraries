@@ -23,38 +23,24 @@ template <typename AType,
 __global__ void test_pipeline(void* a, void* b, void* c)
 {
     using CompilerTarget = decltype(get_compiler_target());
-    using MmaOp          = typename MmaDefaultSelector<AType, // TODO: c++20 MmaOpI MmaOp = typename
-                                                              // MmaDefaultSelector<ADataType,
-                                                       BType,
-                                                       CType,
-                                                       WaveTileM,
-                                                       WaveTileN,
-                                                       WaveTileK,
-                                                       CompilerTarget,
-                                                       MmaOpFamily::DENSE>::SelectedOp;
 
-    using MmaTraits = MmaOpTraits<MmaOp>;
+    using Pipeline = WaveWiseMma<AType,
+                                 BType,
+                                 CType,
+                                 WaveTileM,
+                                 WaveTileN,
+                                 WaveTileK,
+                                 MmaOpFamily::DENSE,
+                                 MmaAccumPolicy::ROW_MAJOR,
+                                 CompilerTarget>;
 
-    if constexpr(MmaTraits::IsSupported)
-    {
-        using Pipeline = WaveWiseMma<AType,
-                                     BType,
-                                     CType,
-                                     WaveTileM,
-                                     WaveTileN,
-                                     WaveTileK,
-                                     MmaOpFamily::DENSE,
-                                     MmaAccumPolicy::ROW_MAJOR,
-                                     CompilerTarget>;
+    using AVecType = typename Pipeline::AVecType;
+    using BVecType = typename Pipeline::BVecType;
+    using CVecType = typename Pipeline::CVecType;
 
-        using AVecType = typename Pipeline::AVecType;
-        using BVecType = typename Pipeline::BVecType;
-        using CVecType = typename Pipeline::CVecType;
-
-        Pipeline::exec(*reinterpret_cast<AVecType(*)[Pipeline::FragsM][Pipeline::FragsK]>(a),
-                       *reinterpret_cast<BVecType(*)[Pipeline::FragsN][Pipeline::FragsK]>(b),
-                       *reinterpret_cast<CVecType(*)[Pipeline::FragsM][Pipeline::FragsN]>(c));
-    }
+    Pipeline::exec(*reinterpret_cast<AVecType(*)[Pipeline::FragsM][Pipeline::FragsK]>(a),
+                   *reinterpret_cast<BVecType(*)[Pipeline::FragsN][Pipeline::FragsK]>(b),
+                   *reinterpret_cast<CVecType(*)[Pipeline::FragsM][Pipeline::FragsN]>(c));
 }
 
 TEST(WaveWiseMmaPipeline, testKIter)
