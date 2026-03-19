@@ -1327,8 +1327,8 @@ class Solution(collections.abc.Mapping):
         if not isaInfoMap[isa].archCaps["HasF32XEmulation"]:
           reject(state, printRejectionReason, "Missing emulation for F32X")
           return
-        if state["ScheduleIterAlg"] != 3:
-          reject(state, printRejectionReason, "F32X Emulation only supported with Schedule Iter Alg == 3")
+        if state["ScheduleIterAlg"] not in (1, 3):
+          reject(state, printRejectionReason, "F32X Emulation only supported with Schedule Iter Alg == (1 or 3)")
           return
         if tuple(state["MatrixInstruction"])[:3] in ((16, 16, 8), (16, 16, 16), (32, 32, 4)):
           reject(state, printRejectionReason, "tf32 emulation currently only supports mfma MI 16x16x32 and 32x32x16")

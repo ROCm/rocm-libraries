@@ -489,7 +489,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
-    rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}});
+    rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
 
     // Vector L1 Data cache line size (bytes) used for alignment-sensitive optimizations in codegen.
     // NOTE: This is a *codegen-time* (compile-time) constant selected by target ISA.
