@@ -10,7 +10,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(hip REQUIRED)
 find_package(hipdnn_test_sdk REQUIRED)
 find_package(hipdnn_plugin_sdk REQUIRED)
-find_package(GTest REQUIRED)
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.16.0.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    set(INSTALL_GTEST OFF)
+    FetchContent_MakeAvailable(googletest)
+endif()
 find_package(Threads REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
@@ -18,6 +28,7 @@ add_executable(hipdnn_integration_tests
     src/main.cpp
     src/IntegrationGpuBatchnormBackwardActivation.cpp
     src/IntegrationGpuConvForward.cpp
+    src/IntegrationIsSupportedExtPerformance.cpp
 )
 
 target_include_directories(hipdnn_integration_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
