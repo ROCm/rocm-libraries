@@ -3,7 +3,7 @@
 
 import pathlib
 from itertools import product
-from typing import List
+from typing import Generator
 
 from rrperf.problems import (
     CodeGenRun,
@@ -1222,15 +1222,17 @@ def add_wgm(mapping, suite):
         yield run
 
 
-def addSkipPermlane(suite: List[GEMMRun], value="PreSwizzleScale"):
+def addSkipPermlane(suite: Generator[GEMMRun, None, None], value="PreSwizzleScale"):
     for run in suite:
         run.types.scaleSkipPermlane = value
         yield run
 
 
-def addStreamK(suite, value="Standard"):
+def addStreamK(suite: Generator[GEMMRun, None, None], value="Standard"):
     for run in suite:
         run.streamK = value
+        if run.types.scale_A == "Separate" or run.types.scale_B == "Separate":
+            run.schedulerCost = "LinearWeightedSimpleStreamK"
         yield run
 
 
@@ -1919,9 +1921,9 @@ def test_streamk_fp4():
         k.M = 128
         k.N = 128
         k.K = 76800
-        k.mac_m = 64,
-        k.mac_n = 32,
-        k.mac_k = 256,
+        k.mac_m = (64,)
+        k.mac_n = (32,)
+        k.mac_k = (256,)
         k.prefetchInFlight = 2
 
         yield k

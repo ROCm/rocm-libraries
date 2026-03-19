@@ -167,9 +167,9 @@ namespace rocRoller
                                                          CoexecCategory::XDL_Scale,
                                                          CoexecCategory::LDS};
                 EnumBitset<CoexecCategory> noVALU     = {CoexecCategory::VALU,
-                                                         CoexecCategory::VALU_Trans,
-                                                         CoexecCategory::XDL,
-                                                         CoexecCategory::XDL_Scale};
+                                                     CoexecCategory::VALU_Trans,
+                                                     CoexecCategory::XDL,
+                                                     CoexecCategory::XDL_Scale};
                 EnumBitset<CoexecCategory> noXDL = {CoexecCategory::XDL, CoexecCategory::XDL_Scale};
 
                 rv = {{1, scalarOnly}, {2, noVALU}, {3, noXDL}, {4, noXDL}, {5, noXDL}, {6, noXDL}};

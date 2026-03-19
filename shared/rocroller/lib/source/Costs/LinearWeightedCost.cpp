@@ -81,16 +81,16 @@ namespace rocRoller
             .dsmemQueueSize   = 1,
         };
         constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {
-            .nops = 131.82052000047628,
-            .stallCycles = 1000.0,
-            .isSALU = 1073.9946584081224,
-            .isVALU = 96.7974133366133,
-            .outOfRegisters = 1000000000.0,
+            .nops             = 131.82052000047628,
+            .stallCycles      = 1000.0,
+            .isSALU           = 1073.9946584081224,
+            .isVALU           = 96.7974133366133,
+            .outOfRegisters   = 1000000000.0,
             .zeroFreeBarriers = false,
-            .vmemCycles = 149,
-            .vmemQueueSize = 3,
-            .dsmemCycles = 46,
-            .dsmemQueueSize = 2,
+            .vmemCycles       = 149,
+            .vmemQueueSize    = 3,
+            .dsmemCycles      = 46,
+            .dsmemQueueSize   = 2,
         };
 
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,

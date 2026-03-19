@@ -144,7 +144,7 @@ class WeightsABC:
 
     @classmethod
     def from_dict(cls, d):
-        assert 'type' in d
+        assert "type" in d
 
         if d["type"] == "FullWeights":
             return FullWeights(**d)
@@ -153,10 +153,12 @@ class WeightsABC:
 
     @classmethod
     def subclass(cls, name):
-        lookup = {"Full": FullWeights,
-                  "FullWeights": FullWeights,
-                  "Simplified": SimplifiedWeights,
-                  "SimplifiedWeights": SimplifiedWeights}
+        lookup = {
+            "Full": FullWeights,
+            "FullWeights": FullWeights,
+            "Simplified": SimplifiedWeights,
+            "SimplifiedWeights": SimplifiedWeights,
+        }
 
         assert name in lookup
         return lookup[name]
@@ -403,7 +405,9 @@ def split_old_new_results(weights) -> Tuple[List[WeightsABC], List[WeightsABC]]:
 
 
 def generation(
-    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[WeightsABC]
+    output_dir: pathlib.Path,
+    problem: rrperf.problems.GEMMRun,
+    weights: List[WeightsABC],
 ) -> List[Result]:
     global prev_results  # noqa: disable=F824
 
@@ -449,7 +453,12 @@ def write_generation(thedir: pathlib.Path, name, results: List[Result]):
 
 
 def new_inputs(
-    all_results: List[Result], population, num_parents, num_random, mutation, weight_type
+    all_results: List[Result],
+    population,
+    num_parents,
+    num_random,
+    mutation,
+    weight_type,
 ):
     if len(all_results) == 0:
         rv = set()
@@ -508,7 +517,7 @@ def genetic(args):
                 num_parents=args.num_parents,
                 num_random=args.num_random,
                 mutation=args.mutation,
-                weight_type=args.weight_type
+                weight_type=args.weight_type,
             )
 
             gen_dir = args.output_dir / f"gen_{i}"

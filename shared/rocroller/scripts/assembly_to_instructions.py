@@ -217,7 +217,9 @@ namespace rocRollerTest
     struct {name}
     {{
         ContextPtr m_context;
-""".format(name=cli_args.function_name)
+""".format(
+        name=cli_args.function_name
+    )
 
     result += declare_labels(labels)
     result += declare_registers(registers)
@@ -227,7 +229,9 @@ namespace rocRollerTest
         {name}(ContextPtr context)
             : m_context(context)
         {{
-""".format(name=cli_args.function_name)
+""".format(
+        name=cli_args.function_name
+    )
 
     result += define_labels(labels)
     result += define_registers(registers)
@@ -241,7 +245,9 @@ namespace rocRollerTest
 
             // clang-format off
 return {{
-""".format(block_count)
+""".format(
+        block_count
+    )
 
     line_count = 0
     in_macro = False
@@ -262,7 +268,9 @@ return {{
         {{
             // clang-format off
 return {{
-""".format(block_count)
+""".format(
+                block_count
+            )
 
     result += """
 }};
@@ -273,7 +281,9 @@ return {{
     Generator<Instruction> {name}_Program(ContextPtr context)
     {{
         {name} gen(context);
-""".format(name=cli_args.function_name)
+""".format(
+        name=cli_args.function_name
+    )
 
     result += allocate_registers(cli_args.function_name, registers)
 

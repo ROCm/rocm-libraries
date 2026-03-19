@@ -37,12 +37,12 @@ namespace rocRoller
 
             /// `vectorQueueSat` penalizes an instruction for how much it will
             /// make the vector memory queue longer than `vmQueueLen`.
-            int   vmQueueLen = 0;
+            int   vmQueueLen     = 0;
             float vectorQueueSat = 0.0f;
 
             /// `ldsQueueSat` penalizes an instruction for how much it will
             /// make the vector memory queue longer than `vmQueueLen`.
-            float ldsQueueSat = 0.0f;
+            float ldsQueueSat  = 0.0f;
             int   lgkmQueueLen = 0;
 
             /// Does our model predict that the instruction will be able to
@@ -58,18 +58,18 @@ namespace rocRoller
             /// other instructions.
             float isMFMA = 0.0f;
 
-            float isSMEM = 0.0f;
+            float isSMEM     = 0.0f;
             float isSControl = 0.0f;
-            float isSALU = 0.0f;
+            float isSALU     = 0.0f;
 
-            float isVMEMRead = 0.0f;
+            float isVMEMRead  = 0.0f;
             float isVMEMWrite = 0.0f;
-            float isLDSRead = 0.0f;
-            float isLDSWrite = 0.0f;
-            float isVALU = 0.0f;
+            float isLDSRead   = 0.0f;
+            float isLDSWrite  = 0.0f;
+            float isVALU      = 0.0f;
 
             float isACCVGPRWrite = 0.0f;
-            float isACCVGPRRead = 0.0f;
+            float isACCVGPRRead  = 0.0f;
 
             /// How many new SGPRs will the instruction allocate?
             float newSGPRs = 0.0f;
