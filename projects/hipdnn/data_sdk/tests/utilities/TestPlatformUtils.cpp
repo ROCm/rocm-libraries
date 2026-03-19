@@ -15,24 +15,24 @@
 
 TEST(TestPlatformUtils, PathCompEqIdenticalPaths)
 {
-    std::filesystem::path const path1 = "/home/user/project";
-    std::filesystem::path const path2 = "/home/user/project";
+    const std::filesystem::path path1 = "/home/user/project";
+    const std::filesystem::path path2 = "/home/user/project";
 
     EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
 
 TEST(TestPlatformUtils, PathCompEqDifferentPaths)
 {
-    std::filesystem::path const path1 = "/home/user/project1";
-    std::filesystem::path const path2 = "/home/user/project2";
+    const std::filesystem::path path1 = "/home/user/project1";
+    const std::filesystem::path path2 = "/home/user/project2";
 
     EXPECT_FALSE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
 
 TEST(TestPlatformUtils, PathCompEqEmptyPaths)
 {
-    std::filesystem::path const path1;
-    std::filesystem::path const path2;
+    const std::filesystem::path path1;
+    const std::filesystem::path path2;
 
     EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
@@ -71,10 +71,10 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
     auto execDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
 
     std::array<char, PATH_MAX> execPath{};
-    ssize_t const len = readlink("/proc/self/exe", execPath.data(), PATH_MAX);
+    const ssize_t len = readlink("/proc/self/exe", execPath.data(), PATH_MAX);
     ASSERT_NE(len, -1);
 
-    std::filesystem::path const actualExecPath(
+    const std::filesystem::path actualExecPath(
         std::string(execPath.data(), static_cast<size_t>(len)));
 
     EXPECT_TRUE(std::filesystem::exists(execDir / actualExecPath.filename()));
@@ -144,7 +144,7 @@ TEST(TestPlatformUtils, GetExecutableNameEmptyName)
 
 TEST(TestPlatformUtils, GetEnvReturnsValue)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const setter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
         "HIPDNN_TEST_PLATFORMUTILS_GETENV", "test_value");
 
     auto result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_GETENV");
@@ -173,7 +173,7 @@ TEST(TestPlatformUtils, GetEnvReturnsEmptyWhenUnsetNoDefault)
 
 TEST(TestPlatformUtils, GetEnvReturnsEmptyStringValue)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const setter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
         "HIPDNN_TEST_PLATFORMUTILS_EMPTY", "");
 
     auto result
@@ -198,7 +198,7 @@ TEST(TestPlatformUtils, SetEnvSetsValue)
 
 TEST(TestPlatformUtils, SetEnvOverwritesExisting)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const setter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
         "HIPDNN_TEST_PLATFORMUTILS_OVERWRITE", "original");
 
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_PLATFORMUTILS_OVERWRITE", "updated");
