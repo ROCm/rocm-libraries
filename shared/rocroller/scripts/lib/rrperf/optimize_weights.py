@@ -117,7 +117,7 @@ def fixed_value(value):
     return factory
 
 
-class WeightsABC:
+class Weights:
     @classmethod
     def Combine(cls, inputs: list, mutation: float = 0.1):
         vals = {}
@@ -164,7 +164,7 @@ class WeightsABC:
 
 
 @dataclass(frozen=True, order=True, unsafe_hash=True)
-class FullWeights(WeightsABC):
+class FullWeights(Weights):
     type: str = field(default_factory=fixed_value("FullWeights"))
 
     nops: float = field(default_factory=random_inv_exp())
@@ -232,7 +232,7 @@ class FullWeights(WeightsABC):
 
 
 @dataclass(frozen=True, order=True, unsafe_hash=True)
-class SimplifiedWeights(WeightsABC):
+class SimplifiedWeights(Weights):
     type: str = field(default_factory=fixed_value("SimplifiedWeights"))
 
     nops: float = field(default_factory=random_inv_exp())
@@ -279,7 +279,7 @@ class Result:
 
     rnorm: float = field(default=math.inf)
 
-    weights: WeightsABC = field(default=None)
+    weights: Weights = field(default=None)
 
     @property
     def passed(self):
@@ -310,7 +310,7 @@ class Result:
     def from_dict(cls, d):
         args = {k: v for k, v in d.items() if k != "hash"}
         if "weights" in args:
-            args["weights"] = WeightsABC.from_dict(args["weights"])
+            args["weights"] = Weights.from_dict(args["weights"])
         return cls(**args)
 
 
@@ -319,7 +319,7 @@ def bench_star(arg):
 
 
 def bench(
-    thedir: Path, problem: rrperf.problems.GEMMRun, weights: WeightsABC
+    thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights
 ) -> Result:
     device, lock = acquire_lock()
 
@@ -389,7 +389,7 @@ def sanity_check(results: list[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> tuple[list[WeightsABC], list[WeightsABC]]:
+def split_old_new_results(weights) -> tuple[list[Weights], list[Weights]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
@@ -406,7 +406,7 @@ def split_old_new_results(weights) -> tuple[list[WeightsABC], list[WeightsABC]]:
 def generation(
     output_dir: Path,
     problem: rrperf.problems.GEMMRun,
-    weights: list[WeightsABC],
+    weights: list[Weights],
 ) -> list[Result]:
     global prev_results  # noqa: disable=F824
 
@@ -632,7 +632,7 @@ def get_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--weight-type",
         default="Simplified",
-        type=WeightsABC.subclass,
+        type=Weights.subclass,
         help="Which subset of weights to optimize.",
     )
 
