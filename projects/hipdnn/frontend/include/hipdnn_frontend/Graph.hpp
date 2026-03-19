@@ -599,13 +599,16 @@ public:
 
     /**
      * @brief Validate the graph structure and tensor configurations
-     * @return Error indicating success or describing validation failures
      *
      * Validates that:
-     * - All tensors have required attributes set
      * - No duplicate tensor UIDs exist
      * - Graph is a valid DAG (no cycles)
-     * - Graph is connected (no orphaned nodes)
+     * - Graph is a single connected component
+     * - All tensor attributes are set (dims, type, strides)
+     * - All operation nodes have valid configurations
+     *
+     * @return Error with ErrorCode::INVALID_VALUE or ErrorCode::ATTRIBUTE_NOT_SET
+     *         on failure. Call get_message() for the specific failure reason.
      */
     Error validate()
     {
@@ -633,7 +636,8 @@ public:
 
     /**
      * @brief Verify that no two tensors in the graph share the same UID
-     * @return Error describing the duplicate UIDs, or OK
+     * @return Error with ErrorCode::INVALID_VALUE listing the duplicate UIDs,
+     *         or OK
      */
     Error checkNoDuplicateTensorIds()
     {
@@ -645,7 +649,8 @@ public:
 
     /**
      * @brief Check that all tensors in the graph have UIDs assigned
-     * @return Error listing tensors without UIDs, or OK
+     * @return Error with ErrorCode::ATTRIBUTE_NOT_SET listing tensors without
+     *         UIDs, or OK
      */
     Error checkTensorUidsSet() const
     {
@@ -709,10 +714,11 @@ public:
      * @brief Topologically sort the graph nodes
      *
      * Reorders internal nodes so that every node appears after its
-     * dependencies. Returns an error if the graph has a cycle or is
-     * disconnected.
+     * dependencies.
      *
-     * @return Error indicating success or describing the structural issue
+     * @return Error with ErrorCode::INVALID_VALUE if the graph contains a cycle
+     *         or multiple disconnected components. Call get_message() for the
+     *         specific failure reason.
      */
     Error topologicallySortGraph()
     {
@@ -1327,7 +1333,8 @@ public:
      * 1. Graph validation
      * 2. Operation graph building
      * 3. Execution plan creation
-     * 4. Plan building
+     * 4. Execution plan support verification
+     * 5. Plan finalization
      *
      * @code{.cpp}
      * hipdnnHandle_t handle;
