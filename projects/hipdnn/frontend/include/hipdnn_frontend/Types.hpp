@@ -684,7 +684,12 @@ inline hipdnn_frontend::AttentionImplementation
     }
 }
 
-/// @brief Convert frontend DataType to backend hipdnnDataType_t
+/**
+ * @brief Convert frontend DataType to backend hipdnnDataType_t
+ *
+ * @param type The frontend DataType value
+ * @return The corresponding hipdnnDataType_t value, or std::nullopt if not set
+ */
 inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
 {
     switch(type)
@@ -991,6 +996,7 @@ inline const char* to_string(const ConvolutionMode& mode)
     }
 }
 
+/// @brief Stream insertion operator for ConvolutionMode
 inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
 {
     return os << to_string(mode);
