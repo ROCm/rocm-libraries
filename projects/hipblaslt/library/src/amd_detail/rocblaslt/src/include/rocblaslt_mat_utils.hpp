@@ -238,44 +238,49 @@ inline rocblaslt_status validateMatmulArgs(int64_t                      m,
         return rocblaslt_status_invalid_pointer;
 
     // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
-    bool a_or_b_null = !a || !b;
+    bool a_or_b_null         = !a || !b;
     bool alpha_A_B_violation = false;
-    if (k && (!alpha || (pointermode && a_or_b_null)))
-    {   // device mode don't read alpha from device
+    if(k && (!alpha || (pointermode && a_or_b_null)))
+    { // device mode don't read alpha from device
         alpha_A_B_violation = true;
     }
-    else if (k && a_or_b_null)
+    else if(k && a_or_b_null)
     {
+        const uint32_t IEEE_F32_ZERO_MASK = 0x7FFFFFFF;
+        const uint64_t IEEE_F64_ZERO_MASK = 0x7FFFFFFFFFFFFFFFULL;
+
         // dig deeper into the alpha value as if non zero then a and b are required
-        switch (compute_type)
+        switch(compute_type)
         {
-        // IEEE not zero tests 
+        // IEEE not zero tests
         case rocblaslt_compute_f16:
-            alpha_A_B_violation = (*((uint16_t*)alpha) & 0x7FFF) != 0; // mask off negative zero bit
+            alpha_A_B_violation = (*((uint16_t*)alpha) & 0x7fff) != 0; // mask off negative zero bit
             break;
         case rocblaslt_compute_f32:
-            alpha_A_B_violation = (*((uint32_t*)alpha) & 0x7FFFFFFF) != 0;
+            alpha_A_B_violation = (*((uint32_t*)alpha) & IEEE_F32_ZERO_MASK) != 0;
             break;
         case rocblaslt_compute_f64:
-            alpha_A_B_violation = (*((uint64_t*)alpha) & 0x7FFFFFFFFFFFFFFF) != 0;
+            alpha_A_B_violation = (*((uint64_t*)alpha) & IEEE_F64_ZERO_MASK) != 0;
             break;
         default:
-            if (type_c != HIP_C_32F && type_c != HIP_C_64F)
+            if(type_c != HIP_C_32F && type_c != HIP_C_64F)
             {
                 // F32 based is default
-                alpha_A_B_violation = (*((uint32_t*)alpha) & 0x7FFFFFFF) != 0;
+                alpha_A_B_violation = (*((uint32_t*)alpha) & IEEE_F32_ZERO_MASK) != 0;
             }
             else
             {
-                if (type_c == HIP_C_32F)
+                if(type_c == HIP_C_32F)
                 {
-                    alpha_A_B_violation = (*((uint32_t*)alpha) & 0x7FFFFFFF) != 0;
-                    alpha_A_B_violation = alpha_A_B_violation || ((((uint32_t*)alpha)[1] & 0x7FFFFFFF) != 0);
+                    alpha_A_B_violation = (*((uint32_t*)alpha) & IEEE_F32_ZERO_MASK) != 0;
+                    alpha_A_B_violation = alpha_A_B_violation
+                                          || ((((uint32_t*)alpha)[1] & IEEE_F32_ZERO_MASK) != 0);
                 }
                 else // HIP_C_64F
                 {
-                    alpha_A_B_violation = (*(uint64_t*)(alpha) & 0x7FFFFFFFFFFFFFFF) != 0;
-                    alpha_A_B_violation = alpha_A_B_violation || ((((uint64_t*)alpha)[1] & 0x7FFFFFFFFFFFFFFF) != 0);
+                    alpha_A_B_violation = (*(uint64_t*)(alpha)&IEEE_F64_ZERO_MASK) != 0;
+                    alpha_A_B_violation = alpha_A_B_violation
+                                          || ((((uint64_t*)alpha)[1] & IEEE_F64_ZERO_MASK) != 0);
                 }
             }
             break;
