@@ -14,14 +14,14 @@ namespace hipdnn_tests::plugin_constants
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
 {
-    static std::string const s_defaultDir
+    static const std::string s_defaultDir
         = (std::filesystem::path(".") / "test_plugins" / "default").string();
     return s_defaultDir;
 }
 
 inline const std::string& getTestPluginCustomDir()
 {
-    static std::string const s_customDir
+    static const std::string s_customDir
         = (std::filesystem::path(".") / "test_plugins" / "custom").string();
     return s_customDir;
 }
@@ -31,7 +31,7 @@ inline std::string getTestCustomFilepathForPlugin(const char* pluginName)
 {
     namespace fs = std::filesystem;
 
-    fs::path const pluginFile = fs::path(getTestPluginCustomDir())
+    const fs::path pluginFile = fs::path(getTestPluginCustomDir())
                                 / hipdnn_data_sdk::utilities::getLibraryName(pluginName);
 
     return pluginFile.string();

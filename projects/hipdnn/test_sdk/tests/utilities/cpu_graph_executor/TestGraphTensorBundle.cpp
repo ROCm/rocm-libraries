@@ -22,7 +22,7 @@ protected:
                                                  DataType scaleBiasDataType,
                                                  DataType meanVarianceDataType)
     {
-        std::vector<int64_t> const dims = {2, 3, 4, 4};
+        const std::vector<int64_t> dims = {2, 3, 4, 4};
         auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
                                                      scaleBiasDataType,
                                                      meanVarianceDataType,
@@ -58,7 +58,7 @@ TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
 
 TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
 {
-    std::vector<int64_t> const dims = {2, 3, 4, 4};
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
@@ -68,7 +68,7 @@ TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
                                                  true);
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     auto& tensorMap = graphWrapper.getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -112,7 +112,7 @@ TEST_F(TestGraphTensorBundle, RandomizeTensorThrowsForInvalidUid)
 
     GraphTensorBundle bundle(tensorMap);
 
-    int64_t const invalidUid = 99999;
+    const int64_t invalidUid = 99999;
     EXPECT_THROW(bundle.randomizeTensor(invalidUid, -1.0f, 1.0f, 42), std::runtime_error);
 }
 
@@ -139,7 +139,7 @@ TEST_F(TestGraphTensorBundle, ConstructorHandlesDifferentDataTypes)
     auto graphWrapper = buildTestGraph(DataType::HALF, DataType::HALF, DataType::HALF);
     auto& tensorMap = graphWrapper->getTensorMap();
 
-    GraphTensorBundle const bundle(tensorMap);
+    const GraphTensorBundle bundle(tensorMap);
 
     EXPECT_EQ(bundle.tensors.size(), tensorMap.size());
 }
@@ -149,7 +149,7 @@ TEST_F(TestGraphTensorBundle, ConstructorHandlesBFloat16DataTypes)
     auto graphWrapper = buildTestGraph(DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
     auto& tensorMap = graphWrapper->getTensorMap();
 
-    GraphTensorBundle const bundle(tensorMap);
+    const GraphTensorBundle bundle(tensorMap);
 
     EXPECT_EQ(bundle.tensors.size(), tensorMap.size());
 }
@@ -159,7 +159,7 @@ TEST_F(TestGraphTensorBundle, TensorsHaveCorrectDimensions)
     auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
-    GraphTensorBundle const bundle(tensorMap);
+    const GraphTensorBundle bundle(tensorMap);
 
     for(const auto& [uid, tensorPtr] : bundle.tensors)
     {
@@ -213,7 +213,7 @@ TEST_F(TestGraphTensorBundle, GetTensorThrowsForInvalidUid)
 
     GraphTensorBundle bundle(tensorMap);
 
-    int64_t const invalidUid = 99999;
+    const int64_t invalidUid = 99999;
     EXPECT_THROW(bundle.getTensor(invalidUid), std::runtime_error);
 }
 
@@ -237,9 +237,9 @@ TEST_F(TestGraphTensorBundle, GetTensorConstThrowsForInvalidUid)
     auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
-    GraphTensorBundle const bundle(tensorMap);
+    const GraphTensorBundle bundle(tensorMap);
 
     const auto& constBundle = bundle;
-    int64_t const invalidUid = 99999;
+    const int64_t invalidUid = 99999;
     EXPECT_THROW(constBundle.getTensor(invalidUid), std::runtime_error);
 }

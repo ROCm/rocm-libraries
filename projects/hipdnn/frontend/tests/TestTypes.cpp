@@ -177,7 +177,7 @@ TEST(TestTypes, GetKnobValueTypeFromVariantInt64)
 {
     using namespace hipdnn_frontend;
 
-    std::variant<int64_t, double, std::string> const value = static_cast<int64_t>(42);
+    const std::variant<int64_t, double, std::string> value = static_cast<int64_t>(42);
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::INT64);
 }
 
@@ -185,7 +185,7 @@ TEST(TestTypes, GetKnobValueTypeFromVariantFloat64)
 {
     using namespace hipdnn_frontend;
 
-    std::variant<int64_t, double, std::string> const value = 3.14;
+    const std::variant<int64_t, double, std::string> value = 3.14;
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::FLOAT64);
 }
 
@@ -193,7 +193,7 @@ TEST(TestTypes, GetKnobValueTypeFromVariantString)
 {
     using namespace hipdnn_frontend;
 
-    std::variant<int64_t, double, std::string> const value = std::string("test");
+    const std::variant<int64_t, double, std::string> value = std::string("test");
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::STRING);
 }
 
