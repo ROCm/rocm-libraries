@@ -167,8 +167,8 @@ public:
             get_x()->get_uid(),
             get_y()->get_uid(),
             get_scale()->get_uid(),
-            block_size
-                .value(), // NOLINT(bugprone-unchecked-optional-access) Throws if block_size not set; requires prior validation
+            block_size // NOLINT(bugprone-unchecked-optional-access) Throws if block_size not set
+                .value(),
             fbAxis,
             transpose);
     }
