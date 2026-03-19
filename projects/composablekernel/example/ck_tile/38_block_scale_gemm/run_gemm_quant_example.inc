@@ -188,9 +188,11 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
         using ABQuantPipeline = std::conditional_t<
             eight_waves,
             ck_tile::ABQuantGemmPipelineAgBgCrEightWaves<PipelineProblem>,
-            std::conditional_t<GemmConfig::DoubleSmemBuffer && GemmConfig::PreshuffleB,
-                               ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
-                               ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
+            std::conditional_t<
+                GemmConfig::DoubleSmemBuffer && GemmConfig::PreshuffleB,
+                ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
+                ck_tile::FusedAQuantBQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
+        //    ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
 
         using GemmPipeline = std::conditional_t<
             QuantMode == ck_tile::QuantType::RowColQuant ||
