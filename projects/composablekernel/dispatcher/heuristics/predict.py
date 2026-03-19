@@ -83,7 +83,8 @@ class Predictor:
         raw = float(model.predict(features.reshape(1, -1))[0])
         if target in self._log_targets:
             return float(np.expm1(raw))
-        return raw
+        # Clamp to non-negative even for non-log models
+        return float(max(0.0, raw))
 
     def predict_tflops(self, problem: dict, kernel_config: dict) -> float:
         """Predict TFLOPS for a single (problem, kernel) pair.
