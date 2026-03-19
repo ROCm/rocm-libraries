@@ -944,8 +944,13 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             # this happens in some transpose cases.  Here the first write needs to wait
                             # for the associated global read to finish, then the remaining writes can flow
                             # TODO - can schedule these writes across iters, should figure this out above
-                            readsToWait = readsToWait - 1
-                            readsToWaitNGLL = readsToWaitNGLL - 1
+                            # A ds_store_b128 + ds_store_b64 pair (counted as one B192-equivalent by
+                            # countDSStoreB192) corresponds to 2 physical VMEM loads. Each extra physical
+                            # load beyond the first must also decrement readsToWait so that the generated
+                            # s_wait_loadcnt value correctly tracks the outstanding load count.
+                            numPhysLoads = 1 + countDSStoreB192(item)
+                            readsToWait = readsToWait - numPhysLoads
+                            readsToWaitNGLL = readsToWaitNGLL - numPhysLoads
                             imodList.append(SWaitCnt(vlcnt=readsToWait, \
                                 comment="wait for global read before writing to local"))
                             imodNGLLList.append(SWaitCnt(vlcnt=readsToWaitNGLL, \
