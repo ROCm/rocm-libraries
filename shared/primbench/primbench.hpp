@@ -1432,7 +1432,7 @@ static constexpr const char* horizontal_bar          = u8"─";
 /// Prints the table header for dry-run mode output.
 inline void print_dry_header(std::string_view algo_name,
                              size_t           specialization_col_width,
-                             size_t           family_col_width,
+                             size_t           index_col_width,
                              size_t           specialization_count)
 {
     std::string status_header    = "Status of " + std::string(algo_name);
@@ -1451,7 +1451,7 @@ inline void print_dry_header(std::string_view algo_name,
 
     if(specialization_count > 1)
     {
-        underline_width += 2 + family_col_width;
+        underline_width += 2 + index_col_width;
     }
 
     for(size_t i = 0; i < underline_width; ++i)
@@ -1462,7 +1462,7 @@ inline void print_dry_header(std::string_view algo_name,
 /// Prints the table header for algorithm progress output.
 inline void print_header(std::string_view          algo_name,
                          size_t                    specialization_col_width,
-                         size_t                    family_col_width,
+                         size_t                    index_col_width,
                          size_t                    specialization_count,
                          std::chrono::seconds::rep noise_timeout_secs)
 {
@@ -1488,7 +1488,7 @@ inline void print_header(std::string_view          algo_name,
 
     if(specialization_count > 1)
     {
-        underline_width += 2 + family_col_width;
+        underline_width += 2 + index_col_width;
     }
 
     for(size_t i = 0; i < underline_width; ++i)
@@ -1510,12 +1510,12 @@ inline void print_cooling(uint16_t gpu_temp, uint16_t max_gpu_temp)
               << green << max_gpu_temp << "°C" << reset << std::flush;
 }
 
-/// Prints a single line of output for dry-run mode, containing the status, specialization and family index.
+/// Prints a single line of output for dry-run mode, containing the status, specialization and index.
 inline void print_dry_progress(std::string_view specialization,
                                std::string_view algo_name,
-                               size_t           family_index,
+                               size_t           specialization_index,
                                size_t           specialization_col_width,
-                               size_t           family_col_width,
+                               size_t           index_col_width,
                                bool             print_index)
 {
     std::ostringstream line;
@@ -1529,7 +1529,7 @@ inline void print_dry_progress(std::string_view specialization,
 
     if(print_index)
     {
-        line << "  " << std::setw(family_col_width) << std::right << family_index;
+        line << "  " << std::setw(index_col_width) << std::right << specialization_index;
     }
 
     std::cout << line.str() << "\n" << std::flush;
@@ -1543,9 +1543,9 @@ inline void print_progress(uint64_t         iteration,
                            std::string_view specialization,
                            std::string_view algo_name,
                            uint64_t         batch_window_size,
-                           size_t           family_index,
+                           size_t           specialization_index,
                            size_t           specialization_col_width,
-                           size_t           family_col_width,
+                           size_t           index_col_width,
                            double           elapsed_host_secs,
                            double           noise_timeout_secs,
                            double           noise_tolerance_percent,
@@ -1636,7 +1636,7 @@ inline void print_progress(uint64_t         iteration,
     // Index.
     if(print_index)
     {
-        line << "  " << std::setw(family_col_width) << std::right << family_index;
+        line << "  " << std::setw(index_col_width) << std::right << specialization_index;
     }
 
     // Colorized status messages.
@@ -2121,7 +2121,7 @@ class state
 public:
     state(std::string_view algo,
           json             meta,
-          size_t           family_index,
+          size_t           specialization_index,
           bool             print_index,
           stream_t         stream,
           logger&          logger,
@@ -2130,7 +2130,7 @@ public:
           const settings&  settings,
           flags::FlagTag   flags,
           size_t           specialization_col_width,
-          size_t           family_col_width,
+          size_t           index_col_width,
           cache_thrasher&  cache,
           gpu_warmer&      warmer)
         : stream(stream)
@@ -2138,7 +2138,7 @@ public:
         , seed(settings.seed)
         , m_algo(algo)
         , m_meta(std::move(meta))
-        , m_family_index(family_index)
+        , m_specialization_index(specialization_index)
         , m_print_index(print_index)
         , m_logger(logger)
         , m_monitor(monitor)
@@ -2146,7 +2146,7 @@ public:
         , m_settings(settings)
         , m_flags(flags)
         , m_specialization_col_width(specialization_col_width)
-        , m_family_col_width(family_col_width)
+        , m_index_col_width(index_col_width)
         , m_cache(cache)
         , m_warmer(warmer)
     {}
@@ -2365,9 +2365,9 @@ private:
                                  name,
                                  m_algo,
                                  s.batch_window_size,
-                                 m_family_index,
+                                 m_specialization_index,
                                  m_specialization_col_width,
-                                 m_family_col_width,
+                                 m_index_col_width,
                                  elapsed_host_secs,
                                  s.noise_timeout_secs,
                                  s.noise_tolerance_percent,
@@ -2378,7 +2378,7 @@ private:
         {
             std::cout << "\n";
 
-            m_logger.output_specialization(m_family_index,
+            m_logger.output_specialization(m_specialization_index,
                                            name,
                                            serialized_meta,
                                            m_kernels_per_batch,
@@ -2596,7 +2596,7 @@ private:
     std::string m_algo;
     const json  m_meta;
 
-    size_t m_family_index;
+    size_t m_specialization_index;
     bool   m_print_index;
 
     logger&         m_logger;
@@ -2608,7 +2608,7 @@ private:
     flags::FlagTag m_flags;
 
     size_t m_specialization_col_width;
-    size_t m_family_col_width;
+    size_t m_index_col_width;
 
     cache_thrasher& m_cache;
     gpu_warmer&     m_warmer;
@@ -3204,7 +3204,7 @@ public:
 
         m_specialization_col_width = compute_max_specialization_width(algorithm);
 
-        m_family_col_width
+        m_index_col_width
             = std::string("Index/").size() + std::to_string(specializations.size()).size();
 
         m_print_index = specializations.size() > 1;
@@ -3488,14 +3488,14 @@ private:
         {
             detail::progress::print_dry_header(algorithm,
                                                m_specialization_col_width,
-                                               m_family_col_width,
+                                               m_index_col_width,
                                                specializations.size());
         }
         else
         {
             detail::progress::print_header(algorithm,
                                            m_specialization_col_width,
-                                           m_family_col_width,
+                                           m_index_col_width,
                                            specializations.size(),
                                            m_settings.noise_timeout_secs);
         }
@@ -3504,7 +3504,7 @@ private:
     /// Runs all benchmark specializations.
     void run_all_specializations()
     {
-        size_t family_index = 0;
+        size_t specialization_index = 0;
         for(auto& b_unique_ptr : specializations)
         {
             auto b    = b_unique_ptr.get();
@@ -3513,24 +3513,24 @@ private:
 
             if(m_settings.dry)
             {
-                output_dry_specialization(algo, meta, family_index);
+                output_dry_specialization(algo, meta, specialization_index);
             }
             else
             {
-                auto state = new_state(algo, meta, family_index);
+                auto state = new_state(algo, meta, specialization_index);
                 b->run(state);
             }
 
-            family_index++;
+            specialization_index++;
         }
     }
 
     /// Create a benchmark state object for execution.
-    state new_state(std::string_view algo, json meta, size_t family_index)
+    state new_state(std::string_view algo, json meta, size_t specialization_index)
     {
         return state(algo,
                      std::move(meta),
-                     family_index,
+                     specialization_index,
                      m_print_index,
                      m_stream,
                      get_logger(),
@@ -3539,13 +3539,15 @@ private:
                      m_settings,
                      m_flags,
                      m_specialization_col_width,
-                     m_family_col_width,
+                     m_index_col_width,
                      m_cache,
                      m_warmer);
     }
 
     /// Outputs a single dry specialization.
-    void output_dry_specialization(std::string_view algo, const json& meta, size_t family_index)
+    void output_dry_specialization(std::string_view algo,
+                                   const json&      meta,
+                                   size_t           specialization_index)
     {
         std::string name            = meta.serialize_name();
         std::string serialized_meta = meta.serialize();
@@ -3566,12 +3568,12 @@ private:
 
         detail::progress::print_dry_progress(name,
                                              algo,
-                                             family_index,
+                                             specialization_index,
                                              m_specialization_col_width,
-                                             m_family_col_width,
+                                             m_index_col_width,
                                              m_print_index);
 
-        get_logger().output_specialization(family_index,
+        get_logger().output_specialization(specialization_index,
                                            name,
                                            serialized_meta,
                                            kernels_per_batch,
@@ -3620,7 +3622,7 @@ private:
         m_stream_blocker; ///< Stream blocker to serialize output.
 
     size_t m_specialization_col_width; ///< Column width for specialization names.
-    size_t m_family_col_width; ///< Column width for family index.
+    size_t m_index_col_width; ///< Column width for specialization index.
 
     detail::cache_thrasher m_cache = detail::cache_thrasher(); ///< Cache clearing utility.
 
