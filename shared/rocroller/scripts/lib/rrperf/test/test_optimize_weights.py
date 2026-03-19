@@ -16,7 +16,8 @@ weights_subclasses = [ow.FullWeights, ow.SimplifiedWeights]
 
 
 @pytest.mark.slow
-def test_run_optimize(tmp_path_factory):
+@pytest.mark.parametrize("subclass", weights_subclasses)
+def test_run_optimize(tmp_path_factory, subclass):
     t = int(time.time())
     print(f"Random seed: {t}")
     random.seed(t)
@@ -30,6 +31,7 @@ def test_run_optimize(tmp_path_factory):
         "--population=3",
         "--new=1",
         "--suite=guidepost_1",
+        f"--weight-type={subclass().type}",
     ]
     parser = argparse.ArgumentParser()
     ow.get_args(parser)
