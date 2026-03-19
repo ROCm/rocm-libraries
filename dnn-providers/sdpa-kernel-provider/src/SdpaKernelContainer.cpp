@@ -13,7 +13,7 @@ namespace sdpa_kernel_provider
 {
 
 /**
- * @brief ENGINE_TYPES contains a comma separated list of all engine types to be loaded in the container.
+ * @brief ENGINE_TYPES expands to a comma separated list of all engine types to be loaded into the container.
  * A defaultPlanBuilders() specialization must be present for each engine type.
  *  **/
 // TODO: Consider moving this macro and defaultPlanBuilders to a separate header file
@@ -21,6 +21,9 @@ namespace sdpa_kernel_provider
 
 using PlanBuilderList = std::vector<std::unique_ptr<IPlanBuilder>>;
 
+/**
+ * @brief Default list of plan builders associated with the engine used as a template argument.
+ */
 template <class T>
 PlanBuilderList defaultPlanBuilders();
 
@@ -54,6 +57,13 @@ const auto& engineIdArray()
     return s_engineIds;
 }
 
+/**
+ * @brief Creates vector of engines for every engine class in the ENGINE_TYPES macro. These are the
+ * engines assigned to the SdpaKernelContainer on construction
+ *
+ * Each entry of ENGINE_TYPES requires a corresponding specialization of defaultPlanBuilders or it
+ * will fail to compile.
+ */
 auto createEngines()
 {
     return detail::createEngines<ENGINE_TYPES>();

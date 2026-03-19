@@ -40,7 +40,7 @@ TEST_F(TestSdpaKernelEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 
 TEST_F(TestSdpaKernelEngine, IsApplicableReturnsTrueForSdpaGraph)
 {
-    // Create a batchnorm inference graph - this does not use SDPA attributes
+    // Create a SDPA forward inference graph
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
