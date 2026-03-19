@@ -73,7 +73,7 @@ constexpr SolverHeuristicConfig kBwdSolverConfig = {
     /* solver_name                 */ "ConvHipImplicitGemmGroupBwdXdlops",
     /* solver_name_ktn             */ "ConvHipIgemmGroupXdlops",
     /* spatial_dims                */ 2,
-    /* uses_split_k                */ true,
+    /* uses_split_k                */ false,
     /* split_k_min                 */ 1,
     /* split_k_max                 */ 128,
     /* supports_split_k_autodeduce */ false,
