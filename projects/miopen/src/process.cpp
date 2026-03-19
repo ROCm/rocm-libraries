@@ -78,7 +78,7 @@ public:
             {
                 envBlock += key + "=" + value + '\0';
             }
-            envBlock += '\0';  // Double null terminator
+            envBlock += '\0'; // Double null terminator
         }
 
         std::string cmd{path.string()};

@@ -78,7 +78,6 @@ std::vector<HipGraphTestCase> GenSmokeTestCases()
          false}};
 }
 
-
 class GPU_HipGraphExistTest_FP32 : public testing::TestWithParam<HipGraphTestCase>
 {
 protected:
