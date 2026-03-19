@@ -221,19 +221,31 @@ class LocalReadMFMA(LocalRead):
     #  dst (dst = True)
     #   valOffset  0 - 31: X reg,  0 - 31
     # Do index transpose if transpose is true
-    def TXInterleaveLayoutIdx(self, idx):
+    def TXInterleaveLayoutIdx(self, idx, miInputPerThread=8):
+        halfM = miInputPerThread // 2
         retIdx = idx
         XTchar = "X"
-        if idx % 8 < 4:
-            # T case, convert to T
+        if idx % miInputPerThread < halfM:
             XTchar = "T"
-            retIdxUpper = (idx // 8) * 4
-            retIdxLower = idx % 4
+            retIdxUpper = (idx // miInputPerThread) * halfM
+            retIdxLower = idx % halfM
             retIdx = retIdxUpper + retIdxLower
         return retIdx, XTchar
 
+    @staticmethod
+    def _genDsReadConvTable(miInputPerThread, lrvwTile):
+        halfM = miInputPerThread // 2
+        numRows = lrvwTile
+        colsPerRow = halfM // lrvwTile
+        table = []
+        for group in range(2):
+            for col in range(colsPerRow):
+                for row in range(numRows):
+                    table.append(row * miInputPerThread + col * lrvwTile + group * halfM)
+        return table
+
     def getTransposeXorTIndex(self, writer, kernel, idx, tc, lrvwTile, dst, isNext, localRead=False):
-        assert(kernel["MIInputPerThread"] == 8)
+        mipt = kernel["MIInputPerThread"]
         assert(lrvwTile <= 4, "lrvwTile is %d"%lrvwTile)
         abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
         if isNext:
@@ -244,23 +256,20 @@ class LocalReadMFMA(LocalRead):
             useDirect32XEmulation = abmatrixinfo.useDirect32XEmulationThis
         TF32EmuInterleaveTreg = abmatrixinfo.TF32EmuInterleaveTreg
         swapBlockSizeSub = abmatrixinfo.swapBlockSizeSub
-        blockH = kernel["MIInputPerThread"]
+        blockH = mipt
         blockW = lrvwTile
         blockSize = blockH * blockW
         # default: no change
         XTchar = "X"
         if localRead:
             if lrvwTile > 1:
-                # local read and lrvwTile > 1 case
-                dsReadConvTable4 = [0,  8, 16, 24,  4, 12, 20, 28]
-                dsReadConvTable2 = [0,  8,  2, 10,  4, 12,  6, 14]
-                dsReadConvTable = dsReadConvTable4 if lrvwTile == 4 else dsReadConvTable2
+                dsReadConvTable = self._genDsReadConvTable(mipt, lrvwTile)
                 blockIdx = idx // blockSize
                 idxInBlk = idx % blockSize
                 tableIdx = idxInBlk // blockW
                 idx = dsReadConvTable[tableIdx] + blockIdx * blockSize
             if TF32EmuInterleaveTreg:
-                idx, XTchar = self.TXInterleaveLayoutIdx(idx)
+                idx, XTchar = self.TXInterleaveLayoutIdx(idx, kernel["MIInputPerThread"])
             elif writer.states.doFullPackCodePrefetch:
                 # full pack code prefetch case, dst of local read is always T reg
                 # use T as destination
@@ -277,7 +286,7 @@ class LocalReadMFMA(LocalRead):
             elif TF32EmuInterleaveTreg:
                 # T reg interleave layout (common for both lrvwTile==1 and >1)
                 # Conversion for src only. No conversion in dst case.
-                idx, XTchar = self.TXInterleaveLayoutIdx(idx)
+                idx, XTchar = self.TXInterleaveLayoutIdx(idx, kernel["MIInputPerThread"])
             elif writer.states.doFullPackCodePrefetch:
                 # full pack code prefetch case, dst of local read is always T reg
                 XTchar = "T" # use T reg for wider local read + transpose code
@@ -323,26 +332,14 @@ class LocalReadMFMA(LocalRead):
     #   reg 7 reg 15 reg 23 reg 31
     def getTransposeIndex(self, kernel, idx, lrvwTile):
         if lrvwTile == 1:
-            return idx # no transpose case, simply return idx
-        # do transpose for lrvwTile x lrvwTile (=2x2 or 4x4)
-        # 8 comes from kernel["MIInputPerThread"]
-        assert(kernel["MIInputPerThread"] == 8)
+            return idx
+        mipt = kernel["MIInputPerThread"]
         assert(lrvwTile <= 4, "lrvwTile is %d"%lrvwTile)
-        # index conversion table for MIInputPerThread==8
-        convArray2 = [0,  8,  2, 10,  4, 12,  6, 14,  1,  9,  3, 11,  5, 13,  7, 15]
-        convArray4 = [0,  8, 16, 24,  4, 12, 20, 28,  1,  9, 17, 25,  5, 13, 21, 29,  2, 10, 18, 26,  6, 14, 22, 30,  3, 11, 19, 27,  7, 15, 23, 31]
-        blockH = kernel["MIInputPerThread"]
-        blockW = lrvwTile
-        blockSize = blockH * blockW
+        blockSize = mipt * lrvwTile
         blockIdx = idx // blockSize
         idxInBlk = idx % blockSize
-        tableIdx = idxInBlk
-        if lrvwTile == 4:
-            swappedIdx = convArray4[tableIdx] + blockIdx * blockSize
-        elif lrvwTile == 2:
-            swappedIdx = convArray2[tableIdx] + blockIdx * blockSize
-        else:
-            swappedIdx = idx
+        dsTable = self._genDsReadConvTable(mipt, lrvwTile)
+        swappedIdx = dsTable[idxInBlk % mipt] + (idxInBlk // mipt) + blockIdx * blockSize
         return swappedIdx
 
     # if prefetch is for NextLoop or not
