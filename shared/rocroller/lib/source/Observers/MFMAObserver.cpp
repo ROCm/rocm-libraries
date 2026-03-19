@@ -11,9 +11,6 @@
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
-#define debug critical
-#define Debug Critical
-
 namespace rocRoller
 {
     namespace Scheduling
@@ -88,10 +85,10 @@ namespace rocRoller
 
                 if(any8Bits)
                 {
-                    Log::critical("Found instruction {} with 8-bit src. Targeted: {} coexec {}",
-                                  inst.getOpCode(),
-                                  isTargetedInstruction(inst),
-                                  MFMACoexecObserver::isTargetedInstruction(inst));
+                    Log::debug("Found instruction {} with 8-bit src. Targeted: {} coexec {}",
+                               inst.getOpCode(),
+                               isTargetedInstruction(inst),
+                               MFMACoexecObserver::isTargetedInstruction(inst));
                     latency *= 2;
                 }
             }
@@ -160,8 +157,6 @@ namespace rocRoller
             bool scaled = inst.getOpCode().find("scale") != std::string::npos;
 
             DisallowedCycles rv;
-
-            Log::critical("Half: {}", isHalfSpeed);
 
             if(isHalfSpeed)
             {
@@ -250,8 +245,8 @@ namespace rocRoller
 
         void MFMACoexecObserver::modify(Instruction& inst) const
         {
-            if(!inst.isCommentOnly() && !m_disallowedOps.empty())
-            //    && Settings::Get(Settings::LogLvl) >= LogLevel::Debug)
+            if(!inst.isCommentOnly() && !m_disallowedOps.empty()
+               && Settings::Get(Settings::LogLvl) >= LogLevel::Debug)
             {
                 auto lastCycle = m_disallowedOps.rbegin()->first;
                 inst.addComment(
