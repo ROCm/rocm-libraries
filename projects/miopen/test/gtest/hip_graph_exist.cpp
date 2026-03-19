@@ -34,17 +34,8 @@
 
 #include <fstream>
 #include <string>
-#include <cstdlib>
 #include <sstream>
 #include <iostream>
-
-#ifdef _WIN32
-#define PATH_SEPARATOR "\\"
-#define popen _popen
-#define pclose _pclose
-#else
-#define PATH_SEPARATOR "/"
-#endif
 
 namespace fs = miopen::fs;
 
@@ -87,46 +78,6 @@ std::vector<HipGraphTestCase> GenSmokeTestCases()
          false}};
 }
 
-std::string ExecuteCommand(const std::string& command)
-{
-    std::string result;
-    FILE* pipe = popen(command.c_str(), "r");
-    if(!pipe)
-    {
-        return "";
-    }
-
-    char buffer[128];
-    while(fgets(buffer, sizeof(buffer), pipe) != nullptr)
-    {
-        result += buffer;
-    }
-
-    pclose(pipe);
-    return result;
-}
-
-int CountOccurrences(const std::string& filepath, const std::string& search_string)
-{
-    std::ifstream file(filepath);
-    if(!file.is_open())
-    {
-        return 0;
-    }
-
-    int count = 0;
-    std::string line;
-    while(std::getline(file, line))
-    {
-        size_t pos = 0;
-        while((pos = line.find(search_string, pos)) != std::string::npos)
-        {
-            count++;
-            pos += search_string.length();
-        }
-    }
-    return count;
-}
 
 class GPU_HipGraphExistTest_FP32 : public testing::TestWithParam<HipGraphTestCase>
 {
@@ -185,54 +136,31 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     // redirected, causing issues for subsequent tests.
     testing::internal::CaptureStderr();
 
-    // Build the command to run MIOpenDriver with AMD_LOG_LEVEL for HIP API tracing
-    // AMD_LOG_LEVEL=4 enables debug level logging which includes HIP API calls
-    std::string output_file = temp_dir + PATH_SEPARATOR + test_case.test_name + "_output.txt";
-
-    std::ostringstream cmd;
-
-    // Set up environment and library path
-    auto lib_path = fs::absolute(driver_path).parent_path().parent_path() / "lib";
-#ifdef _WIN32
-    cmd << "cd /d \"" << temp_dir << "\" && ";
-    cmd << "set AMD_LOG_LEVEL=4 && ";
-#else
-    cmd << "cd \"" << temp_dir << "\" && ";
-    cmd << "AMD_LOG_LEVEL=4 ";
-    cmd << "LD_LIBRARY_PATH=\"" << lib_path.string() << ":$LD_LIBRARY_PATH\" ";
-#endif
-
-    // Run MIOpenDriver directly (no need for rocprof)
-    cmd << "\"" << fs::absolute(driver_path).string() << "\" " << test_case.driver_type << " ";
-    cmd << test_case.driver_args;
+    // Build command arguments
+    std::ostringstream args;
+    args << test_case.driver_type << " " << test_case.driver_args;
 
     // Only add --use_hip_graph 1 if not already in driver_args and expect_graph is true
     if(test_case.expect_graph && test_case.driver_args.find("--use_hip_graph") == std::string::npos)
     {
-        cmd << " --use_hip_graph 1";
+        args << " --use_hip_graph 1";
     }
 
-    // Capture both stdout and stderr to the output file
-    cmd << " > \"" << output_file << "\" 2>&1";
+    // Set up environment variables for HIP API tracing
+    // AMD_LOG_LEVEL=4 enables debug level logging which includes HIP API calls
+    miopen::ProcessEnvironmentMap envVars;
+    envVars["AMD_LOG_LEVEL"] = "4";
 
-    std::cout << "Executing command: " << cmd.str() << std::endl;
+    std::cout << "Executing: " << driver_path.string() << " " << args.str() << std::endl;
 
-    // Execute the command
-    int ret = std::system(cmd.str().c_str());
+    // Execute using miopen::Process with output capture
+    std::stringstream output_stream;
+    miopen::Process process{driver_path};
+    int ret = process(args.str(), temp_dir, &output_stream, envVars);
+
+    std::string output_content = output_stream.str();
 
     std::cout << "Command return code: " << ret << std::endl;
-
-    // Read the output file
-    std::string output_content;
-    {
-        std::ifstream output_stream(output_file);
-        if(output_stream.is_open())
-        {
-            std::ostringstream ss;
-            ss << output_stream.rdbuf();
-            output_content = ss.str();
-        }
-    }
 
     // Check if command executed successfully
     // MIOpenDriver should return 0 on success

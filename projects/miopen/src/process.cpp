@@ -45,18 +45,40 @@ public:
                 std::ostream* out,
                 const ProcessEnvironmentMap& additionalEnvironmentVariables)
     {
+        outStream = out;
+
         STARTUPINFOA info;
         ZeroMemory(&info, sizeof(STARTUPINFO));
         info.cb = sizeof(STARTUPINFO);
 
-        if(out != nullptr)
+        // Set up pipe for stdout capture if output stream is provided
+        if(outStream != nullptr)
         {
-            MIOPEN_THROW("Capturing output not defined for Windows.");
+            SECURITY_ATTRIBUTES saAttr;
+            saAttr.nLength              = sizeof(SECURITY_ATTRIBUTES);
+            saAttr.bInheritHandle       = TRUE;
+            saAttr.lpSecurityDescriptor = nullptr;
+
+            if(CreatePipe(&hReadPipe, &hWritePipe, &saAttr, 0) == FALSE)
+                MIOPEN_THROW("CreatePipe error: " + std::to_string(GetLastError()));
+
+            // Ensure the read handle is not inherited
+            SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+            info.hStdOutput = hWritePipe;
+            info.hStdError  = hWritePipe;
+            info.dwFlags |= STARTF_USESTDHANDLES;
         }
 
+        // Build environment block for additional variables
+        std::string envBlock;
         if(!additionalEnvironmentVariables.empty())
         {
-            MIOPEN_THROW("Overriding environment variables not defined for Windows.");
+            for(const auto& [key, value] : additionalEnvironmentVariables)
+            {
+                envBlock += key + "=" + value + '\0';
+            }
+            envBlock += '\0';  // Double null terminator
         }
 
         std::string cmd{path.string()};
@@ -74,17 +96,40 @@ public:
                          cmd.data(),
                          nullptr,
                          nullptr,
-                         FALSE,
+                         outStream != nullptr ? TRUE : FALSE,
                          0,
-                         nullptr,
+                         envBlock.empty() ? nullptr : envBlock.data(),
                          cwd.empty() ? nullptr : cwd.data(),
                          &info,
                          &processInfo) == FALSE)
             MIOPEN_THROW("CreateProcess error: " + std::to_string(GetLastError()));
+
+        // Close the write end of the pipe (child process has it now)
+        if(hWritePipe != nullptr)
+        {
+            CloseHandle(hWritePipe);
+            hWritePipe = nullptr;
+        }
     }
 
     int Wait()
     {
+        // Read output from pipe if capturing
+        if(outStream != nullptr && hReadPipe != nullptr)
+        {
+            std::array<char, 1024> buffer{};
+            DWORD bytesRead;
+
+            while(ReadFile(hReadPipe, buffer.data(), buffer.size() - 1, &bytesRead, nullptr) &&
+                  bytesRead > 0)
+            {
+                buffer[bytesRead] = '\0';
+                *outStream << buffer.data();
+            }
+            CloseHandle(hReadPipe);
+            hReadPipe = nullptr;
+        }
+
         WaitForSingleObject(processInfo.hProcess, INFINITE);
 
         DWORD status;
@@ -100,8 +145,11 @@ public:
     }
 
 private:
+    std::ostream* outStream = nullptr;
     fs::path path;
     PROCESS_INFORMATION processInfo{};
+    HANDLE hReadPipe  = nullptr;
+    HANDLE hWritePipe = nullptr;
 };
 
 #else
