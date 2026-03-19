@@ -215,7 +215,6 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                      = problem.GetInChannels() + problem.GetOutChannels();
     auto g                      = problem.GetGroupCount();
-    auto spatial_per_batch      = s / b;
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 

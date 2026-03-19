@@ -140,7 +140,6 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     auto g                      = problem.GetGroupCount();
     auto spatial_per_batch      = s / b;
     auto channels_per_group     = c / g;
-    auto spatial_work_per_group = s * channels_per_group;
 
     if(is_gfx11 || is_gfx12)
     {
@@ -381,7 +380,6 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
     auto g                      = problem.GetGroupCount();
     auto spatial_per_batch      = s / b;
     auto channels_per_group     = c / g;
-    auto spatial_work_per_group = s * channels_per_group;
 
     if(is_gfx11 || is_gfx12)
     {
