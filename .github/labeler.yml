@@ -20,6 +20,10 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hipblaslt-provider/**/*'
 
+"project: fusilli-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/fusilli-provider/**/*'
+
 "project: hipcub":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'

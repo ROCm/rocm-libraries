@@ -32,7 +32,7 @@
 #include <mpi.h>
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -764,7 +764,7 @@ struct rocfft_funcs
 
 struct dyna_rocfft_funcs
 {
-#ifdef WIN32
+#ifdef _WIN32
     typedef HMODULE ROCFFT_LIB;
 #else
     typedef void* ROCFFT_LIB;
@@ -773,7 +773,7 @@ struct dyna_rocfft_funcs
     // Load the rocfft library
     static ROCFFT_LIB lib_load(const std::string& path)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return LoadLibraryA(path.c_str());
 #else
         return dlopen(path.c_str(), RTLD_LAZY);
@@ -783,7 +783,7 @@ struct dyna_rocfft_funcs
     // Return a string describing the error loading rocfft
     static const char* lib_load_error()
     {
-#ifdef WIN32
+#ifdef _WIN32
         // just return the error number
         static std::string error_str;
         error_str = std::to_string(GetLastError());
@@ -796,7 +796,7 @@ struct dyna_rocfft_funcs
     // Get symbol from rocfft lib
     static void* lib_symbol(ROCFFT_LIB libhandle, const char* sym)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return reinterpret_cast<void*>(GetProcAddress(libhandle, sym));
 #else
         return dlsym(libhandle, sym);
@@ -807,7 +807,7 @@ struct dyna_rocfft_funcs
     {
         if(!libhandle)
             return;
-#ifdef WIN32
+#ifdef _WIN32
         FreeLibrary(libhandle);
 #else
         dlclose(libhandle);

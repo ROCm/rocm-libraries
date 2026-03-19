@@ -109,11 +109,11 @@ private:
 
         std::vector<int64_t> broadcastedIndex(tensorDims.size());
 
-        size_t dimOffset = broadcastIndex.size() - tensorDims.size();
+        size_t const dimOffset = broadcastIndex.size() - tensorDims.size();
 
         for(size_t i = 0; i < tensorDims.size(); ++i)
         {
-            size_t broadcastDimIdx = dimOffset + i;
+            size_t const broadcastDimIdx = dimOffset + i;
             broadcastedIndex[i] = (tensorDims[i] == 1) ? 0 : broadcastIndex[broadcastDimIdx];
         }
 

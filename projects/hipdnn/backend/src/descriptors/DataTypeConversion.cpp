@@ -74,17 +74,13 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::DOUBLE:
         return 8;
     case DataType::HALF:
-        return 2;
     case DataType::BFLOAT16:
         return 2;
     case DataType::INT32:
         return 4;
     case DataType::UINT8:
-        return 1;
     case DataType::INT8:
-        return 1;
     case DataType::FP8_E4M3:
-        return 1;
     case DataType::FP8_E5M2:
         return 1;
     default:
@@ -329,6 +325,77 @@ hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::Pointw
         return HIPDNN_POINTWISE_TANH_FWD;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK PointwiseMode value");
+    }
+}
+
+hipdnn_data_sdk::data_objects::DiagonalAlignment
+    toSdkDiagonalAlignment(hipdnnDiagonalAlignment_t mode)
+{
+    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+
+    switch(mode)
+    {
+    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
+        return DiagonalAlignment::TOP_LEFT;
+    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
+        return DiagonalAlignment::BOTTOM_RIGHT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnDiagonalAlignment_t value");
+    }
+}
+
+hipdnnDiagonalAlignment_t
+    fromSdkDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment mode)
+{
+    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+
+    switch(mode)
+    {
+    case DiagonalAlignment::TOP_LEFT:
+        return HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+    case DiagonalAlignment::BOTTOM_RIGHT:
+        return HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK DiagonalAlignment value");
+    }
+}
+
+hipdnn_data_sdk::data_objects::AttentionImplementation
+    toSdkAttentionImplementation(hipdnnAttentionImplementation_t mode)
+{
+    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+
+    switch(mode)
+    {
+    case HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT:
+        return AttentionImplementation::AUTO;
+    case HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT:
+        return AttentionImplementation::COMPOSITE;
+    case HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT:
+        return AttentionImplementation::UNIFIED;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnAttentionImplementation_t value");
+    }
+}
+
+hipdnnAttentionImplementation_t
+    fromSdkAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation mode)
+{
+    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+
+    switch(mode)
+    {
+    case AttentionImplementation::AUTO:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+    case AttentionImplementation::COMPOSITE:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_COMPOSITE_EXT;
+    case AttentionImplementation::UNIFIED:
+        return HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported SDK AttentionImplementation value");
     }
 }
 

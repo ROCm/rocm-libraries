@@ -6,6 +6,9 @@
 #include "BatchnormBackwardOperationDescriptor.hpp"
 #include "BatchnormInferenceOperationDescriptor.hpp"
 #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
+#include "BatchnormOperationDescriptor.hpp"
+#include "BlockScaleDequantizeOperationDescriptor.hpp"
+#include "BlockScaleQuantizeOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
@@ -16,9 +19,11 @@
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
+#include "SdpaFpropOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -83,11 +88,26 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormInferenceVarianceExtOperationDescriptor>();
         break;
+    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BlockScaleQuantizeOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<MatmulOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<SdpaFpropOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<LayernormOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BatchnormOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BlockScaleDequantizeOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
