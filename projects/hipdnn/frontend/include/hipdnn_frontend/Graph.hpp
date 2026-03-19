@@ -1935,8 +1935,14 @@ public:
 
     /** @brief Layer normalization forward pass
      *
-     * Normalizes the input across the feature dimensions (all dimensions
-     * except the batch dimension).
+     * Normalizes the input across the last k feature dimensions, where k
+     * is determined by the scale tensor shape or by
+     * LayernormAttributes::set_normalized_dim_count(). By default, all
+     * dimensions except the first (batch) dimension are normalized.
+     *
+     * Common configurations:
+     * - **Transformer**: x=[B, S, D], scale=[D] → normalizes over D (k=1)
+     * - **Vision**: x=[N, C, H, W], scale=[1, C, H, W] → normalizes over C, H, W (k=3)
      *
      * Formula:
      * @code
@@ -1949,9 +1955,13 @@ public:
      * In training phase, mean and inverse variance are also returned as outputs.
      *
      * @param x Input tensor [N, D1, D2, ..., Dk]
-     * @param scale Per-feature scale (gamma) tensor [1, D1, D2, ..., Dk]
-     * @param bias Per-feature bias (beta) tensor [1, D1, D2, ..., Dk]
-     * @param attributes Configuration including epsilon and forward phase
+     * @param scale Per-feature scale (gamma) tensor, matching the normalized
+     *        dimensions. Can be full-rank with batch dims set to 1
+     *        (e.g. [1, C, H, W]) or reduced-rank with batch dims omitted
+     *        (e.g. [C, H, W])
+     * @param bias Per-feature bias (beta) tensor (same shape as scale)
+     * @param attributes Configuration including epsilon, forward phase,
+     *        and optionally normalized_dim_count
      * @return Array of 3 output tensors:
      *         - [0] y: Normalized output (same shape as x)
      *         - [1] mean: Computed mean (nullptr in inference mode)
@@ -2015,21 +2025,24 @@ public:
 
     /** @brief RMS normalization forward pass
      *
-     * Normalizes the input using the root mean square, without mean subtraction.
-     * Unlike layer normalization, RMSNorm does not center the activations.
+     * Normalizes the input using the root mean square across the channel
+     * dimension, without mean subtraction. Unlike layer normalization,
+     * RMSNorm does not center the activations.
      *
      * Formula:
      * @code
-     * rms     = sqrt((1/m) * sum(x^2) over normalized dims + epsilon)
-     * y       = scale * (x / rms)
+     * rms[n,h,w]  = sqrt((1/C) * sum_c x[n,c,h,w]^2 + epsilon)
+     * y[n,c,h,w]  = scale[c] * (x[n,c,h,w] / rms[n,h,w]) + bias[c]
      * @endcode
+     * where C = number of channels.
      *
      * In training phase, the inverse RMS is also returned as an output for use
      * in the backward pass.
      *
-     * @param x Input tensor with batch and feature dimensions
-     * @param scale Per-channel scale (gamma) tensor, broadcast over batch and spatial dims
-     * @param attributes Configuration including epsilon and forward phase
+     * @param x Input tensor [N, C, H, W, ...] (minimum 2 dimensions)
+     * @param scale Per-channel scale (gamma) tensor [1, C, 1, 1, ...]
+     * @param attributes Configuration including epsilon, forward phase,
+     *        and optional bias [1, C, 1, 1, ...]
      * @return Array of 2 output tensors:
      *         - [0] y: Normalized output (same shape as x)
      *         - [1] invRms: Inverse RMS values (nullptr in inference mode)
@@ -2216,10 +2229,12 @@ public:
     /** @brief Ternary element-wise operation
      *
      * Applies an element-wise function to three input tensors.
+     * Currently only BINARY_SELECT uses this overload:
+     * `out[i] = in0[i] ? in1[i] : in2[i]`
      *
-     * @param in0 First input tensor
-     * @param in1 Second input tensor
-     * @param in2 Third input tensor (e.g., condition for BINARY_SELECT)
+     * @param in0 Condition tensor (selector mask)
+     * @param in1 Value selected where in0 is non-zero
+     * @param in2 Value selected where in0 is zero
      * @param attributes Configuration specifying the pointwise mode
      * @return out0: Output tensor
      *
@@ -2747,6 +2762,10 @@ public:
      *              .set_data_type(DataType::HALF)
      *              .set_uid(0));
      * @endcode
+     *
+     * @note This creates a tensor descriptor (shape, type, strides) only.
+     *       No device memory is allocated. Device pointers are provided
+     *       at execution time via the variant pack.
      *
      * @see tensor_like() for creating a tensor with cleared UID and custom name
      */
