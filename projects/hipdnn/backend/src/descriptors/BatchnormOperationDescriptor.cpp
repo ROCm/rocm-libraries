@@ -33,22 +33,22 @@ void BatchnormOperationDescriptor::finalize()
                   "set");
 
     // Validate mean + inv_variance: both-or-none
-    bool const hasMean = _meanDesc != nullptr;
-    bool const hasInvVariance = _invVarianceDesc != nullptr;
+    const bool hasMean = _meanDesc != nullptr;
+    const bool hasInvVariance = _invVarianceDesc != nullptr;
     THROW_IF_TRUE(hasMean != hasInvVariance,
                   HIPDNN_STATUS_BAD_PARAM,
                   "BatchnormOperationDescriptor::finalize() failed: mean and inverse variance "
                   "tensors must both be set or both be null");
 
     // Validate running stats: all-or-none
-    bool const hasPrevRunMean = _prevRunningMeanDesc != nullptr;
-    bool const hasPrevRunVar = _prevRunningVarianceDesc != nullptr;
-    bool const hasMomentum = _momentumDesc != nullptr;
-    bool const hasNextRunMean = _nextRunningMeanDesc != nullptr;
-    bool const hasNextRunVar = _nextRunningVarianceDesc != nullptr;
-    bool const anyRunning
+    const bool hasPrevRunMean = _prevRunningMeanDesc != nullptr;
+    const bool hasPrevRunVar = _prevRunningVarianceDesc != nullptr;
+    const bool hasMomentum = _momentumDesc != nullptr;
+    const bool hasNextRunMean = _nextRunningMeanDesc != nullptr;
+    const bool hasNextRunVar = _nextRunningVarianceDesc != nullptr;
+    const bool anyRunning
         = hasPrevRunMean || hasPrevRunVar || hasMomentum || hasNextRunMean || hasNextRunVar;
-    bool const allRunning
+    const bool allRunning
         = hasPrevRunMean && hasPrevRunVar && hasMomentum && hasNextRunMean && hasNextRunVar;
     THROW_IF_TRUE(anyRunning && !allRunning,
                   HIPDNN_STATUS_BAD_PARAM,

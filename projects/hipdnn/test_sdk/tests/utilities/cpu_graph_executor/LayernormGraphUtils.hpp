@@ -17,16 +17,36 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                              hipdnn_data_sdk::data_objects::DataType meanInvVarianceDataType,
                              hipdnn_data_sdk::data_objects::DataType computeDataType,
                              const std::vector<int64_t>& dims,
+                             const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
-                             bool useTrainingPhase = false)
+                             bool useTrainingPhase = false,
+                             bool onePadded = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("LayernormFpropTest");
 
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
-    // Scale/bias shape = normalized dims (last N-1 dims for NCHW, i.e., dims[1:])
-    std::vector<int64_t> const normalizedDims(dims.begin() + 1, dims.end());
+    // Scale/bias shape = normalized dims (last normalizedDimCount dims for NCHW)
+    std::vector<int64_t> normalizedDims;
+    if(onePadded)
+    {
+        normalizedDims = std::vector<int64_t>(dims.size(), 1);
+        for(size_t i = static_cast<size_t>(
+                std::max(static_cast<int64_t>(dims.size()) - normalizedDimCount, int64_t{0}));
+            i < dims.size();
+            ++i)
+        {
+            normalizedDims[i] = dims[i];
+        }
+    }
+    else
+    {
+        normalizedDims = std::vector<int64_t>(
+            dims.begin()
+                + std::max(static_cast<int64_t>(dims.size()) - normalizedDimCount, int64_t{0}),
+            dims.end());
+    }
     auto normalizedStrides = hipdnn_data_sdk::utilities::generateStrides(normalizedDims);
 
     int64_t uid = 1;
@@ -56,7 +76,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_dim({1})
         .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+        .set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
 
     hipdnn_frontend::graph::LayernormAttributes lnAttrs;
     lnAttrs.set_name("layernorm_fprop");
@@ -88,9 +108,14 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     if(useTrainingPhase)
     {
-        // Mean shape = batch dims (e.g., [N, 1, 1, 1] for input [N, C, H, W])
+        // Mean shape = batch dims (e.g., [N, 1, 1, 1] for input [N, C, H, W] and normalizedDimCount 3)
         std::vector<int64_t> statsDims(dims.size(), 1);
-        statsDims[0] = dims[0];
+        for(size_t i = 0; i < static_cast<size_t>(std::max(
+                              static_cast<int64_t>(dims.size()) - normalizedDimCount, int64_t{0}));
+            ++i)
+        {
+            statsDims[i] = dims[i];
+        }
         auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
         auto& meanTensorAttr = outputTensorsAttr[1];

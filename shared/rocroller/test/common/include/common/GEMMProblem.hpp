@@ -101,6 +101,8 @@ struct GEMMProblem
     std::vector<size_t>              scaleShuffleTileA;
     std::vector<size_t>              scaleShuffleTileB;
 
+    // Pre-tile A matrix (MxK tile dimensions); kernel expects pre-tiled layout (transA must be T)
+    std::vector<size_t> pretileA;
     // Pre-tile B matrix (KxN tile dimensions); kernel expects pre-tiled layout
     std::vector<size_t> pretileB;
 

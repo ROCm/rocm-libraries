@@ -447,8 +447,8 @@ inline bool isfinite(half x)
 
 inline half copysign(half x, half y)
 {
-    uint16_t const xBits = x.data & detail::HALF_ABS_MASK;
-    uint16_t const ySign = y.data & detail::HALF_SIGN_MASK;
+    const uint16_t xBits = x.data & detail::HALF_ABS_MASK;
+    const uint16_t ySign = y.data & detail::HALF_SIGN_MASK;
     return half::from_bits(xBits | ySign);
 }
 

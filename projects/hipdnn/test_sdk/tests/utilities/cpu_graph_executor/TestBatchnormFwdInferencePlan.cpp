@@ -41,8 +41,8 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    std::vector<int64_t> const dims = {6, 3, 32, 32};
-    unsigned int const seed = getGlobalTestSeed();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
@@ -50,7 +50,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                                  dims,
                                                  TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     BatchnormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     BatchnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -65,7 +65,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.mean_tensor_uid()),
                                        *tensorMap.at(attributes.inv_variance_tensor_uid()));
 
-    std::unordered_map<int64_t, void*> const variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -92,7 +92,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     BatchnormFwdPlan<float, float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
@@ -100,7 +100,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 
 TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
@@ -108,17 +108,18 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
                                                  dims,
                                                  TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT> const patient;
+    const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT>
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool const result
+    const bool result
         = dynamic_cast<BatchnormFwdPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -126,7 +127,7 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
 
 TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
@@ -134,22 +135,24 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
                                                  dims,
                                                  TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT> const floatPlanBuilder;
+    const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT>
+        floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
-                                     DataType::HALF,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT> const badTypesPlanBuilder;
+    const BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
+                                           DataType::HALF,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT,
+                                           DataType::FLOAT>
+        badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
