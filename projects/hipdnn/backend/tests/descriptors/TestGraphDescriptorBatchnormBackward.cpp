@@ -26,8 +26,6 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-using hipdnn_tests::toVec;
-
 namespace
 {
 
@@ -239,7 +237,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
     auto peerStatsDesc0 = createFinalizedTensor(110);
     auto peerStatsDesc1 = createFinalizedTensor(111);
 
-    std::vector<HipdnnBackendDescriptor*> peerStatsDescs
+    std::vector<HipdnnBackendDescriptor*> const peerStatsDescs
         = {peerStatsDesc0.get(), peerStatsDesc1.get()};
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),

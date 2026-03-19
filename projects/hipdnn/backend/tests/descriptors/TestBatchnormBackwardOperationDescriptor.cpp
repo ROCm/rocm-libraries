@@ -519,7 +519,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawDy)));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedDy(rawDy);
+    std::unique_ptr<HipdnnBackendDescriptor> const retrievedDy(rawDy);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedDy, nullptr);
@@ -774,7 +774,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    std::string const str = desc->toString();
     ASSERT_NE(str.find("BatchnormBackwardOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("dy_uid=60"), std::string::npos);
     ASSERT_NE(str.find("x_uid=61"), std::string::npos);
@@ -952,8 +952,8 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, GetPeerStatsTensorArray)
                                        2,
                                        &elementCount,
                                        static_cast<void*>(retrieved.data())));
-    std::unique_ptr<HipdnnBackendDescriptor> retrieved0(retrieved[0]);
-    std::unique_ptr<HipdnnBackendDescriptor> retrieved1(retrieved[1]);
+    std::unique_ptr<HipdnnBackendDescriptor> const retrieved0(retrieved[0]);
+    std::unique_ptr<HipdnnBackendDescriptor> const retrieved1(retrieved[1]);
 
     ASSERT_EQ(elementCount, 2);
     ASSERT_NE(retrieved0, nullptr);

@@ -22,6 +22,7 @@ add_library(
     descriptors/BatchnormOperationDescriptor.cpp
     descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
+    descriptors/BlockScaleDequantizeOperationDescriptor.cpp
     descriptors/BlockScaleQuantizeOperationDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
@@ -45,6 +46,7 @@ add_library(
     descriptors/VariantDescriptor.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp
+    logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
     plugin/EnginePlugin.cpp
