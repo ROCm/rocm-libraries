@@ -537,6 +537,13 @@ class Solution(collections.abc.Mapping):
       reject(state, "WaveSplitK currently only support dot2 kernel.")
       return
 
+    # workaround for MX
+    # set ASEM=32 for not TLUA or not TLUB
+    if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and \
+       ((not state["ProblemType"]["TLUA"]) or (not state["ProblemType"]["TLUB"])):
+      if state["AssertSummationElementMultiple"] % 32 != 0:
+        state["AssertSummationElementMultiple"] = 32
+
     # tail loop optimization
     state["tailLoopOptA"] = True
     state["tailLoopOptB"] = True
@@ -3143,11 +3150,11 @@ class Solution(collections.abc.Mapping):
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
-    # TODO: disable Tail Loop when bpe < 1
-    if state["ProblemType"]["MacDataTypeA"].numBytes() < 1:
-        state["NoTailLoop"] = True
-    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-        state["NoTailLoop"] = True
+    ## TODO: disable Tail Loop when bpe < 1
+    #if state["ProblemType"]["MacDataTypeA"].numBytes() < 1:
+    #    state["NoTailLoop"] = True
+    #if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+    #    state["NoTailLoop"] = True
 		
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
