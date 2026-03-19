@@ -741,6 +741,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsDefaultWorks
 
     HipdnnMiopenSettings freshSettings;
     auto expected = _planBuilder.getMaxWorkspaceSize(_handle, graph, freshSettings);
+
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access,-warnings-as-errors)
     EXPECT_EQ(settings.defaultWorkspaceSize().value(), expected);
 }
 
