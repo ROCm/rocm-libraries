@@ -41,9 +41,9 @@ public:
                                     hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
                                     hipdnn_data_sdk::data_objects::DataType computeDataType)
     {
-        unsigned int seed = getGlobalTestSeed();
+        unsigned int const seed = getGlobalTestSeed();
 
-        std::vector<int64_t> dims = {1, 3, 14, 14};
+        std::vector<int64_t> const dims = {1, 3, 14, 14};
         auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
                                                      scaleBiasDataType,
                                                      meanVarianceDataType,
@@ -56,7 +56,7 @@ public:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
@@ -78,7 +78,7 @@ public:
         auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
         auto computeDataType = nativeTypeToDataType<ComputeType>();
 
-        std::vector<int64_t> dims = {1, 3, 14, 14};
+        std::vector<int64_t> const dims = {1, 3, 14, 14};
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
             dims, 1, TensorLayout::NCHW);
 
@@ -108,7 +108,7 @@ public:
         auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
         auto computeDataType = nativeTypeToDataType<ComputeType>();
 
-        std::vector<int64_t> dims = {1, 3, 14, 14};
+        std::vector<int64_t> const dims = {1, 3, 14, 14};
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
             dims, 1, TensorLayout::NCHW, useOptionalTensors);
 
@@ -135,9 +135,9 @@ public:
     static void runConvolutionFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                       hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
-        std::vector<int64_t> xDims = {1, 1, 2, 2};
-        std::vector<int64_t> wDims = {1, 1, 1, 1};
-        std::vector<int64_t> yDims = {1, 1, 2, 2};
+        std::vector<int64_t> const xDims = {1, 1, 2, 2};
+        std::vector<int64_t> const wDims = {1, 1, 1, 1};
+        std::vector<int64_t> const yDims = {1, 1, 2, 2};
         ConvolutionFwdTensorBundle<InputType> tensorBundle(
             xDims, wDims, yDims, 1, TensorLayout::NCHW);
 
@@ -160,9 +160,9 @@ public:
     static void runConvolutionBwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                       hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
-        std::vector<int64_t> dxDims = {1, 1, 2, 2};
-        std::vector<int64_t> wDims = {1, 1, 1, 1};
-        std::vector<int64_t> dyDims = {1, 1, 2, 2};
+        std::vector<int64_t> const dxDims = {1, 1, 2, 2};
+        std::vector<int64_t> const wDims = {1, 1, 1, 1};
+        std::vector<int64_t> const dyDims = {1, 1, 2, 2};
         ConvolutionBwdTensorBundle<InputType> tensorBundle(
             dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -185,9 +185,9 @@ public:
     static void runConvolutionWrwTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                       hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
-        std::vector<int64_t> xDims = {1, 1, 2, 2};
-        std::vector<int64_t> dwDims = {1, 1, 1, 1};
-        std::vector<int64_t> dyDims = {1, 1, 2, 2};
+        std::vector<int64_t> const xDims = {1, 1, 2, 2};
+        std::vector<int64_t> const dwDims = {1, 1, 1, 1};
+        std::vector<int64_t> const dyDims = {1, 1, 2, 2};
         ConvolutionWrwTensorBundle<InputType> tensorBundle(
             xDims, dwDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -210,9 +210,9 @@ public:
     static void runMatmulTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
                               hipdnn_data_sdk::data_objects::DataType computeDataType)
     {
-        std::vector<int64_t> aDims = {2, 5, 3};
-        std::vector<int64_t> bDims = {2, 3, 4};
-        std::vector<int64_t> cDims = {2, 5, 4};
+        std::vector<int64_t> const aDims = {2, 5, 3};
+        std::vector<int64_t> const bDims = {2, 3, 4};
+        std::vector<int64_t> const cDims = {2, 5, 4};
         MatmulTensorBundle<inputType> tensorBundle(aDims, bDims, cDims, false, false, 1);
 
         auto graphTuple = buildMatmulGraph(tensorBundle, inputDataType, computeDataType);
@@ -355,8 +355,8 @@ TEST(TestCpuReferenceGraphExecutor, MatmulAllBFloat16)
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
 {
-    std::vector<int64_t> inputDims = {1, 3, 2, 2};
-    std::vector<int64_t> outputDims = {1, 3, 2, 2};
+    std::vector<int64_t> const inputDims = {1, 3, 2, 2};
+    std::vector<int64_t> const outputDims = {1, 3, 2, 2};
 
     auto [graph, tensorBundle, variantPack]
         = buildPointwiseBinaryGraph(inputDims,

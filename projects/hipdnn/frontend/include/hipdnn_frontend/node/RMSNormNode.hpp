@@ -13,7 +13,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class RMSNormNode : public BaseNode<RMSNormNode>
+class RMSNormNode : public BaseNode<RMSNormNode, NodeType::RMS_NORM>
 {
 public:
     RMSNormAttributes attributes;
@@ -75,7 +75,7 @@ public:
         // SECTION 4: Validate Channel Dimensions and Scale Tensor Shape
         // Scale is per-channel with shape [1, C, 1, 1, ...]
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        int64_t const channels = xDims[1];
 
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 

@@ -135,7 +135,7 @@ public:
         }
         if(static_cast<int32_t>(block_size.size()) < idx + 1)
         {
-            block_size.resize(static_cast<size_t>(idx + 1), 1);
+            block_size.resize(static_cast<size_t>(idx) + 1, 1);
         }
         block_size[static_cast<size_t>(idx)] = value;
         return *this;
@@ -199,7 +199,7 @@ public:
 
         if(fb->block_size() != nullptr)
         {
-            std::vector<int32_t> bs(fb->block_size()->begin(), fb->block_size()->end());
+            std::vector<int32_t> const bs(fb->block_size()->begin(), fb->block_size()->end());
             attr.set_block_size(bs);
         }
 

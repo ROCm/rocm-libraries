@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 
@@ -37,7 +37,7 @@
 
 #include "RunListener.hpp"
 
-namespace po = boost::program_options;
+namespace po = Tensile::Client::po;
 
 namespace Tensile
 {

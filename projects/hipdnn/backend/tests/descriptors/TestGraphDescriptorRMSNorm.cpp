@@ -42,18 +42,30 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<RMSNormOperationDescriptor>();
     auto desc = wrapper->asDescriptor<RMSNormOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &scaleDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &biasDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &invRmsDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&scaleDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&epsilonDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&yDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&biasDesc));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&invRmsDesc));
 
     auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
     desc->setAttribute(
@@ -105,7 +117,10 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                           HIPDNN_TYPE_HANDLE,
+                           1,
+                           static_cast<const void*>(&handle));
     }
 
 protected:
@@ -153,8 +168,10 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromSingleRMSNormOperation)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {rmsnormOp.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -241,8 +258,10 @@ TEST_F(TestGraphDescriptorRMSNorm, ComputeDataTypePreserved)
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {rmsnormOp.get()};
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();

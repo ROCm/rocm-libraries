@@ -617,8 +617,15 @@ void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
         bnBwdAttr.peer_stats_tensor_uid(),
         "Batchnorm backward fusion does not support peer statistics");
 
+    auto actIn1Uid = actAttr.in_1_tensor_uid();
+    if(!actIn1Uid.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation backward node must have a second input tensor (in_1)");
+    }
     std::vector<int64_t> ioTensorIds
-        = {bnBwdAttr.x_tensor_uid(), actAttr.in_1_tensor_uid().value(), bnBwdAttr.dx_tensor_uid()};
+        = {bnBwdAttr.x_tensor_uid(), *actIn1Uid, bnBwdAttr.dx_tensor_uid()};
     std::vector<int64_t> affineTensorIds = {bnBwdAttr.scale_tensor_uid(),
                                             bnBwdAttr.dscale_tensor_uid(),
                                             bnBwdAttr.dbias_tensor_uid(),
