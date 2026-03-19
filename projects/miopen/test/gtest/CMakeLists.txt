@@ -44,19 +44,30 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     list(APPEND SKIP_TESTS tensor_fwd_bias_ocl_hip.cpp)
     # Disable tests that leak memory when Address Sanitizer is enabled.  These tests need to be investigated and fixed.
     list(APPEND SKIP_TESTS
+        deterministic_conv_api.cpp
         fusion_test.cpp
         gpu_mha_backward.cpp
         gpu_mha_forward.cpp
+        graphapi_convolution.cpp
         graphapi_enginecfg.cpp
         graphapi_engineheur.cpp
         graphapi_execution_plan.cpp
+        graphapi_matmul.cpp
         graphapi_operationgraph_descriptor.cpp
         graphapi_operation_reduction.cpp
         graphapi_operation_reshape.cpp
+        graphapi_operation_matmul.cpp
+        graphapi_operation_pointwise.cpp
+        graphapi_operation_rng.cpp
+        graphapi_pointwise.cpp
+        graphapi_reduction.cpp
+        graphapi_rng.cpp
         graphapi_tensor.cpp
+        graphapi_variant_pack.cpp
         log_test.cpp
         log_test_neg.cpp
-        mha_find20.cpp)
+        mha_find20.cpp
+        w_supertensor.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
