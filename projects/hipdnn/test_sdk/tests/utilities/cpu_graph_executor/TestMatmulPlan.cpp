@@ -70,7 +70,7 @@ TEST_F(TestMatmulPlan, ExecutePlan)
         = hipdnn_test_sdk::utilities::matmul::calculateMatmulTolerance<float, float, float>(
             planTensorBundle.aTensor, planTensorBundle.bTensor);
 
-    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.cTensor, planTensorBundle.cTensor));
 }
