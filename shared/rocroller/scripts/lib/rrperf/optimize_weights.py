@@ -152,6 +152,7 @@ class Weights:
 
     @classmethod
     def subclass_map(cls):
+        # TODO: This could be automatically populated using introspection.
         return {
             "Full": FullWeights,
             "FullWeights": FullWeights,
