@@ -98,7 +98,8 @@ TEST_F(TestEngineNames, RegistrarSucceedsForNewUniqueName)
 
 TEST_F(TestEngineNames, RegistrarThrowsOnDuplicateName)
 {
-    // Registering an already-registered engine name should throw
+    // These names are already in the map from HIPDNN_REGISTER_ENGINE static initialization.
+    // Re-registering should throw to catch accidental duplicate engine definitions.
     const std::string_view miopenName{MIOPEN_ENGINE_NAME};
     const std::string_view fusilliName{FUSILLI_ENGINE_NAME};
     EXPECT_THROW(EngineRegistrar{miopenName}, std::runtime_error);
