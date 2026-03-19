@@ -31,12 +31,26 @@ class ConvBackwardData : public IntegrationGraphVerificationHarness<DataType, Co
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
                           GraphTensorBundle& bundle,
+                          const std::vector<int64_t>& outputTensorIds,
                           unsigned int seed) override
     {
         assert(_minVal < _maxVal && "Invalid tensor value range");
+
+        auto isOutputTensor = [&outputTensorIds](int64_t id) {
+            return std::find(outputTensorIds.begin(), outputTensorIds.end(), id)
+                   != outputTensorIds.end();
+        };
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            if(isOutputTensor(tensorPair.first))
+            {
+                tensorPair.second->fillWithSentinelValue();
+            }
+            else
+            {
+                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            }
         }
     }
 

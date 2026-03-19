@@ -389,3 +389,61 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, TensorSameElementCountDiffere
     // even though element counts are the same
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
 }
+
+/* ======== NaN/Inf detection tests ======== */
+
+TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasNaN)
+{
+    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
+    std::vector<int64_t> const dims = {2, 2};
+
+    Tensor<float> tensor1(dims);
+    Tensor<float> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<float>::quiet_NaN(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenBothHaveNaN)
+{
+    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
+    std::vector<int64_t> const dims = {2, 2};
+
+    Tensor<float> tensor1(dims);
+    Tensor<float> tensor2(dims);
+    tensor1.fillWithSentinelValue();
+    tensor2.fillWithSentinelValue();
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasInf)
+{
+    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
+    std::vector<int64_t> const dims = {2, 2};
+
+    Tensor<float> tensor1(dims);
+    Tensor<float> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<float>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceMiopenRmsValidationFp32, PassesForFiniteValues)
+{
+    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
+    std::vector<int64_t> const dims = {2, 2};
+
+    Tensor<float> tensor1(dims);
+    Tensor<float> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}

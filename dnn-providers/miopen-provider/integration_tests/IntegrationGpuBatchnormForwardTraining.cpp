@@ -199,8 +199,18 @@ protected:
 
     void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
                           GraphTensorBundle& bundle,
+                          const std::vector<int64_t>& outputTensorIds,
                           unsigned int seed) override
     {
+        // Fill output tensors with sentinel values
+        for(auto id : outputTensorIds)
+        {
+            if(bundle.tensors.find(id) != bundle.tensors.end())
+            {
+                bundle.tensors.at(id)->fillWithSentinelValue();
+            }
+        }
+
         // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
 
         // X input: default range

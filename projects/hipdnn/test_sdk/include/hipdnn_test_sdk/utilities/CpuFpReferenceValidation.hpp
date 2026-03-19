@@ -48,8 +48,21 @@ public:
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
+            using hipdnn_data_sdk::types::isnan;
+            using hipdnn_data_sdk::types::isinf;
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
+
+            if(isnan(refValue) || isnan(implValue) || isinf(refValue) || isinf(implValue))
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "NaN or Inf detected at indices "
+                    << StreamVec(indices) << ": reference value = " << refValue
+                    << ", implementation value = " << implValue
+                    << ". This may indicate an output element was not written by the operation.");
+                result.store(false, std::memory_order_relaxed);
+                return result.load(std::memory_order_relaxed);
+            }
 
             auto absDiff = static_cast<float>(fabs(implValue - refValue));
             auto threshold

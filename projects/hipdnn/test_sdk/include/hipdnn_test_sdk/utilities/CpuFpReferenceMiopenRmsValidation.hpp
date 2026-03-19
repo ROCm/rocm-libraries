@@ -49,14 +49,27 @@ public:
         std::atomic<double> squareDifference(0.0);
         std::atomic<double> maxRefMagnitude(0.0);
         std::atomic<double> maxImplMagnitude(0.0);
+        std::atomic<bool> hasNanOrInf(false);
 
         hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
         hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
+            using hipdnn_data_sdk::types::isnan;
+            using hipdnn_data_sdk::types::isinf;
             T refValueT = refView.getHostValue(indices);
             T implValueT = implView.getHostValue(indices);
+
+            if(isnan(refValueT) || isnan(implValueT) || isinf(refValueT) || isinf(implValueT))
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "NaN or Inf detected at indices: reference value = "
+                    << refValueT << ", implementation value = " << implValueT
+                    << ". This may indicate an output element was not written by the operation.");
+                hasNanOrInf.store(true, std::memory_order_relaxed);
+                return;
+            }
 
             auto refValue = static_cast<double>(refValueT);
             auto implValue = static_cast<double>(implValueT);
@@ -89,6 +102,11 @@ public:
         auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
+
+        if(hasNanOrInf.load())
+        {
+            return false;
+        }
 
         return checkRmsError(
             squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());

@@ -31,11 +31,24 @@ class ConvBackwardWeights : public IntegrationGraphVerificationHarness<DataType,
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
                           GraphTensorBundle& bundle,
+                          const std::vector<int64_t>& outputTensorIds,
                           unsigned int seed) override
     {
+        auto isOutputTensor = [&outputTensorIds](int64_t id) {
+            return std::find(outputTensorIds.begin(), outputTensorIds.end(), id)
+                   != outputTensorIds.end();
+        };
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            if(isOutputTensor(tensorPair.first))
+            {
+                tensorPair.second->fillWithSentinelValue();
+            }
+            else
+            {
+                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            }
         }
     }
 

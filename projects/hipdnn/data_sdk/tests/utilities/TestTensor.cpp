@@ -1,12 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cmath>
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::types;
 
 TEST(TestTensor, Swap)
 {
@@ -605,4 +608,109 @@ TEST(TestTensor, SparseTensorCreationAndUsage)
     EXPECT_EQ(tensor.getIndex(0, 0, 1, 0), 8);
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 1), 16);
     EXPECT_EQ(tensor.getIndex(1, 1, 1, 1), 30);
+}
+
+/* ======== fillWithSentinelValue tests ======== */
+
+TEST(TestTensorSentinel, FloatTensorFilledWithNaN)
+{
+    Tensor<float> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        EXPECT_TRUE(std::isnan(*static_cast<float*>(valuePtr)));
+    }
+}
+
+TEST(TestTensorSentinel, HalfTensorFilledWithNaN)
+{
+    Tensor<half> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        auto value = *static_cast<half*>(valuePtr);
+        EXPECT_TRUE(std::isnan(static_cast<float>(value)));
+    }
+}
+
+TEST(TestTensorSentinel, Bfloat16TensorFilledWithNaN)
+{
+    Tensor<bfloat16> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        auto value = *static_cast<bfloat16*>(valuePtr);
+        EXPECT_TRUE(std::isnan(static_cast<float>(value)));
+    }
+}
+
+TEST(TestTensorSentinel, DoubleTensorFilledWithNaN)
+{
+    Tensor<double> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        EXPECT_TRUE(std::isnan(*static_cast<double*>(valuePtr)));
+    }
+}
+
+TEST(TestTensorSentinel, Int32TensorFilledWithMax)
+{
+    Tensor<int32_t> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        EXPECT_EQ(*static_cast<int32_t*>(valuePtr), std::numeric_limits<int32_t>::max());
+    }
+}
+
+TEST(TestTensorSentinel, Int8TensorFilledWithMax)
+{
+    Tensor<int8_t> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        EXPECT_EQ(*static_cast<int8_t*>(valuePtr), std::numeric_limits<int8_t>::max());
+    }
+}
+
+TEST(TestTensorSentinel, Uint8TensorFilledWithMax)
+{
+    Tensor<uint8_t> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        EXPECT_EQ(*static_cast<uint8_t*>(valuePtr), std::numeric_limits<uint8_t>::max());
+    }
+}
+
+TEST(TestTensorSentinel, StridedTensorFilledWithNaN)
+{
+    std::vector<int64_t> const dims = {2, 2, 2};
+    std::vector<int64_t> const strides = {2, 4, 8};
+
+    Tensor<float> tensor(dims, strides);
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        EXPECT_TRUE(std::isnan(*static_cast<float*>(valuePtr)));
+    }
+}
+
+TEST(TestTensorSentinel, ViaITensorInterface)
+{
+    std::unique_ptr<ITensor> tensor = std::make_unique<Tensor<float>>(std::vector<int64_t>{4, 4});
+    tensor->fillWithSentinelValue();
+
+    auto* floatTensor = static_cast<TensorBase<float>*>(tensor.get());
+    EXPECT_TRUE(std::isnan(floatTensor->getHostValue(0, 0)));
+    EXPECT_TRUE(std::isnan(floatTensor->getHostValue(3, 3)));
 }

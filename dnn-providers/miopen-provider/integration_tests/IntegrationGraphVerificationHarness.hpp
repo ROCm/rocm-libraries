@@ -134,8 +134,8 @@ protected:
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
 
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
+        initializeBundle(graph, gpuBundle, outputTensorIds, seed);
+        initializeBundle(graph, cpuBundle, outputTensorIds, seed);
 
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(_handle, graph, gpuBundle));
         executeCpuGraph(graph, cpuBundle);
@@ -229,11 +229,24 @@ protected:
 
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                                  const std::vector<int64_t>& outputTensorIds,
                                   unsigned int seed)
     {
+        auto isOutputTensor = [&outputTensorIds](int64_t id) {
+            return std::find(outputTensorIds.begin(), outputTensorIds.end(), id)
+                   != outputTensorIds.end();
+        };
+
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
+            if(isOutputTensor(tensorPair.first))
+            {
+                tensorPair.second->fillWithSentinelValue();
+            }
+            else
+            {
+                bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
+            }
         }
     }
 

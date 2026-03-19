@@ -318,6 +318,7 @@ public:
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual void fillWithSentinelValue() = 0;
     virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
@@ -404,6 +405,18 @@ public:
                                     unsigned int seed = std::random_device{}()) override
     {
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
+    }
+
+    void fillWithSentinelValue() override
+    {
+        if constexpr(std::numeric_limits<T>::has_quiet_NaN)
+        {
+            fillWithValue(std::numeric_limits<T>::quiet_NaN());
+        }
+        else
+        {
+            fillWithValue(std::numeric_limits<T>::max());
+        }
     }
 
     virtual MigratableMemoryBase<T>& memory() = 0;
