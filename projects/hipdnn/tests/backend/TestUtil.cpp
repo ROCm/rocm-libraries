@@ -25,9 +25,9 @@ void createTestHandle(hipdnnHandle_t* handle)
 void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handle)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
         builder,
         "Test GRAPH!",
@@ -43,8 +43,11 @@ void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handl
                   descriptor, serializedGraph.data(), serializedGraph.size()),
               HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  *descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+    ASSERT_EQ(hipdnnBackendSetAttribute(*descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -60,10 +63,12 @@ void populateTestEngine(hipdnnBackendDescriptor_t engine,
     }
 
     ASSERT_EQ(hipdnnBackendFinalize(*graph), HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            engine, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, graph),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(engine,
+                                        HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(graph)),
+              HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendSetAttribute(
                   engine, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &gidx),
               HIPDNN_STATUS_SUCCESS);
@@ -97,10 +102,12 @@ void populateTestEngineConfig(hipdnnBackendDescriptor_t* engineConfig,
         createTestEngine(engine, graph, handle, gidx, true);
     }
 
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            *engineConfig, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, engine),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(*engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(engine)),
+              HIPDNN_STATUS_SUCCESS);
 
     if(finalize)
     {
@@ -128,10 +135,12 @@ void populateTestExecutionPlan(hipdnnBackendDescriptor_t* executionPlan,
                                int64_t gidx,
                                bool finalize)
 {
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            *executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(*executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
+              HIPDNN_STATUS_SUCCESS);
 
     if(*engineConfig == nullptr)
     {
@@ -142,7 +151,7 @@ void populateTestExecutionPlan(hipdnnBackendDescriptor_t* executionPlan,
                                         HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        engineConfig),
+                                        static_cast<const void*>(engineConfig)),
               HIPDNN_STATUS_SUCCESS);
 
     if(finalize)
@@ -170,6 +179,8 @@ void freeTensorMemory(void* dataPtr)
     }
 }
 
+namespace
+{
 void setTensorMappingsInVariantPack(hipdnnBackendDescriptor_t variantPack,
                                     const std::vector<int64_t>& tensorIds,
                                     const std::vector<void*>& dataPtrs)
@@ -185,7 +196,7 @@ void setTensorMappingsInVariantPack(hipdnnBackendDescriptor_t variantPack,
                                         HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                         HIPDNN_TYPE_VOID_PTR,
                                         static_cast<int64_t>(dataPtrs.size()),
-                                        dataPtrs.data()),
+                                        static_cast<const void*>(dataPtrs.data())),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -197,7 +208,7 @@ void setWorkspaceInVariantPack(hipdnnBackendDescriptor_t variantPack, void* work
                                             HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
                                             HIPDNN_TYPE_VOID_PTR,
                                             1,
-                                            &workspace),
+                                            static_cast<const void*>(&workspace)),
                   HIPDNN_STATUS_SUCCESS);
     }
 }
@@ -221,6 +232,7 @@ void extractTensorMappings(const std::unordered_map<int64_t, void*>& dataPtrMapp
     ASSERT_FALSE(tensorIds.empty());
     ASSERT_FALSE(dataPtrs.empty());
 }
+} // namespace
 
 void populateVariantPackWithMappings(hipdnnBackendDescriptor_t variantPack,
                                      const std::unordered_map<int64_t, void*>& dataPtrMappings,
@@ -245,10 +257,12 @@ void createAndInitializeBackendDescriptor(hipdnnBackendDescriptor_t* backendDesc
         backendDescriptor, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            *backendDescriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(*backendDescriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
+              HIPDNN_STATUS_SUCCESS);
 
     status = hipdnnBackendFinalize(*backendDescriptor);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
@@ -274,8 +288,8 @@ void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGra
     // Extract all tensor information from the deserialized graph
     for(const auto& tensor : deserializedGraph->tensors)
     {
-        int64_t uid = tensor->uid;
-        std::string name = tensor->name;
+        const int64_t uid = tensor->uid;
+        const std::string name = tensor->name;
 
         uidToNameMap[uid] = name;
         nameToUidMap[name] = uid;
@@ -346,8 +360,8 @@ static bool isPluginLoadedByRelativePathInternal(const fs::path& fullPath, const
 {
     using hipdnn_data_sdk::utilities::pathCompEq;
 
-    fs::path suffixNorm = suffix.lexically_normal();
-    fs::path fullPathNorm = fullPath.lexically_normal();
+    const fs::path suffixNorm = suffix.lexically_normal();
+    const fs::path fullPathNorm = fullPath.lexically_normal();
 
     if(suffixNorm.empty())
     {

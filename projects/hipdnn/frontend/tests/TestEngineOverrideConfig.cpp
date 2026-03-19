@@ -64,7 +64,7 @@ TEST(TestEngineOverrideConfig, ExactDimMatchSingleRule)
 
     auto config = makeConfig({std::move(rule)});
 
-    std::vector<std::shared_ptr<TensorAttributes>> tensors
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors
         = {makeTensor({1, 3, 224, 224}), makeTensor({64, 3, 7, 7})};
 
     auto result = config.matchOperation("conv_fprop", tensors);
@@ -88,7 +88,7 @@ TEST(TestEngineOverrideConfig, FirstMatchingRuleWins)
 
     auto config = makeConfig({std::move(rule1), std::move(rule2)});
 
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
 
     auto result = config.matchOperation("conv_fprop", tensors);
     ASSERT_TRUE(result.has_value());
@@ -106,7 +106,7 @@ TEST(TestEngineOverrideConfig, NoRuleMatchesWrongDims)
 
     auto config = makeConfig({std::move(rule)});
 
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {
         makeTensor({1, 3, 112, 112}) // different spatial dims
     };
 
@@ -125,16 +125,17 @@ TEST(TestEngineOverrideConfig, WildcardInOneDimension)
 
     auto config = makeConfig({std::move(rule)});
 
-    for(int64_t batch : {1, 4, 8, 32})
+    for(const int64_t batch : {1, 4, 8, 32})
     {
-        std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({batch, 64, 56, 56})};
+        const std::vector<std::shared_ptr<TensorAttributes>> tensors
+            = {makeTensor({batch, 64, 56, 56})};
         auto result = config.matchOperation("conv_fprop", tensors);
         ASSERT_TRUE(result.has_value()) << "batch=" << batch << " should match";
         EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
     }
 
     // Non-matching channel dim should still fail
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({4, 128, 56, 56})};
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({4, 128, 56, 56})};
     EXPECT_FALSE(config.matchOperation("conv_fprop", tensors).has_value());
 }
 
@@ -152,7 +153,7 @@ TEST(TestEngineOverrideConfig, AllWildcardRuleMatchesAnyShape)
     for(const auto& shape :
         std::vector<std::vector<int64_t>>{{1, 3, 224, 224}, {8, 64, 56, 56}, {32, 256, 14, 14}})
     {
-        std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor(shape)};
+        const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor(shape)};
         auto result = config.matchOperation("conv_fprop", tensors);
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(*result, FUSILLI_ENGINE_ID);
@@ -170,7 +171,7 @@ TEST(TestEngineOverrideConfig, WrongOpNameReturnsNullopt)
 
     auto config = makeConfig({std::move(rule)});
 
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
 
     EXPECT_FALSE(config.matchOperation("conv_dgrad", tensors).has_value());
     EXPECT_FALSE(config.matchOperation("conv_wgrad", tensors).has_value());
@@ -189,11 +190,11 @@ TEST(TestEngineOverrideConfig, WrongTensorCountReturnsNullopt)
     auto config = makeConfig({std::move(rule)});
 
     // Provide only 1 tensor where 2 are expected
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
     EXPECT_FALSE(config.matchOperation("conv_fprop", tensors).has_value());
 
     // Provide 3 tensors where 2 are expected
-    std::vector<std::shared_ptr<TensorAttributes>> tensors3
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors3
         = {makeTensor({1, 3, 224, 224}), makeTensor({64, 3, 7, 7}), makeTensor({64, 1, 1, 1})};
     EXPECT_FALSE(config.matchOperation("conv_fprop", tensors3).has_value());
 }
@@ -218,7 +219,7 @@ TEST(TestEngineOverrideConfig, WildcardBeforeExactBothMatch)
 
     auto config = makeConfig({std::move(wildcard), std::move(exact)});
 
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
     auto result = config.matchOperation("conv_fprop", tensors);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, FUSILLI_ENGINE_ID); // wildcard (order 0) beats exact (order 1)
@@ -239,7 +240,7 @@ TEST(TestEngineOverrideConfig, ExactBeforeWildcardBothMatch)
 
     auto config = makeConfig({std::move(exact), std::move(wildcard)});
 
-    std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
+    const std::vector<std::shared_ptr<TensorAttributes>> tensors = {makeTensor({1, 3, 224, 224})};
     auto result = config.matchOperation("conv_fprop", tensors);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID); // exact (order 0) beats wildcard (order 1)
@@ -263,7 +264,8 @@ TEST(TestEngineOverrideConfig, ExactStrideMatchSelectsEngine)
     EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
 
     // Different stride must not match
-    auto wrongStride = makeTensorWithStride({1, 3, 224, 224}, {1, 224, 224 * 3, 224 * 3 * 224});
+    auto wrongStride = makeTensorWithStride({1, 3, 224, 224},
+                                            {1, 224, int64_t{224} * 3, int64_t{224} * 3 * 224});
     EXPECT_FALSE(config.matchOperation("conv_fprop", {wrongStride}).has_value());
 }
 
@@ -279,7 +281,7 @@ TEST(TestEngineOverrideConfig, WildcardStrideElement)
     auto config = makeConfig({std::move(rule)});
 
     // Should match regardless of the last two stride values
-    for(int64_t s2 : {224, 112, 56})
+    for(const int64_t s2 : {224, 112, 56})
     {
         auto t = makeTensorWithStride({1, 3, 224, 224}, {150528, 50176, s2, 1});
         auto result = config.matchOperation("conv_fprop", {t});
@@ -348,14 +350,14 @@ TEST(TestEngineOverrideConfig, LoadFromValidJsonFile)
     ASSERT_TRUE(config.has_value());
 
     // Exact match hits the first rule
-    std::vector<std::shared_ptr<TensorAttributes>> exact
+    const std::vector<std::shared_ptr<TensorAttributes>> exact
         = {makeTensor({1, 3, 224, 224}), makeTensor({64, 3, 7, 7})};
     auto r1 = config->matchOperation("conv_fprop", exact);
     ASSERT_TRUE(r1.has_value());
     EXPECT_EQ(*r1, MIOPEN_ENGINE_ID);
 
     // Different shape falls through to the wildcard rule
-    std::vector<std::shared_ptr<TensorAttributes>> other
+    const std::vector<std::shared_ptr<TensorAttributes>> other
         = {makeTensor({8, 64, 56, 56}), makeTensor({64, 64, 3, 3})};
     auto r2 = config->matchOperation("conv_fprop", other);
     ASSERT_TRUE(r2.has_value());
@@ -409,7 +411,8 @@ TEST(TestEngineOverrideConfig, JsonWithStrideConstraint)
     EXPECT_EQ(*r1, MIOPEN_ENGINE_ID);
 
     // Wrong stride must not match
-    auto xWrong = makeTensorWithStride({1, 3, 224, 224}, {1, 224, 224 * 3, 224 * 3 * 224});
+    auto xWrong = makeTensorWithStride({1, 3, 224, 224},
+                                       {1, 224, int64_t{224} * 3, int64_t{224} * 3 * 224});
     EXPECT_FALSE(config->matchOperation("conv_fprop", {xWrong, w}).has_value());
 }
 

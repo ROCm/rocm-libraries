@@ -105,7 +105,7 @@ auto forward_transform_types
     = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
 INSTANTIATE_TEST_SUITE_P(
-#ifdef WIN32
+#ifdef _WIN32
     DISABLED_callback_no_offset,
 #else
     callback,

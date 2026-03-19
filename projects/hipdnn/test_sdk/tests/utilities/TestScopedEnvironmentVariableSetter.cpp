@@ -16,7 +16,7 @@ TEST(TestScopedEnvironmentVariableSetter, RestoresOriginalValue)
     hipdnn_data_sdk::utilities::setEnv(testVar, originalValue);
 
     {
-        ScopedEnvironmentVariableSetter guard(testVar, newValue);
+        const ScopedEnvironmentVariableSetter guard(testVar, newValue);
 
         EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv(testVar, ""), newValue);
     }
@@ -33,7 +33,7 @@ TEST(TestScopedEnvironmentVariableSetter, RestoresUnsetVariable)
     hipdnn_data_sdk::utilities::unsetEnv(testVar);
 
     {
-        ScopedEnvironmentVariableSetter guard(testVar, "temporary");
+        const ScopedEnvironmentVariableSetter guard(testVar, "temporary");
 
         EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv(testVar, ""), "temporary");
     }
@@ -49,7 +49,7 @@ TEST(TestScopedEnvironmentVariableSetter, HandlesEmptyValue)
     hipdnn_data_sdk::utilities::setEnv(testVar, "");
 
     {
-        ScopedEnvironmentVariableSetter guard(testVar, "non-empty");
+        const ScopedEnvironmentVariableSetter guard(testVar, "non-empty");
 
         EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv(testVar, ""), "non-empty");
     }

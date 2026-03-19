@@ -314,7 +314,7 @@ TEST(TestBatchnormBackwardAttributes, SimplifiedSetPeerStatsWithMove)
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    size_t originalSize = peerStatsMove.size();
+    const size_t originalSize = peerStatsMove.size();
     batchnormAttributes.set_peer_stats(std::move(peerStatsMove));
 
     // Verify the vector was moved

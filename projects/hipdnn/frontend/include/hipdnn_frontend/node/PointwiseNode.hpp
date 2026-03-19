@@ -13,7 +13,7 @@
 
 namespace hipdnn_frontend::graph
 {
-class PointwiseNode : public BaseNode<PointwiseNode>
+class PointwiseNode : public BaseNode<PointwiseNode, NodeType::POINTWISE>
 {
 
 public:

@@ -15,6 +15,9 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+namespace
+{
+
 // Helper function to create a tensor with computed contiguous strides
 std::shared_ptr<TensorAttributes> createTensor(const std::string& name,
                                                const std::vector<int64_t>& dims,
@@ -177,6 +180,8 @@ std::string serializationFormatToString(const ::testing::TestParamInfo<Serializa
         return "Unknown";
     }
 }
+
+} // namespace
 
 //==============================================================================
 // Parametrized Round-Trip Tests
@@ -487,7 +492,7 @@ TEST_P(TestGraphSerializationRoundTrip, BnInfDReluBnBwdFusion)
     auto dy = createTensor("dy", {1, 64, 32, 32}, DataType::FLOAT, 6);
 
     // Batchnorm inference
-    BatchnormInferenceAttributes bnInfAttrs;
+    const BatchnormInferenceAttributes bnInfAttrs;
     auto bnY = graph.batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttrs);
 
     // DReLU (ReLU backward)
@@ -1158,7 +1163,7 @@ TEST(TestGraphSerialization, DeserializeInvalidJsonGracefully)
     Graph graph;
 
     // Empty JSON object
-    nlohmann::json emptyJson = nlohmann::json::object();
+    const nlohmann::json emptyJson = nlohmann::json::object();
     auto err = graph.deserialize(emptyJson);
     // Should not crash, behavior depends on implementation
     // At minimum, should return without exception
@@ -1318,7 +1323,7 @@ TEST_P(TestGraphSerializationRoundTrip, MatmulNode)
     auto a = createTensor("a", {32, 64}, DataType::FLOAT, 1);
     auto b = createTensor("b", {64, 128}, DataType::FLOAT, 2);
 
-    MatmulAttributes matmulAttrs;
+    const MatmulAttributes matmulAttrs;
     auto c = graph.matmul(a, b, matmulAttrs);
     c->set_output(true); // Mark as output to test non-virtual tensor
 
@@ -1347,7 +1352,7 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInferenceNodeVarianceExt)
     auto bias = createTensor1D("bias", 64, DataType::FLOAT, 5);
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
-    BatchnormInferenceAttributesVarianceExt bnInfVarAttrs;
+    const BatchnormInferenceAttributesVarianceExt bnInfVarAttrs;
 
     auto y = graph.batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, bnInfVarAttrs);
@@ -1512,7 +1517,7 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInference)
     auto scale = createTensor1D("scale", 64, DataType::FLOAT, 4);
     auto bias = createTensor1D("bias", 64, DataType::FLOAT, 5);
 
-    BatchnormInferenceAttributes bnInfAttrs;
+    const BatchnormInferenceAttributes bnInfAttrs;
 
     auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnInfAttrs);
     y->set_output(true); // Mark as output to test non-virtual tensor
@@ -1728,7 +1733,7 @@ TEST_P(TestGraphSerializationRoundTrip, CustomOpNode)
     auto inputA = createTensor("input_a", {2, 3}, DataType::FLOAT, 1);
     auto inputB = createTensor("input_b", {2, 3}, DataType::FLOAT, 2);
 
-    std::vector<uint8_t> opaquePayload = {0xDE, 0xAD, 0xBE, 0xEF};
+    const std::vector<uint8_t> opaquePayload = {0xDE, 0xAD, 0xBE, 0xEF};
 
     CustomOpAttributes customAttrs;
     customAttrs.set_name("my_custom_op").set_custom_op_id("example.my_add").set_data(opaquePayload);

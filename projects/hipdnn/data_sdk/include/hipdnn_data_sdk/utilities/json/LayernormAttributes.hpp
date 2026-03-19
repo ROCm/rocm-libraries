@@ -22,6 +22,7 @@ inline void to_json(nlohmann::json& layernormJson, const LayernormAttributes& ln
     outputs["mean_tensor_uid"] = ln.mean_tensor_uid();
     outputs["inv_variance_tensor_uid"] = ln.inv_variance_tensor_uid();
 
+    layernormJson["normalized_dim_count"] = ln.normalized_dim_count();
     layernormJson["forward_phase"] = static_cast<int8_t>(ln.forward_phase());
 }
 
@@ -35,6 +36,8 @@ inline auto to<data_objects::LayernormAttributes>(flatbuffers::FlatBufferBuilder
 {
     auto& inputs = entry.at("inputs");
     auto& outputs = entry.at("outputs");
+
+    const int64_t normalizedDimCount = entry.at("normalized_dim_count").get<int64_t>();
 
     auto forwardPhase = data_objects::NormFwdPhase::NOT_SET;
     if(entry.contains("forward_phase"))
@@ -50,6 +53,7 @@ inline auto to<data_objects::LayernormAttributes>(flatbuffers::FlatBufferBuilder
         inputs.at("bias_tensor_uid").get<int64_t>(),
         inputs.at("epsilon_tensor_uid").get<int64_t>(),
         outputs.at("y_tensor_uid").get<int64_t>(),
+        normalizedDimCount,
         outputs.at("mean_tensor_uid").get<std::optional<int64_t>>(),
         outputs.at("inv_variance_tensor_uid").get<std::optional<int64_t>>(),
         forwardPhase);
