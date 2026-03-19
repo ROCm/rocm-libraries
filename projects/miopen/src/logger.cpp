@@ -86,8 +86,8 @@ size_t& GetBufferIdx()
 std::ostringstream& GetThreadLocalLogStream()
 {
     static thread_local std::ostringstream stream;
-    stream.str("");  // Clear contents
-    stream.clear();  // Clear state flags
+    stream.str(""); // Clear contents
+    stream.clear(); // Clear state flags
     return stream;
 }
 
