@@ -60,13 +60,13 @@ def calibrate_timing(iterations=10000):
         return
     # Warmup — let CPython's adaptive specialization settle
     for _ in range(100):
-        with timing_context("__calibrate__"):
+        with timing_context("calibrate_python_timing_overhead"):
             pass
     buf_before = len(_timing_buffer)
     count_before = _invocation_count
     start = time.time_ns()
     for _ in range(iterations):
-        with timing_context("__calibrate__"):
+        with timing_context("calibrate_python_timing_overhead"):
             pass
     total = time.time_ns() - start
     # Remove calibration entries from buffer and counter

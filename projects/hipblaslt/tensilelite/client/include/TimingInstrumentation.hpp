@@ -19,6 +19,12 @@ namespace TensileLite
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
 
+        // Accumulated instrumentation overhead in nanoseconds.
+        // Tracks time spent in ScopedTimer construction/destruction bookkeeping
+        // (clock::now calls, push_back, etc.) that falls OUTSIDE measured intervals.
+        // Single-threaded — no atomic needed.
+        inline int64_t g_timingOverheadNs = 0;
+
         // ---- Deferred I/O buffer ------------------------------------------------
         //
         // During measurement, timing data is captured as raw structs with no string
@@ -98,6 +104,14 @@ namespace TensileLite
         // Format and write all buffered records, then clear the buffer.
         inline void flushTimingBuffer()
         {
+            // Emit accumulated instrumentation overhead as a timing record.
+            if(g_timingInstrumentationEnabled)
+            {
+                double overheadMs = g_timingOverheadNs / 1'000'000.0;
+                g_timingBuffer.push_back(TimingRec{"timing_overhead", overheadMs});
+                g_timingOverheadNs = 0;
+            }
+
             for(auto& rec : g_timingBuffer)
             {
                 std::visit(
@@ -139,8 +153,14 @@ namespace TensileLite
             {
                 if(g_timingInstrumentationEnabled)
                 {
+                    auto t0    = clock::now();
                     m_category = category;
                     m_start    = clock::now();
+                    // Overhead = time between first clock::now and measurement start.
+                    g_timingOverheadNs
+                        += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               m_start - t0)
+                               .count();
                 }
             }
 
@@ -152,6 +172,11 @@ namespace TensileLite
                     double durationMs
                         = std::chrono::duration<double, std::milli>(end - m_start).count();
                     g_timingBuffer.push_back(TimingRec{m_category, durationMs});
+                    auto t1 = clock::now();
+                    // Overhead = time between measurement end and destructor finish.
+                    g_timingOverheadNs
+                        += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - end)
+                               .count();
                 }
             }
 
@@ -173,7 +198,11 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
+                auto t0 = TimingClock::now();
                 g_timingBuffer.push_back(TimingRec{category, ms});
+                auto t1 = TimingClock::now();
+                g_timingOverheadNs
+                    += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             }
         }
 
@@ -183,7 +212,11 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
+                auto t0 = TimingClock::now();
                 g_timingBuffer.push_back(ContextRec{M, N, K, batchCount, typeA, typeD});
+                auto t1 = TimingClock::now();
+                g_timingOverheadNs
+                    += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             }
         }
 
@@ -194,8 +227,12 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
+                auto t0 = TimingClock::now();
                 g_timingBuffer.push_back(
                     GroupedContextRec{index, totalGemms, M, N, K, batchCount, typeA, typeD});
+                auto t1 = TimingClock::now();
+                g_timingOverheadNs
+                    += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             }
         }
 

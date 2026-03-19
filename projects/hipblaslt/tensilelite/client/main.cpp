@@ -1541,8 +1541,17 @@ int main(int argc, const char* argv[])
         listeners.finalizeReport();
     }
 
-    // Flush all buffered timing records to stderr
-    flushTimingBuffer();
+    // Flush all buffered timing records to stderr.
+    // Timed with raw chrono instead of ScopedTimer because ScopedTimer pushes
+    // its record into the buffer on destruction — after flushTimingBuffer()
+    // has already drained and cleared it, so the record would be lost.
+    {
+        auto flushStart = TimingClock::now();
+        flushTimingBuffer();
+        auto flushMs = std::chrono::duration<double, std::milli>(
+            TimingClock::now() - flushStart).count();
+        std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+    }
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);
