@@ -56,7 +56,7 @@ TEST(TestLayernormAttributes, SetNormalizedDimCount)
 {
     LayernormAttributes attrs;
 
-    int64_t normalizedDimCount = 3;
+    const int64_t normalizedDimCount = 3;
     attrs.set_normalized_dim_count(normalizedDimCount);
 
     EXPECT_EQ(attrs.get_normalized_dim_count(), normalizedDimCount);

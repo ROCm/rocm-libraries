@@ -37,7 +37,7 @@ inline auto to<data_objects::LayernormAttributes>(flatbuffers::FlatBufferBuilder
     auto& inputs = entry.at("inputs");
     auto& outputs = entry.at("outputs");
 
-    int64_t normalizedDimCount = entry.at("normalized_dim_count").get<int64_t>();
+    const int64_t normalizedDimCount = entry.at("normalized_dim_count").get<int64_t>();
 
     auto forwardPhase = data_objects::NormFwdPhase::NOT_SET;
     if(entry.contains("forward_phase"))

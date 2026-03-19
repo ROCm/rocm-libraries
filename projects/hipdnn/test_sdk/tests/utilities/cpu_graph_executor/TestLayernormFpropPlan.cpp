@@ -78,7 +78,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
     fpropPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));
@@ -87,9 +87,9 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
 TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 {
     auto tolerance = layernorm::getTolerance<float>();
-    std::vector<int64_t> dims = {6, 3, 32, 32};
+    std::vector<int64_t> const dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 2;
-    unsigned int seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
@@ -100,7 +100,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
                                           false,
                                           true);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -115,7 +115,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
                                 *tensorMap.at(attributes.bias_tensor_uid()),
                                 normalizedDimCount);
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.getTensor(attributes.x_tensor_uid()).rawHostData());

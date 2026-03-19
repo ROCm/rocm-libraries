@@ -414,7 +414,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCount)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -434,7 +434,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsAmbiguousNormalizedDimCount)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -454,7 +454,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCountWithAlternativeLayo
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
