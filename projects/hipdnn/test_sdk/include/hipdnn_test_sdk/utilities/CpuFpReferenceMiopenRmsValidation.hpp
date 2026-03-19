@@ -62,7 +62,7 @@ public:
             auto implValue = static_cast<double>(implValueT);
 
             auto diff = refValue - implValue;
-            double diffSquared = diff * diff;
+            const double diffSquared = diff * diff;
             double currentSum = squareDifference.load(std::memory_order_relaxed);
             while(!squareDifference.compare_exchange_weak(
                 currentSum, currentSum + diffSquared, std::memory_order_relaxed))
@@ -71,7 +71,7 @@ public:
 
             // Track maximum magnitudes
             double currentMaxRef = maxRefMagnitude.load(std::memory_order_relaxed);
-            double absRefValue = fabs(refValue);
+            const double absRefValue = fabs(refValue);
             while(absRefValue > currentMaxRef
                   && !maxRefMagnitude.compare_exchange_weak(
                       currentMaxRef, absRefValue, std::memory_order_relaxed))
@@ -79,7 +79,7 @@ public:
             }
 
             double currentMaxImpl = maxImplMagnitude.load(std::memory_order_relaxed);
-            double absImplValue = fabs(implValue);
+            const double absImplValue = fabs(implValue);
             while(absImplValue > currentMaxImpl
                   && !maxImplMagnitude.compare_exchange_weak(
                       currentMaxImpl, absImplValue, std::memory_order_relaxed))
@@ -103,10 +103,10 @@ private:
         using hipdnn_data_sdk::types::max;
         using hipdnn_data_sdk::types::sqrt;
         // Find the maximum magnitude between reference and implementation
-        double maxMagnitude
+        const double maxMagnitude
             = max(max(maxRefMagnitude, maxImplMagnitude), std::numeric_limits<double>::min());
 
-        double relativeRmsError
+        const double relativeRmsError
             = sqrt(squareDifference) / (sqrt(static_cast<double>(elementCount)) * maxMagnitude);
 
         if(relativeRmsError > _relativeTolerance)

@@ -12,7 +12,8 @@
 
 namespace hipdnn_frontend::graph
 {
-class BatchnormInferenceNodeVarianceExt : public BaseNode<BatchnormInferenceNodeVarianceExt>
+class BatchnormInferenceNodeVarianceExt
+    : public BaseNode<BatchnormInferenceNodeVarianceExt, NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT>
 {
 public:
     BatchnormInferenceAttributesVarianceExt attributes;
@@ -109,7 +110,7 @@ public:
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));

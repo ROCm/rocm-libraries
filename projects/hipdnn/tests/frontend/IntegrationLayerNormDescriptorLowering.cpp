@@ -334,13 +334,13 @@ TEST_F(IntegrationLayerNormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << " not found in graph tensors";
 
     // All tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids = {layernorm->x_tensor_uid,
-                                            layernorm->scale_tensor_uid,
-                                            layernorm->bias_tensor_uid,
-                                            layernorm->epsilon_tensor_uid,
-                                            layernorm->y_tensor_uid,
-                                            layernorm->mean_tensor_uid.value(),
-                                            layernorm->inv_variance_tensor_uid.value()};
+    const std::unordered_set<int64_t> nodeUids = {layernorm->x_tensor_uid,
+                                                  layernorm->scale_tensor_uid,
+                                                  layernorm->bias_tensor_uid,
+                                                  layernorm->epsilon_tensor_uid,
+                                                  layernorm->y_tensor_uid,
+                                                  layernorm->mean_tensor_uid.value(),
+                                                  layernorm->inv_variance_tensor_uid.value()};
     EXPECT_EQ(nodeUids.size(), 7u) << "LayerNorm node tensor UIDs are not distinct";
 }
 

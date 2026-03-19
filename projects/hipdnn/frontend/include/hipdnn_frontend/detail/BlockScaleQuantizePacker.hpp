@@ -47,7 +47,7 @@ inline Error createBlockScaleQuantizeOperation(
     {
         return {ErrorCode::ATTRIBUTE_NOT_SET, "blockscalequantize block_size is required"};
     }
-    int32_t blockSize = attributes.get_block_size().value();
+    const int32_t blockSize = attributes.get_block_size().value();
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrScalar(opDesc.get(),
                                 HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT,
@@ -57,7 +57,7 @@ inline Error createBlockScaleQuantizeOperation(
 
     if(attributes.get_axis().has_value())
     {
-        int64_t axis = attributes.get_axis().value();
+        const int64_t axis = attributes.get_axis().value();
         HIPDNN_CHECK_ERROR(
             setDescriptorAttrScalar(opDesc.get(),
                                     HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT,
@@ -66,7 +66,7 @@ inline Error createBlockScaleQuantizeOperation(
                                     "blockscalequantize axis"));
     }
 
-    bool transpose = attributes.get_transpose();
+    const bool transpose = attributes.get_transpose();
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrScalar(opDesc.get(),
                                 HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT,
