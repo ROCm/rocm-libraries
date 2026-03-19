@@ -6,7 +6,7 @@
 TYPED_TEST(TestGemmUniversal_FP16_MK_KN, SmallM)
 {
     std::vector<int> Ms{1, 2, 3, 4, 5, 6};
-    constexpr int N = 512;
+    constexpr int N = 256;
     constexpr int K = 320;
 
     constexpr int StrideA = K;

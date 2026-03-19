@@ -7,7 +7,7 @@ TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDKBatch1Default_256x512x256)
 {
     constexpr int M      = 256;
     constexpr int N      = 512;
-    constexpr int K      = 256;
+    constexpr int K      = 512;
     constexpr int kBatch = 1;
 
     EXPECT_EQ(this->Run(M, N, K, kBatch), true);
