@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 namespace hipdnn_frontend::detail
@@ -77,65 +78,101 @@ namespace hipdnn_frontend::detail
     }
     attributes.set_mode(operationResult);
 
-    // Unpack relu_lower_clip
-    float reluLowerClip = 0.0f;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP,
-                                               HIPDNN_TYPE_FLOAT,
-                                               reluLowerClip,
-                                               "pointwise relu_lower_clip"));
-    attributes.set_relu_lower_clip(reluLowerClip);
+    // Unpack relu_lower_clip (optional)
+    {
+        std::optional<float> reluLowerClip;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP,
+                                                           HIPDNN_TYPE_FLOAT,
+                                                           reluLowerClip,
+                                                           "pointwise relu_lower_clip"));
+        if(reluLowerClip.has_value())
+        {
+            attributes.set_relu_lower_clip(*reluLowerClip);
+        }
+    }
 
-    // Unpack relu_upper_clip
-    float reluUpperClip = 0.0f;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP,
-                                               HIPDNN_TYPE_FLOAT,
-                                               reluUpperClip,
-                                               "pointwise relu_upper_clip"));
-    attributes.set_relu_upper_clip(reluUpperClip);
+    // Unpack relu_upper_clip (optional)
+    {
+        std::optional<float> reluUpperClip;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP,
+                                                           HIPDNN_TYPE_FLOAT,
+                                                           reluUpperClip,
+                                                           "pointwise relu_upper_clip"));
+        if(reluUpperClip.has_value())
+        {
+            attributes.set_relu_upper_clip(*reluUpperClip);
+        }
+    }
 
-    // Unpack relu_lower_clip_slope
-    float reluLowerClipSlope = 0.0f;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE,
-                                               HIPDNN_TYPE_FLOAT,
-                                               reluLowerClipSlope,
-                                               "pointwise relu_lower_clip_slope"));
-    attributes.set_relu_lower_clip_slope(reluLowerClipSlope);
+    // Unpack relu_lower_clip_slope (optional)
+    {
+        std::optional<float> reluLowerClipSlope;
+        HIPDNN_CHECK_ERROR(
+            getDescriptorAttrOptionalScalar(opDesc,
+                                            HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE,
+                                            HIPDNN_TYPE_FLOAT,
+                                            reluLowerClipSlope,
+                                            "pointwise relu_lower_clip_slope"));
+        if(reluLowerClipSlope.has_value())
+        {
+            attributes.set_relu_lower_clip_slope(*reluLowerClipSlope);
+        }
+    }
 
-    // Unpack swish_beta
-    float swishBeta = 0.0f;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_POINTWISE_SWISH_BETA,
-                                               HIPDNN_TYPE_FLOAT,
-                                               swishBeta,
-                                               "pointwise swish_beta"));
-    attributes.set_swish_beta(swishBeta);
+    // Unpack swish_beta (optional)
+    {
+        std::optional<float> swishBeta;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_POINTWISE_SWISH_BETA,
+                                                           HIPDNN_TYPE_FLOAT,
+                                                           swishBeta,
+                                                           "pointwise swish_beta"));
+        if(swishBeta.has_value())
+        {
+            attributes.set_swish_beta(*swishBeta);
+        }
+    }
 
-    // Unpack elu_alpha
-    float eluAlpha = 0.0f;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_POINTWISE_ELU_ALPHA,
-                                               HIPDNN_TYPE_FLOAT,
-                                               eluAlpha,
-                                               "pointwise elu_alpha"));
-    attributes.set_elu_alpha(eluAlpha);
+    // Unpack elu_alpha (optional)
+    {
+        std::optional<float> eluAlpha;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_POINTWISE_ELU_ALPHA,
+                                                           HIPDNN_TYPE_FLOAT,
+                                                           eluAlpha,
+                                                           "pointwise elu_alpha"));
+        if(eluAlpha.has_value())
+        {
+            attributes.set_elu_alpha(*eluAlpha);
+        }
+    }
 
-    // Unpack softplus_beta
-    float softplusBeta = 0.0f;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA,
-                                               HIPDNN_TYPE_FLOAT,
-                                               softplusBeta,
-                                               "pointwise softplus_beta"));
-    attributes.set_softplus_beta(softplusBeta);
+    // Unpack softplus_beta (optional)
+    {
+        std::optional<float> softplusBeta;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA,
+                                                           HIPDNN_TYPE_FLOAT,
+                                                           softplusBeta,
+                                                           "pointwise softplus_beta"));
+        if(softplusBeta.has_value())
+        {
+            attributes.set_softplus_beta(*softplusBeta);
+        }
+    }
 
-    // Unpack axis
-    int64_t axis = 0;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
-        opDesc, HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, axis, "pointwise axis"));
-    attributes.set_axis(axis);
+    // Unpack axis (optional)
+    {
+        std::optional<int64_t> axis;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(
+            opDesc, HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, axis, "pointwise axis"));
+        if(axis.has_value())
+        {
+            attributes.set_axis(*axis);
+        }
+    }
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(
