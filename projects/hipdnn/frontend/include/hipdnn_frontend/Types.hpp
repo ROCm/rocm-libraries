@@ -169,7 +169,7 @@ typedef DataType DataType_t; ///< @brief Type alias for DataType
  * S_q < S_kv, BOTTOM_RIGHT aligns the mask so that each query attends
  * to the most recent keys rather than the earliest.
  *
- * @see SdpaAttributes::set_diagonal_alignment()
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_diagonal_alignment()
  */
 enum class DiagonalAlignment
 {
@@ -185,7 +185,7 @@ typedef DiagonalAlignment DiagonalAlignment_t; ///< @brief Type alias for Diagon
  *
  * Selects how the SDPA computation is mapped to GPU kernels.
  *
- * @see SdpaAttributes::set_implementation()
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_implementation()
  */
 enum class AttentionImplementation
 {

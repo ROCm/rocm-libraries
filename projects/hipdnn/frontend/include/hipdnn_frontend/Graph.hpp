@@ -148,7 +148,8 @@ namespace hipdnn_frontend::graph
  *      .set_name("my_graph");
  * @endcode
  *
- * @see TensorAttributes, ConvFpropAttributes, BatchnormAttributes, PointwiseAttributes
+ * @see hipdnn_frontend::graph::TensorAttributes, hipdnn_frontend::graph::ConvFpropAttributes,
+ *      hipdnn_frontend::graph::BatchnormAttributes, hipdnn_frontend::graph::PointwiseAttributes
  */
 class Graph : public INode
 {
@@ -1736,7 +1737,7 @@ public:
      *         - [3] nextRunningMean: Updated running mean (nullptr if not tracking)
      *         - [4] nextRunningVariance: Updated running variance (nullptr if not tracking)
      *
-     * @see BatchnormAttributes
+     * @see hipdnn_frontend::graph::BatchnormAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 5>
         batchnorm(std::shared_ptr<TensorAttributes> x,
@@ -1803,7 +1804,7 @@ public:
      *         - [1] dscale: Per-channel gradient w.r.t. scale
      *         - [2] dbias: Per-channel gradient w.r.t. bias
      *
-     * @see BatchnormBackwardAttributes
+     * @see hipdnn_frontend::graph::BatchnormBackwardAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         batchnorm_backward(std::shared_ptr<TensorAttributes> dy, // NOLINT
@@ -1850,7 +1851,7 @@ public:
      * @param attributes Additional configuration
      * @return y: Normalized output tensor (same shape as x)
      *
-     * @see BatchnormInferenceAttributes
+     * @see hipdnn_frontend::graph::BatchnormInferenceAttributes
      */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference(std::shared_ptr<TensorAttributes> x, // NOLINT
@@ -1899,7 +1900,7 @@ public:
      * @param attributes Additional configuration
      * @return y: Normalized output tensor (same shape as x)
      *
-     * @see BatchnormInferenceAttributesVarianceExt
+     * @see hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt
      */
     std::shared_ptr<TensorAttributes>
         batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
@@ -1956,7 +1957,7 @@ public:
      *         - [1] mean: Computed mean (nullptr in inference mode)
      *         - [2] invVariance: Computed inverse variance (nullptr in inference mode)
      *
-     * @see LayernormAttributes
+     * @see hipdnn_frontend::graph::LayernormAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         layernorm(std::shared_ptr<TensorAttributes> x,
@@ -2033,7 +2034,7 @@ public:
      *         - [0] y: Normalized output (same shape as x)
      *         - [1] invRms: Inverse RMS values (nullptr in inference mode)
      *
-     * @see RMSNormAttributes, LayernormAttributes
+     * @see hipdnn_frontend::graph::RMSNormAttributes, hipdnn_frontend::graph::LayernormAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 2>
         rmsnorm(std::shared_ptr<TensorAttributes> x,
@@ -2074,7 +2075,7 @@ public:
      * @param attributes Configuration: block_size, is_negative_scale
      * @return y: Dequantized output tensor
      *
-     * @see BlockScaleDequantizeAttributes
+     * @see hipdnn_frontend::graph::BlockScaleDequantizeAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes>
@@ -2110,7 +2111,7 @@ public:
      * @param attributes Configuration: block_size, axis, transpose
      * @return [y, scale]: Quantized output tensor and computed scale tensor
      *
-     * @see BlockScaleQuantizeAttributes
+     * @see hipdnn_frontend::graph::BlockScaleQuantizeAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2>
@@ -2146,7 +2147,7 @@ public:
      *        mode-specific parameters (e.g., relu_lower_clip, elu_alpha)
      * @return out0: Output tensor (same shape as in0)
      *
-     * @see PointwiseAttributes, PointwiseMode
+     * @see hipdnn_frontend::graph::PointwiseAttributes, hipdnn_frontend::PointwiseMode
      */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
@@ -2181,7 +2182,7 @@ public:
      * @param attributes Configuration specifying the pointwise mode
      * @return out0: Output tensor (broadcast shape of in0 and in1)
      *
-     * @see PointwiseAttributes, PointwiseMode
+     * @see hipdnn_frontend::graph::PointwiseAttributes, hipdnn_frontend::PointwiseMode
      */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
@@ -2222,7 +2223,7 @@ public:
      * @param attributes Configuration specifying the pointwise mode
      * @return out0: Output tensor
      *
-     * @see PointwiseAttributes, PointwiseMode
+     * @see hipdnn_frontend::graph::PointwiseAttributes, hipdnn_frontend::PointwiseMode
      */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
@@ -2276,7 +2277,7 @@ public:
      * @param attributes Additional configuration
      * @return c: Output matrix [..., M, N]
      *
-     * @see MatmulAttributes
+     * @see hipdnn_frontend::graph::MatmulAttributes
      */
     std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
                                              std::shared_ptr<TensorAttributes> b,
@@ -2323,7 +2324,7 @@ public:
      *       It will fail engine selection unless a plugin is loaded that explicitly
      *       handles the specified `custom_op_id`.
      *
-     * @see CustomOpAttributes
+     * @see hipdnn_frontend::graph::CustomOpAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::vector<std::shared_ptr<TensorAttributes>>
@@ -2381,7 +2382,7 @@ public:
      * @return [o, stats]: Output tensor [B, H, S_q, D] and optional softmax
      *         statistics (nullptr if generate_stats is not set)
      *
-     * @see SdpaAttributes
+     * @see hipdnn_frontend::graph::SdpaAttributes
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> sdpa(std::shared_ptr<TensorAttributes> q,
@@ -2452,7 +2453,7 @@ public:
      *         - [1] dK: Gradient w.r.t. key [B, H, S_kv, D]
      *         - [2] dV: Gradient w.r.t. value [B, H, S_kv, D]
      *
-     * @see SdpaBackwardAttributes, SdpaAttributes
+     * @see hipdnn_frontend::graph::SdpaBackwardAttributes, hipdnn_frontend::graph::SdpaAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 3>
         sdpa_backward(std::shared_ptr<TensorAttributes> q, // NOLINT
@@ -2524,7 +2525,7 @@ public:
      *        convolution mode
      * @return y: Output activation tensor
      *
-     * @see ConvFpropAttributes
+     * @see hipdnn_frontend::graph::ConvFpropAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
@@ -2576,7 +2577,7 @@ public:
      *        (must match forward pass)
      * @return dx: Gradient w.r.t. input (same shape as forward input)
      *
-     * @see ConvDgradAttributes
+     * @see hipdnn_frontend::graph::ConvDgradAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_dgrad(std::shared_ptr<TensorAttributes> dy,
@@ -2628,7 +2629,7 @@ public:
      *        (must match forward pass)
      * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
      *
-     * @see ConvWgradAttributes
+     * @see hipdnn_frontend::graph::ConvWgradAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> dy,
