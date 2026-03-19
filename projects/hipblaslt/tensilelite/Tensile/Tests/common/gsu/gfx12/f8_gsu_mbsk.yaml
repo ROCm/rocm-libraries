@@ -1,0 +1,193 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeC: 21
+  DataInitTypeE: 21
+  DataInitTypeAlpha: 21
+  DataInitTypeBeta: 21
+  DataInitTypeBias: 21
+  DataInitTypeScaleAlphaVec: 1
+  NumElementsToValidate: -1
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAlphaVec: 1
+      UseBias: 1
+      BiasDataTypeList: [s]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]  # 16x16
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]  # 128x128
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ScheduleIterAlg: [3]
+        - GlobalSplitU: [2, 3, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - StoreVectorWidth: [-1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1,   128, 1, 640]
+          - Exact: [2,   128, 1, 640]
+          - Exact: [128,   1, 1, 640]
+          - Exact: [128,   2, 1, 640]
+          - Exact: [128, 128, 1, 1]
+          - Exact: [128, 128, 1, 2]
+          - Exact: [128, 127, 1, 640]
+          - Exact: [128, 129, 1, 640]
+          - Exact: [128, 128, 1, 640]
+          - Exact: [127, 128, 1, 640]
+          - Exact: [129, 128, 1, 640]
+          - Exact: [128, 128, 1, 639]
+          - Exact: [128, 128, 1, 641]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseScaleAlphaVec: 1
+      UseBias: 1
+      BiasDataTypeList: [s]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]  # 16x16
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]  # 128x128
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ScheduleIterAlg: [3]
+        - GlobalSplitU: [2, 3, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - StoreVectorWidth: [-1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1,   128, 1, 640]
+          - Exact: [2,   128, 1, 640]
+          - Exact: [128,   1, 1, 640]
+          - Exact: [128,   2, 1, 640]
+          - Exact: [128, 128, 1, 1]
+          - Exact: [128, 128, 1, 2]
+          - Exact: [128, 127, 1, 640]
+          - Exact: [128, 129, 1, 640]
+          - Exact: [128, 128, 1, 640]
+          - Exact: [127, 128, 1, 640]
+          - Exact: [129, 128, 1, 640]
+          - Exact: [128, 128, 1, 639]
+          - Exact: [128, 128, 1, 641]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAlphaVec: 1
+      UseBias: 1
+      BiasDataTypeList: [s]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]  # 16x16
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]  # 128x128
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ScheduleIterAlg: [3]
+        - GlobalSplitU: [2, 3, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - StoreVectorWidth: [-1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1,   128, 1, 640]
+          - Exact: [2,   128, 1, 640]
+          - Exact: [128,   1, 1, 640]
+          - Exact: [128,   2, 1, 640]
+          - Exact: [128, 128, 1, 1]
+          - Exact: [128, 128, 1, 2]
+          - Exact: [128, 127, 1, 640]
+          - Exact: [128, 129, 1, 640]
+          - Exact: [128, 128, 1, 640]
+          - Exact: [127, 128, 1, 640]
+          - Exact: [129, 128, 1, 640]
+          - Exact: [128, 128, 1, 639]
+          - Exact: [128, 128, 1, 641]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
