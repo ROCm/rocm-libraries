@@ -1127,10 +1127,11 @@ struct BlockFmhaFwdV3Pipeline
             if(2 < num_total_loop)
             {
                 K_mem_load(number<0>{}); // mem_K2
-
-                s_waitcnt<K_mem_su_ld_insts + V_mem_su_ld_insts>();
-                __builtin_amdgcn_s_barrier();
             }
+
+            // drain K1 + V0 async loads before core_loop reads K1 from LDS
+            s_waitcnt<K_mem_su_ld_insts + V_mem_su_ld_insts>();
+            __builtin_amdgcn_s_barrier();
 
             ASM_MARKER("end pre-stage");
         }
