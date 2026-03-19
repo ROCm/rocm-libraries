@@ -1143,13 +1143,17 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
             }
         }
     }
+
+    
+    if(verbose > 1)
+        std::cout << "Copying to the devices ...\n";
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(inoutdesc),
                                direction == HIPFFT_FORWARD
                                ? reinterpret_cast<void*>(real.data())
                                : reinterpret_cast<void*>(complex.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy failed with code "
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy h2d failed with code "
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
     
@@ -1158,11 +1162,14 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         << " got " << format_name((hipfftXtSubFormat)inoutdesc->subFormat)
         << " expected " << format_name((hipfftXtSubFormat)informat);
 
+    if(verbose > 1)
+        std::cout << "Executing the transform ...\n";
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code "
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
 
+    
     EXPECT_EQ(inoutdesc->subFormat, outformat)
         << "outformat not what expected:"
         << " got " << inoutdesc->subFormat << " "
@@ -1170,15 +1177,18 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         << " expected "  << outformat << " "
         << format_name((hipfftXtSubFormat)outformat);
 
-    // FIXME: re-enable
-    // hipfft_rt = hipfftXtMemcpy(plan,
-    //                            direction == HIPFFT_FORWARD
-    //                            ? reinterpret_cast<void*>(complex.data())
-    //                            : reinterpret_cast<void*>(real.data()),
-    //                            reinterpret_cast<void*>(inoutdesc),
-    //                            HIPFFT_COPY_DEVICE_TO_HOST);
-    // EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-        
+    if(verbose > 1)
+        std::cout << "Copying back to host ...\n";
+    
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               direction == HIPFFT_FORWARD
+                               ? reinterpret_cast<void*>(complex.data())
+                               : reinterpret_cast<void*>(real.data()),
+                               reinterpret_cast<void*>(inoutdesc),
+                               HIPFFT_COPY_DEVICE_TO_HOST);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMemcpy d2h failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
 
     hipfft_rt = hipfftXtFree(inoutdesc);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);

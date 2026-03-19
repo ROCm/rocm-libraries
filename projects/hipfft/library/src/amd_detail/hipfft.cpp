@@ -2052,14 +2052,12 @@ try
     if(!dest || !src || dest == src)
         return HIPFFT_INVALID_VALUE;
 
-    // get pointer into buf, at the index pointed to by lower
-    // assuming lengths are strided by stride
+    // Get pointer into buf, at the index pointed to by lower assuming lengths are strided by stride
     auto offset_buffer = [](void*                      buf,
                             hipDataType                dtype,
                             const std::vector<size_t>& lower,
                             const std::vector<size_t>& stride) {
         auto offset_elems = std::inner_product(lower.begin(), lower.end(), stride.begin(), 0);
-
         return static_cast<void*>(static_cast<char*>(buf) + hipDataType_bytes(dtype, offset_elems));
     };
 
@@ -2096,26 +2094,26 @@ try
             throw HIPFFT_INVALID_VALUE;
         }
     };
-
     
     switch(cptype)
     {
     case HIPFFT_COPY_HOST_TO_DEVICE:
+    case HIPFFT_COPY_DEVICE_TO_HOST:
     {
-        // FIXME: implement
+        std::cout << "hipfftXtMemcpy" << std::endl;
         
-        // // dest is a hipLibXtDesc
-        auto destDesc = static_cast<hipLibXtDesc*>(dest);
-        if(!destDesc->descriptor)
+        const bool h2d = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
+        
+        auto myDesc = static_cast<hipLibXtDesc*>(h2d ? dest : src);
+        if(!myDesc->descriptor)
             return HIPFFT_INVALID_VALUE;
 
-        // FIXME: move all of this to a lambda or someting.  Dry.
         const bool realdata = !plan->type.is_complex_to_complex()
-            && (destDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE);
+            && (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE);
         const bool hermdata = !plan->type.is_complex_to_complex()
-            && (destDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
-        const bool inplace = (destDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE) ||
-            (destDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+            && (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+        const bool inplace = (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE) ||
+            (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
         
         std::vector<size_t> hostDataLengths = {plan->batch};
         hostDataLengths.insert(hostDataLengths.end(), plan->lengths.begin(), plan->lengths.end());
@@ -2125,8 +2123,8 @@ try
             = plan->type.is_complex_to_complex()
             ? fft_transform_type_complex_forward
             : fft_transform_type_real_forward;
-        const auto io = (destDesc->subFormat == HIPFFT_XT_FORMAT_INPUT ||
-                         destDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE) ? fft_io_in : fft_io_out;
+        const auto io = (myDesc->subFormat == HIPFFT_XT_FORMAT_INPUT ||
+                         myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE) ? fft_io_in : fft_io_out;
         auto hostDataStride
             = default_strides(dft_type,
                               inplace ? fft_placement_inplace : fft_placement_notinplace,
@@ -2134,7 +2132,7 @@ try
                               hostDataLengths);
         if(hermdata)
         {
-            // row-major, so fold on the last dim.
+            // Row-major, so fold on the last dim.
             hostDataLengths[lastdim] = hostDataLengths[lastdim] / 2 + 1;
         }
         if(realdata)
@@ -2144,7 +2142,7 @@ try
             hostDataLengths[lastdim] = 2 * (hostDataLengths[lastdim] / 2 + 1);
         }
 
-        // FIXME:
+        // // FIXME:
         std::cout << "lastdim: " << lastdim << "\n";
         if(realdata)
             std::cout << "realdata\n";
@@ -2157,14 +2155,14 @@ try
             std::cout << " " << val;
         std::cout << "\n";
         
-        for(size_t idx = 0; idx < static_cast<size_t>(destDesc->descriptor->nGPUs); ++idx)
+        for(size_t idx = 0; idx < static_cast<size_t>(myDesc->descriptor->nGPUs); ++idx)
         {
             std::cout << "brick " << idx << "\n";
             
-            rocfft_scoped_device dev(destDesc->descriptor->GPUs[idx]);
+            rocfft_scoped_device dev(myDesc->descriptor->GPUs[idx]);
 
             // space bricks of frequency bricks:
-            const auto& brick = brick_layout(destDesc->subFormat)[idx];
+            const auto& brick = brick_layout(myDesc->subFormat)[idx];
             
             auto brick_length = brick.length();
             if(realdata)
@@ -2183,9 +2181,8 @@ try
                 std::cout << " " << val;
             std::cout << "\n";
 
-            // FIXME: not just input type, but space/freq type.
             const auto host_offset
-                = offset_buffer(src, brick_format(destDesc->subFormat),
+                = offset_buffer(h2d ? src : dest, brick_format(myDesc->subFormat),
                                 brick.field_lower, hostDataStride);
 
             auto brick_length_collapsed = brick_length;
@@ -2194,19 +2191,33 @@ try
             collapse_contiguous_dims(brick_length_collapsed, brick_stride_collapsed,
                                      hostDataStride_collapsed);
             
+            std::cout << "\t\thostDataStride_collapsed";
+            for(const auto val: hostDataStride_collapsed)
+                std::cout << " " << val;
+            std::cout << std::endl;
+            std::cout << "\t\tbrick_length_collapsed";
+            for(const auto val: brick_length_collapsed)
+                std::cout << " " << val;
+            std::cout << std::endl;
+            std::cout << "\t\tbrick_stride_collapsed";
+            for(const auto val: brick_stride_collapsed)
+                std::cout << " " << val;
+            std::cout << std::endl;
+
+                
+            auto destptr = h2d ? myDesc->descriptor->data[idx] : host_offset;
+            const auto srcptr = h2d ? host_offset : myDesc->descriptor->data[idx];
+            const auto cpdirection = h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
             switch(brick_length_collapsed.size())
             {
             case 1:
             {
-                if(hipMemcpy(destDesc->descriptor->data[idx],
-                             host_offset,
-                             destDesc->descriptor->size[idx],
-                             hipMemcpyHostToDevice)
-                   != hipSuccess)
-                {
-                    std::cout << "asdf" << std::endl;
+                auto ret = hipMemcpy(destptr,
+                                     srcptr,
+                                     myDesc->descriptor->size[idx],
+                                     hipMemcpyHostToDevice);
+                if(ret != hipSuccess)
                     return HIPFFT_INTERNAL_ERROR;
-                }
                 break;
             }
             case 2:
@@ -2224,167 +2235,51 @@ try
                     valsize = sizeof(double);
                     break;
                 default:
-                    std::cout << "adsfdsafdsadfdsaf" << std::endl;
                     return HIPFFT_INTERNAL_ERROR;
                 }
                 if(!realdata)
                     valsize *= 2;
 
-                std::cout << "\t\thostDataStride_collapsed";
-                for(const auto val: hostDataStride_collapsed)
-                    std::cout << " " << val;
-                std::cout << std::endl;
-                std::cout << "\t\tbrick_length_collapsed";
-                for(const auto val: brick_length_collapsed)
-                    std::cout << " " << val;
-                std::cout << std::endl;
-                std::cout << "\t\tbrick_stride_collapsed";
-                for(const auto val: brick_stride_collapsed)
-                    std::cout << " " << val;
-                std::cout << std::endl;
+                std::cout << "\thipMemcpy2D:\n";
+                std::cout << "\t\tvalsize : " << valsize << std::endl;
 
-                if(true)
+                size_t dpitch = h2d ? brick_stride_collapsed[0]: hostDataStride_collapsed[0];
+                std::cout << "\t\tdpitch : " << dpitch << std::endl;
+
+                size_t spitch = h2d ? hostDataStride_collapsed[0] : brick_stride_collapsed[0];
+                std::cout << "\t\tspitch : " << spitch << std::endl;
+
+                size_t width = brick_length_collapsed[1];
+                std::cout << "\t\twidth : " << width << std::endl;
+
+                size_t height = brick_length_collapsed[0];
+                std::cout << "\t\theight : " << height << std::endl;
+
+                auto ret = hipMemcpy2D(
+                    destptr,
+                    valsize * dpitch, //  dpitch (bytes between starts of rows)
+                    srcptr,
+                    valsize * spitch, //  spitch (bytes between starts of rows)
+                    valsize * width,   // width  (bytes in a row)
+                    height,            // height (how many rows)
+                    cpdirection);                
+                if(ret != hipSuccess)
                 {
-                    // Using hipMemcpy2D
-                
-                    std::cout << "\thipMemcpy2D:\n";
-                    std::cout << "\t\tvalsize : " << valsize << std::endl;
-
-                    size_t dpitch = brick_stride_collapsed[0];
-                    std::cout << "\t\tdpitch : " << dpitch << std::endl;
-
-                    // host
-                    size_t spitch = hostDataStride_collapsed[0];
-                    std::cout << "\t\tspitch : " << spitch << std::endl;
-
-                    size_t width = brick_length_collapsed[1];
-                    std::cout << "\t\twidth : " << width << std::endl;
-
-                    size_t height = brick_length_collapsed[0];
-                    std::cout << "\t\theight : " << height << std::endl;
-
-                    auto ret = hipMemcpy2D(
-                        destDesc->descriptor->data[idx], // destination
-                        valsize * dpitch,                //  dpitch (bytes between starts of rows)
-                        host_offset,                     // source
-                        valsize * spitch,                //  spitch (bytes between starts of rows)
-                        valsize * width,                 // width  (bytes in a row)
-                        height,                          // height (how many rows)
-                        hipMemcpyHostToDevice);
-                    if(ret != hipSuccess)
-                    {
-                        std::cout << "hipMemcpy2D failed: "
-                                  << hipGetErrorString(ret) << " " << ret << std::endl;
-                        return HIPFFT_INTERNAL_ERROR;
-                    }
-                
+                    std::cout << "hipMemcpy " << idx << " failed: "
+                              << hipGetErrorString(ret) << " " << ret << std::endl;
+                    return HIPFFT_INTERNAL_ERROR;
                 }
-                else
-                {
-                    // Series of memcpys
-                    for(size_t midx = 0; midx < brick_length_collapsed[0]; ++midx)
-                    {
-                        const size_t deststride = midx * brick_stride_collapsed[0];
-                        const size_t srcstride = midx * hostDataStride_collapsed[0];
-                        const size_t datasize = brick_length_collapsed[1];
-
-                        std::cout << "\t" << midx << std::endl;
-                        std::cout << "\t\tvalsize: " << valsize << std::endl;
-                        std::cout << "\t\tdeststride: " << deststride << std::endl;
-                        std::cout << "\t\tsrcstride: " << srcstride << std::endl;
-                        std::cout << "\t\tdatasize: " << datasize << std::endl;
-
-
-                        auto ret = hipMemcpy(
-                               static_cast<void*>(
-                                   static_cast<char*>(destDesc->descriptor->data[idx])
-                                   + valsize * deststride),
-                               static_cast<void*>(
-                                   static_cast<char*>(host_offset) + valsize * srcstride),
-                               valsize * datasize,
-                               hipMemcpyHostToDevice);
-                        if(ret != hipSuccess)
-                        {
-                            std::cout << midx << std::endl;
-                            std::cout << "\tdeststride: " << deststride << std::endl;
-                            std::cout << "\tsrcstride: " << srcstride << std::endl;
-                            std::cout << "\tdatasize: " << datasize << std::endl;
-                            std::cout << "hipMemcpy " << midx << " failed: "
-                                      << hipGetErrorString(ret) << " " << ret << std::endl;
-                            return HIPFFT_INTERNAL_ERROR;
-                        }
-                    }
-
-                    
-                }
-                
-                break;
+            break;
             }
             default:
-                std::cout << "AsdfSAdfsadfsad" << std::endl;
                 return HIPFFT_INTERNAL_ERROR;
             }
         }
         return HIPFFT_SUCCESS;
     }
-    case HIPFFT_COPY_DEVICE_TO_HOST:
-    {
-        std::cout << "HIPFFT_COPY_DEVICE_TO_HOST" << std::endl;
-        return HIPFFT_NOT_IMPLEMENTED;
-
-        // FIXME: implement
-        
-        // // src is a hipLibXtDesc
-        // auto srcDesc = static_cast<const hipLibXtDesc*>(src);
-        // if(!srcDesc->descriptor)
-        //     return HIPFFT_INVALID_VALUE;
-
-        // std::vector<size_t> destStride = plan->outStrides;
-        // destStride.push_back(plan->oDist);
-        // for(size_t i = 0; i < static_cast<size_t>(srcDesc->descriptor->nGPUs); ++i)
-        // {
-        //     rocfft_scoped_device dev(srcDesc->descriptor->GPUs[i]);
-
-        //     const auto& brick = brick_layout(srcDesc->subFormat)[i];
-
-        //     auto brick_length = brick.length();
-        //     auto brick_stride = brick.brick_stride;
-        //     auto field_stride = destStride;
-        //     collapse_contiguous_dims(brick_length, brick_stride, field_stride);
-
-        //     // if we can do a 1D memcpy, just do that
-        //     if(brick_length.size() == 1)
-        //     {
-        //         if(hipMemcpy(
-        //                offset_buffer(dest, plan->type.outputType, brick.field_lower, destStride),
-        //                srcDesc->descriptor->data[i],
-        //                srcDesc->descriptor->size[i],
-        //                hipMemcpyDeviceToHost)
-        //            != hipSuccess)
-        //         {
-        //             return HIPFFT_INTERNAL_ERROR;
-        //         }
-        //     }
-        //     else
-        //     {
-        //         if(hipMemcpy2D(
-        //                offset_buffer(dest, plan->type.outputType, brick.field_lower, destStride),
-        //                hipDataType_bytes(plan->type.outputType, field_stride[1]),
-        //                srcDesc->descriptor->data[i],
-        //                hipDataType_bytes(plan->type.outputType, brick_stride[1]),
-        //                hipDataType_bytes(plan->type.outputType, brick_length[0]),
-        //                brick_length[1],
-        //                hipMemcpyDeviceToHost)
-        //            != hipSuccess)
-        //         {
-        //             return HIPFFT_INTERNAL_ERROR;
-        //         }
-        //     }
-        // }
-        // return HIPFFT_SUCCESS;
-    }
     case HIPFFT_COPY_DEVICE_TO_DEVICE:
     {
+        // TODO: implement
         return HIPFFT_NOT_IMPLEMENTED;
     }
     case HIPFFT_COPY_UNDEFINED:
