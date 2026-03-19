@@ -68,8 +68,7 @@ namespace rocRoller
 
     namespace Scheduling
     {
-#if 1
-        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS_STREAMK = {
             .nops             = 10000.0,
             .stallCycles      = 1000.0,
             .isSALU           = 154.26834112288643,
@@ -81,41 +80,18 @@ namespace rocRoller
             .dsmemCycles      = 94,
             .dsmemQueueSize   = 1,
         };
-
-#else
-        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {.nops               = 10000.,
-                                                       .vmcnt              = 0,
-                                                       .lgkmcnt            = 0,
-                                                       .vmQueueLen         = 0,
-                                                       .vectorQueueSat     = 0,
-                                                       .ldsQueueSat        = 0,
-                                                       .lgkmQueueLen       = 0,
-                                                       .stallCycles        = 1000.0,
-                                                       .notMFMA            = 0,
-                                                       .isMFMA             = 0,
-                                                       .isSMEM             = 0,
-                                                       .isSControl         = 0,
-                                                       .isSALU             = 10,
-                                                       .isVMEMRead         = 0,
-                                                       .isVMEMWrite        = 0,
-                                                       .isLDSRead          = 0,
-                                                       .isLDSWrite         = 0,
-                                                       .isVALU             = 10,
-                                                       .isACCVGPRWrite     = 0,
-                                                       .isACCVGPRRead      = 0,
-                                                       .newSGPRs           = 0,
-                                                       .newVGPRs           = 0,
-                                                       .highWaterMarkSGPRs = 0,
-                                                       .highWaterMarkVGPRs = 0,
-                                                       .fractionOfSGPRs    = 0,
-                                                       .fractionOfVGPRs    = 0,
-                                                       .outOfRegisters     = 1000000000.0,
-                                                       .zeroFreeBarriers   = true,
-                                                       .vmemCycles         = 64,
-                                                       .vmemQueueSize      = 3,
-                                                       .dsmemCycles        = 32,
-                                                       .dsmemQueueSize     = 3};
-#endif
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {
+            .nops = 131.82052000047628,
+            .stallCycles = 1000.0,
+            .isSALU = 1073.9946584081224,
+            .isVALU = 96.7974133366133,
+            .outOfRegisters = 1000000000.0,
+            .zeroFreeBarriers = false,
+            .vmemCycles = 149,
+            .vmemQueueSize = 3,
+            .dsmemCycles = 46,
+            .dsmemQueueSize = 2,
+        };
 
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
                                             .vmcnt              = 526.093932290615,
@@ -249,10 +225,7 @@ namespace rocRoller
             {
                 try
                 {
-                    auto weights = Serialization::readYAMLFile<Weights>(settingsFile);
-                    Log::critical(
-                        "Read weights from {}:\n{}", settingsFile, Serialization::toYAML(weights));
-                    return weights;
+                    return Serialization::readYAMLFile<Weights>(settingsFile);
                 }
                 catch(const std::exception& e)
                 {
@@ -276,6 +249,15 @@ namespace rocRoller
                     return GFX950_SIMPLIFIED_WEIGHTS;
                 }
 
+                if(fn == CostFunction::LinearWeightedSimpleStreamK)
+                {
+                    if(!arch.isCDNA4GPU())
+                        Log::warn("Architecture {} not tested for simplifed weights.",
+                                  arch.toString());
+
+                    return GFX950_SIMPLIFIED_WEIGHTS_STREAMK;
+                }
+
                 if(arch.isCDNA1GPU())
                     return GFX908_WEIGHTS;
                 else if(arch.isCDNA2GPU())
@@ -283,7 +265,7 @@ namespace rocRoller
                 else if(arch.isCDNA3GPU())
                     return GFX942_WEIGHTS;
                 else if(arch.isCDNA4GPU())
-                    return GFX950_SIMPLIFIED_WEIGHTS;
+                    return GFX950_WEIGHTS;
                 else
                 {
                     Log::warn("Unsupported architecture {} for linear weighted cost; defaulting to "
@@ -303,7 +285,8 @@ namespace rocRoller
         {
             auto [costFn, ctx] = arg;
             return costFn == CostFunction::LinearWeighted
-                   || costFn == CostFunction::LinearWeightedSimple;
+                   || costFn == CostFunction::LinearWeightedSimple
+                   || costFn == CostFunction::LinearWeightedSimpleStreamK;
         }
 
         std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)

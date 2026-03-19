@@ -653,7 +653,7 @@ def get_args(parser: argparse.ArgumentParser):
         dest="num_random",
         default=4,
         type=int,
-        help="Number of new random configurations to try every " "generation.",
+        help="Number of new random configurations to try every generation.",
     )
 
     parser.add_argument(
@@ -668,7 +668,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--mutation-decay",
         default=0.98,
         type=float,
-        help="Mutation rate is multiplied by this number every" " generation.",
+        help="Mutation rate is multiplied by this number every generation.",
     )
 
     parser.add_argument(

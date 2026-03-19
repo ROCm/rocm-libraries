@@ -27,8 +27,12 @@ namespace rocRoller
 
         bool MFMAObserver::isTargetedInstruction(Instruction const& inst)
         {
-            return GPUInstructionInfo::isMFMA(inst.getOpCode())
-                   && !MFMACoexecObserver::isTargetedInstruction(inst);
+            return GPUInstructionInfo::isMFMA(inst.getOpCode());
+        }
+
+        bool MFMAObserver::runtimeRequired(ContextPtr const& ctx)
+        {
+            return !MFMACoexecObserver::runtimeRequired(ctx);
         }
 
         InstructionStatus MFMAObserver::peek(Instruction const& inst) const
@@ -115,28 +119,24 @@ namespace rocRoller
         {
         }
 
-        bool MFMACoexecObserver::isTargetedInstruction(Instruction const& inst)
+        bool MFMACoexecObserver::runtimeRequired(ContextPtr const& ctx)
         {
-            auto isMxInstruction = GPUInstructionInfo::isMFMA(inst.getOpCode())
-                                   && inst.getOpCode().find("f8f6f4") != std::string::npos;
-
-            if(!isMxInstruction)
-                return false;
-
-            if(inst.getOpCode().find("scale") == std::string::npos)
-                return true;
-
             /**
              * TODO: Remove.
              * Right now, this observer gives slower results unless it is
-             * combined with the LinearWeightedSimple cost function. Once we can
-             * make this the default cost function we should be able to remove
-             * this and just always return true for this instruction.
+             * combined with the LinearWeightedSimple or
+             * LinearWeightedSimpleStreamK cost function. Once we can make this
+             * the default cost function we should be able to remove this and
+             * replace the MFMAObserver with this one entirely.
              */
-            // if(Settings::Get(Settings::SchedulerCost) == CostFunction::LinearWeightedSimple)
-                return true;
+            auto cost = Settings::Get(Settings::SchedulerCost);
+            return cost == CostFunction::LinearWeightedSimple
+                   || cost == CostFunction::LinearWeightedSimpleStreamK;
+        }
 
-            return false;
+        bool MFMACoexecObserver::isTargetedInstruction(Instruction const& inst)
+        {
+            return GPUInstructionInfo::isMFMA(inst.getOpCode());
         }
 
         DisallowedCycles MFMACoexecObserver::getDisallowedCycles(Instruction const& inst) const
