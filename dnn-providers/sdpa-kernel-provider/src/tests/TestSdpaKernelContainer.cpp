@@ -5,7 +5,11 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+
 #include "SdpaKernelContainer.hpp"
+#include "SdpaKernelEngine.hpp"
 
 using namespace sdpa_kernel_provider;
 
@@ -40,4 +44,34 @@ TEST(TestSdpaKernelContainer, GetEngineManagerReturnsValidReference)
 
     // Engine manager should exist but have no engines
     (void)engineManager;
+}
+
+TEST(TestSdpaKernelContainer, SomeTest)
+{
+    SdpaKernelHandle handle;
+    SdpaKernelContainer container;
+    auto& engineManager = container.getEngineManager();
+
+    auto graph = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+    auto graphBuffer = graph.Release();
+
+    auto graphWrapper = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer.data(),
+                                                                            graphBuffer.size());
+
+    auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+
+    ASSERT_EQ(applicableEngines.size(), 1);
+    EXPECT_EQ(applicableEngines.front(), SdpaKernelEngine::staticId());
+}
+
+TEST(TestSdpaKernelContainer, GetAllEngineIds)
+{
+    SdpaKernelHandle handle;
+    SdpaKernelContainer container;
+    auto& engineManager = container.getEngineManager();
+
+    auto allEngines = engineManager.getAllEngineIds();
+
+    ASSERT_EQ(allEngines.size(), 1);
+    EXPECT_EQ(allEngines.front(), SdpaKernelEngine::staticId());
 }
