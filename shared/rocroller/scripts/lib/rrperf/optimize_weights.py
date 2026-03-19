@@ -151,13 +151,17 @@ class Weights:
             return SimplifiedWeights(**d)
 
     @classmethod
-    def subclass(cls, name):
-        lookup = {
+    def subclass_map(cls):
+        return {
             "Full": FullWeights,
             "FullWeights": FullWeights,
             "Simplified": SimplifiedWeights,
             "SimplifiedWeights": SimplifiedWeights,
         }
+
+    @classmethod
+    def subclass(cls, name):
+        lookup = cls.subclass_map()
 
         assert name in lookup
         return lookup[name]
@@ -318,9 +322,7 @@ def bench_star(arg):
     return bench(*arg)
 
 
-def bench(
-    thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights
-) -> Result:
+def bench(thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights) -> Result:
     device, lock = acquire_lock()
 
     try:
@@ -633,7 +635,8 @@ def get_args(parser: argparse.ArgumentParser):
         "--weight-type",
         default="Simplified",
         type=Weights.subclass,
-        help="Which subset of weights to optimize.",
+        help="Which subset of weights to optimize. Options: "
+        + ", ".join(Weights.subclass_map().keys()),
     )
 
     parser.add_argument(
