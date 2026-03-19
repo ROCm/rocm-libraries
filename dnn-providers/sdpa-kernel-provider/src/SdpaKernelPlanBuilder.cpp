@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "SdpaKernelPlanBuilder.hpp"
+#include "SdpaKernelPlan.hpp"
 #include <iostream>
 
 namespace sdpa_kernel_provider
@@ -17,17 +18,8 @@ bool SdpaKernelPlanBuilder::isApplicable(
        || nodeWrappers.front()->attributesType()
               != hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes)
     {
-        std::cout << "\n\n\n\nNodewrappers has incorrect size or wrong type\n\n\n\n\n";
-        std::cout << "Nodewrappers.size() = " << nodeWrappers.size() << "\n";
-        if(nodeWrappers.size() == 1)
-        {
-            std::cout << "front()->attributesType() = "
-                      << static_cast<int>(nodeWrappers.front()->attributesType()) << "\n";
-        }
         return false;
     }
-
-    std::cout << "\n\n\n\nNodewrappers has correct type size or wrong type\n\n\n\n\n";
 
     // TODO: Add more expansive checks
     HIPDNN_PLUGIN_LOG_WARN("SdpaKernelPlanBuilder::isApplicable not fully implemented");
@@ -57,8 +49,10 @@ void SdpaKernelPlanBuilder::buildPlan(
     const SdpaKernelHandle& /* handle */,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    SdpaKernelContext& /* executionContext */) const
+    SdpaKernelContext& executionContext) const
 {
+    HIPDNN_PLUGIN_LOG_ERROR("SdpaKernelPlanBuilder::buildPlan not fully implemented");
+    executionContext.setPlan(std::make_unique<SdpaKernelPlan>());
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaKernelPlanBuilder::getCustomKnobs(

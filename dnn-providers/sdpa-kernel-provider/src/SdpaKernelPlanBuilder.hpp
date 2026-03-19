@@ -32,11 +32,10 @@ public:
         const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         SdpaKernelSettings& executionSettings) const override;
 
-    void buildPlan(
-        const SdpaKernelHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        SdpaKernelContext& executionContext) const override;
+    void buildPlan(const SdpaKernelHandle& handle,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+                   SdpaKernelContext& executionContext) const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         // NOLINTNEXTLINE(portability-template-virtual-member-function)

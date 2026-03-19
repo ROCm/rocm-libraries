@@ -2,7 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include "SdpaKernelEngine.hpp"
+
+#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+
 #include <ranges>
 
 namespace sdpa_kernel_provider
@@ -31,11 +34,20 @@ bool SdpaKernelEngine::isApplicable(
                                [&](const auto& pb) { return pb->isApplicable(handle, opGraph); });
 }
 
-void SdpaKernelEngine::getDetails(SdpaKernelHandle& /* handle*/,
+void SdpaKernelEngine::getDetails(SdpaKernelHandle& handle,
                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-                                  hipdnnPluginConstData_t& /*detailsOut*/) const
+                                  hipdnnPluginConstData_t& detailsOut) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaKernelEngine::getdetails not implemented");
+    flatbuffers::FlatBufferBuilder builder;
+
+    auto engineDetails
+        = hipdnn_data_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
+    builder.Finish(engineDetails);
+    auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
+    detailsOut.ptr = detachedBuffer->data();
+    detailsOut.size = detachedBuffer->size();
+
+    handle.storeEngineDetailsDetachedBuffer(detachedBuffer->data(), std::move(detachedBuffer));
 }
 
 size_t SdpaKernelEngine::getMaxWorkspaceSize(

@@ -5,6 +5,7 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
@@ -107,7 +108,7 @@ protected:
         attributes.set_name("SdpaNode");
         if(testCase.attnScaleValue.has_value())
         {
-            attributes.set_attn_scale_value(static_cast<DataType>(testCase.attnScaleValue.value()));
+            attributes.set_attn_scale_value(testCase.attnScaleValue.value());
         }
         if(!testCase.attnMaskDims.empty())
         {
@@ -122,6 +123,7 @@ protected:
         auto [o, stats] = graph.sdpa(q, k, v, attributes);
 
         o->set_output(true);
+        o->set_data_type(getDataTypeEnumFromType<DataType>());
 
         auto validationResult = graph.validate();
         EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
@@ -134,15 +136,15 @@ protected:
     float _maxVal = 1.0;
 };
 
-using IntegrationGpuSdpaFwdFp32 = SdpaForward<float>;
+using IntegrationGpuSdpaFwdBf16 = SdpaForward<bfloat16>;
 
 } // namespace
 
-TEST_P(IntegrationGpuSdpaFwdFp32, Correctness)
+TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
 {
     auto tolerance = 1e-7f;
 
     runGraphTest(tolerance);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, IntegrationGpuSdpaFwdFp32, testing::ValuesIn(getSdpaTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, IntegrationGpuSdpaFwdBf16, testing::ValuesIn(getSdpaTestCases()));
