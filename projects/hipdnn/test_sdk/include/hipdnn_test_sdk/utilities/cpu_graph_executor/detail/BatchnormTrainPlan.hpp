@@ -348,12 +348,14 @@ public:
            && nodeAttributes->next_running_mean_tensor_uid()
            && nodeAttributes->next_running_variance_tensor_uid())
         {
+            // NOLINTBEGIN(bugprone-unchecked-optional-access)
             prevRunningMean = tensorMap.at(nodeAttributes->prev_running_mean_tensor_uid().value());
             prevRunningVariance
                 = tensorMap.at(nodeAttributes->prev_running_variance_tensor_uid().value());
             nextRunningMean = tensorMap.at(nodeAttributes->next_running_mean_tensor_uid().value());
             nextRunningVariance
                 = tensorMap.at(nodeAttributes->next_running_variance_tensor_uid().value());
+            // NOLINTEND(bugprone-unchecked-optional-access)
         }
 
         BatchnormTrainParams<MeanVarianceDataType> params(

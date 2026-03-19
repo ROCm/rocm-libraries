@@ -3,7 +3,23 @@
 
 #pragma once
 
+// Uncomment when fromNode() is implemented in the lifting PR:
+// #include "BatchnormBackwardOperationDescriptor.hpp"
+// #include "BatchnormInferenceOperationDescriptor.hpp"
+// #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
+// #include "BatchnormOperationDescriptor.hpp"
+// #include "BlockScaleDequantizeOperationDescriptor.hpp"
+// #include "BlockScaleQuantizeOperationDescriptor.hpp"
+// #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
+// #include "ConvolutionWrwOperationDescriptor.hpp"
+// #include "CustomOpOperationDescriptor.hpp"
+// #include "LayernormOperationDescriptor.hpp"
+// #include "MatmulOperationDescriptor.hpp"
+// #include "PointwiseOperationDescriptor.hpp"
+// #include "RMSNormOperationDescriptor.hpp"
+// #include "SdpaBackwardOperationDescriptor.hpp"
+// #include "SdpaFpropOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
