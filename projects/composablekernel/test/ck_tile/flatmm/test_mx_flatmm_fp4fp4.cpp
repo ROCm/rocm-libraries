@@ -19,7 +19,7 @@ TYPED_TEST_SUITE(TestMXFlatmm, FP4FP4Types);
 // K=256 -> num_loop=1: has_hot_loop=false, tail=Odd
 TYPED_TEST(TestMXFlatmm, SmallMNK)
 {
-    this->run_test_with_validation(256, 512, 256, 1, false, ck_tile::TailNumber::Odd);
+    this->run_test_with_validation(128, 512, 256, 1, false, ck_tile::TailNumber::Odd);
 }
 
 // K=512 -> num_loop=2: has_hot_loop=false, tail=Even

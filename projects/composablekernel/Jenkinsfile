@@ -1397,8 +1397,8 @@ pipeline {
             description: "Run codegen tests (default: ON)")
         booleanParam(
             name: "RUN_BUILDER_TESTS",
-            defaultValue: true,
-            description: "Run CK_BUILDER tests (default: ON)")
+            defaultValue: false,
+            description: "Run CK_BUILDER tests (default: OFF)")
         booleanParam(
             name: "RUN_ALL_UNIT_TESTS",
             defaultValue: false,

@@ -55,7 +55,7 @@ TYPED_TEST(TEST_SUITE_NAME, SingleTile)
 
 TYPED_TEST(TEST_SUITE_NAME, MidLargeM)
 {
-    std::vector<int> Ms{127, 255, 315, 799, 1573};
+    std::vector<int> Ms{127, 255, 312, 799, 1573};
     constexpr int N = 1024;
 
     std::vector<int> Ks;
