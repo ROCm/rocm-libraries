@@ -14,7 +14,7 @@ using namespace hipdnn_data_sdk::types;
 class TestCrossTypeConversion : public ::testing::Test
 {
 protected:
-    static constexpr float K_TOLERANCE = 0.2f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.2f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -38,6 +38,13 @@ TEST_F(TestCrossTypeConversion, Bfloat16ToFp4E2M1)
     bfloat16 a(2.0f);
     fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 2.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Bfloat16ToFp6E2M3)
+{
+    bfloat16 a(3.5f);
+    fp6_e2m3 b(a);
+    EXPECT_EQ(static_cast<float>(b), 3.5f);
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E4M3)
@@ -91,6 +98,13 @@ TEST_F(TestCrossTypeConversion, HalfToFp4E2M1)
     half a(4.0f);
     fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
+}
+
+TEST_F(TestCrossTypeConversion, HalfToFp6E2M3)
+{
+    half a(5.5f);
+    fp6_e2m3 b(a);
+    EXPECT_EQ(static_cast<float>(b), 5.5f);
 }
 
 TEST_F(TestCrossTypeConversion, HalfToFp8E4M3)
@@ -158,6 +172,38 @@ TEST_F(TestCrossTypeConversion, Fp4E2M1ToDouble)
     fp4_e2m1 a(4.0f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 4.0);
+}
+
+// ============================================================================
+// fp6_e2m3 -> other types
+// ============================================================================
+
+TEST_F(TestCrossTypeConversion, Fp6E2M3ToBfloat16)
+{
+    fp6_e2m3 a(3.5f);
+    bfloat16 b(a);
+    EXPECT_EQ(static_cast<float>(b), 3.5f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp6E2M3ToHalf)
+{
+    fp6_e2m3 a(5.0f);
+    half b(a);
+    EXPECT_EQ(static_cast<float>(b), 5.0f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp6E2M3ToFloat)
+{
+    fp6_e2m3 a(7.5f);
+    auto b = static_cast<float>(a);
+    EXPECT_EQ(b, 7.5f);
+}
+
+TEST_F(TestCrossTypeConversion, Fp6E2M3ToDouble)
+{
+    fp6_e2m3 a(4.5f);
+    auto b = static_cast<double>(a);
+    EXPECT_EQ(b, 4.5);
 }
 
 // ============================================================================
@@ -295,6 +341,13 @@ TEST_F(TestCrossTypeConversion, FloatToFp4E2M1)
     EXPECT_EQ(static_cast<float>(b), 6.0f);
 }
 
+TEST_F(TestCrossTypeConversion, FloatToFp6E2M3)
+{
+    float a = 6.5f;
+    fp6_e2m3 b(a);
+    EXPECT_EQ(static_cast<float>(b), 6.5f);
+}
+
 TEST_F(TestCrossTypeConversion, FloatToFp8E4M3)
 {
     float a = 4.0f;
@@ -339,6 +392,13 @@ TEST_F(TestCrossTypeConversion, DoubleToFp4E2M1)
     double a = 0.5;
     fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 0.5f);
+}
+
+TEST_F(TestCrossTypeConversion, DoubleToFp6E2M3)
+{
+    double a = 2.5;
+    fp6_e2m3 b(a);
+    EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, DoubleToFp8E4M3)
@@ -387,6 +447,14 @@ TEST_F(TestCrossTypeConversion, Fp4E2M1RoundtripViaFloat)
     fp4_e2m1 a(4.0f);
     auto f = static_cast<float>(a);
     fp4_e2m1 b(f);
+    EXPECT_EQ(a.data, b.data);
+}
+
+TEST_F(TestCrossTypeConversion, Fp6E2M3RoundtripViaFloat)
+{
+    fp6_e2m3 a(5.5f);
+    auto f = static_cast<float>(a);
+    fp6_e2m3 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
@@ -469,6 +537,7 @@ TEST_F(TestCrossTypeConversion, TypeTraitsVerification)
     EXPECT_TRUE(std::is_trivially_copyable_v<bfloat16>);
     EXPECT_TRUE(std::is_trivially_copyable_v<half>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp4_e2m1>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<fp6_e2m3>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e4m3>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e5m2>);
     EXPECT_TRUE(std::is_trivially_copyable_v<fp8_e8m0>);
@@ -477,6 +546,7 @@ TEST_F(TestCrossTypeConversion, TypeTraitsVerification)
     EXPECT_TRUE(std::is_standard_layout_v<bfloat16>);
     EXPECT_TRUE(std::is_standard_layout_v<half>);
     EXPECT_TRUE(std::is_standard_layout_v<fp4_e2m1>);
+    EXPECT_TRUE(std::is_standard_layout_v<fp6_e2m3>);
     EXPECT_TRUE(std::is_standard_layout_v<fp8_e4m3>);
     EXPECT_TRUE(std::is_standard_layout_v<fp8_e5m2>);
     EXPECT_TRUE(std::is_standard_layout_v<fp8_e8m0>);

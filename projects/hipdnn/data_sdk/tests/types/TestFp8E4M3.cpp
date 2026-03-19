@@ -23,7 +23,7 @@ class TestFp8E4M3 : public ::testing::Test
 {
 protected:
     // FP8 E4M3 has limited precision, use larger tolerance
-    static constexpr float K_TOLERANCE = 0.2f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.2f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {

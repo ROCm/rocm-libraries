@@ -19,6 +19,7 @@ enum class Bfloat16RoundingMode;
 template <Bfloat16RoundingMode>
 struct bfloat16_t;
 struct fp4_e2m1;
+struct fp6_e2m3;
 struct fp8_e4m3;
 struct fp8_e5m2;
 struct fp8_e8m0;
@@ -104,11 +105,8 @@ constexpr uint32_t HALF_ROUND_THRESHOLD = 0x1000;
 /// Mask for remainder bits during rounding (13 LSB of float mantissa)
 constexpr uint32_t HALF_REMAINDER_MASK = 0x1FFF;
 
-// NOLINTBEGIN(readability-identifier-naming,readability-else-after-return,
-//              readability-implicit-bool-conversion,modernize-use-auto,
-//              clang-diagnostic-sign-conversion)
-
 // Convert float to fp16 bits using round-to-nearest-even
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline uint16_t float_to_half_bits(float f) noexcept
 {
     uint32_t bits;
@@ -128,7 +126,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
         }
         // Denormalized number
         mant |= 0x00800000;
-        uint32_t shift = static_cast<uint32_t>(14 - exp);
+        auto shift = static_cast<uint32_t>(14 - exp);
         mant >>= shift;
         return static_cast<uint16_t>(sign | (mant >> 13));
     }
@@ -169,6 +167,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
 }
 
 // Convert fp16 bits to float
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline float half_bits_to_float(uint16_t bits) noexcept
 {
     uint32_t sign = (static_cast<uint32_t>(bits) & 0x8000) << 16;
@@ -212,10 +211,6 @@ inline float half_bits_to_float(uint16_t bits) noexcept
     std::memcpy(&f, &floatBits, sizeof(float));
     return f;
 }
-
-// NOLINTEND(readability-identifier-naming,readability-else-after-return,
-//           readability-implicit-bool-conversion,modernize-use-auto,
-//           clang-diagnostic-sign-conversion)
 
 } // namespace detail
 
@@ -271,12 +266,13 @@ struct half
     template <Bfloat16RoundingMode M>
     inline explicit half(bfloat16_t<M> b) noexcept;
     inline explicit half(fp4_e2m1 f) noexcept;
+    inline explicit half(fp6_e2m3 f) noexcept;
     inline explicit half(fp8_e4m3 f) noexcept;
     inline explicit half(fp8_e5m2 f) noexcept;
     inline explicit half(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits
-    // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr half from_bits(uint16_t bits) noexcept
     {
         half val;

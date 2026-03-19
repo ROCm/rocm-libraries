@@ -22,7 +22,7 @@ using namespace hipdnn_data_sdk::types;
 class TestHalf : public ::testing::Test
 {
 protected:
-    static constexpr float K_TOLERANCE = 0.001f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.001f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {

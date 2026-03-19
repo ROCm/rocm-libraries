@@ -13,7 +13,7 @@ using namespace hipdnn_data_sdk::types;
 class TestUserDefinedLiterals : public ::testing::Test
 {
 protected:
-    static constexpr float K_TOLERANCE = 0.01f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.01f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -133,6 +133,43 @@ TEST_F(TestUserDefinedLiterals, Fp4E2M1LiteralFractional)
 
     auto b = 1.5_e2m1;
     EXPECT_EQ(static_cast<float>(b), 1.5f);
+}
+
+// ============================================================================
+// fp6_e2m3 literal (_e2m3) tests
+// ============================================================================
+
+TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralPositive)
+{
+    auto a = 1.0_e2m3;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e2m3>));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralNegative)
+{
+    auto a = -2.0_e2m3;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e2m3>));
+    EXPECT_EQ(static_cast<float>(a), -2.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralZero)
+{
+    auto a = 0.0_e2m3;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e2m3>));
+    EXPECT_EQ(static_cast<float>(a), 0.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralFractional)
+{
+    auto a = 0.5_e2m3;
+    EXPECT_EQ(static_cast<float>(a), 0.5f);
+
+    auto b = 1.5_e2m3;
+    EXPECT_EQ(static_cast<float>(b), 1.5f);
+
+    auto c = 0.125_e2m3;
+    EXPECT_EQ(static_cast<float>(c), 0.125f);
 }
 
 // ============================================================================
