@@ -315,37 +315,22 @@ void KnobDescriptor::setValidValuesString(hipdnnBackendAttributeType_t attribute
                                           int64_t elementCount,
                                           const void* arrayOfElements)
 {
-    // Multi-call append pattern: each call with elementCount=N appends one string of length N
+    // Type check first so a wrong-type clear call is still rejected.
     THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
                    HIPDNN_STATUS_BAD_PARAM,
                    "KnobDescriptor::setAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-    THROW_IF_LT(elementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                "KnobDescriptor::setAttribute(): elementCount is negative");
 
-    if(elementCount == 0)
+    // elementCount=0 + nullptr: clear the list (mirrors VALID_VALUES_INT semantics).
+    if(elementCount == 0 && arrayOfElements == nullptr)
     {
-        if(arrayOfElements == nullptr)
-        {
-            // nullptr with elementCount=0: clear the list (mirrors VALID_VALUES_INT semantics)
-            _validValuesString.clear();
-        }
-        else
-        {
-            // non-null pointer with elementCount=0: append an empty string
-            _validValuesString.emplace_back();
-        }
+        _validValuesString.clear();
         return;
     }
 
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "KnobDescriptor::setAttribute(): "
-                  "arrayOfElements is null with positive elementCount for VALID_VALUES_STRING");
-
-    _validValuesString.emplace_back(static_cast<const char*>(arrayOfElements),
-                                    static_cast<size_t>(elementCount));
+    // Delegate validation and construction to setString, then append.
+    std::string tmp;
+    setString(tmp, attributeType, elementCount, arrayOfElements, "KnobDescriptor::setAttribute()");
+    _validValuesString.push_back(std::move(tmp));
 }
 
 // ============================================================================
