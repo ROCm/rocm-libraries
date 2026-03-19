@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -438,6 +438,7 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_9_16<MAX_NNZB>),
                                            dim3(A->rows, A->batch_count),
@@ -455,8 +456,8 @@ namespace rocsparse
                                            done_array,
                                            done_array_stride,
                                            reinterpret_cast<const J*>(trm_info->get_row_map()),
-                                           reinterpret_cast<J*>(bsric0_info->get_zero_pivot()),
-                                           bsric0_info->get_zero_pivot_stride(),
+                                           reinterpret_cast<J*>(numeric_exact->get_position()),
+                                           numeric_exact->get_stride(),
                                            A->descr->base);
 
         return rocsparse_status_success;

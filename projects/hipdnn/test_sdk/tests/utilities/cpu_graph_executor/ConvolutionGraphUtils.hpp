@@ -18,9 +18,9 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_data_sdk::data_objects::DataType inputDataType,
                              hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
 {
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    std::vector<int64_t> const strides = {1, 1};
+    std::vector<int64_t> const dilation = {1, 1};
+    std::vector<int64_t> const padding = {0, 0};
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionFwdTest");
@@ -66,9 +66,9 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_data_sdk::data_objects::DataType inputDataType,
                              hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
 {
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    std::vector<int64_t> const strides = {1, 1};
+    std::vector<int64_t> const dilation = {1, 1};
+    std::vector<int64_t> const padding = {0, 0};
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionBwdTest");
@@ -116,9 +116,9 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_data_sdk::data_objects::DataType inputDataType,
                              hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
 {
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    std::vector<int64_t> const strides = {1, 1};
+    std::vector<int64_t> const dilation = {1, 1};
+    std::vector<int64_t> const padding = {0, 0};
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionWrwTest");

@@ -159,24 +159,33 @@ TEST_F(TestExecutionPlanDescriptor, SetHandle)
     auto plan = getExecutionPlanDescriptor();
     hipdnnHandle_t handle = nullptr;
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_INT64, 1, &handle),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                                  HIPDNN_TYPE_INT64,
+                                                  1,
+                                                  static_cast<const void*>(&handle)),
+                               HIPDNN_STATUS_BAD_PARAM);
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 2, &handle),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                                  HIPDNN_TYPE_HANDLE,
+                                                  2,
+                                                  static_cast<const void*>(&handle)),
+                               HIPDNN_STATUS_BAD_PARAM);
 
     ASSERT_THROW_HIPDNN_STATUS(
         plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                                  HIPDNN_TYPE_HANDLE,
+                                                  1,
+                                                  static_cast<const void*>(&handle)),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                       HIPDNN_TYPE_HANDLE,
+                       1,
+                       static_cast<const void*>(&handle));
 }
 
 TEST_F(TestExecutionPlanDescriptor, SetEngineConfig)
@@ -289,7 +298,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &count,
-                                       returnedEngineConfig.getPtr()));
+                                       static_cast<void*>(returnedEngineConfig.getPtr())));
 
     ASSERT_EQ(count, 1);
     ASSERT_EQ(*returnedEngineConfig.get(), *(_mockEngineConfigWrapper.get()));
@@ -298,7 +307,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        nullptr,
-                                       nullCountEngineConfig.getPtr()));
+                                       static_cast<void*>(nullCountEngineConfig.getPtr())));
 
     ASSERT_EQ(*nullCountEngineConfig.get(), *(_mockEngineConfigWrapper.get()));
 }
@@ -308,7 +317,7 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineConfigErrors)
     auto plan = getExecutionPlanDescriptor();
     hipdnnBackendDescriptor_t returnedEngineConfig = nullptr;
     int64_t count = 0;
-    void* dummy = &returnedEngineConfig;
+    void* dummy = static_cast<void*>(&returnedEngineConfig);
 
     makeExecutionPlanFinalized();
 

@@ -9,7 +9,7 @@ using namespace hipdnn_plugin_sdk;
 TEST(TestKnobFactory, CreateIntKnob)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<int64_t> options = {10, 20, 30};
+    std::vector<int64_t> const options = {10, 20, 30};
     auto knob
         = KnobFactory::createIntKnob(builder, "int_knob", "description", 10, 0, 100, 1, options);
     builder.Finish(knob);
@@ -38,7 +38,7 @@ TEST(TestKnobFactory, CreateIntKnob)
 TEST(TestKnobFactory, CreateIntKnobDeprecated)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<int64_t> options = {};
+    std::vector<int64_t> const options = {};
     auto knob = KnobFactory::createIntKnob(
         builder, "deprecated_int_knob", "deprecated description", 5, 0, 10, 1, options, true);
     builder.Finish(knob);
@@ -88,7 +88,7 @@ TEST(TestKnobFactory, CreateFloatKnobDeprecated)
 TEST(TestKnobFactory, CreateStringKnob)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<std::string> options = {"option1", "option2"};
+    std::vector<std::string> const options = {"option1", "option2"};
     auto knob
         = KnobFactory::createStringKnob(builder, "string_knob", "description", "option1", options);
     builder.Finish(knob);
@@ -113,7 +113,7 @@ TEST(TestKnobFactory, CreateStringKnob)
 TEST(TestKnobFactory, CreateStringKnobDeprecated)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<std::string> options = {"a", "b"};
+    std::vector<std::string> const options = {"a", "b"};
     auto knob = KnobFactory::createStringKnob(
         builder, "deprecated_string_knob", "deprecated description", "a", options, true);
     builder.Finish(knob);
