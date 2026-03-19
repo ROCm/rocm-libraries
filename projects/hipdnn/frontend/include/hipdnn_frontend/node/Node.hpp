@@ -8,13 +8,16 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/NodeType.hpp>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend::graph
 {
+
 class INode
 {
 public:
@@ -50,6 +53,11 @@ public:
         return {};
     }
 
+    virtual NodeType getNodeType() const
+    {
+        return NodeType::UNKNOWN;
+    }
+
     virtual void
         // NOLINTNEXTLINE(readability-identifier-naming)
         gather_hipdnn_tensors(
@@ -62,6 +70,19 @@ public:
         pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         return {};
+    }
+
+    /// Unpacks operation attributes from a backend descriptor into this node.
+    /// Subclasses that support unpacking from the C-API must override this.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    virtual Error unpack_from_descriptor(
+        [[maybe_unused]] hipdnnBackendDescriptor_t opDesc,
+        [[maybe_unused]] std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        auto nodeName = getNodeName();
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "unpack_from_descriptor not implemented for node"
+                    + (nodeName.empty() ? std::string{} : ": " + nodeName)};
     }
 
     // Creates backend operation descriptor(s) for this node using the C-API.
@@ -151,9 +172,11 @@ protected:
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
 // BaseNode uses this to gather tensor uids, and populate unset ones.
-template <typename DerivedT>
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
 class BaseNode : public INode
 {
+    friend DerivedT;
+
 private:
     DerivedT& self()
     {
@@ -165,6 +188,11 @@ private:
     }
 
 public:
+    NodeType getNodeType() const override
+    {
+        return Type;
+    }
+
     std::string getNodeName() const override
     {
         return std::string(self().attributes.get_name());
@@ -235,10 +263,13 @@ public:
         return outputAttributes;
     }
 
+private:
+    BaseNode() = default;
+
 protected:
     using INode::INode;
 };
 
-template <typename DerivedT>
-using NodeCRTP = BaseNode<DerivedT>; // NOLINT
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
+using NodeCRTP = BaseNode<DerivedT, Type>; // NOLINT
 } // namespace hipdnn_frontend::graph

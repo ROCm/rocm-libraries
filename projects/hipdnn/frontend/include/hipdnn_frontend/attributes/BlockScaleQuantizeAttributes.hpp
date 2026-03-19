@@ -160,18 +160,15 @@ public:
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        flatbuffers::Optional<int64_t> fbAxis = flatbuffers::nullopt;
-        if(axis.has_value())
-        {
-            fbAxis = axis.value();
-        }
+        flatbuffers::Optional<int64_t> const fbAxis = axis;
 
         return hipdnn_data_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
             builder,
             get_x()->get_uid(),
             get_y()->get_uid(),
             get_scale()->get_uid(),
-            block_size.value(), // Throws if block_size not set; requires prior validation
+            block_size
+                .value(), // NOLINT(bugprone-unchecked-optional-access) Throws if block_size not set; requires prior validation
             fbAxis,
             transpose);
     }

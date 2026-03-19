@@ -28,6 +28,7 @@
 
 #include <miopen/common.hpp>
 #include <miopen/errors.hpp>
+#include <miopen/logger.hpp>
 
 #include <memory>
 #include <typeinfo>
@@ -121,6 +122,12 @@ public:
         if(!impl->CanCastTo(typeid(Actual)))
             MIOPEN_THROW("Attempt to cast AnyInvokeParams to invalid type.");
         return *reinterpret_cast<Actual*>(impl->GetRawPtr());
+    }
+
+    template <class Actual>
+    bool IsOfType() const
+    {
+        return impl && impl->CanCastTo(typeid(Actual));
     }
 
     operator bool() const { return impl != nullptr; }

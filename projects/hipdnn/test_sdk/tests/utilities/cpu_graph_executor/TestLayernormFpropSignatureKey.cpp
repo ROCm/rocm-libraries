@@ -18,61 +18,61 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestLayernormFpropSignatureKey, EqualityOperator)
 {
-    LayernormFpropSignatureKey key1{
+    LayernormFpropSignatureKey const key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key2{
+    LayernormFpropSignatureKey const key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    LayernormFpropSignatureKey key3{
+    LayernormFpropSignatureKey const key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    LayernormFpropSignatureKey key4{
+    LayernormFpropSignatureKey const key4{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_TRUE(key3 == key4);
 
-    LayernormFpropSignatureKey key5{
+    LayernormFpropSignatureKey const key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key6{
+    LayernormFpropSignatureKey const key6{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key5 == key6);
 
-    LayernormFpropSignatureKey key7{
+    LayernormFpropSignatureKey const key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key8{
+    LayernormFpropSignatureKey const key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    LayernormFpropSignatureKey key9{
+    LayernormFpropSignatureKey const key9{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key10{
+    LayernormFpropSignatureKey const key10{
         DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
 
-    LayernormFpropSignatureKey key11{
+    LayernormFpropSignatureKey const key11{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key12{
+    LayernormFpropSignatureKey const key12{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key11 == key12);
 }
 
 TEST(TestLayernormFpropSignatureKey, HashFunction)
 {
-    LayernormFpropSignatureKey key1{
+    LayernormFpropSignatureKey const key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key2{
+    LayernormFpropSignatureKey const key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    LayernormFpropSignatureKey key3{
+    LayernormFpropSignatureKey const key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    LayernormFpropSignatureKey key4{
+    LayernormFpropSignatureKey const key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key5{
+    LayernormFpropSignatureKey const key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    LayernormFpropSignatureKey key6{
+    LayernormFpropSignatureKey const key6{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    LayernormFpropSignatureKey key7{
+    LayernormFpropSignatureKey const key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
@@ -88,9 +88,9 @@ TEST(TestLayernormFpropSignatureKey, HashFunction)
 
 TEST(TestLayernormFpropSignatureKey, Copy)
 {
-    LayernormFpropSignatureKey original{
+    LayernormFpropSignatureKey const original{
         DataType::FLOAT, DataType::HALF, DataType::DOUBLE, DataType::FLOAT, DataType::BFLOAT16};
-    LayernormFpropSignatureKey copied{original};
+    LayernormFpropSignatureKey const copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
@@ -102,20 +102,22 @@ TEST(TestLayernormFpropSignatureKey, Copy)
 
 TEST(TestLayernormFpropSignatureKey, CreateFromNodeAndTensorMap)
 {
-    LayernormFpropSignatureKey expectedKey{
+    LayernormFpropSignatureKey const expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           dims,
+                                          normalizedDimCount,
                                           TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    LayernormFpropSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    LayernormFpropSignatureKey const keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

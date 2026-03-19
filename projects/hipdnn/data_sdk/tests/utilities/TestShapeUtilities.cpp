@@ -17,6 +17,8 @@ struct ExtractStrideOrderTestCase
     std::vector<int64_t> dim;
 };
 
+// Outside anonymous namespace so ADL finds it for gtest printing
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::ostream& operator<<(std::ostream& os, const ExtractStrideOrderTestCase& tc)
 {
     os << "ExtractStrideOrderTestCase(";
@@ -33,8 +35,8 @@ using TestShapeUtilsExtractStrideOrder = ::testing::TestWithParam<ExtractStrideO
 
 TEST(TestShapeUtils, GenerateStridesNhwcValid)
 {
-    std::vector<int64_t> dim = {1, 2, 3, 4};
-    std::vector<int64_t> strideOrder = {3, 0, 2, 1}; // NHWC
+    std::vector<int64_t> const dim = {1, 2, 3, 4};
+    std::vector<int64_t> const strideOrder = {3, 0, 2, 1}; // NHWC
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{24, 1, 8, 2}));
@@ -42,8 +44,8 @@ TEST(TestShapeUtils, GenerateStridesNhwcValid)
 
 TEST(TestShapeUtils, GenerateStridesNdhwcValid)
 {
-    std::vector<int64_t> dim = {1, 2, 3, 4, 5};
-    std::vector<int64_t> strideOrder = {4, 0, 3, 2, 1}; // NDHWC
+    std::vector<int64_t> const dim = {1, 2, 3, 4, 5};
+    std::vector<int64_t> const strideOrder = {4, 0, 3, 2, 1}; // NDHWC
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{120, 1, 40, 10, 2}));
@@ -51,8 +53,8 @@ TEST(TestShapeUtils, GenerateStridesNdhwcValid)
 
 TEST(TestShapeUtils, GenerateStridesNchwValid)
 {
-    std::vector<int64_t> dim = {1, 2, 3, 4};
-    std::vector<int64_t> strideOrder = {3, 2, 1, 0}; // NCHW
+    std::vector<int64_t> const dim = {1, 2, 3, 4};
+    std::vector<int64_t> const strideOrder = {3, 2, 1, 0}; // NCHW
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{24, 12, 4, 1}));
@@ -60,8 +62,8 @@ TEST(TestShapeUtils, GenerateStridesNchwValid)
 
 TEST(TestShapeUtils, GenerateStridesNcdhwValid)
 {
-    std::vector<int64_t> dim = {1, 2, 3, 4, 5};
-    std::vector<int64_t> strideOrder = {4, 3, 2, 1, 0}; // NCDHW
+    std::vector<int64_t> const dim = {1, 2, 3, 4, 5};
+    std::vector<int64_t> const strideOrder = {4, 3, 2, 1, 0}; // NCDHW
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{120, 60, 20, 5, 1}));
@@ -69,8 +71,8 @@ TEST(TestShapeUtils, GenerateStridesNcdhwValid)
 
 TEST(TestShapeUtils, GenerateStridesSingleDimension)
 {
-    std::vector<int64_t> dim = {5};
-    std::vector<int64_t> strideOrder = {0};
+    std::vector<int64_t> const dim = {5};
+    std::vector<int64_t> const strideOrder = {0};
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1}));
@@ -78,7 +80,7 @@ TEST(TestShapeUtils, GenerateStridesSingleDimension)
 
 TEST(TestShapeUtils, StrideOrderNhwcFiveDimensions)
 {
-    size_t numDims = 5;
+    size_t const numDims = 5;
     auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{4, 0, 3, 2, 1}));
@@ -86,7 +88,7 @@ TEST(TestShapeUtils, StrideOrderNhwcFiveDimensions)
 
 TEST(TestShapeUtils, StrideOrderNhwcFourDimensions)
 {
-    size_t numDims = 4;
+    size_t const numDims = 4;
     auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{3, 0, 2, 1}));
@@ -94,7 +96,7 @@ TEST(TestShapeUtils, StrideOrderNhwcFourDimensions)
 
 TEST(TestShapeUtils, StrideOrderNhwcThreeDimensions)
 {
-    size_t numDims = 3;
+    size_t const numDims = 3;
     auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{2, 0, 1}));
@@ -102,7 +104,7 @@ TEST(TestShapeUtils, StrideOrderNhwcThreeDimensions)
 
 TEST(TestShapeUtils, StrideOrderNhwcWithTwoDimensions)
 {
-    size_t numDims = 2;
+    size_t const numDims = 2;
     auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{1, 0}));
@@ -110,7 +112,7 @@ TEST(TestShapeUtils, StrideOrderNhwcWithTwoDimensions)
 
 TEST(TestShapeUtils, StrideOrderNhwcWithSingleDimension)
 {
-    size_t numDims = 1;
+    size_t const numDims = 1;
     auto strideOrder = strideOrderNhwc(numDims);
 
     EXPECT_EQ(strideOrder, (std::vector<int64_t>{0}));
@@ -118,8 +120,8 @@ TEST(TestShapeUtils, StrideOrderNhwcWithSingleDimension)
 
 TEST(TestShapeUtils, GenerateStridesEmptyDimensions)
 {
-    std::vector<int64_t> dim = {};
-    std::vector<int64_t> strideOrder = {};
+    std::vector<int64_t> const dim = {};
+    std::vector<int64_t> const strideOrder = {};
     auto strides = generateStrides(dim, strideOrder);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{}));
@@ -127,8 +129,8 @@ TEST(TestShapeUtils, GenerateStridesEmptyDimensions)
 
 TEST(TestShapeUtils, BroadcastCompatibleExactMatch)
 {
-    std::vector<int64_t> inputDims = {2, 3, 4};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {2, 3, 4};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -136,8 +138,8 @@ TEST(TestShapeUtils, BroadcastCompatibleExactMatch)
 TEST(TestShapeUtils, BroadcastCompatibleInputNon1OutputIs1Invalid)
 {
     // Input has non-1 value where output has 1 - invalid
-    std::vector<int64_t> inputDims = {2, 3, 4};
-    std::vector<int64_t> outputDims = {2, 1, 4};
+    std::vector<int64_t> const inputDims = {2, 3, 4};
+    std::vector<int64_t> const outputDims = {2, 1, 4};
 
     EXPECT_FALSE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -145,8 +147,8 @@ TEST(TestShapeUtils, BroadcastCompatibleInputNon1OutputIs1Invalid)
 TEST(TestShapeUtils, BroadcastCompatibleInputIs1OutputNon1Valid)
 {
     // Input has 1 where output has non-1 - valid (broadcast)
-    std::vector<int64_t> inputDims = {2, 1, 4};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {2, 1, 4};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -154,8 +156,8 @@ TEST(TestShapeUtils, BroadcastCompatibleInputIs1OutputNon1Valid)
 TEST(TestShapeUtils, BroadcastCompatibleFewerInputDims)
 {
     // Input has fewer dimensions - valid (implicit leading 1s)
-    std::vector<int64_t> inputDims = {3, 4};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {3, 4};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -163,8 +165,8 @@ TEST(TestShapeUtils, BroadcastCompatibleFewerInputDims)
 TEST(TestShapeUtils, BroadcastCompatibleMoreInputDimsInvalid)
 {
     // Input has more dimensions than output - invalid
-    std::vector<int64_t> inputDims = {2, 3, 4, 5};
-    std::vector<int64_t> outputDims = {3, 4, 5};
+    std::vector<int64_t> const inputDims = {2, 3, 4, 5};
+    std::vector<int64_t> const outputDims = {3, 4, 5};
 
     EXPECT_FALSE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -172,8 +174,8 @@ TEST(TestShapeUtils, BroadcastCompatibleMoreInputDimsInvalid)
 TEST(TestShapeUtils, BroadcastCompatibleMismatchedDimsInvalid)
 {
     // Input and output don't match (3 vs 5) - invalid
-    std::vector<int64_t> inputDims = {2, 3, 4};
-    std::vector<int64_t> outputDims = {2, 5, 4};
+    std::vector<int64_t> const inputDims = {2, 3, 4};
+    std::vector<int64_t> const outputDims = {2, 5, 4};
 
     EXPECT_FALSE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -181,8 +183,8 @@ TEST(TestShapeUtils, BroadcastCompatibleMismatchedDimsInvalid)
 TEST(TestShapeUtils, BroadcastCompatibleEmptyInputValid)
 {
     // Empty input is broadcastable to any output
-    std::vector<int64_t> inputDims = {};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -190,8 +192,8 @@ TEST(TestShapeUtils, BroadcastCompatibleEmptyInputValid)
 TEST(TestShapeUtils, BroadcastCompatibleEmptyOutputWithNonEmptyInputInvalid)
 {
     // Non-empty input cannot broadcast to empty output
-    std::vector<int64_t> inputDims = {2, 3};
-    std::vector<int64_t> outputDims = {};
+    std::vector<int64_t> const inputDims = {2, 3};
+    std::vector<int64_t> const outputDims = {};
 
     EXPECT_FALSE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -199,8 +201,8 @@ TEST(TestShapeUtils, BroadcastCompatibleEmptyOutputWithNonEmptyInputInvalid)
 TEST(TestShapeUtils, BroadcastCompatibleBothEmpty)
 {
     // Both empty is valid (exact match)
-    std::vector<int64_t> inputDims = {};
-    std::vector<int64_t> outputDims = {};
+    std::vector<int64_t> const inputDims = {};
+    std::vector<int64_t> const outputDims = {};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -208,8 +210,8 @@ TEST(TestShapeUtils, BroadcastCompatibleBothEmpty)
 TEST(TestShapeUtils, BroadcastCompatibleScalarToTensor)
 {
     // Scalar [1] broadcasts to any shape
-    std::vector<int64_t> inputDims = {1};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {1};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -217,8 +219,8 @@ TEST(TestShapeUtils, BroadcastCompatibleScalarToTensor)
 TEST(TestShapeUtils, BroadcastCompatibleVectorToMatrix)
 {
     // Vector [4] broadcasts to matrix [3, 4]
-    std::vector<int64_t> inputDims = {4};
-    std::vector<int64_t> outputDims = {3, 4};
+    std::vector<int64_t> const inputDims = {4};
+    std::vector<int64_t> const outputDims = {3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -226,8 +228,8 @@ TEST(TestShapeUtils, BroadcastCompatibleVectorToMatrix)
 TEST(TestShapeUtils, BroadcastCompatibleVectorMismatchInvalid)
 {
     // Vector [5] cannot broadcast to matrix [3, 4]
-    std::vector<int64_t> inputDims = {5};
-    std::vector<int64_t> outputDims = {3, 4};
+    std::vector<int64_t> const inputDims = {5};
+    std::vector<int64_t> const outputDims = {3, 4};
 
     EXPECT_FALSE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -235,8 +237,8 @@ TEST(TestShapeUtils, BroadcastCompatibleVectorMismatchInvalid)
 TEST(TestShapeUtils, BroadcastCompatibleComplexBroadcast)
 {
     // Complex broadcast: [1, 3, 1] -> [2, 3, 4]
-    std::vector<int64_t> inputDims = {1, 3, 1};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {1, 3, 1};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -244,8 +246,8 @@ TEST(TestShapeUtils, BroadcastCompatibleComplexBroadcast)
 TEST(TestShapeUtils, BroadcastCompatiblePartialMatchWithOnes)
 {
     // [2, 1, 4] -> [2, 3, 4]
-    std::vector<int64_t> inputDims = {2, 1, 4};
-    std::vector<int64_t> outputDims = {2, 3, 4};
+    std::vector<int64_t> const inputDims = {2, 1, 4};
+    std::vector<int64_t> const outputDims = {2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -253,8 +255,8 @@ TEST(TestShapeUtils, BroadcastCompatiblePartialMatchWithOnes)
 TEST(TestShapeUtils, BroadcastCompatibleHigherDimensionalBroadcast)
 {
     // 5D broadcast: [1, 1, 3, 1, 5] -> [2, 4, 3, 6, 5]
-    std::vector<int64_t> inputDims = {1, 1, 3, 1, 5};
-    std::vector<int64_t> outputDims = {2, 4, 3, 6, 5};
+    std::vector<int64_t> const inputDims = {1, 1, 3, 1, 5};
+    std::vector<int64_t> const outputDims = {2, 4, 3, 6, 5};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -262,8 +264,8 @@ TEST(TestShapeUtils, BroadcastCompatibleHigherDimensionalBroadcast)
 TEST(TestShapeUtils, BroadcastCompatibleLeadingOnesImplicit)
 {
     // [3, 4] broadcasts to [1, 2, 3, 4] (implicit leading 1s)
-    std::vector<int64_t> inputDims = {3, 4};
-    std::vector<int64_t> outputDims = {1, 2, 3, 4};
+    std::vector<int64_t> const inputDims = {3, 4};
+    std::vector<int64_t> const outputDims = {1, 2, 3, 4};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -271,8 +273,8 @@ TEST(TestShapeUtils, BroadcastCompatibleLeadingOnesImplicit)
 TEST(TestShapeUtils, BroadcastCompatibleSingleDimToMultiDim)
 {
     // Single dimension [5] to multi-dimensional [2, 3, 5]
-    std::vector<int64_t> inputDims = {5};
-    std::vector<int64_t> outputDims = {2, 3, 5};
+    std::vector<int64_t> const inputDims = {5};
+    std::vector<int64_t> const outputDims = {2, 3, 5};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -280,8 +282,8 @@ TEST(TestShapeUtils, BroadcastCompatibleSingleDimToMultiDim)
 TEST(TestShapeUtils, BroadcastCompatibleAllOnesInput)
 {
     // All 1s input broadcasts to any matching rank output
-    std::vector<int64_t> inputDims = {1, 1, 1};
-    std::vector<int64_t> outputDims = {5, 7, 9};
+    std::vector<int64_t> const inputDims = {1, 1, 1};
+    std::vector<int64_t> const outputDims = {5, 7, 9};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
@@ -289,24 +291,24 @@ TEST(TestShapeUtils, BroadcastCompatibleAllOnesInput)
 TEST(TestShapeUtils, BroadcastCompatibleMixedOnesAndMatches)
 {
     // Mix of exact matches and 1s: [2, 1, 4, 1] -> [2, 3, 4, 5]
-    std::vector<int64_t> inputDims = {2, 1, 4, 1};
-    std::vector<int64_t> outputDims = {2, 3, 4, 5};
+    std::vector<int64_t> const inputDims = {2, 1, 4, 1};
+    std::vector<int64_t> const outputDims = {2, 3, 4, 5};
 
     EXPECT_TRUE(areDimensionsBroadcastCompatible(inputDims, outputDims));
 }
 
 TEST(TestShapeUtils, GenerateStridesMoreDimsThanStridesThrows)
 {
-    std::vector<int64_t> dim = {1, 2, 3, 4};
-    std::vector<int64_t> strideOrder = {2, 1, 0};
+    std::vector<int64_t> const dim = {1, 2, 3, 4};
+    std::vector<int64_t> const strideOrder = {2, 1, 0};
 
     EXPECT_THROW(generateStrides(dim, strideOrder), std::invalid_argument);
 }
 
 TEST(TestShapeUtils, GenerateStridesLessDimsThanStridesValid)
 {
-    std::vector<int64_t> dim = {1, 2, 3};
-    std::vector<int64_t> strideOrder = {3, 2, 1, 0};
+    std::vector<int64_t> const dim = {1, 2, 3};
+    std::vector<int64_t> const strideOrder = {3, 2, 1, 0};
 
     auto strides = generateStrides(dim, strideOrder);
 
@@ -315,8 +317,8 @@ TEST(TestShapeUtils, GenerateStridesLessDimsThanStridesValid)
 
 TEST(TestShapeUtils, GenerateStridesFewerDimsNhwcOrdering)
 {
-    std::vector<int64_t> dim = {2, 3, 4};
-    std::vector<int64_t> strideOrder = {2, 0, 1, 3};
+    std::vector<int64_t> const dim = {2, 3, 4};
+    std::vector<int64_t> const strideOrder = {2, 0, 1, 3};
 
     // Should use first 3 elements: {2, 0, 1} for NHW ordering
     auto strides = generateStrides(dim, strideOrder);
@@ -326,8 +328,8 @@ TEST(TestShapeUtils, GenerateStridesFewerDimsNhwcOrdering)
 
 TEST(TestShapeUtils, GenerateStridesEmptyDimsWithNonEmptyStridesValid)
 {
-    std::vector<int64_t> dim = {};
-    std::vector<int64_t> strideOrder = {3, 2, 1, 0};
+    std::vector<int64_t> const dim = {};
+    std::vector<int64_t> const strideOrder = {3, 2, 1, 0};
 
     auto strides = generateStrides(dim, strideOrder);
 
@@ -336,7 +338,7 @@ TEST(TestShapeUtils, GenerateStridesEmptyDimsWithNonEmptyStridesValid)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStridesEmpty)
 {
-    std::vector<int64_t> dims = {};
+    std::vector<int64_t> const dims = {};
     auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{}));
@@ -344,7 +346,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesEmpty)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides1D)
 {
-    std::vector<int64_t> dims = {10};
+    std::vector<int64_t> const dims = {10};
     auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1}));
@@ -352,7 +354,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides1D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides2D)
 {
-    std::vector<int64_t> dims = {5, 8};
+    std::vector<int64_t> const dims = {5, 8};
     auto strides = generateStrides(dims);
 
     // Row-major: {8, 1}
@@ -361,7 +363,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides2D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides3D)
 {
-    std::vector<int64_t> dims = {4, 5, 6};
+    std::vector<int64_t> const dims = {4, 5, 6};
     auto strides = generateStrides(dims);
 
     // Row-major: {5*6, 6, 1} = {30, 6, 1}
@@ -370,7 +372,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides3D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides4D)
 {
-    std::vector<int64_t> dims = {2, 3, 4, 5};
+    std::vector<int64_t> const dims = {2, 3, 4, 5};
     auto strides = generateStrides(dims);
 
     // Row-major: {3*4*5, 4*5, 5, 1} = {60, 20, 5, 1}
@@ -379,7 +381,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides4D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides5D)
 {
-    std::vector<int64_t> dims = {2, 3, 4, 5, 6};
+    std::vector<int64_t> const dims = {2, 3, 4, 5, 6};
     auto strides = generateStrides(dims);
 
     // Row-major: {3*4*5*6, 4*5*6, 5*6, 6, 1} = {360, 120, 30, 6, 1}
@@ -388,7 +390,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides5D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides6D)
 {
-    std::vector<int64_t> dims = {1, 2, 3, 4, 5, 6};
+    std::vector<int64_t> const dims = {1, 2, 3, 4, 5, 6};
     auto strides = generateStrides(dims);
 
     // Row-major: {2*3*4*5*6, 3*4*5*6, 4*5*6, 5*6, 6, 1} = {720, 360, 120, 30, 6, 1}
@@ -397,7 +399,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides6D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStrides7D)
 {
-    std::vector<int64_t> dims = {2, 2, 2, 2, 2, 2, 2};
+    std::vector<int64_t> const dims = {2, 2, 2, 2, 2, 2, 2};
     auto strides = generateStrides(dims);
 
     // Row-major: {64, 32, 16, 8, 4, 2, 1}
@@ -406,7 +408,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStrides7D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStridesWithOnes)
 {
-    std::vector<int64_t> dims = {1, 1, 5, 1, 3};
+    std::vector<int64_t> const dims = {1, 1, 5, 1, 3};
     auto strides = generateStrides(dims);
 
     // Row-major: {1*5*1*3, 5*1*3, 1*3, 3, 1} = {15, 15, 3, 3, 1}
@@ -415,7 +417,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesWithOnes)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStridesLargeDims)
 {
-    std::vector<int64_t> dims = {100, 200};
+    std::vector<int64_t> const dims = {100, 200};
     auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{200, 1}));
@@ -423,7 +425,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesLargeDims)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNchwFor4D)
 {
-    std::vector<int64_t> dims = {2, 3, 4, 5};
+    std::vector<int64_t> const dims = {2, 3, 4, 5};
     auto packedStrides = generateStrides(dims);
     auto nchwStrides = generateStrides(dims, {3, 2, 1, 0}); // NCHW stride order
 
@@ -432,7 +434,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNchwFor4D)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNcdhwFor5D)
 {
-    std::vector<int64_t> dims = {2, 3, 4, 5, 6};
+    std::vector<int64_t> const dims = {2, 3, 4, 5, 6};
     auto packedStrides = generateStrides(dims);
     auto ncdhwStrides = generateStrides(dims, {4, 3, 2, 1, 0}); // NCDHW stride order
 
@@ -453,7 +455,7 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesCalculation)
 
 TEST(TestShapeUtils, GenerateDefaultPackedStridesAllOnes)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
     auto strides = generateStrides(dims);
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1, 1, 1, 1}));
@@ -470,7 +472,7 @@ TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder)
     // Sanity-check test data
     EXPECT_EQ(generateStrides(testCase.dim, testCase.order), testCase.strides);
 
-    std::vector<int64_t> deducedStrideOrder = extractStrideOrder(testCase.strides);
+    std::vector<int64_t> const deducedStrideOrder = extractStrideOrder(testCase.strides);
     EXPECT_EQ(deducedStrideOrder, testCase.order);
 
     if(testCase.log)
@@ -480,10 +482,10 @@ TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder)
                                                      << recorder.getRecordedLogsAsString();
 
         // Build expected warning message
-        std::string expectedLogSuffix = "extractStrideOrder(): Stride lengths "
-                                        + vecToString(testCase.strides)
-                                        + " are not unique, the deduced stride order "
-                                        + vecToString(deducedStrideOrder) + " may not be correct.";
+        std::string const expectedLogSuffix
+            = "extractStrideOrder(): Stride lengths " + vecToString(testCase.strides)
+              + " are not unique, the deduced stride order " + vecToString(deducedStrideOrder)
+              + " may not be correct.";
 
         // Verify log contains expected message at WARN level
         EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedLogSuffix))
@@ -566,19 +568,90 @@ INSTANTIATE_TEST_SUITE_P(
         ExtractStrideOrderTestCase{
             {1, 4, 8, 8, 8, 1}, {1, 2, 5, 4, 3, 0}, true, {4, 2, 1, 1, 1, 1}}));
 
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisNchwAxis1)
+{
+    // NCHW input, make axis 1 (C) most packed
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 1);
+
+    // Sorted by stride ascending: [3,2,1,0], rotate axis=1 to front → [1,0,3,2]
+    // strideOrder=[1,0,3,2]: dim1 gets stride 1
+    EXPECT_EQ(strides, (std::vector<int64_t>{64, 1, 4096, 128}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisNhwcAxis3)
+{
+    // NHWC input, make axis 3 (W) most packed
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1, 2048, 64}, {2, 64, 32, 32}, {2, 64, 32, 32}, 3);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{1024, 2048, 32, 1}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisNoAxisPreservesOrder)
+{
+    // Without axis, stride ordering matches the reference layout
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32});
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisDifferentTargetDims)
+{
+    // Target dims differ from reference (e.g., scale tensor with reduced axis dim)
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 2, 32, 32}, 1);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{2, 1, 128, 4}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisSingletonTiebreaker)
+{
+    // Singletons with equal strides should sort before non-singletons
+    // dims {1, 4, 1, 4} with strides {4, 1, 4, 1}: dims 0 and 2 are singletons with stride 4
+    auto strides = generateStridesWithPackedAxis({4, 1, 4, 1}, {1, 4, 1, 4}, {1, 4, 1, 4}, 1);
+
+    // Sorted ascending: dim1(1), dim3(1), dim0(4,singleton), dim2(4,singleton)
+    // Rotate axis=1 to front: [1, 3, 0, 2]
+    // strideOrder: [2, 0, 3, 1] → dim1 gets stride 1
+    EXPECT_EQ(strides[1], 1); // axis dim is most packed
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxis3D)
+{
+    // 3D tensor, axis=0
+    auto strides = generateStridesWithPackedAxis({12, 4, 1}, {3, 3, 4}, {3, 3, 4}, 0);
+
+    // Sorted ascending: [2,1,0], rotate axis=0 to front: [0,2,1]
+    // strideOrder: [0,2,1] → dim0 gets stride 1
+    EXPECT_EQ(strides[0], 1);
+    EXPECT_EQ(strides, (std::vector<int64_t>{1, 12, 3}));
+}
+
+TEST(TestShapeUtils, GenerateStridesWithPackedAxisLastAxis)
+{
+    // Packing the last axis (already most packed in NCHW) preserves original layout
+    auto strides
+        = generateStridesWithPackedAxis({65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 3);
+
+    // Sorted ascending: [3,2,1,0], rotate axis=3 (at position 0) to front → no change
+    EXPECT_EQ(strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
 TEST(TestShapeUtils, IsTensorPackedTrueForPackedTensor)
 {
-    std::vector<int64_t> shape3D = {2, 3, 4};
+    std::vector<int64_t> const shape3D = {2, 3, 4};
     auto strides3D = generateStrides(shape3D);
     EXPECT_TRUE(isTensorPacked(shape3D, strides3D));
 
-    std::vector<int64_t> shape4D = {2, 3, 4, 5};
+    std::vector<int64_t> const shape4D = {2, 3, 4, 5};
     auto stridesNchw = generateStrides(shape4D);
     EXPECT_TRUE(isTensorPacked(shape4D, stridesNchw));
     auto stridesNhwc = generateStrides(shape4D, {3, 0, 2, 1});
     EXPECT_TRUE(isTensorPacked(shape4D, stridesNhwc));
 
-    std::vector<int64_t> shape5D = {2, 3, 4, 5, 6};
+    std::vector<int64_t> const shape5D = {2, 3, 4, 5, 6};
     auto stridesNcdhw = generateStrides(shape5D);
     EXPECT_TRUE(isTensorPacked(shape5D, stridesNcdhw));
     auto stridesNdhwc = generateStrides(shape5D, {4, 0, 3, 2, 1});
@@ -587,62 +660,62 @@ TEST(TestShapeUtils, IsTensorPackedTrueForPackedTensor)
 
 TEST(TestShapeUtils, IsTensorPackedFalseForNonPackedTensor)
 {
-    std::vector<int64_t> shape3D = {2, 3, 4};
-    std::vector<int64_t> nonPackedStrides3D = {13, 4, 1};
+    std::vector<int64_t> const shape3D = {2, 3, 4};
+    std::vector<int64_t> const nonPackedStrides3D = {13, 4, 1};
     EXPECT_FALSE(isTensorPacked(shape3D, nonPackedStrides3D));
 
-    std::vector<int64_t> shape4D = {2, 3, 4, 5};
-    std::vector<int64_t> nonPackedStrides4D = {50, 20, 5, 1};
+    std::vector<int64_t> const shape4D = {2, 3, 4, 5};
+    std::vector<int64_t> const nonPackedStrides4D = {50, 20, 5, 1};
     EXPECT_FALSE(isTensorPacked(shape4D, nonPackedStrides4D));
 
-    std::vector<int64_t> shape5D = {2, 3, 4, 5, 6};
-    std::vector<int64_t> nonPackedStrides5D = {400, 120, 30, 6, 1};
+    std::vector<int64_t> const shape5D = {2, 3, 4, 5, 6};
+    std::vector<int64_t> const nonPackedStrides5D = {400, 120, 30, 6, 1};
     EXPECT_FALSE(isTensorPacked(shape5D, nonPackedStrides5D));
 }
 
 TEST(TestShapeUtils, IsTensorPackedEmptyTensor)
 {
     // Empty tensors are considered packed
-    std::vector<int64_t> emptyDims = {};
-    std::vector<int64_t> emptyStrides = {};
+    std::vector<int64_t> const emptyDims = {};
+    std::vector<int64_t> const emptyStrides = {};
     EXPECT_TRUE(isTensorPacked(emptyDims, emptyStrides));
 }
 
 TEST(TestShapeUtils, IsTensorPackedSingleDimension)
 {
     // Single dimension tensors are packed if stride is 1
-    std::vector<int64_t> dims = {10};
-    std::vector<int64_t> strides = {1};
+    std::vector<int64_t> const dims = {10};
+    std::vector<int64_t> const strides = {1};
     EXPECT_TRUE(isTensorPacked(dims, strides));
 }
 
 TEST(TestShapeUtils, IsTensorPackedWithDimensionSizeOne)
 {
     // Dimensions with size 1 - stride is irrelevant for that dimension
-    std::vector<int64_t> dims1 = {1, 3, 4};
-    std::vector<int64_t> strides1 = {12, 4, 1}; // Standard packed
+    std::vector<int64_t> const dims1 = {1, 3, 4};
+    std::vector<int64_t> const strides1 = {12, 4, 1}; // Standard packed
     EXPECT_TRUE(isTensorPacked(dims1, strides1));
 
-    std::vector<int64_t> dims2 = {1, 3, 4};
-    std::vector<int64_t> strides2 = {100, 4, 1}; // Large stride for size-1 dim, still packed
+    std::vector<int64_t> const dims2 = {1, 3, 4};
+    std::vector<int64_t> const strides2 = {100, 4, 1}; // Large stride for size-1 dim, still packed
     EXPECT_TRUE(isTensorPacked(dims2, strides2));
 
-    std::vector<int64_t> dims3 = {2, 1, 4};
-    std::vector<int64_t> strides3 = {4, 100, 1}; // Large stride for size-1 dim, still packed
+    std::vector<int64_t> const dims3 = {2, 1, 4};
+    std::vector<int64_t> const strides3 = {4, 100, 1}; // Large stride for size-1 dim, still packed
     EXPECT_TRUE(isTensorPacked(dims3, strides3));
 }
 
 TEST(TestShapeUtils, IsTensorPackedRowMajorVsColumnMajor)
 {
     // Both row-major and column-major 2x3 matrices should be packed
-    std::vector<int64_t> dims = {2, 3};
+    std::vector<int64_t> const dims = {2, 3};
 
     // Row-major: strides = [3, 1]
-    std::vector<int64_t> rowMajorStrides = {3, 1};
+    std::vector<int64_t> const rowMajorStrides = {3, 1};
     EXPECT_TRUE(isTensorPacked(dims, rowMajorStrides));
 
     // Column-major: strides = [1, 2]
-    std::vector<int64_t> colMajorStrides = {1, 2};
+    std::vector<int64_t> const colMajorStrides = {1, 2};
     EXPECT_TRUE(isTensorPacked(dims, colMajorStrides));
 }
 
@@ -652,8 +725,8 @@ TEST(TestShapeUtils, IsTensorPackedWithNegativeStrides)
     // A 2x3 tensor with reversed first dimension: strides = [-3, 1]
     // The math still works: count = 6, space = (2-1)*(-3) + (3-1)*1 = -3 + 2 = -1
     // So count != space + 1 (6 != 0), which means it's not packed
-    std::vector<int64_t> dims = {2, 3};
-    std::vector<int64_t> negativeStrides = {-3, 1};
+    std::vector<int64_t> const dims = {2, 3};
+    std::vector<int64_t> const negativeStrides = {-3, 1};
     // With negative strides, the tensor is typically not packed in the standard sense
     EXPECT_FALSE(isTensorPacked(dims, negativeStrides));
 }
@@ -661,16 +734,16 @@ TEST(TestShapeUtils, IsTensorPackedWithNegativeStrides)
 TEST(TestShapeUtils, IsTensorPackedMismatchedSizes)
 {
     // Mismatched dims and strides should throw
-    std::vector<int64_t> dims = {2, 3, 4};
-    std::vector<int64_t> strides = {12, 4}; // Only 2 strides for 3 dims
+    std::vector<int64_t> const dims = {2, 3, 4};
+    std::vector<int64_t> const strides = {12, 4}; // Only 2 strides for 3 dims
     EXPECT_THROW(isTensorPacked(dims, strides), std::invalid_argument);
 }
 
 TEST(TestShapeUtils, IsTensorPackedOverlappingStrides)
 {
     // Strides that cause overlap (e.g., both dimensions have stride 1)
-    std::vector<int64_t> dims = {2, 3};
-    std::vector<int64_t> overlappingStrides = {1, 1};
+    std::vector<int64_t> const dims = {2, 3};
+    std::vector<int64_t> const overlappingStrides = {1, 1};
     // count = 6, space = (2-1)*1 + (3-1)*1 = 1 + 2 = 3, count != space+1 (6 != 4)
     EXPECT_FALSE(isTensorPacked(dims, overlappingStrides));
 }
@@ -678,15 +751,15 @@ TEST(TestShapeUtils, IsTensorPackedOverlappingStrides)
 TEST(TestShapeUtils, IsTensorPackedAllOnesShape)
 {
     // Shape with all 1s should be packed
-    std::vector<int64_t> dims = {1, 1, 1, 1};
-    std::vector<int64_t> strides = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    std::vector<int64_t> const strides = {1, 1, 1, 1};
     EXPECT_TRUE(isTensorPacked(dims, strides));
 }
 
 TEST(TestShapeUtils, IsTensorPackedLargeTensor)
 {
     // Test with a larger tensor
-    std::vector<int64_t> dims = {4, 16, 32, 64};
+    std::vector<int64_t> const dims = {4, 16, 32, 64};
     auto strides = generateStrides(dims);
     EXPECT_TRUE(isTensorPacked(dims, strides));
 }
@@ -694,16 +767,16 @@ TEST(TestShapeUtils, IsTensorPackedLargeTensor)
 TEST(TestShapeUtils, IsTensorPackedCustomPackedLayout)
 {
     // Custom packed layout (not standard NCHW/NHWC but still contiguous)
-    std::vector<int64_t> dims = {2, 3, 4};
+    std::vector<int64_t> const dims = {2, 3, 4};
     // Order: [2, 0, 1] means dimension 2 is innermost, then 0, then 1
-    std::vector<int64_t> customOrder = {2, 0, 1};
+    std::vector<int64_t> const customOrder = {2, 0, 1};
     auto customStrides = generateStrides(dims, customOrder);
     EXPECT_TRUE(isTensorPacked(dims, customStrides));
 }
 
 TEST(TestShapeUtils, GetDerivedShape5DValid)
 {
-    std::vector<int64_t> shape = {2, 4, 8, 16, 32};
+    std::vector<int64_t> const shape = {2, 4, 8, 16, 32};
     auto derivedShape = getDerivedShape(shape);
 
     EXPECT_EQ(derivedShape, (std::vector<int64_t>{1, 4, 1, 1, 1}));
@@ -711,14 +784,14 @@ TEST(TestShapeUtils, GetDerivedShape5DValid)
 
 TEST(TestShapeUtils, GetDerivedShapeThrowsForSingleDimension)
 {
-    std::vector<int64_t> shape = {10};
+    std::vector<int64_t> const shape = {10};
     EXPECT_THROW(getDerivedShape(shape), std::runtime_error);
 }
 
 TEST(TestShapeUtils, CalculateGroupCountReturnsOneForStandardConvolution)
 {
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 16, 3, 3};
+    std::vector<int64_t> const inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> const weightDims = {32, 16, 3, 3};
 
     auto groupCount = calculateGroupCount(inputDims, weightDims);
     EXPECT_EQ(groupCount, 1);
@@ -726,8 +799,8 @@ TEST(TestShapeUtils, CalculateGroupCountReturnsOneForStandardConvolution)
 
 TEST(TestShapeUtils, CalculateGroupCountReturnsCorrectValueForGroupedConvolution)
 {
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 8, 3, 3};
+    std::vector<int64_t> const inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> const weightDims = {32, 8, 3, 3};
 
     auto groupCount = calculateGroupCount(inputDims, weightDims);
     EXPECT_EQ(groupCount, 2);
@@ -735,40 +808,40 @@ TEST(TestShapeUtils, CalculateGroupCountReturnsCorrectValueForGroupedConvolution
 
 TEST(TestShapeUtils, CalculateGroupCountThrowsForZeroWeightChannels)
 {
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 0, 3, 3};
+    std::vector<int64_t> const inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> const weightDims = {32, 0, 3, 3};
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
 
 TEST(TestShapeUtils, CalculateGroupCountThrowsForZeroInputChannels)
 {
-    std::vector<int64_t> inputDims = {1, 0, 32, 32};
-    std::vector<int64_t> weightDims = {32, 8, 3, 3};
+    std::vector<int64_t> const inputDims = {1, 0, 32, 32};
+    std::vector<int64_t> const weightDims = {32, 8, 3, 3};
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
 
 TEST(TestShapeUtils, CalculateGroupCountThrowsForInputDimsLessThanTwo)
 {
-    std::vector<int64_t> inputDims = {16};
-    std::vector<int64_t> weightDims = {32, 16, 3, 3};
+    std::vector<int64_t> const inputDims = {16};
+    std::vector<int64_t> const weightDims = {32, 16, 3, 3};
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
 
 TEST(TestShapeUtils, CalculateGroupCountThrowsForWeightDimsLessThanTwo)
 {
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32};
+    std::vector<int64_t> const inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> const weightDims = {32};
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
 
 TEST(TestShapeUtils, CalculateGroupCountThrowsForNonDivisibleChannels)
 {
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 7, 3, 3};
+    std::vector<int64_t> const inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> const weightDims = {32, 7, 3, 3};
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }

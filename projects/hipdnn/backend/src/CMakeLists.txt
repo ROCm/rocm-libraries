@@ -17,25 +17,36 @@ set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
     hipdnn_backend_private
+    descriptors/BatchnormBackwardOperationDescriptor.cpp
+    descriptors/BatchnormInferenceOperationDescriptor.cpp
+    descriptors/BatchnormOperationDescriptor.cpp
+    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
+    descriptors/BlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/BlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/ConvolutionFwdOperationDescriptor.cpp
+    descriptors/ConvolutionWrwOperationDescriptor.cpp
+    descriptors/DataTypeConversion.cpp
+    descriptors/DescriptorAttributeUtils.cpp
+    descriptors/DescriptorFactory.cpp
     descriptors/EngineConfigDescriptor.cpp
     descriptors/EngineDescriptor.cpp
     descriptors/EngineHeuristicDescriptor.cpp
     descriptors/ExecutionPlanDescriptor.cpp
     descriptors/GraphDescriptor.cpp
-    descriptors/TensorDescriptor.cpp
-    descriptors/ConvolutionFwdOperationDescriptor.cpp
-    descriptors/ConvolutionWrwOperationDescriptor.cpp
-    descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
-    descriptors/ConvolutionBwdOperationDescriptor.cpp
-    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
-    descriptors/DescriptorAttributeUtils.cpp
-    descriptors/DataTypeConversion.cpp
+    descriptors/LayernormOperationDescriptor.cpp
+    descriptors/MatmulOperationDescriptor.cpp
+    descriptors/PointwiseOperationDescriptor.cpp
+    descriptors/RMSNormOperationDescriptor.cpp
+    descriptors/SdpaFpropOperationDescriptor.cpp
+    descriptors/TensorDescriptor.cpp
+    descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp
-    descriptors/DescriptorFactory.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp
+    logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
     plugin/EnginePlugin.cpp
@@ -53,7 +64,7 @@ target_include_directories(
                                   ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include/
 )
 
-target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
@@ -79,7 +90,7 @@ target_include_directories(
 # Use PUBLIC to ensure it's exported to consumers
 target_compile_definitions(hipdnn_backend PUBLIC __HIP_PLATFORM_AMD__)
 
-target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 # This definition is used to enable logging in the backend.  It is #ifdef'ed in the backend code.
 # This is to stop the frontend/plugin from having lazy log initialization which will end up with the
 # same logger name. Frontend/plugin code will need to init the logger themselves so they have a

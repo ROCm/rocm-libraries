@@ -8,11 +8,13 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BlockScaleQuantizePacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class BlockScaleQuantizeNode : public BaseNode<BlockScaleQuantizeNode>
+class BlockScaleQuantizeNode
+    : public BaseNode<BlockScaleQuantizeNode, NodeType::BLOCK_SCALE_QUANTIZE>
 {
 public:
     BlockScaleQuantizeAttributes attributes;
@@ -77,7 +79,7 @@ public:
             }
 
             // Validate divisibility of the target dimension by block_size
-            size_t targetAxis
+            size_t const targetAxis
                 = axis.has_value() ? static_cast<size_t>(axis.value()) : xDims.size() - 1;
             if(targetAxis < xDims.size() && xDims[targetAxis] > 0)
             {
@@ -126,6 +128,8 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
+        auto axis = attributes.get_axis();
+
         // Infer Y dims and strides from X
         if(y->get_dim().empty())
         {
@@ -134,7 +138,12 @@ public:
 
         if(y->get_stride().empty())
         {
-            if(!x->get_stride().empty())
+            if(attributes.get_transpose() && !x->get_stride().empty())
+            {
+                y->set_stride(hipdnn_data_sdk::utilities::generateStridesWithPackedAxis(
+                    x->get_stride(), x->get_dim(), y->get_dim(), axis));
+            }
+            else if(!x->get_stride().empty())
             {
                 y->set_stride(x->get_stride());
             }
@@ -151,9 +160,7 @@ public:
             if(blockSize.has_value() && blockSize.value() > 0)
             {
                 auto scaleDims = x->get_dim();
-                // Default axis is last dimension if not specified
-                auto axis = attributes.get_axis();
-                size_t scaleAxis
+                size_t const scaleAxis
                     = axis.has_value() ? static_cast<size_t>(axis.value()) : scaleDims.size() - 1;
 
                 if(scaleAxis < scaleDims.size())
@@ -166,7 +173,12 @@ public:
 
         if(scale->get_stride().empty())
         {
-            if(!x->get_stride().empty() && !scale->get_dim().empty())
+            if(attributes.get_transpose() && !x->get_stride().empty() && !scale->get_dim().empty())
+            {
+                scale->set_stride(hipdnn_data_sdk::utilities::generateStridesWithPackedAxis(
+                    x->get_stride(), x->get_dim(), scale->get_dim(), axis));
+            }
+            else if(!x->get_stride().empty() && !scale->get_dim().empty())
             {
                 auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                 scale->set_stride(
@@ -190,6 +202,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBlockScaleQuantizeOperation(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph

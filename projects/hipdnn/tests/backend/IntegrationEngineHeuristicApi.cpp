@@ -72,7 +72,7 @@ protected:
                                             HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                             1,
-                                            &_graph),
+                                            static_cast<const void*>(&_graph)),
                   HIPDNN_STATUS_SUCCESS);
     }
 
@@ -95,7 +95,7 @@ TEST_F(IntegrationEngineHeuristicApi, SetEngineHeuristicOperationGraph)
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &nullGraph),
+                                        static_cast<const void*>(&nullGraph)),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     test_util::createTestGraph(&_graph, _handle);
@@ -104,7 +104,7 @@ TEST_F(IntegrationEngineHeuristicApi, SetEngineHeuristicOperationGraph)
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_graph),
+                                        static_cast<const void*>(&_graph)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -186,7 +186,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetAttributeOnUnfinalizedDescriptor)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &dummyGraph),
+                                        static_cast<void*>(&dummyGraph)),
               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 }
 
@@ -202,7 +202,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_INT64,
                                         1,
                                         nullptr,
-                                        &retrievedGraph),
+                                        static_cast<void*>(&retrievedGraph)),
               HIPDNN_STATUS_BAD_PARAM);
 
     EXPECT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
@@ -210,7 +210,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         2,
                                         nullptr,
-                                        &retrievedGraph),
+                                        static_cast<void*>(&retrievedGraph)),
               HIPDNN_STATUS_BAD_PARAM);
 
     EXPECT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
@@ -226,7 +226,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &retrievedGraph),
+                                        static_cast<void*>(&retrievedGraph)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_NE(retrievedGraph, nullptr);
 
@@ -239,7 +239,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &count,
-                                        &retrievedGraph2),
+                                        static_cast<void*>(&retrievedGraph2)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(count, 1);
 
@@ -342,7 +342,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigs)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         3,
                                         nullptr,
-                                        configs.data()),
+                                        static_cast<void*>(configs.data())),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     int64_t count = 0;
@@ -375,7 +375,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigs)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         3, // Ask for 3, but only one engine avaliable.
                                         &count,
-                                        configs.data()),
+                                        static_cast<void*>(configs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(count, 1); // Only one returned since there isn't more than that.
 
@@ -387,7 +387,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigs)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &engine),
+                                        static_cast<void*>(&engine)),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(engine, nullptr);
 
@@ -427,7 +427,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigsRequestMoreThanAvailable)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         5,
                                         &count,
-                                        configs.data()),
+                                        static_cast<void*>(configs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(count, 1);
 
