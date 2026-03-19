@@ -2654,475 +2654,155 @@ struct TestCase
     std::vector<int> batchSeq{};
 };
 
-std::vector<TestCase> dropout_full_cases = {
-    TestCase{17, 23, 13, 67, 3, 0, 0, 0, true, false, false, false, false, false, {0}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, false, {0}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 0, true, false, false, false, false, true, {0}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 1, true, false, false, false, false, true, {0}}};
+using TestParam = std::tuple<int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             int,
+                             bool,
+                             bool,
+                             bool,
+                             bool,
+                             bool,
+                             bool,
+                             std::vector<int>>;
 
-std::vector<TestCase> deepbench_cases = {
-    TestCase{32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 10, 2816, 2816, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 1500, 248, 248, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 12, 2048, 2048, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 1500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 12, 1536, 1536, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 1500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 10, 2560, 2560, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 1, 512, 512, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
-    TestCase{64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}}};
+TestCase ConvertParam(TestParam const& param)
+{
+    auto [batchSize,
+          seqLength,
+          inVecLen,
+          hiddenSize,
+          numLayers,
+          inputMode,
+          biasMode,
+          dirMode,
+          useDropout,
+          nohx,
+          nodhy,
+          nohy,
+          nodhx,
+          flatBatchFill,
+          batchSeq] = param;
 
-std::vector<TestCase> extra_cases = {
-    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, false, false, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, false, true, false, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, true, false, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, false, false, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, true, false, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, true, false, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, false, false, false, true, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, false, false, true, true, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, false, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, false, true, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, true, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 0, false, true, true, true, true, false, {32, 32, 32}},
-    TestCase{32, 3, 128, 128, 1, 0, 0, 1, false, true, true, true, true, false, {32, 32, 32}}};
+    return TestCase{batchSize,
+                    seqLength,
+                    inVecLen,
+                    hiddenSize,
+                    numLayers,
+                    inputMode,
+                    biasMode,
+                    dirMode,
+                    useDropout,
+                    nohx,
+                    nodhy,
+                    nohy,
+                    nodhx,
+                    flatBatchFill,
+                    batchSeq};
+}
 
-static std::vector<TestCase> base_cases = {
-    TestCase{1, 1, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {0}},
-    TestCase{1, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {1}},
-    TestCase{1, 1, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {1}},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             0,
-             0,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             0,
-             0,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             0,
-             1,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             0,
-             1,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             1,
-             0,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             1,
-             0,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             1,
-             1,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             1,
-             1,
-             1,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             0,
-             0,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             0,
-             0,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             0,
-             1,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             0,
-             1,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             1,
-             0,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             1,
-             0,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             1,
-             1,
-             0,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{1,
-             23,
-             13,
-             67,
-             3,
-             1,
-             1,
-             1,
-             false,
-             false,
-             false,
-             false,
-             false,
-             false,
-             {
-                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             }},
-    TestCase{17, 1, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17}},
-    TestCase{17, 1, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17}},
-    TestCase{17, 23, 13, 67, 1, 0, 0, 0, false, false, false, false, false, false, {17, 15, 14, 14,
-                                                                                    12, 10, 9,  9,
-                                                                                    9,  7,  5,  5,
-                                                                                    3,  3,  2,  2,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 1, 0, 0, 1, false, false, false, false, false, false, {17, 15, 13, 12,
-                                                                                    10, 9,  8,  6,
-                                                                                    6,  6,  4,  2,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 1, 0, 1, 0, false, false, false, false, false, false, {17, 17, 17, 16,
-                                                                                    16, 16, 15, 14,
-                                                                                    14, 12, 11, 11,
-                                                                                    11, 11, 11, 10,
-                                                                                    9,  8,  6,  4,
-                                                                                    3,  2,  1}},
-    TestCase{17, 23, 13, 67, 1, 0, 1, 1, false, false, false, false, false, false, {17, 15, 13, 12,
-                                                                                    11, 11, 10, 8,
-                                                                                    7,  5,  5,  4,
-                                                                                    2,  2,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 1, 1, 0, 0, false, false, false, false, false, false, {17, 15, 15, 13,
-                                                                                    12, 11, 10, 8,
-                                                                                    6,  6,  4,  3,
-                                                                                    3,  3,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 1, 1, 0, 1, false, false, false, false, false, false, {17, 15, 14, 14,
-                                                                                    14, 13, 13, 13,
-                                                                                    11, 9,  9,  7,
-                                                                                    6,  4,  4,  4,
-                                                                                    4,  4,  4,  4,
-                                                                                    4,  2,  1}},
-    TestCase{17, 23, 13, 67, 1, 1, 1, 0, false, false, false, false, false, false, {17, 17, 17, 15,
-                                                                                    14, 12, 12, 12,
-                                                                                    10, 8,  6,  4,
-                                                                                    4,  4,  4,  3,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 1, 1, 1, 1, false, false, false, false, false, false, {17, 15, 13, 11,
-                                                                                    11, 10, 10, 10,
-                                                                                    8,  7,  6,  4,
-                                                                                    2,  2,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 0, false, false, false, false, false, false, {17, 15, 13, 13,
-                                                                                    11, 10, 8,  7,
-                                                                                    5,  4,  2,  2,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 3, 0, 0, 1, false, false, false, false, false, false, {17, 16, 15, 14,
-                                                                                    12, 11, 9,  8,
-                                                                                    6,  6,  6,  4,
-                                                                                    3,  1,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 3, 0, 1, 0, false, false, false, false, false, false, {17, 15, 15, 15,
-                                                                                    15, 15, 14, 13,
-                                                                                    11, 10, 9,  7,
-                                                                                    5,  3,  2,  2,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 3, 0, 1, 1, false, false, false, false, false, false, {17, 17, 15, 15,
-                                                                                    13, 12, 10, 9,
-                                                                                    8,  6,  5,  3,
-                                                                                    2,  1,  1,  1,
-                                                                                    1,  1,  1,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 3, 1, 0, 0, false, false, false, false, false, false, {17, 17, 16, 16,
-                                                                                    16, 15, 15, 13,
-                                                                                    13, 11, 11, 10,
-                                                                                    10, 10, 8,  7,
-                                                                                    7,  7,  5,  4,
-                                                                                    3,  3,  3}},
-    TestCase{17, 23, 13, 67, 3, 1, 0, 1, false, false, false, false, false, false, {17, 17, 16, 16,
-                                                                                    15, 13, 12, 12,
-                                                                                    10, 10, 9,  8,
-                                                                                    7,  7,  7,  5,
-                                                                                    4,  4,  4,  4,
-                                                                                    3,  2,  1}},
-    TestCase{17, 23, 13, 67, 3, 1, 1, 0, false, false, false, false, false, false, {17, 16, 14, 14,
-                                                                                    14, 13, 13, 13,
-                                                                                    12, 11, 10, 9,
-                                                                                    9,  7,  7,  5,
-                                                                                    4,  4,  2,  1,
-                                                                                    1,  1,  1}},
-    TestCase{17, 23, 13, 67, 3, 1, 1, 1, false, false, false, false, false, false, {17, 17, 17, 16,
-                                                                                    16, 15, 13, 11,
-                                                                                    11, 11, 9,  7,
-                                                                                    7,  7,  6,  6,
-                                                                                    5,  3,  3,  2,
-                                                                                    1,  1,  1}}};
+std::vector<TestParam> deepbench_cases = {
+    {32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 10, 2816, 2816, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1500, 248, 248, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 12, 2048, 2048, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 500, 156, 156, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 12, 1536, 1536, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 500, 256, 256, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 10, 2560, 2560, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 1, 512, 512, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
+    {64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}}};
+
+std::vector<TestParam> extra_cases = {
+    {32, 3, 128, 128, 1, 0, 0, 0, false, true, false, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, false, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, true, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, true, false, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, true, true, false, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, false, false, false, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, false, false, true, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, false, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, false, false, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, false, false, true, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 0, false, true, true, true, true, false, {32, 32, 32}},
+    {32, 3, 128, 128, 1, 0, 0, 1, false, true, true, true, true, false, {32, 32, 32}}};
 
 auto GenCases(bool gen_dropout)
 {
     std::vector<int> defaultBS(1);
 
-    std::vector<TestCase> cases{};
-
-    TestCase single{};
-    single.batchSize     = 17;
-    single.seqLength     = (gen_dropout ? 23 : 2);
-    single.inVecLen      = 13;
-    single.hiddenSize    = 67;
-    single.numLayers     = (gen_dropout ? 3 : 1);
-    single.inputMode     = 0;
-    single.biasMode      = 0;
-    single.dirMode       = 0;
-    single.useDropout    = gen_dropout;
-    single.nohx          = false;
-    single.nodhy         = false;
-    single.nohy          = false;
-    single.nodhx         = false;
-    single.flatBatchFill = false;
-    single.batchSeq      = defaultBS;
-    cases.push_back(single);
-    return cases;
+    std::vector<TestParam> cases{};
+    cases.push_back({17,
+                     (gen_dropout ? 23 : 2),
+                     13,
+                     67,
+                     (gen_dropout ? 3 : 1),
+                     0,
+                     0,
+                     0,
+                     gen_dropout,
+                     false,
+                     false,
+                     false,
+                     false,
+                     false,
+                     defaultBS});
+    return ::testing::ValuesIn(cases);
 }
 
-auto const& GetFullBaseTests() { return base_cases; }
+auto GetFullBaseTests()
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+    std::vector<int> defaultBS(1);
+    return ::testing::Combine(::testing::ValuesIn(get_gru_batchSize()),
+                              ::testing::ValuesIn(get_gru_seq_len()),
+                              ::testing::ValuesIn(get_gru_vector_len()),
+                              ::testing::ValuesIn(get_gru_hidden_size()),
+                              ::testing::ValuesIn(get_gru_num_layers()),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({defaultBS}));
+}
 
-auto const& GetDropoutTests() { return dropout_full_cases; }
+auto GetDropoutTests()
+{
+    std::vector<int> modes(2, 0);
+    modes[1] = 1;
+    std::vector<int> defaultBS(1);
+    return ::testing::Combine(::testing::ValuesIn({17}),
+                              ::testing::ValuesIn({23}),
+                              ::testing::ValuesIn({13}),
+                              ::testing::ValuesIn({67}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn(modes),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({defaultBS}));
+}
 
 auto const& GetDropoutSmokeTests()
 {
@@ -3141,7 +2821,7 @@ auto const& GetSmokeTests()
 }
 
 template <class T>
-class gru_test : public testing::TestWithParam<TestCase>
+class gru_test : public testing::TestWithParam<TestParam>
 {
     const double tolerance = 80; // Will be multiplied by std::numeric_limits<T>::epsilon()
     TestCase param;
@@ -3214,7 +2894,11 @@ public:
     void SetUp() override
     {
         prng::reset_seed();
-        param = GetParam();
+        param = ConvertParam(GetParam());
+        if(!param.useDropout)
+        {
+            param.batchSeq = generate_batchSeq(param.batchSize, param.seqLength)[0];
+        }
     }
 
     void Run()
@@ -3472,7 +3156,7 @@ public:
 
 struct TestNameGenerator
 {
-    std::string operator()(const ::testing::TestParamInfo<TestCase>& param_info)
+    std::string operator()(const ::testing::TestParamInfo<TestParam>& param_info)
     {
         std::stringstream ss{};
         auto print_bool = [](bool value) { return value ? "true" : "false"; };
@@ -3486,17 +3170,15 @@ struct TestNameGenerator
             return vec_ss.str();
         };
 
-        ss << "batchSize_" << param_info.param.batchSize << "_seqLength_"
-           << param_info.param.seqLength << "_inVecLen_" << param_info.param.inVecLen
-           << "_hiddenSize_" << param_info.param.hiddenSize << "_numLayers_"
-           << param_info.param.numLayers << "_inputMode_" << param_info.param.inputMode
-           << "_biasMode_" << param_info.param.biasMode << "_dirMode_" << param_info.param.dirMode
-           << "_useDropout_" << print_bool(param_info.param.useDropout) << "_nohx_"
-           << print_bool(param_info.param.nohx) << "_nodhy_" << print_bool(param_info.param.nodhy)
-           << "_nohy_" << print_bool(param_info.param.nohy) << "_nodhx_"
-           << print_bool(param_info.param.nodhx) << "_flatBatchFill_"
-           << print_bool(param_info.param.flatBatchFill) << "_batch_seq_"
-           << print_batch_seq(param_info.param.batchSeq);
+        auto param = ConvertParam(param_info.param);
+
+        ss << "batchSize_" << param.batchSize << "_seqLength_" << param.seqLength << "_inVecLen_"
+           << param.inVecLen << "_hiddenSize_" << param.hiddenSize << "_numLayers_"
+           << param.numLayers << "_inputMode_" << param.inputMode << "_biasMode_" << param.biasMode
+           << "_dirMode_" << param.dirMode << "_useDropout_" << print_bool(param.useDropout)
+           << "_nohx_" << print_bool(param.nohx) << "_nodhy_" << print_bool(param.nodhy) << "_nohy_"
+           << print_bool(param.nohy) << "_nodhx_" << print_bool(param.nodhx) << "_flatBatchFill_"
+           << print_bool(param.flatBatchFill) << "_batch_seq_" << print_batch_seq(param.batchSeq);
         return ss.str();
     }
 };
@@ -3537,47 +3219,23 @@ TEST_P(GPU_GRU_Base_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Base_FP16, TestFloat16) { Run(); }
 
 // Base tests
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_GRU_Base_FP32,
-                         ::testing::ValuesIn(GetFullBaseTests()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GRU_Base_FP32,
-                         ::testing::ValuesIn(GetSmokeTests()),
-                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP32, GetFullBaseTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP32, GetSmokeTests(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_GRU_Base_FP16,
-                         ::testing::ValuesIn(GetFullBaseTests()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GRU_Base_FP16,
-                         ::testing::ValuesIn(GetSmokeTests()),
-                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP16, GetFullBaseTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP16, GetSmokeTests(), TestNameGenerator{});
 
 // Dropout tests
 TEST_P(GPU_GRU_Dropout_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Dropout_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_GRU_Dropout_FP32,
-                         ::testing::ValuesIn(GetDropoutTests()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GRU_Dropout_FP32,
-                         ::testing::ValuesIn(GetDropoutSmokeTests()),
-                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP32, GetDropoutTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP32, GetDropoutSmokeTests(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_GRU_Dropout_FP16,
-                         ::testing::ValuesIn(GetDropoutTests()),
-                         TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GRU_Dropout_FP16,
-                         ::testing::ValuesIn(GetDropoutSmokeTests()),
-                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP16, GetDropoutTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP16, GetDropoutSmokeTests(), TestNameGenerator{});
 
-// Deepbench tests
+// // Deepbench tests
 TEST_P(GPU_GRU_Deepbench_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Deepbench_FP16, TestFloat16) { Run(); }
 
