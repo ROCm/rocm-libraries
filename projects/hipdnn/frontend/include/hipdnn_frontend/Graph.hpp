@@ -1075,6 +1075,41 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Check if the graph is supported by any available engine plugin
+     * @param handle The hipDNN handle
+     * @param modes Heuristic modes for engine ranking
+     * @return Error with OK if supported, HIPDNN_BACKEND_ERROR if not
+     *
+     * Performs a lightweight check to determine if any engine plugin can
+     * handle this graph. If the graph has not yet been validated and built,
+     * those steps are performed automatically. The graph's internal state
+     * (operation graph descriptor) is preserved for subsequent operations.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error is_supported_ext(hipdnnHandle_t handle,
+                           const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    {
+        HIPDNN_FE_LOG_INFO("Checking engine support for graph " << graph_attributes.get_name());
+
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            HIPDNN_CHECK_ERROR(validate());
+            HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true));
+
+        std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
+        std::vector<int64_t> engineIds;
+        HIPDNN_CHECK_ERROR(
+            detail::getEngineConfigs(engineConfigs, engineIds, engineHeuristicDesc.get(), false));
+
+        return {ErrorCode::OK, ""};
+    }
+
     /// Serialize to FlatBuffer DetachedBuffer (const version)
     /// Returns error if tensor UIDs are not set
     Error toFlatBuffer(flatbuffers::DetachedBuffer& buffer) const
