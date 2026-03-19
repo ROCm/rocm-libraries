@@ -8,13 +8,16 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/NodeType.hpp>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend::graph
 {
+
 class INode
 {
 public:
@@ -48,6 +51,11 @@ public:
     virtual std::string getNodeName() const
     {
         return {};
+    }
+
+    virtual NodeType getNodeType() const
+    {
+        return NodeType::UNKNOWN;
     }
 
     virtual void
@@ -164,9 +172,11 @@ protected:
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
 // BaseNode uses this to gather tensor uids, and populate unset ones.
-template <typename DerivedT>
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
 class BaseNode : public INode
 {
+    friend DerivedT;
+
 private:
     DerivedT& self()
     {
@@ -178,6 +188,11 @@ private:
     }
 
 public:
+    NodeType getNodeType() const override
+    {
+        return Type;
+    }
+
     std::string getNodeName() const override
     {
         return std::string(self().attributes.get_name());
@@ -248,10 +263,13 @@ public:
         return outputAttributes;
     }
 
+private:
+    BaseNode() = default;
+
 protected:
     using INode::INode;
 };
 
-template <typename DerivedT>
-using NodeCRTP = BaseNode<DerivedT>; // NOLINT
+template <typename DerivedT, NodeType Type = NodeType::UNKNOWN>
+using NodeCRTP = BaseNode<DerivedT, Type>; // NOLINT
 } // namespace hipdnn_frontend::graph

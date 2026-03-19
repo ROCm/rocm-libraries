@@ -775,8 +775,8 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &rawQ));
-    std::unique_ptr<HipdnnBackendDescriptor> retrievedQ(rawQ);
+                                       static_cast<void*>(&rawQ)));
+    std::unique_ptr<HipdnnBackendDescriptor> const retrievedQ(rawQ);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedQ, nullptr);
@@ -1093,7 +1093,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    std::string const str = desc->toString();
     ASSERT_NE(str.find("SdpaFpropOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("q_uid=" + std::to_string(K_SDPA_TENSOR_Q_UID)), std::string::npos);
     ASSERT_NE(str.find("k_uid=" + std::to_string(K_SDPA_TENSOR_K_UID)), std::string::npos);
@@ -1325,7 +1325,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 {
     makeFinalized();
 
-    auto graphOp = _wrapper->tryAsInterface<IGraphOperation>();
+    auto graphOp = _wrapper->tryAsGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the returned interface is the same underlying object
@@ -1337,7 +1337,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
 {
     // TensorDescriptor does not implement IGraphOperation
-    auto graphOp = _qDesc->tryAsInterface<IGraphOperation>();
+    auto graphOp = _qDesc->tryAsGraphOperation();
     EXPECT_EQ(graphOp, nullptr);
 }
 

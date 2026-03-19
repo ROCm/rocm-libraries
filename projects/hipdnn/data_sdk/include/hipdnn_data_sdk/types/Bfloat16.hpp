@@ -16,6 +16,7 @@ namespace hipdnn_data_sdk::types
 // Forward declarations for cross-type conversions
 // NOLINTBEGIN(readability-identifier-naming) - lowercase to match type definitions
 struct half;
+struct fp4_e2m1;
 struct fp8_e4m3;
 struct fp8_e5m2;
 struct fp8_e8m0;
@@ -124,8 +125,8 @@ inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
 
     // Check for NaN: if exponent is all 1s and mantissa is non-zero, preserve NaN
     // NaN bit patterns have exponent 0xFF and non-zero mantissa in the full float
-    uint32_t exp = (bits >> 23) & 0xFF;
-    uint32_t mant = bits & 0x007FFFFF;
+    uint32_t const exp = (bits >> 23) & 0xFF;
+    uint32_t const mant = bits & 0x007FFFFF;
     if(exp == 0xFF && mant != 0)
     {
         // Preserve NaN - ensure mantissa is non-zero in bfloat16
@@ -265,6 +266,7 @@ struct bfloat16_t
     // EXPLICIT constructors from other custom types (via float)
     // These are defined inline but require forward declarations above
     inline explicit bfloat16_t(half h) noexcept;
+    inline explicit bfloat16_t(fp4_e2m1 f) noexcept;
     inline explicit bfloat16_t(fp8_e4m3 f) noexcept;
     inline explicit bfloat16_t(fp8_e5m2 f) noexcept;
     inline explicit bfloat16_t(fp8_e8m0 f) noexcept;
@@ -465,8 +467,8 @@ inline bool isfinite(bfloat16_t<M> x)
 template <Bfloat16RoundingMode M>
 inline bfloat16_t<M> copysign(bfloat16_t<M> x, bfloat16_t<M> y)
 {
-    uint16_t xBits = x.data & detail::BFLOAT16_ABS_MASK;
-    uint16_t ySign = y.data & detail::BFLOAT16_SIGN_MASK;
+    uint16_t const xBits = x.data & detail::BFLOAT16_ABS_MASK;
+    uint16_t const ySign = y.data & detail::BFLOAT16_SIGN_MASK;
     return bfloat16_t<M>::from_bits(xBits | ySign);
 }
 

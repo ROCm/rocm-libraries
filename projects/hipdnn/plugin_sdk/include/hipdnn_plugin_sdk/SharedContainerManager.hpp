@@ -61,7 +61,7 @@ public:
      */
     std::shared_ptr<ContainerType> getOrCreate()
     {
-        std::lock_guard<std::mutex> lock(_mutex);
+        std::lock_guard<std::mutex> const lock(_mutex);
 
         auto containerPtr = _weakContainer.lock();
         if(containerPtr != nullptr)
