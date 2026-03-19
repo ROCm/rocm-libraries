@@ -55,7 +55,9 @@ add_executable(
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
+    descriptors/TestSdpaBpropOperationDescriptor.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp

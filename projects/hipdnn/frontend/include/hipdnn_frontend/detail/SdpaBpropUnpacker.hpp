@@ -1,0 +1,379 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
+#include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
+#include <memory>
+#include <unordered_map>
+
+#include "HipdnnDiagonalAlignment.h"
+
+namespace hipdnn_frontend::detail
+{
+
+/// Converts a backend hipdnnDiagonalAlignment_t to a frontend DiagonalAlignment.
+[[nodiscard]] inline std::pair<DiagonalAlignment, Error>
+    fromBackendDiagonalAlignment(hipdnnDiagonalAlignment_t backendType)
+{
+    switch(backendType)
+    {
+    case HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT:
+        return {DiagonalAlignment::TOP_LEFT, {}};
+    case HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT:
+        return {DiagonalAlignment::BOTTOM_RIGHT, {}};
+    default:
+        return {DiagonalAlignment::TOP_LEFT,
+                {ErrorCode::INVALID_VALUE, "Unknown diagonal alignment value"}};
+    }
+}
+
+/// Unpacks an optional tensor from an operation descriptor. If the attribute
+/// is not set (count == 0 or NOT_SUPPORTED), outTensor is left null and
+/// success is returned.
+[[nodiscard]] inline Error unpackAndRegisterOptionalTensor(
+    hipdnnBackendDescriptor_t opDesc,
+    hipdnnBackendAttributeName_t tensorAttrName,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    std::shared_ptr<graph::TensorAttributes>& outTensor,
+    const std::string& errorContext)
+{
+    // Check if the attribute has any elements
+    int64_t count = 0;
+    auto status = hipdnnBackend()->backendGetAttribute(
+        opDesc, tensorAttrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, nullptr);
+
+    // If the attribute is not supported or has no elements, this is optional — skip it
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    {
+        outTensor = nullptr;
+        return {};
+    }
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to query count for optional " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+
+    return unpackAndRegisterTensor(opDesc, tensorAttrName, tensorMap, outTensor, errorContext);
+}
+
+/// Unpacks an optional boolean scalar from an operation descriptor.
+/// If not supported, sets value to the default and returns success.
+[[nodiscard]] inline Error unpackOptionalBool(hipdnnBackendDescriptor_t opDesc,
+                                              hipdnnBackendAttributeName_t attrName,
+                                              bool& value,
+                                              bool defaultValue,
+                                              const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto status = hipdnnBackend()->backendGetAttribute(
+        opDesc, attrName, HIPDNN_TYPE_BOOLEAN, 0, &count, nullptr);
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    {
+        value = defaultValue;
+        return {};
+    }
+    return getDescriptorAttrScalar(opDesc, attrName, HIPDNN_TYPE_BOOLEAN, value, errorContext);
+}
+
+/// Unpacks an optional float scalar from an operation descriptor.
+/// If not supported, leaves the optional empty and returns success.
+[[nodiscard]] inline Error unpackOptionalFloat(hipdnnBackendDescriptor_t opDesc,
+                                               hipdnnBackendAttributeName_t attrName,
+                                               std::optional<float>& value,
+                                               const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto status = hipdnnBackend()->backendGetAttribute(
+        opDesc, attrName, HIPDNN_TYPE_FLOAT, 0, &count, nullptr);
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    {
+        value = std::nullopt;
+        return {};
+    }
+    float v = 0.0f;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrScalar(opDesc, attrName, HIPDNN_TYPE_FLOAT, v, errorContext));
+    value = v;
+    return {};
+}
+
+/// Unpacks an optional int64 scalar from an operation descriptor.
+/// If not supported, leaves the optional empty and returns success.
+[[nodiscard]] inline Error unpackOptionalInt64(hipdnnBackendDescriptor_t opDesc,
+                                               hipdnnBackendAttributeName_t attrName,
+                                               std::optional<int64_t>& value,
+                                               const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto status = hipdnnBackend()->backendGetAttribute(
+        opDesc, attrName, HIPDNN_TYPE_INT64, 0, &count, nullptr);
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    {
+        value = std::nullopt;
+        return {};
+    }
+    int64_t v = 0;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrScalar(opDesc, attrName, HIPDNN_TYPE_INT64, v, errorContext));
+    value = v;
+    return {};
+}
+
+/// Unpacks an SDPA backward operation descriptor and populates
+/// SdpaBackwardAttributes with tensors (using tensorMap for sharing)
+/// and scalar/enum parameters.
+[[nodiscard]] inline Error unpackSdpaBpropOperation(
+    hipdnnBackendDescriptor_t opDesc,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    graph::SdpaBackwardAttributes& attributes)
+{
+    // Required input tensors
+    std::shared_ptr<graph::TensorAttributes> qTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT, tensorMap, qTensor, "SDPA bprop Q"));
+    attributes.set_q(qTensor);
+
+    std::shared_ptr<graph::TensorAttributes> kTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT, tensorMap, kTensor, "SDPA bprop K"));
+    attributes.set_k(kTensor);
+
+    std::shared_ptr<graph::TensorAttributes> vTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT, tensorMap, vTensor, "SDPA bprop V"));
+    attributes.set_v(vTensor);
+
+    std::shared_ptr<graph::TensorAttributes> oTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT, tensorMap, oTensor, "SDPA bprop O"));
+    attributes.set_o(oTensor);
+
+    std::shared_ptr<graph::TensorAttributes> doTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT, tensorMap, doTensor, "SDPA bprop dO"));
+    attributes.set_do(doTensor);
+
+    std::shared_ptr<graph::TensorAttributes> statsTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
+                                               HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT,
+                                               tensorMap,
+                                               statsTensor,
+                                               "SDPA bprop Stats"));
+    attributes.set_stats(statsTensor);
+
+    // Required output tensors
+    std::shared_ptr<graph::TensorAttributes> dqTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT, tensorMap, dqTensor, "SDPA bprop dQ"));
+    attributes.set_dq(dqTensor);
+
+    std::shared_ptr<graph::TensorAttributes> dkTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT, tensorMap, dkTensor, "SDPA bprop dK"));
+    attributes.set_dk(dkTensor);
+
+    std::shared_ptr<graph::TensorAttributes> dvTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT, tensorMap, dvTensor, "SDPA bprop dV"));
+    attributes.set_dv(dvTensor);
+
+    // Optional input tensors
+    std::shared_ptr<graph::TensorAttributes> scaleTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterOptionalTensor(opDesc,
+                                                       HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT,
+                                                       tensorMap,
+                                                       scaleTensor,
+                                                       "SDPA bprop SCALE"));
+    if(scaleTensor)
+    {
+        attributes.set_attn_scale(scaleTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> attnMaskTensor;
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterOptionalTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT,
+                                        tensorMap,
+                                        attnMaskTensor,
+                                        "SDPA bprop ATTN_MASK"));
+    if(attnMaskTensor)
+    {
+        attributes.set_bias(attnMaskTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> seqLenQTensor;
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterOptionalTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT,
+                                        tensorMap,
+                                        seqLenQTensor,
+                                        "SDPA bprop SEQ_LEN_Q"));
+    if(seqLenQTensor)
+    {
+        attributes.set_seq_len_q(seqLenQTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> seqLenKvTensor;
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterOptionalTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT,
+                                        tensorMap,
+                                        seqLenKvTensor,
+                                        "SDPA bprop SEQ_LEN_KV"));
+    if(seqLenKvTensor)
+    {
+        attributes.set_seq_len_kv(seqLenKvTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> seedTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterOptionalTensor(opDesc,
+                                                       HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT,
+                                                       tensorMap,
+                                                       seedTensor,
+                                                       "SDPA bprop SEED"));
+    if(seedTensor)
+    {
+        attributes.set_seed(seedTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> offsetTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterOptionalTensor(opDesc,
+                                                       HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT,
+                                                       tensorMap,
+                                                       offsetTensor,
+                                                       "SDPA bprop OFFSET"));
+    if(offsetTensor)
+    {
+        attributes.set_offset(offsetTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> dropoutMaskTensor;
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterOptionalTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT,
+                                        tensorMap,
+                                        dropoutMaskTensor,
+                                        "SDPA bprop DROPOUT_MASK"));
+    if(dropoutMaskTensor)
+    {
+        attributes.set_dropout_mask(dropoutMaskTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> dropoutScaleTensor;
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterOptionalTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT,
+                                        tensorMap,
+                                        dropoutScaleTensor,
+                                        "SDPA bprop DROPOUT_SCALE"));
+    if(dropoutScaleTensor)
+    {
+        attributes.set_dropout_scale(dropoutScaleTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> dropoutScaleInvTensor;
+    HIPDNN_CHECK_ERROR(
+        unpackAndRegisterOptionalTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT,
+                                        tensorMap,
+                                        dropoutScaleInvTensor,
+                                        "SDPA bprop DROPOUT_SCALE_INV"));
+    if(dropoutScaleInvTensor)
+    {
+        attributes.set_dropout_scale_inv(dropoutScaleInvTensor);
+    }
+
+    // Optional output tensor
+    std::shared_ptr<graph::TensorAttributes> dbiasTensor;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterOptionalTensor(opDesc,
+                                                       HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT,
+                                                       tensorMap,
+                                                       dbiasTensor,
+                                                       "SDPA bprop DBIAS"));
+    if(dbiasTensor)
+    {
+        attributes.set_dbias(dbiasTensor);
+    }
+
+    // Boolean scalars
+    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
+                                          HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT,
+                                          attributes.alibi_mask,
+                                          false,
+                                          "SDPA bprop alibi_mask"));
+    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
+                                          HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT,
+                                          attributes.padding_mask,
+                                          false,
+                                          "SDPA bprop padding_mask"));
+    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
+                                          HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT,
+                                          attributes.causal_mask,
+                                          false,
+                                          "SDPA bprop causal_mask"));
+    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
+                                          HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT,
+                                          attributes.causal_mask_bottom_right,
+                                          false,
+                                          "SDPA bprop causal_mask_bottom_right"));
+
+    // Optional float scalars
+    HIPDNN_CHECK_ERROR(unpackOptionalFloat(opDesc,
+                                           HIPDNN_ATTR_SDPA_BPROP_DROPOUT_PROBABILITY_EXT,
+                                           attributes.dropout_probability,
+                                           "SDPA bprop dropout_probability"));
+    HIPDNN_CHECK_ERROR(unpackOptionalFloat(opDesc,
+                                           HIPDNN_ATTR_SDPA_BPROP_ATTN_SCALE_VALUE_EXT,
+                                           attributes.attn_scale_value,
+                                           "SDPA bprop attn_scale_value"));
+
+    // Optional int64 scalars
+    HIPDNN_CHECK_ERROR(unpackOptionalInt64(opDesc,
+                                           HIPDNN_ATTR_SDPA_BPROP_LEFT_BOUND_EXT,
+                                           attributes.left_bound,
+                                           "SDPA bprop left_bound"));
+    HIPDNN_CHECK_ERROR(unpackOptionalInt64(opDesc,
+                                           HIPDNN_ATTR_SDPA_BPROP_RIGHT_BOUND_EXT,
+                                           attributes.right_bound,
+                                           "SDPA bprop right_bound"));
+
+    // Diagonal alignment
+    hipdnnDiagonalAlignment_t diagAlign{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
+                                               HIPDNN_ATTR_SDPA_BPROP_DIAGONAL_ALIGNMENT_EXT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                               diagAlign,
+                                               "SDPA bprop diagonal_alignment"));
+    auto [alignVal, alignErr] = fromBackendDiagonalAlignment(diagAlign);
+    if(alignErr.is_bad())
+    {
+        return alignErr;
+    }
+    attributes.set_diagonal_alignment(alignVal);
+
+    // Compute data type
+    auto [dt, dtErr]
+        = unpackGraphDataType(opDesc, HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT, "SDPA bprop math prec");
+    if(dtErr.is_bad())
+    {
+        return dtErr;
+    }
+    attributes.set_compute_data_type(dt);
+
+    // Operation name
+    std::string opName;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrString(opDesc, HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
+    attributes.set_name(opName);
+
+    return {};
+}
+
+} // namespace hipdnn_frontend::detail

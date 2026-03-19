@@ -260,4 +260,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT = 28,
 
+    /**
+     * @brief SDPA backward propagation operation descriptor (extension)
+     *
+     * Represents a scaled dot-product attention backward operation with
+     * query (Q), key (K), value (V), output (O), gradient output (dO),
+     * and stats tensors as inputs, producing gradients dQ, dK, dV.
+     */
+    HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT = 29,
+
 } hipdnnBackendDescriptorType_t;

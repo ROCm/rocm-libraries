@@ -46,8 +46,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     //     return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
     // case NodeAttributes::SdpaAttributes:
     //     return SdpaFpropOperationDescriptor::fromNode(nodeT, tensorMap);
-    // case NodeAttributes::SdpaBackwardAttributes:
-    //     return SdpaBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::SdpaBackwardAttributes:
+        return SdpaBpropOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,

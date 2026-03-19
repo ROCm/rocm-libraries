@@ -52,6 +52,7 @@
  * - 2800-2899: Block scale quantize operation attributes
  * - 2807-2899: Block scale dequantize operation attributes
  * - 2900-2913: Batchnorm training forward operation attributes
+ * - 3000-3099: SDPA backward propagation operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -907,6 +908,101 @@ typedef enum
 
     /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
     HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2913,
+
+    /** @} */
+
+    /**
+     * @name SDPA Backward Propagation Operation Attributes (3000-3099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_BPROP_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Q (query) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT = 3000,
+
+    /** @brief K (key) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT = 3001,
+
+    /** @brief V (value) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT = 3002,
+
+    /** @brief O (output) tensor from forward pass for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT = 3003,
+
+    /** @brief dO (output gradient) tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT = 3004,
+
+    /** @brief Stats tensor from forward pass for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT = 3005,
+
+    /** @brief dQ (query gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT = 3006,
+
+    /** @brief dK (key gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT = 3007,
+
+    /** @brief dV (value gradient) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT = 3008,
+
+    /** @brief Scale tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT = 3009,
+
+    /** @brief Attention mask tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT = 3010,
+
+    /** @brief Sequence length Q tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT = 3011,
+
+    /** @brief Sequence length KV tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT = 3012,
+
+    /** @brief Seed tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT = 3013,
+
+    /** @brief Offset tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT = 3014,
+
+    /** @brief Dropout mask tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT = 3015,
+
+    /** @brief Dropout scale tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT = 3016,
+
+    /** @brief Dropout scale inverse tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT = 3017,
+
+    /** @brief dBias (gradient of attention bias) output tensor for SDPA backward */
+    HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT = 3018,
+
+    /** @brief Whether to use ALiBi mask (bool) */
+    HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT = 3019,
+
+    /** @brief Whether to use padding mask (bool) */
+    HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT = 3020,
+
+    /** @brief Whether to use causal mask (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT = 3021,
+
+    /** @brief Whether to use causal mask bottom-right (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 3022,
+
+    /** @brief Dropout probability (float) */
+    HIPDNN_ATTR_SDPA_BPROP_DROPOUT_PROBABILITY_EXT = 3023,
+
+    /** @brief Attention scale value (float) */
+    HIPDNN_ATTR_SDPA_BPROP_ATTN_SCALE_VALUE_EXT = 3024,
+
+    /** @brief Left bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_BPROP_LEFT_BOUND_EXT = 3025,
+
+    /** @brief Right bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_BPROP_RIGHT_BOUND_EXT = 3026,
+
+    /** @brief Diagonal alignment mode (hipdnnDiagonalAlignment_t) */
+    HIPDNN_ATTR_SDPA_BPROP_DIAGONAL_ALIGNMENT_EXT = 3027,
+
+    /** @brief Compute data type for SDPA backward */
+    HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT = 3028,
 
     /** @} */
 
