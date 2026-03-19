@@ -26,7 +26,7 @@
 #include "internal/precond/rocsparse_gtsv.h"
 
 #include "gtsv_nopivot_device.h"
-#include "gtsv_no_pivot_large_device.h"
+#include "gtsv_nopivot_medium_device.h"
 
 #include <map>
 
@@ -59,24 +59,6 @@
         d,                                                            \
         du,                                                           \
         B);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #define LAUNCH_GTSV_NOPIVOT_5x5_THOMAS(BLOCKSIZE)                                       \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_5x5_kernel<BLOCKSIZE>), \
@@ -130,22 +112,6 @@
                                        du,                                                    \
                                        B);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #define LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(block_size, pcr_size)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel<block_size, pcr_size>), \
@@ -159,7 +125,11 @@
         dl,                                                                       \
         d,                                                                        \
         du,                                                                       \
-        B, (T*)nullptr, (T*)nullptr, (T*)nullptr, (T*)nullptr);
+        B,                                                                        \
+        (T*)nullptr,                                                              \
+        (T*)nullptr,                                                              \
+        (T*)nullptr,                                                              \
+        (T*)nullptr);
 
 #define LAUNCH_GTSV_NOPIVOT_PCR_SHARED(block_size)                                              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_pcr_shared_kernel<block_size>), \
@@ -222,23 +192,46 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
         return rocsparse_status_success;
     }
 
-    if(m <= 512)
-    {
-        *buffer_size = 0;
-    }
-    else
-    {
-        *buffer_size = 0;
+    // if(m <= 1024)
+    // {
+    //     *buffer_size = 0;
+    // }
+    // else
+    // {
+    *buffer_size = 0;
 
-        *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // da0
-        *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // da1
-        *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // db0
-        *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // db1
-        *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dc0
-        *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dc1
-        *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // drhs0
-        *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // drhs1
-    }
+    *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dl_modified
+    *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // d_modified
+    *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // du_modified
+    *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // B_modified
+
+    constexpr int BLOCKSIZE  = 256;
+    const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
+    const int     num_spikes = 2 * nblocks;
+
+    *buffer_size += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256; // dl_spike
+    *buffer_size += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256; // d_spike
+    *buffer_size += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256; // du_spike
+    *buffer_size += ((sizeof(T) * num_spikes * n - 1) / 256 + 1) * 256; // B_spike
+    // }
+
+    // if(m <= 512)
+    // {
+    //     *buffer_size = 0;
+    // }
+    // else
+    // {
+    //     *buffer_size = 0;
+
+    //     *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // da0
+    //     *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // da1
+    //     *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // db0
+    //     *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // db1
+    //     *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dc0
+    //     *buffer_size += ((sizeof(T) * m - 1) / 256 + 1) * 256; // dc1
+    //     *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // drhs0
+    //     *buffer_size += ((sizeof(T) * m * n - 1) / 256 + 1) * 256; // drhs1
+    // }
 
     return rocsparse_status_success;
 }
@@ -337,7 +330,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template<typename T>
+    template <typename T>
     constexpr uint32_t determine_num_rhs()
     {
         if constexpr(std::is_same<T, float>())
@@ -348,7 +341,7 @@ namespace rocsparse
         {
             return 2;
         }
-        else 
+        else
         {
             return 1;
         }
@@ -369,212 +362,11 @@ namespace rocsparse
 
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
-
-        if(m == 8 && n == 1)
-        {
-            constexpr int BLOCKSIZE = 4;
-            int nblocks = (m - 1) / BLOCKSIZE + 1;
-            int num_spikes = 2 * nblocks;
-
-            std::cout << "nblocks: " << nblocks << " num_spikes: " << num_spikes << " n: " << n << std::endl;
-
-            std::vector<T> hdl_modified(m);
-            std::vector<T> hd_modified(m);
-            std::vector<T> hdu_modified(m);
-            std::vector<T> hB_modified(m * n);
-
-            std::vector<T> hspike_lower(2 * nblocks);
-            std::vector<T> hspike_main(2 * nblocks);
-            std::vector<T> hspike_upper(2 * nblocks);
-            std::vector<T> hspike_B(2 * nblocks);
-
-            T* dl_modified = nullptr;
-            T* d_modified = nullptr;
-            T* du_modified = nullptr;
-            T* dB_modified = nullptr;
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dl_modified, sizeof(T) * m));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&d_modified, sizeof(T) * m));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&du_modified, sizeof(T) * m));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dB_modified, sizeof(T) * m * n));
-
-            T* dspike_lower = nullptr;
-            T* dspike_main = nullptr;
-            T* dspike_upper = nullptr;
-            T* dspike_B = nullptr;
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dspike_lower, sizeof(T) * 2 * nblocks));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dspike_main, sizeof(T) * 2 * nblocks));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dspike_upper, sizeof(T) * 2 * nblocks));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dspike_B, sizeof(T) * 2 * nblocks));
-
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::pcr_tiled_forward_kernel<BLOCKSIZE>),
-                dim3(nblocks),
-                dim3(BLOCKSIZE),
-                0,
-                handle->stream,
-                m,
-                n,
-                ldb,
-                dl,
-                d,
-                du,
-                B,
-                dl_modified,
-                d_modified,
-                du_modified,
-                dB_modified,
-                dspike_lower,
-                dspike_main,
-                dspike_upper,
-                dspike_B);
-
-            RETURN_IF_HIP_ERROR(hipMemcpy(hdl_modified.data(), dl_modified, sizeof(T) * m, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(hd_modified.data(), d_modified, sizeof(T) * m, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(hdu_modified.data(), du_modified, sizeof(T) * m, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(hB_modified.data(), dB_modified, sizeof(T) * m * n, hipMemcpyDeviceToHost));
-
-            RETURN_IF_HIP_ERROR(hipMemcpy(hspike_lower.data(), dspike_lower, sizeof(T) * 2 * nblocks, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(hspike_main.data(), dspike_main, sizeof(T) * 2 * nblocks, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(hspike_upper.data(), dspike_upper, sizeof(T) * 2 * nblocks, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(hspike_B.data(), dspike_B, sizeof(T) * 2 * nblocks, hipMemcpyDeviceToHost));
-
-            std::cout << "hdl_modified" << std::endl;
-            for(size_t i = 0; i < hdl_modified.size(); i++)
-            {
-                std::cout << hdl_modified[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hd_modified" << std::endl;
-            for(size_t i = 0; i < hd_modified.size(); i++)
-            {
-                std::cout << hd_modified[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hdu_modified" << std::endl;
-            for(size_t i = 0; i < hdu_modified.size(); i++)
-            {
-                std::cout << hdu_modified[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hB_modified" << std::endl;
-            for(size_t i = 0; i < hB_modified.size(); i++)
-            {
-                std::cout << hB_modified[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hspike_lower" << std::endl;
-            for(size_t i = 0; i < hspike_lower.size(); i++)
-            {
-                std::cout << hspike_lower[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hspike_main" << std::endl;
-            for(size_t i = 0; i < hspike_main.size(); i++)
-            {
-                std::cout << hspike_main[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hspike_upper" << std::endl;
-            for(size_t i = 0; i < hspike_upper.size(); i++)
-            {
-                std::cout << hspike_upper[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            std::cout << "hspike_B" << std::endl;
-            for(size_t i = 0; i < hspike_B.size(); i++)
-            {
-                std::cout << hspike_B[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::spike_solver_pcr_kernel<BLOCKSIZE>),
-                dim3(1),
-                dim3(BLOCKSIZE),
-                0,
-                handle->stream,
-                num_spikes,
-                dspike_lower,
-                dspike_main,
-                dspike_upper,
-                dspike_B);
-
-            RETURN_IF_HIP_ERROR(hipMemcpy(hspike_B.data(), dspike_B, sizeof(T) * 2 * nblocks, hipMemcpyDeviceToHost));
-
-            std::cout << "hspike_B" << std::endl;
-            for(size_t i = 0; i < hspike_B.size(); i++)
-            {
-                std::cout << hspike_B[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::backward_sweep_kernel<BLOCKSIZE>),
-                dim3(nblocks),
-                dim3(BLOCKSIZE),
-                0,
-                handle->stream,
-                m,
-                dl_modified,
-                d_modified,
-                du_modified,
-                dB_modified,
-                dspike_B,
-                B);
-
-            std::vector<T> hB(m * n);
-            RETURN_IF_HIP_ERROR(hipMemcpy(hB.data(), B, sizeof(T) * m * n, hipMemcpyDeviceToHost));
-
-            std::cout << "hB" << std::endl;
-            for(size_t i = 0; i < hB.size(); i++)
-            {
-                std::cout << hB[i] << " "; 
-            }
-            std::cout << "" << std::endl;
-
-            RETURN_IF_HIP_ERROR(hipFree(dl_modified));
-            RETURN_IF_HIP_ERROR(hipFree(d_modified));
-            RETURN_IF_HIP_ERROR(hipFree(du_modified));
-            RETURN_IF_HIP_ERROR(hipFree(dB_modified));
-
-            RETURN_IF_HIP_ERROR(hipFree(dspike_lower));
-            RETURN_IF_HIP_ERROR(hipFree(dspike_main));
-            RETURN_IF_HIP_ERROR(hipFree(dspike_upper));
-            RETURN_IF_HIP_ERROR(hipFree(dspike_B));
-            return rocsparse_status_success;
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         if(m == 8)
         {
             constexpr uint32_t WF_SIZE = 32;
-            constexpr uint32_t TILE_X = 8;
-            constexpr uint32_t TILE_Y = 4;
+            constexpr uint32_t TILE_X  = 8;
+            constexpr uint32_t TILE_Y  = 4;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::thomas_shared_transpose_kernel1<256, WF_SIZE, 8, TILE_X, TILE_Y>),
                 dim3((n - 1) / 256 + 1),
@@ -593,8 +385,8 @@ namespace rocsparse
         else if(m == 16)
         {
             constexpr uint32_t WF_SIZE = 32;
-            constexpr uint32_t TILE_X = 16;
-            constexpr uint32_t TILE_Y = 2;
+            constexpr uint32_t TILE_X  = 16;
+            constexpr uint32_t TILE_Y  = 2;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::thomas_shared_transpose_kernel1<128, WF_SIZE, 16, TILE_X, TILE_Y>),
                 dim3((n - 1) / 128 + 1),
@@ -613,8 +405,8 @@ namespace rocsparse
         else if(m == 32)
         {
             constexpr uint32_t WF_SIZE = 32;
-            constexpr uint32_t TILE_X = 32;
-            constexpr uint32_t TILE_Y = 1;
+            constexpr uint32_t TILE_X  = 32;
+            constexpr uint32_t TILE_Y  = 1;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::thomas_shared_transpose_kernel1<64, WF_SIZE, 32, TILE_X, TILE_Y>),
                 dim3((n - 1) / 64 + 1),
@@ -633,8 +425,8 @@ namespace rocsparse
         else if(m == 64)
         {
             constexpr uint32_t WF_SIZE = 32;
-            constexpr uint32_t TILE_X = 32;
-            constexpr uint32_t TILE_Y = 1;
+            constexpr uint32_t TILE_X  = 32;
+            constexpr uint32_t TILE_Y  = 1;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 64, TILE_X, TILE_Y>),
                 dim3((n - 1) / 64 + 1),
@@ -653,8 +445,8 @@ namespace rocsparse
         else if(m == 96)
         {
             constexpr uint32_t WF_SIZE = 32;
-            constexpr uint32_t TILE_X = 32;
-            constexpr uint32_t TILE_Y = 1;
+            constexpr uint32_t TILE_X  = 32;
+            constexpr uint32_t TILE_Y  = 1;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 96, TILE_X, TILE_Y>),
                 dim3((n - 1) / 64 + 1),
@@ -673,8 +465,8 @@ namespace rocsparse
         else if(m == 128)
         {
             constexpr uint32_t WF_SIZE = 32;
-            constexpr uint32_t TILE_X = 32;
-            constexpr uint32_t TILE_Y = 1;
+            constexpr uint32_t TILE_X  = 32;
+            constexpr uint32_t TILE_Y  = 1;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 128, TILE_X, TILE_Y>),
                 dim3((n - 1) / 64 + 1),
@@ -693,13 +485,13 @@ namespace rocsparse
 
         if(m <= 8)
         {
-            constexpr int NUM_RHS = 8;
-            constexpr int WF_SIZE = 8;
+            constexpr int NUM_RHS   = 8;
+            constexpr int WF_SIZE   = 8;
             constexpr int BLOCKSIZE = 256;
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_B = nullptr;
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_B   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
                 dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
@@ -721,13 +513,13 @@ namespace rocsparse
         }
         else if(m <= 16)
         {
-            constexpr int NUM_RHS = 8;
-            constexpr int WF_SIZE = 16;
+            constexpr int NUM_RHS   = 8;
+            constexpr int WF_SIZE   = 16;
             constexpr int BLOCKSIZE = 256;
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_B = nullptr;
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_B   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
                 dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
@@ -749,10 +541,10 @@ namespace rocsparse
         }
         else if(m <= 32)
         {
-            constexpr int NUM_RHS = 8;
-            constexpr int WF_SIZE = 32;
+            constexpr int NUM_RHS   = 8;
+            constexpr int WF_SIZE   = 32;
             constexpr int BLOCKSIZE = 256;
-        
+
             T* dtemp_a = nullptr;
             T* dtemp_b = nullptr;
             T* dtemp_c = nullptr;
@@ -778,13 +570,13 @@ namespace rocsparse
         }
         else if(m <= 64)
         {
-            constexpr int NUM_RHS = 8;
-            constexpr int WF_SIZE = 32;
+            constexpr int NUM_RHS   = 8;
+            constexpr int WF_SIZE   = 32;
             constexpr int BLOCKSIZE = 64;
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_B = nullptr;
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_B   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
                 dim3((n - 1) / NUM_RHS + 1),
@@ -806,13 +598,13 @@ namespace rocsparse
         }
         else if(m <= 128)
         {
-            constexpr int NUM_RHS = 8;
-            constexpr int WF_SIZE = 32;
+            constexpr int NUM_RHS   = 8;
+            constexpr int WF_SIZE   = 32;
             constexpr int BLOCKSIZE = 128;
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_B = nullptr;
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_B   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
                 dim3((n - 1) / NUM_RHS + 1),
@@ -834,13 +626,13 @@ namespace rocsparse
         }
         else if(m <= 256)
         {
-            constexpr int NUM_RHS = 8;
-            constexpr int WF_SIZE = 32;
+            constexpr int NUM_RHS   = 8;
+            constexpr int WF_SIZE   = 32;
             constexpr int BLOCKSIZE = 256;
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_B = nullptr;
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_B   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
                 dim3((n - 1) / NUM_RHS + 1),
@@ -863,11 +655,11 @@ namespace rocsparse
         else if(m <= 512)
         {
             constexpr int BLOCKSIZE = 256;
-            constexpr int NUM_RHS = determine_num_rhs<T>();
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_d = nullptr;
+            constexpr int NUM_RHS   = determine_num_rhs<T>();
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_d   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel2<BLOCKSIZE, 128, NUM_RHS>),
                 dim3((n - 1) / NUM_RHS + 1),
@@ -891,11 +683,11 @@ namespace rocsparse
         else if(m <= 1024)
         {
             constexpr int BLOCKSIZE = 512;
-            constexpr int NUM_RHS = determine_num_rhs<T>();
-            T* dtemp_a = nullptr;
-            T* dtemp_b = nullptr;
-            T* dtemp_c = nullptr;
-            T* dtemp_d = nullptr;
+            constexpr int NUM_RHS   = determine_num_rhs<T>();
+            T*            dtemp_a   = nullptr;
+            T*            dtemp_b   = nullptr;
+            T*            dtemp_c   = nullptr;
+            T*            dtemp_d   = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel2<BLOCKSIZE, 256, NUM_RHS>),
                 dim3((n - 1) / NUM_RHS + 1),
@@ -915,17 +707,6 @@ namespace rocsparse
                 dtemp_d);
             return rocsparse_status_success;
         }
-
-
-
-
-
-
-
-
-
-
-
 
         // // Define function pointer type for kernel dispatch
         // using KernelFuncPtr = rocsparse_status (*)(
@@ -1164,76 +945,6 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_STAGE1_N(T, block_size, stride, iter) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                    \
-        (rocsparse::gtsv_nopivot_pcr_pow2_stage1_n_kernel<block_size>),    \
-        dim3(((m - 1) / block_size + 1), n, 1),                            \
-        dim3(block_size, 1, 1),                                            \
-        0,                                                                 \
-        handle->stream,                                                    \
-        stride,                                                            \
-        m,                                                                 \
-        n,                                                                 \
-        ((iter == 0) ? ldb : m),                                           \
-        ((iter == 0) ? dl : (((iter & 1) == 0) ? da0 : da1)),              \
-        ((iter == 0) ? d : (((iter & 1) == 0) ? db0 : db1)),               \
-        ((iter == 0) ? du : (((iter & 1) == 0) ? dc0 : dc1)),              \
-        ((iter == 0) ? B : (((iter & 1) == 0) ? drhs0 : drhs1)),           \
-        (((iter & 1) == 0) ? da1 : da0),                                   \
-        (((iter & 1) == 0) ? db1 : db0),                                   \
-        (((iter & 1) == 0) ? dc1 : dc0),                                   \
-        (((iter & 1) == 0) ? drhs1 : drhs0));
-
-#define LAUNCH_GTSV_NOPIVOT_PCR_STAGE1_N(T, block_size, stride, iter)                             \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_pcr_stage1_n_kernel<block_size>), \
-                                       dim3(((m - 1) / block_size + 1), n, 1),                    \
-                                       dim3(block_size),                                          \
-                                       0,                                                         \
-                                       handle->stream,                                            \
-                                       stride,                                                    \
-                                       m,                                                         \
-                                       n,                                                         \
-                                       ((iter == 0) ? ldb : m),                                   \
-                                       ((iter == 0) ? dl : (((iter & 1) == 0) ? da0 : da1)),      \
-                                       ((iter == 0) ? d : (((iter & 1) == 0) ? db0 : db1)),       \
-                                       ((iter == 0) ? du : (((iter & 1) == 0) ? dc0 : dc1)),      \
-                                       ((iter == 0) ? B : (((iter & 1) == 0) ? drhs0 : drhs1)),   \
-                                       (((iter & 1) == 0) ? da1 : da0),                           \
-                                       (((iter & 1) == 0) ? db1 : db0),                           \
-                                       (((iter & 1) == 0) ? dc1 : dc0),                           \
-                                       (((iter & 1) == 0) ? drhs1 : drhs0));
-
-#define LAUNCH_GTSV_NOPIVOT_CR_POW2_STAGE2(T, block_size, iter)      \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                              \
-        (rocsparse::gtsv_nopivot_cr_pow2_stage2_kernel<block_size>), \
-        dim3(subsystem_count, n, 1),                                 \
-        dim3(block_size),                                            \
-        0,                                                           \
-        handle->stream,                                              \
-        m,                                                           \
-        n,                                                           \
-        ldb,                                                         \
-        (((iter & 1) != 0) ? da1 : da0),                             \
-        (((iter & 1) != 0) ? db1 : db0),                             \
-        (((iter & 1) != 0) ? dc1 : dc0),                             \
-        (((iter & 1) != 0) ? drhs1 : drhs0),                         \
-        B);
-
-#define LAUNCH_GTSV_NOPIVOT_PCR_STAGE2(T, block_size, iter)                                     \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_pcr_stage2_kernel<block_size>), \
-                                       dim3(subsystem_count, n, 1),                             \
-                                       dim3(block_size),                                        \
-                                       0,                                                       \
-                                       handle->stream,                                          \
-                                       m,                                                       \
-                                       n,                                                       \
-                                       ldb,                                                     \
-                                       (((iter & 1) != 0) ? da1 : da0),                         \
-                                       (((iter & 1) != 0) ? db1 : db0),                         \
-                                       (((iter & 1) != 0) ? dc1 : dc0),                         \
-                                       (((iter & 1) != 0) ? drhs1 : drhs0),                     \
-                                       B);
-
     template <typename T>
     rocsparse_status gtsv_no_pivot_medium_template(rocsparse_handle handle,
                                                    rocsparse_int    m,
@@ -1247,68 +958,143 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        rocsparse_host_assert(m > 512 && m <= 65536,
-                              "This function is designed for m > 512 and m <= 65536.");
+        // rocsparse_host_assert(m > 1024 && m <= 65536,
+        //                       "This function is designed for m > 1024 and m <= 65536.");
 
-        char* ptr = reinterpret_cast<char*>(temp_buffer);
-        T*    da0 = reinterpret_cast<T*>(ptr);
+        char* ptr         = reinterpret_cast<char*>(temp_buffer);
+        T*    dl_modified = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
-        T* da1 = reinterpret_cast<T*>(ptr);
+        T* d_modified = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
-        T* db0 = reinterpret_cast<T*>(ptr);
+        T* du_modified = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
-        T* db1 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
-        T* dc0 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
-        T* dc1 = reinterpret_cast<T*>(ptr);
-        ptr += ((sizeof(T) * m - 1) / 256 + 1) * 256;
-        T* drhs0 = reinterpret_cast<T*>(ptr);
+        T* B_modified = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
-        T* drhs1 = reinterpret_cast<T*>(ptr);
-        // ptr += ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
 
-        // Run special algorithm if m is power of 2
-        if((m & (m - 1)) == 0)
+        constexpr int BLOCKSIZE  = 256;
+        const int     nblocks    = ((m - 1) / BLOCKSIZE + 1);
+        const int     num_spikes = 2 * nblocks;
+
+        //std::cout << "m: " << m << " n: " << n << " num_spikes: " << num_spikes << std::endl;
+
+        T* dl_spike = reinterpret_cast<T*>(ptr);
+        ptr += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256;
+        T* d_spike = reinterpret_cast<T*>(ptr);
+        ptr += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256;
+        T* du_spike = reinterpret_cast<T*>(ptr);
+        ptr += ((sizeof(T) * num_spikes - 1) / 256 + 1) * 256;
+        T* B_spike = reinterpret_cast<T*>(ptr);
+        ptr += ((sizeof(T) * num_spikes * n - 1) / 256 + 1) * 256;
+
+        constexpr int NUM_RHS = 8;
+
+        dim3 grid((m - 1) / BLOCKSIZE + 1, (n - 1) / NUM_RHS + 1);
+        dim3 block(BLOCKSIZE);
+
+        gtsv_no_pivot_pcr_tiled_forward_kernel<BLOCKSIZE, NUM_RHS><<<grid, block>>>(m,
+                                                                                    n,
+                                                                                    ldb,
+                                                                                    num_spikes,
+                                                                                    dl,
+                                                                                    d,
+                                                                                    du,
+                                                                                    B,
+                                                                                    dl_modified,
+                                                                                    d_modified,
+                                                                                    du_modified,
+                                                                                    B_modified,
+                                                                                    dl_spike,
+                                                                                    d_spike,
+                                                                                    du_spike,
+                                                                                    B_spike);
+
+        // std::vector<T> hdl_spike(num_spikes, 0);
+        // std::vector<T> hd_spike(num_spikes, 0);
+        // std::vector<T> hdu_spike(num_spikes, 0);
+        // std::vector<T> hB_spike(num_spikes * n, 0);
+
+        // RETURN_IF_HIP_ERROR(
+        //     hipMemcpy(hdl_spike.data(), dl_spike, sizeof(T) * num_spikes, hipMemcpyDeviceToHost));
+        // RETURN_IF_HIP_ERROR(
+        //     hipMemcpy(hd_spike.data(), d_spike, sizeof(T) * num_spikes, hipMemcpyDeviceToHost));
+        // RETURN_IF_HIP_ERROR(
+        //     hipMemcpy(hdu_spike.data(), du_spike, sizeof(T) * num_spikes, hipMemcpyDeviceToHost));
+        // RETURN_IF_HIP_ERROR(
+        //     hipMemcpy(hB_spike.data(), B_spike, sizeof(T) * num_spikes * n, hipMemcpyDeviceToHost));
+
+        // std::cout << "hdl_spike" << std::endl;
+        // for(size_t i = 0; i < hdl_spike.size(); i++)
+        // {
+        //     std::cout << hdl_spike[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
+        // std::cout << "hd_spike" << std::endl;
+        // for(size_t i = 0; i < hd_spike.size(); i++)
+        // {
+        //     std::cout << hd_spike[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
+        // std::cout << "hdu_spike" << std::endl;
+        // for(size_t i = 0; i < hdu_spike.size(); i++)
+        // {
+        //     std::cout << hdu_spike[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
+        // std::cout << "hB_spike" << std::endl;
+        // for(size_t i = 0; i < hB_spike.size(); i++)
+        // {
+        //     std::cout << hB_spike[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
+
+        if(num_spikes <= 4)
         {
-            // Stage1: Break large tridiagonal system into multiple smaller systems
-            // using parallel cyclic reduction so that each sub system is of size 512.
-            rocsparse_int iter = static_cast<rocsparse_int>(rocsparse::log2(m))
-                                 - static_cast<rocsparse_int>(rocsparse::log2(512));
-
-            rocsparse_int stride = 1;
-            for(rocsparse_int i = 0; i < iter; i++)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_STAGE1_N(T, 256, stride, i);
-
-                stride *= 2;
-            }
-
-            // Stage2: Solve the many systems from stage1 in parallel using cyclic reduction.
-            rocsparse_int subsystem_count = 1 << iter;
-
-            LAUNCH_GTSV_NOPIVOT_CR_POW2_STAGE2(T, 256, iter);
+            gtsv_no_pivot_spike_solver_pcr_kernel<4, NUM_RHS>
+                <<<(n - 1) / NUM_RHS + 1, 4>>>(num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
         }
-        else
+        else if(num_spikes <= 8)
         {
-            // Stage1: Break large tridiagonal system into multiple smaller systems
-            // using parallel cyclic reduction so that each sub system is of size 512 or less.
-            rocsparse_int iter = static_cast<rocsparse_int>(rocsparse::log2(m))
-                                 - static_cast<rocsparse_int>(rocsparse::log2(512)) + 1;
-
-            rocsparse_int stride = 1;
-            for(rocsparse_int i = 0; i < iter; i++)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_STAGE1_N(T, 256, stride, i);
-
-                stride *= 2;
-            }
-
-            // Stage2: Solve the many systems from stage1 in parallel using cyclic reduction.
-            rocsparse_int subsystem_count = 1 << iter;
-
-            LAUNCH_GTSV_NOPIVOT_PCR_STAGE2(T, 512, iter);
+            gtsv_no_pivot_spike_solver_pcr_kernel<8, NUM_RHS>
+                <<<(n - 1) / NUM_RHS + 1, 8>>>(num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
         }
+        else if(num_spikes <= 16)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<16, NUM_RHS><<<(n - 1) / NUM_RHS + 1, 16>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+        else if(num_spikes <= 32)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<32, NUM_RHS><<<(n - 1) / NUM_RHS + 1, 32>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+        else if(num_spikes <= 64)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<64, NUM_RHS><<<(n - 1) / NUM_RHS + 1, 64>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+        else if(num_spikes <= 128)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<128, NUM_RHS><<<(n - 1) / NUM_RHS + 1, 128>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+        else if(num_spikes <= 256)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<256, NUM_RHS><<<(n - 1) / NUM_RHS + 1, 256>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+        else if(num_spikes <= 512)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<512, 4><<<(n - 1) / 4 + 1, 512>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+        else if(num_spikes <= 1024)
+        {
+            gtsv_no_pivot_spike_solver_pcr_kernel<1024, 1><<<(n - 1) / 1 + 1, 1024>>>(
+                num_spikes, n, dl_spike, d_spike, du_spike, B_spike);
+        }
+
+        gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS><<<grid, block>>>(
+           m, n, ldb, num_spikes, dl_modified, d_modified, du_modified, B_modified, B_spike, B);
 
         return rocsparse_status_success;
     }
@@ -1520,13 +1306,13 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
 
     // If m is small we can solve the systems entirely in shared memory
     //if(m <= 512)
-    if(m <= 1024)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::gtsv_no_pivot_small_template(handle, m, n, dl, d, du, B, ldb, temp_buffer));
-        return rocsparse_status_success;
-    }
-    else if(m <= 65536)
+    // if(m <= 1024)
+    // {
+    //     RETURN_IF_ROCSPARSE_ERROR(
+    //         rocsparse::gtsv_no_pivot_small_template(handle, m, n, dl, d, du, B, ldb, temp_buffer));
+    //     return rocsparse_status_success;
+    // }
+    if(m <= 131072)
     {
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::gtsv_no_pivot_medium_template(handle, m, n, dl, d, du, B, ldb, temp_buffer));
