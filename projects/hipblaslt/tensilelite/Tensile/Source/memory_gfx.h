@@ -103,21 +103,31 @@ struct alignas(16) BufferResource
     };
 
     INLINEDEVICE
-    BufferResource(void const* base_addr, uint32_t num_records = (0xFFFFFFFF - 1))
+    BufferResource(void const* base_addr, uint64_t num_records = (0xFFFFFFFF - 1))
     {
-        // 64-bit base address
-        desc_.d64[0] = const_cast<void*>(base_addr);
-        // 32-bit number of records in bytes which is used to guard against out-of-range access
-        desc_.d32[2] = num_records;
-        // 32-bit buffer resource descriptor
-        desc_.d32[3] = BUFFER_RESOURCE_3RD_DWORD;
+        //   GFX1250:
+        //      base address bits [56:0] (57 bits)
+        //      num_records bits [101:57] (45 bits)
+        //   Other archs:
+        //      base address bits [47:0] (47 bits)
+        //      num_records bits [95:64] (32 bits)
+
 #if defined(__gfx1250__)
-        uint32_t tmp = desc_.d32[2] & 0x7F;
-        tmp = tmp << 25;
-        desc_.d32[2] = desc_.d32[2] >> 7;
-        uint32_t srd1 = desc_.d32[1];
-        srd1 = srd1 & 0x1FFFFFF;
-        desc_.d32[1] = srd1 | tmp;
+        uint64_t addr = reinterpret_cast<uint64_t>(const_cast<void*>(base_addr));
+
+        // bits [56:0] - base address (57 bits)
+        desc_.d32[0] = static_cast<uint32_t>(addr);
+        desc_.d32[1] = static_cast<uint32_t>(addr >> 32) & 0x01FFFFFFu;  // bits 32-56
+
+        // bits [101:57] - num_records (45 bits)
+        desc_.d32[1] |= static_cast<uint32_t>((num_records & 0x7Fu) << 25);   // bits 57-63
+        desc_.d32[2] = static_cast<uint32_t>((num_records >> 7) & 0xFFFFFFFFu); // bits 64-95
+        desc_.d32[3] = (BUFFER_RESOURCE_3RD_DWORD & 0xFFFFFFC0u) |
+                       static_cast<uint32_t>((num_records >> 39) & 0x3Fu);     // bits 96-101
+#else
+        desc_.d64[0] = const_cast<void*>(base_addr);
+        desc_.d32[2] = static_cast<uint32_t>(num_records);
+        desc_.d32[3] = BUFFER_RESOURCE_3RD_DWORD;
 #endif
     }
 

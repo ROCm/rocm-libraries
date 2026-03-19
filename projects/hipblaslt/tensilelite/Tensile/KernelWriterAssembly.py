@@ -1436,9 +1436,9 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["BufferLoad"] or kernel["BufferStore"]:
       module.addComment0("2GB limit - set offsets to -1 to exceed this and clamp")
       module.add(ValueSet("BufferLimit", 0xffffffff, format=1))
-      #TODO-64 : This is max 32-bit negative value, the tail loop
-      # does incrementally step through the GRO and increment GRO
-      # which are initialized with this value
+      # Use 2^31 for BufferOOB behavior.
+      # set BufferOOB to NumRecords field of SRD.
+      # if thread is OOB, we can invalid it by setting vOffset to BufferOOB
       module.add(ValueSet("BufferOOB", 0x80000000, format=1))
 
       srdUpperValue = SrdUpperValue(self.states.version)
@@ -13594,7 +13594,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(skipGlobalStoreLabel)
         else:
           # Init bias Srd
-          module.add(allocPostLoopSrdSuppress("Bias", labelStr, hex(0x80000000)))
+          module.add(allocPostLoopSrdSuppress("Bias", labelStr, "BufferOOB"))
+          module.add(self.shiftSrd("Bias"))
           ssslist.append("Bias")
           useSize.append(True)
 
@@ -13687,7 +13688,8 @@ class KernelWriterAssembly(KernelWriter):
         strideE1 = "StrideE%s" % (self.states.indexChars[kernel["PackedC1IndicesX"][0]])
         module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrE), src0=vgpr(self.vgprs.coutRowPtrE), src1=sgpr(strideE1), comment=" offset 1"))
         labelEStr = self.labels.getNameInc("E")
-        module.add(allocPostLoopSrdSuppress("E", labelEStr, hex(0x80000000)))
+        module.add(allocPostLoopSrdSuppress("E", labelEStr, "BufferOOB"))
+        module.add(self.shiftSrd("E"))
         ssslist.append("E")
         useSize.append(False)
 

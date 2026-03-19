@@ -3008,8 +3008,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 algoIndex.resize(1);
                 algoIndex[0] = arg.solution_index;
             }
-            if(HIPBLAS_STATUS_INVALID_VALUE
-               == hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo))
+
+            // INVALID_VALUE means some indices exceeded the pool size; valid algos are still returned in tmpAlgo
+            bool lastBatch = (HIPBLAS_STATUS_INVALID_VALUE == hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo));
+            if(tmpAlgo.empty())
             {
                 break;
             }
@@ -3184,7 +3186,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_SOLUTION_FOUND(foundAlgo);
                 foundAlgo = true;
             }
-            if(foundAlgo)
+            if(lastBatch || foundAlgo)
             {
                 break;
             }

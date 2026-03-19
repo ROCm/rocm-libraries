@@ -241,6 +241,18 @@ class SoftmaxKernelGenerator:
             self.sgpr_pool.checkIn(stmp)
         return module
 
+    def shiftSrd(self, srdIdx):
+        module = Module()
+        if self.isa[0] == 12 and self.isa[1] == 5:
+            stmp = self.sgpr_pool.checkOutAligned(1, 1)
+            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdIdx+2), 0x7F))
+            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
+            module.add(ri.SAndB32(sgpr(srdIdx+1), sgpr(srdIdx+1), 0x1FFFFFF))
+            module.add(ri.SOrB32(sgpr(srdIdx+1), sgpr(srdIdx+1), sgpr(stmp)))
+            module.add(ri.SLShiftRightB32(sgpr(srdIdx+2), 7, sgpr(srdIdx+2)))
+            self.sgpr_pool.checkIn(stmp)
+        return module
+
     def load_kernel_args(self):
         kernel_args_addr = 0
         kernel_args_addr_size = 2
