@@ -83,10 +83,8 @@ def ancestral_targets(targets: list[str]):
     targets.reverse()
     targets = [git.short_hash(orig_project_dir, x) for x in targets]
     if len(targets) == 0:
-        raise RuntimeError(
-            """No targets. Check `git rev-list` and make sure
-            commits are listed from oldest to newest."""
-        )
+        raise RuntimeError("""No targets. Check `git rev-list` and make sure
+            commits are listed from oldest to newest.""")
     return targets
 
 
