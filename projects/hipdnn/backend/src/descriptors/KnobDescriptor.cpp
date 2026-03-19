@@ -151,10 +151,56 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                          1);
         break;
     case HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE:
-        setMaximumValue(attributeType, elementCount, arrayOfElements);
+        if(attributeType == HIPDNN_TYPE_INT64)
+        {
+            setOptionalScalar<HIPDNN_TYPE_INT64>(_maxValueInt,
+                                                 attributeType,
+                                                 elementCount,
+                                                 arrayOfElements,
+                                                 "KnobDescriptor::setAttribute()");
+        }
+        else if(attributeType == HIPDNN_TYPE_DOUBLE)
+        {
+            setOptionalScalar<HIPDNN_TYPE_DOUBLE>(_maxValueDouble,
+                                                  attributeType,
+                                                  elementCount,
+                                                  arrayOfElements,
+                                                  "KnobDescriptor::setAttribute()");
+        }
+        else
+        {
+            throw HipdnnException(
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string("KnobDescriptor::setAttribute(): "
+                            "unsupported attribute type for MAXIMUM_VALUE: ")
+                    + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+        }
         break;
     case HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE:
-        setMinimumValue(attributeType, elementCount, arrayOfElements);
+        if(attributeType == HIPDNN_TYPE_INT64)
+        {
+            setOptionalScalar<HIPDNN_TYPE_INT64>(_minValueInt,
+                                                 attributeType,
+                                                 elementCount,
+                                                 arrayOfElements,
+                                                 "KnobDescriptor::setAttribute()");
+        }
+        else if(attributeType == HIPDNN_TYPE_DOUBLE)
+        {
+            setOptionalScalar<HIPDNN_TYPE_DOUBLE>(_minValueDouble,
+                                                  attributeType,
+                                                  elementCount,
+                                                  arrayOfElements,
+                                                  "KnobDescriptor::setAttribute()");
+        }
+        else
+        {
+            throw HipdnnException(
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string("KnobDescriptor::setAttribute(): "
+                            "unsupported attribute type for MINIMUM_VALUE: ")
+                    + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+        }
         break;
     case HIPDNN_ATTR_KNOB_INFO_STRIDE:
         setOptionalScalar<HIPDNN_TYPE_INT64>(_stride,
@@ -218,54 +264,43 @@ void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                                      int64_t elementCount,
                                      const void* arrayOfElements)
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "KnobDescriptor::setAttribute(): arrayOfElements is null");
-
     switch(attributeType)
     {
     case HIPDNN_TYPE_INT64:
     {
-        THROW_IF_NE(elementCount,
-                    1,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobDescriptor::setAttribute(): elementCount must be 1 for int64 default");
         hipdnn_data_sdk::data_objects::IntValueT intVal;
-        int64_t tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(int64_t));
-        intVal.value = tmp;
+        setScalar(intVal.value,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "KnobDescriptor::setAttribute()");
         _defaultValue.Set(intVal);
         _defaultValueSet = true;
         break;
     }
     case HIPDNN_TYPE_DOUBLE:
     {
-        THROW_IF_NE(elementCount,
-                    1,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobDescriptor::setAttribute(): elementCount must be 1 for double default");
         hipdnn_data_sdk::data_objects::FloatValueT floatVal;
-        double tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(double));
-        floatVal.value = tmp;
+        setScalar(floatVal.value,
+                  HIPDNN_TYPE_DOUBLE,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "KnobDescriptor::setAttribute()");
         _defaultValue.Set(floatVal);
         _defaultValueSet = true;
         break;
     }
     case HIPDNN_TYPE_CHAR:
     {
-        THROW_IF_LT(elementCount,
-                    static_cast<int64_t>(0),
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobDescriptor::setAttribute(): elementCount is negative for string default");
-        THROW_IF_TRUE(elementCount > MAX_STRING_VALUE_LENGTH,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "KnobDescriptor::setAttribute(): "
-                      "elementCount exceeds MAX_STRING_VALUE_LENGTH ("
-                          + std::to_string(MAX_STRING_VALUE_LENGTH) + ")");
         hipdnn_data_sdk::data_objects::StringValueT strVal;
-        strVal.value = std::string(static_cast<const char*>(arrayOfElements),
-                                   static_cast<size_t>(elementCount));
+        setBoundedString(strVal.value,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         MAX_STRING_VALUE_LENGTH,
+                         "KnobDescriptor::setAttribute()");
         _defaultValue.Set(std::move(strVal));
         _defaultValueSet = true;
         break;
@@ -274,78 +309,6 @@ void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               std::string("KnobDescriptor::setAttribute(): "
                                           "unsupported attribute type for DEFAULT_VALUE: ")
-                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
-    }
-}
-
-void KnobDescriptor::setMaximumValue(hipdnnBackendAttributeType_t attributeType,
-                                     int64_t elementCount,
-                                     const void* arrayOfElements)
-{
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "KnobDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_NE(elementCount,
-                1,
-                HIPDNN_STATUS_BAD_PARAM,
-                "KnobDescriptor::setAttribute(): elementCount must be 1 for MAXIMUM_VALUE");
-
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-    {
-        int64_t tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(int64_t));
-        _maxValueInt = tmp;
-        break;
-    }
-    case HIPDNN_TYPE_DOUBLE:
-    {
-        double tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(double));
-        _maxValueDouble = tmp;
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              std::string("KnobDescriptor::setAttribute(): "
-                                          "unsupported attribute type for MAXIMUM_VALUE: ")
-                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
-    }
-}
-
-void KnobDescriptor::setMinimumValue(hipdnnBackendAttributeType_t attributeType,
-                                     int64_t elementCount,
-                                     const void* arrayOfElements)
-{
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "KnobDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_NE(elementCount,
-                1,
-                HIPDNN_STATUS_BAD_PARAM,
-                "KnobDescriptor::setAttribute(): elementCount must be 1 for MINIMUM_VALUE");
-
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-    {
-        int64_t tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(int64_t));
-        _minValueInt = tmp;
-        break;
-    }
-    case HIPDNN_TYPE_DOUBLE:
-    {
-        double tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(double));
-        _minValueDouble = tmp;
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              std::string("KnobDescriptor::setAttribute(): "
-                                          "unsupported attribute type for MINIMUM_VALUE: ")
                                   + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
     }
 }

@@ -87,14 +87,6 @@ private:
                          int64_t elementCount,
                          const void* arrayOfElements);
 
-    void setMaximumValue(hipdnnBackendAttributeType_t attributeType,
-                         int64_t elementCount,
-                         const void* arrayOfElements);
-
-    void setMinimumValue(hipdnnBackendAttributeType_t attributeType,
-                         int64_t elementCount,
-                         const void* arrayOfElements);
-
     void setValidValuesString(hipdnnBackendAttributeType_t attributeType,
                               int64_t elementCount,
                               const void* arrayOfElements);
