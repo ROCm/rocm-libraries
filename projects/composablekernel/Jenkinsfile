@@ -644,7 +644,8 @@ def cmake_build(Map conf=[:]){
 
         // Smart-build: Only build if running all tests or forced
         // Otherwise, smart-build will determine what to build after cmake configure
-        if (runAllUnitTests) {
+        // Always run install target if specified, as it's required for client_example
+        if (runAllUnitTests || config_targets.contains("install")) {
             build_cmd = conf.get(
                 "build_cmd",
                 "${build_envs} ninja -j${nt} ${config_targets}"
