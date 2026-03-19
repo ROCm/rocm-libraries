@@ -58,7 +58,7 @@ namespace fin_interface {
 // ================== Interface for Fin ==================
 
 // Base classes for solvers.
-class MIOPEN_INTERNALS_EXPORT Solver
+class Solver
 {
 public:
     // GetId(), IsDynamic() and IsTunable() throw miopenStatusNotInitialized if the solver is not
@@ -124,7 +124,7 @@ extern template class SolverMixin<miopen::ExecutionContext, miopen::conv::Proble
 extern template class SolverMixin<miopen::ExecutionContext, miopen::batchnorm::ProblemDescription>;
 
 // Convolution solver
-class MIOPEN_INTERNALS_EXPORT ConvSolver final
+class ConvSolver final
     : public SolverMixin<miopen::ExecutionContext, miopen::conv::ProblemDescription>
 {
 public:
@@ -146,7 +146,7 @@ protected:
 };
 
 // Batch normalization solver
-class MIOPEN_INTERNALS_EXPORT BatchNormSolver final
+class BatchNormSolver final
     : public SolverMixin<miopen::ExecutionContext, miopen::batchnorm::ProblemDescription>
 {
 protected:
@@ -162,16 +162,14 @@ protected:
 // dummy if a solver with specified name does not exist.
 
 // Convolution
-MIOPEN_INTERNALS_EXPORT const std::vector<ConvSolver>& GetAllConvSolvers();
-MIOPEN_INTERNALS_EXPORT std::vector<ConvSolver>
-GetConvSolvers(const std::vector<std::string>& names);
-MIOPEN_INTERNALS_EXPORT ConvSolver GetConvSolver(const std::string& name);
+const std::vector<ConvSolver>& GetAllConvSolvers();
+std::vector<ConvSolver> GetConvSolvers(const std::vector<std::string>& names);
+ConvSolver GetConvSolver(const std::string& name);
 
 // Batch normalization
-MIOPEN_INTERNALS_EXPORT const std::vector<BatchNormSolver>& GetAllBatchNormSolvers();
-MIOPEN_INTERNALS_EXPORT std::vector<BatchNormSolver>
-GetBatchNormSolvers(const std::vector<std::string>& names);
-MIOPEN_INTERNALS_EXPORT BatchNormSolver GetBatchNormSolver(const std::string& name);
+const std::vector<BatchNormSolver>& GetAllBatchNormSolvers();
+std::vector<BatchNormSolver> GetBatchNormSolvers(const std::vector<std::string>& names);
+BatchNormSolver GetBatchNormSolver(const std::string& name);
 
 // Examples:
 //

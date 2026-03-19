@@ -1085,6 +1085,7 @@ TEST(TransformInOutTests, TestUnaryTransformDevice)
       size,
       thrust::raw_pointer_cast(&d_input[0]),
       thrust::raw_pointer_cast(&d_output[0]));
+    HIP_CHECK(hipGetLastError());
 
     ASSERT_EQ(expected, d_output);
   }
@@ -1137,6 +1138,7 @@ TEST(TransformInOutTests, TestBinaryTransformDevice)
       thrust::raw_pointer_cast(&d_input1[0]),
       thrust::raw_pointer_cast(&d_input2[0]),
       thrust::raw_pointer_cast(&d_output[0]));
+    HIP_CHECK(hipGetLastError());
 
     ASSERT_EQ(expected, d_output);
   }

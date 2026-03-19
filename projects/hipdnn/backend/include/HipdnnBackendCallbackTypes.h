@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -32,6 +32,29 @@ typedef enum
  * @param message The log message, formatted by the logger.
  */
 typedef void (*hipdnnCallback_t)(hipdnnSeverity_t severity, const char* message);
+
+/**
+ * @brief User-defined opaque handle passed to callback and used as unique ID.
+ *
+ * The userHandle serves two purposes:
+ * 1. Passed back as parameter to the user callback function
+ * 2. Used as part of the unique identifier for the callback (callback, userHandle)
+ */
+typedef void* hipdnnUserLogCallbackHandle_t;
+
+/**
+ * @brief User callback signature - includes user handle as first parameter.
+ *
+ * @param[in] userHandle User-provided context handle
+ * @param[in] severity   Log message severity level
+ * @param[in] message    The log message (null-terminated string, includes component name)
+ *
+ * @note Callback should return promptly. For blocking operations (network, disk I/O),
+ *       queue work to a separate thread to avoid impacting hipDNN performance.
+ */
+typedef void (*hipdnnUserLogCallback_t)(hipdnnUserLogCallbackHandle_t userHandle,
+                                        hipdnnSeverity_t severity,
+                                        const char* message);
 
 #endif // HIPDNN_CALLBACK_TYPES_DEFINED
 

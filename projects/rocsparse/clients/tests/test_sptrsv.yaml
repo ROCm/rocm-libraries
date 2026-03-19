@@ -1,0 +1,764 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &M_N_csr_range_quick
+    - { M:   8, N:   8 }
+    - { M:   64, N:   64 }
+
+  - &M_N_csr_range_checkin
+    - { M:   128, N:   128 }
+    - { M:   1024, N:  1024 }
+
+  - &M_N_csr_range_nightly
+    - { M:   9381, N:   9381 }
+    - { M:  37017, N:  37017 }
+
+  - &alpha_csr_range_quick
+    - { alpha:   1.0, alphai: -0.2 }
+
+  - &alpha_csr_range_checkin
+    - { alpha:   2.0, alphai:  0.0 }
+
+  - &alpha_csr_range_nightly
+    - { alpha:   0.0,  alphai: -0.75 }
+    - { alpha:  -0.75, alphai:  0.25 }
+    - { alpha:  -0.5, alphai:  0.1 }
+
+
+  - &M_N_coo_range_quick
+    - { M:   8, N:   8 }
+    - { M:   64, N:   64 }
+
+  - &M_N_coo_range_checkin
+    - { M:   128, N:   128 }
+    - { M:   1024, N:  1024 }
+
+  - &M_N_coo_range_nightly
+    - { M:   9381, N:   9381 }
+    - { M:  37017, N:  37017 }
+
+  - &alpha_coo_range_quick
+    - { alpha:   1.0, alphai: -0.2 }
+
+  - &alpha_coo_range_checkin
+    - { alpha:   2.0, alphai:  0.0 }
+
+
+  - &alpha_coo_range_nightly
+    - { alpha:   0.0,  alphai: -0.75 }
+    - { alpha:  -0.75, alphai:  0.25 }
+    - { alpha:  -0.5, alphai:  0.1 }
+
+
+Tests:
+- name: sptrsv_bad_arg
+  category: pre_checkin
+  function: sptrsv_bad_arg
+  precision: *single_double_precisions_complex_real
+  formatA: [rocsparse_format_csr]
+
+- name: sptrsv
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_checkin
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2,4]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+#  TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos5,
+             nos7]
+  formatA: [rocsparse_format_csr]
+  batch_count: [3,17]
+  batch_count_A: [1]
+
+
+
+- name: sptrsv_file
+  category: nigthly
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos5,
+             nos7]
+  formatA: [rocsparse_format_csr]
+  batch_count: [3,4,17,96, 256, 1024]
+  batch_count_A: [1]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+# TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_triangular]
+  filename: [nos5]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2, 4]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+# TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_triangular]
+  filename: [rma10,
+             nos5]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2, 3, 4, 17, 25]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mplate]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mc2depi]
+  formatA: [rocsparse_format_csr]
+  batch_count: [4]
+  batch_count_A: [1]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mplate,
+             mc2depi]
+  formatA: [rocsparse_format_csr]
+  batch_count: [4, 5, 8]
+  batch_count_A: [0, 1]
+
+- name: sptrsv
+  category: quick
+  function: sptrsv
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_quick
+  alpha_alphai: *alpha_csr_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+  formatA: [rocsparse_format_csr]
+  batch_count: [3, 31]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: quick
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+# TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos2,
+             nos6]
+  formatA: [rocsparse_format_csr]
+  batch_count: [19]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: quick
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_quick
+  transA: [rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos2]
+  formatA: [rocsparse_format_csr]
+  batch_count: [7]
+  batch_count_A: [1]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_quick
+  transA: [rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos2]
+  formatA: [rocsparse_format_csr]
+  batch_count: [7, 19]
+  batch_count_A: [0, 1]
+
+- name: sptrsv
+  category: nightly
+  function: sptrsv
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_nightly
+  alpha_alphai: *alpha_csr_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2]
+
+- name: sptrsv
+  category: nightly
+  function: sptrsv
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M_N: *M_N_csr_range_nightly
+  alpha_alphai: *alpha_csr_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_nightly
+  transA: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+# TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [bmwcra_1,
+             amazon0312,
+             sme3Dc,
+             shipsec1]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [Chevron4]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2, 3]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_graph_test
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_quick
+  alpha_alphai: *alpha_csr_range_quick
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: *all_rocsparse_index_base
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  graph_test: true
+  formatA: [rocsparse_format_csr]
+  batch_count: [2]
+
+
+
+- name: sptrsv
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_coo_range_checkin
+  alpha_alphai: *alpha_coo_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+
+
+- name: sptrsv
+  category: nightly
+  function: sptrsv
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_coo_range_checkin
+  alpha_alphai: *alpha_coo_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: *all_rocsparse_analysis_policy
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_coo]
+  batch_count: [4,8]
+  batch_count_A: [0, 1]
+
+
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos5,
+             nos7]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_triangular]
+  filename: [rma10,
+             nos5]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_checkin
+  transA: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mplate]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+
+- name: sptrsv_file
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mplate,
+             mc2depi]
+  formatA: [rocsparse_format_coo]
+  batch_count: [4]
+
+
+- name: sptrsv
+  category: quick
+  function: sptrsv
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_coo_range_quick
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+  formatA: [rocsparse_format_coo]
+  batch_count: [32, 64]
+
+- name: sptrsv
+  category: nightly
+  function: sptrsv
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_coo_range_quick
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+  formatA: [rocsparse_format_coo]
+  batch_count: [1024,4096]
+
+
+- name: sptrsv_file
+  category: quick
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos6]
+  formatA: [rocsparse_format_coo]
+  batch_count: [1,2]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: quick
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos2]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2,8]
+
+
+
+
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_one]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos2,
+             nos6]
+  formatA: [rocsparse_format_coo]
+  batch_count: [1,2,9,32]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [nos2]
+  formatA: [rocsparse_format_coo]
+  batch_count: [1,2,8,15,51]
+
+
+- name: sptrsv
+  category: nightly
+  function: sptrsv
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_coo_range_nightly
+  alpha_alphai: *alpha_coo_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+
+- name: sptrsv
+  category: nightly
+  function: sptrsv
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M_N: *M_N_coo_range_nightly
+  alpha_alphai: *alpha_coo_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+  batch_count_A: [0, 1]
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_nightly
+  transA: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [bmwcra_1,
+             amazon0312,
+             sme3Dc,
+             shipsec1]
+  formatA: [rocsparse_format_coo]
+  batch_count: [2]
+  batch_count_A: [0, 1]
+
+
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_coo_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [Chevron4]
+  formatA: [rocsparse_format_coo]
+  batch_count: [4]
+
+- name: sptrsv_graph_test
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_coo_range_quick
+  alpha_alphai: *alpha_coo_range_quick
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: *all_rocsparse_index_base
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  graph_test: true
+  formatA: [rocsparse_format_coo]
+  batch_count: [1]
+
+

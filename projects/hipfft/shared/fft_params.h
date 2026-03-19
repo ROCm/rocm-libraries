@@ -38,9 +38,9 @@
 
 #include "../shared/arithmetic.h"
 #include "../shared/array_validator.h"
+#include "../shared/client_data_layout_helpers.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
-#include "../shared/data_layout.h"
 #include "../shared/device_properties.h"
 #include "../shared/fft_enums.h"
 #include "../shared/gpubuf.h"
@@ -91,9 +91,9 @@ static bool lexical_cast(const std::string& word, fft_input_generator& gen)
     else
         throw std::runtime_error("Invalid input generator specified");
 #ifndef USE_HIPRAND
-    if(gen == fft_input_random_generator_device || gen == fft_input_generator_device)
+    if(gen == fft_input_random_generator_device)
         throw std::runtime_error(
-            "Device input generation is not available, as hipRAND support is not enabled");
+            "Device random input generation is not available, as hipRAND support is not enabled");
 #endif
     return true;
 }
@@ -127,7 +127,6 @@ inline Tsize var_size(const fft_precision precision, const fft_array_type type)
     return var_size;
 }
 
-#ifdef USE_HIPRAND
 // Given an array type and transform length, strides, etc, initialize
 // values into the input device buffer.
 //
@@ -159,6 +158,12 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const Tint1&               field_contig_stride,
                       const size_t               field_contig_dist)
 {
+#ifndef USE_HIPRAND
+    if(igen == fft_input_random_generator_device)
+        throw std::runtime_error(
+            "Device random input generation is not available, as hipRAND support is not enabled");
+#endif // USE_HIPRAND
+
     if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
         throw std::runtime_error("Host input generation is not available for gpu buffers");
 
@@ -170,7 +175,7 @@ inline void set_input(std::vector<gpubuf>&       input,
     case fft_array_type_hermitian_interleaved:
     {
         auto ibuffer = (rocfft_complex<Tfloat>*)input[0].data();
-
+#ifdef USE_HIPRAND
         if(igen == fft_input_generator_device)
             generate_interleaved_data(
                 whole_length, idist, isize, whole_stride, nbatch, ibuffer, deviceProp);
@@ -185,6 +190,10 @@ inline void set_input(std::vector<gpubuf>&       input,
                                              field_lower_batch,
                                              field_contig_stride,
                                              field_contig_dist);
+#else
+        generate_interleaved_data(
+            whole_length, idist, isize, whole_stride, nbatch, ibuffer, deviceProp);
+#endif // USE_HIPRAND
 
         if(itype == fft_array_type_hermitian_interleaved)
         {
@@ -201,6 +210,7 @@ inline void set_input(std::vector<gpubuf>&       input,
         auto ibuffer_real = (Tfloat*)input[0].data();
         auto ibuffer_imag = (Tfloat*)input[1].data();
 
+#ifdef USE_HIPRAND
         if(igen == fft_input_generator_device)
             generate_planar_data(whole_length,
                                  idist,
@@ -222,6 +232,16 @@ inline void set_input(std::vector<gpubuf>&       input,
                                         field_lower_batch,
                                         field_contig_stride,
                                         field_contig_dist);
+#else
+        generate_planar_data(whole_length,
+                             idist,
+                             isize,
+                             whole_stride,
+                             nbatch,
+                             ibuffer_real,
+                             ibuffer_imag,
+                             deviceProp);
+#endif // USE_HIPRAND
 
         if(itype == fft_array_type_hermitian_planar)
             impose_hermitian_symmetry_planar(
@@ -233,6 +253,7 @@ inline void set_input(std::vector<gpubuf>&       input,
     {
         auto ibuffer = (Tfloat*)input[0].data();
 
+#ifdef USE_HIPRAND
         if(igen == fft_input_generator_device)
             generate_real_data(
                 whole_length, idist, isize, whole_stride, nbatch, ibuffer, deviceProp);
@@ -247,6 +268,9 @@ inline void set_input(std::vector<gpubuf>&       input,
                                       field_lower_batch,
                                       field_contig_stride,
                                       field_contig_dist);
+#else
+        generate_real_data(whole_length, idist, isize, whole_stride, nbatch, ibuffer, deviceProp);
+#endif // USE_HIPRAND
 
         break;
     }
@@ -254,7 +278,6 @@ inline void set_input(std::vector<gpubuf>&       input,
         throw std::runtime_error("Input layout format not yet supported");
     }
 }
-#endif // USE_HIPRAND
 
 // Given an array type and transform length, strides, etc, initialize
 // values into the input host buffer.
@@ -288,7 +311,8 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const size_t               field_contig_dist)
 {
     if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
-        throw std::runtime_error("Device input generation is not available for host buffers");
+        throw std::runtime_error(
+            "Device random input generation is not available for host buffers");
 
     switch(itype)
     {
@@ -1653,7 +1677,7 @@ public:
                     std::cout << "istride:";
                     for(const auto& i : istride)
                         std::cout << " " << i;
-                    std::cout << " ostride0:";
+                    std::cout << " ostride:";
                     for(const auto& i : ostride)
                         std::cout << " " << i;
                     std::cout << " differ; skipped for in-place transforms: skipping test"
@@ -1678,20 +1702,48 @@ public:
                 return false;
             }
 
-            if((transform_type == fft_transform_type_real_forward
-                || transform_type == fft_transform_type_real_inverse)
-               && (istride.back() != 1 || ostride.back() != 1) && length.back() > 1)
+            if(transform_type == fft_transform_type_real_forward
+               || transform_type == fft_transform_type_real_inverse)
             {
-                // In-place real/complex transforms require unit strides.
-                if(verbose)
+                bool invalid = length.back() > 1 && (istride.back() != 1 || ostride.back() != 1);
+                if(invalid)
                 {
-                    std::cout
-                        << "istride.back(): " << istride.back()
-                        << " ostride.back(): " << ostride.back()
-                        << " must be unitary for in-place real/complex transforms: skipping test"
-                        << std::endl;
+                    // In-place real/complex transforms require unit strides.
+                    if(verbose)
+                    {
+                        std::cout << "istride.back(): " << istride.back()
+                                  << " ostride.back(): " << ostride.back()
+                                  << " must be unitary for in-place real/complex transforms: "
+                                     "skipping test"
+                                  << std::endl;
+                    }
+                    return false;
                 }
-                return false;
+                const auto& real_strides
+                    = transform_type == fft_transform_type_real_forward ? istride : ostride;
+                const auto& hermitian_strides
+                    = transform_type == fft_transform_type_real_forward ? ostride : istride;
+                const auto& real_dist
+                    = transform_type == fft_transform_type_real_forward ? idist : odist;
+                const auto& hermitian_dist
+                    = transform_type == fft_transform_type_real_forward ? odist : idist;
+                for(size_t dim = 0; dim < stridesize - 1; dim++)
+                {
+                    if(length[dim] == 1)
+                        continue;
+                    invalid |= real_strides[dim] != 2 * hermitian_strides[dim];
+                }
+                if(nbatch > 1)
+                    invalid |= real_dist != 2 * hermitian_dist;
+                if(invalid)
+                {
+                    if(verbose)
+                    {
+                        std::cout << "Inconsistency detected in strides/distances for in-place "
+                                     "real/complex transforms; skipped\n";
+                    }
+                    return false;
+                }
             }
 
             if((itype == fft_array_type_complex_interleaved

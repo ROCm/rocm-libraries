@@ -35,7 +35,7 @@ TEST_F(TestEngineNames, EngineIdToNameMappingConsistent)
     // Verify each mapping is consistent
     for(const auto& [id, name] : idToName)
     {
-        auto calculatedId = engineNameToId(name.data());
+        auto calculatedId = engineNameToId(name);
         EXPECT_EQ(id, calculatedId)
             << "ID mismatch for engine: " << name << " (stored: 0x" << std::hex << id
             << ", calculated: 0x" << calculatedId << std::dec << ")";
@@ -63,7 +63,7 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     EXPECT_EQ(getEngineNameFromId(FUSILLI_ENGINE_ID), "FUSILLI_ENGINE");
 
     // Test with non-existent ID - should throw
-    int64_t nonExistentId = 0xDEADBEEF;
+    const int64_t nonExistentId = 0xDEADBEEF;
     EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 
@@ -79,7 +79,7 @@ TEST_F(TestEngineNames, EngineCountMatches)
     // Also verify all names in one are in the other
     for(const auto& name : allEngines)
     {
-        auto id = engineNameToId(name.data());
+        auto id = engineNameToId(name);
         EXPECT_NE(idToName.find(id), idToName.end())
             << "Engine '" << name << "' is in getAllEngineNames but not in getEngineIdToNameMap";
     }

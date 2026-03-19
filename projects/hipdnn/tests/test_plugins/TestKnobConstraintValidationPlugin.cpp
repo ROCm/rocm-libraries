@@ -26,6 +26,11 @@ public:
         return "1.0.0";
     }
 
+    const char* getPluginApiVersion() const override
+    {
+        return apiVersionWithoutTweak();
+    }
+
     int64_t getEngineId() const override
     {
         return hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
@@ -132,7 +137,7 @@ public:
             hipdnn_plugin_sdk::throwIfNull(executionContext);
 
             // Deserialize engineConfig to access knob settings
-            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+            const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
                 engineConfig->ptr, engineConfig->size);
 
             // Validate knob types
@@ -196,6 +201,11 @@ hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
 hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
 {
     return TestPluginBase::pluginGetVersion(version);
+}
+
+hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
+{
+    return TestPluginBase::pluginGetApiVersion(version);
 }
 
 hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
