@@ -38,30 +38,26 @@ namespace hipdnn_frontend::detail
 
     // Unpack input_1 tensor (optional)
     std::shared_ptr<graph::TensorAttributes> input1Tensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT,
+                                            tensorMap,
+                                            input1Tensor,
+                                            "pointwise IN_1 tensor"));
+    if(input1Tensor)
     {
-        auto status = unpackAndRegisterTensor(opDesc,
-                                              HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT,
-                                              tensorMap,
-                                              input1Tensor,
-                                              "pointwise IN_1 tensor");
-        if(status.is_good())
-        {
-            attributes.set_input_1(input1Tensor);
-        }
+        attributes.set_input_1(input1Tensor);
     }
 
     // Unpack input_2 tensor (optional)
     std::shared_ptr<graph::TensorAttributes> input2Tensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT,
+                                            tensorMap,
+                                            input2Tensor,
+                                            "pointwise IN_2 tensor"));
+    if(input2Tensor)
     {
-        auto status = unpackAndRegisterTensor(opDesc,
-                                              HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT,
-                                              tensorMap,
-                                              input2Tensor,
-                                              "pointwise IN_2 tensor");
-        if(status.is_good())
-        {
-            attributes.set_input_2(input2Tensor);
-        }
+        attributes.set_input_2(input2Tensor);
     }
 
     // Unpack operation

@@ -805,4 +805,188 @@ TEST_F(IntegrationGraphLifting, PointwiseTensorSharingPreserved)
     EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID].get(), pwNode->attributes.get_output_0().get());
 }
 
+// Builds a unary pointwise (SWISH_FWD) graph with swish_beta scalar,
+// lowers, lifts, and verifies the scalar survives the round trip.
+TEST_F(IntegrationGraphLifting, PointwiseSwishBetaPreserved)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("PointwiseSwishBetaLiftTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("swish_op");
+    pwAttrs.set_mode(PointwiseMode::SWISH_FWD);
+    pwAttrs.set_swish_beta(0.5F);
+
+    auto out0 = graph->pointwise(in0, pwAttrs);
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
+    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+
+    EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::SWISH_FWD);
+    EXPECT_TRUE(pwNode->attributes.get_swish_beta().has_value());
+    EXPECT_FLOAT_EQ(pwNode->attributes.get_swish_beta().value(), 0.5F);
+}
+
+// Builds a unary pointwise (ELU_FWD) graph with elu_alpha scalar,
+// lowers, lifts, and verifies the scalar survives the round trip.
+TEST_F(IntegrationGraphLifting, PointwiseEluAlphaPreserved)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("PointwiseEluAlphaLiftTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("elu_op");
+    pwAttrs.set_mode(PointwiseMode::ELU_FWD);
+    pwAttrs.set_elu_alpha(1.0F);
+
+    auto out0 = graph->pointwise(in0, pwAttrs);
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
+    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+
+    EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::ELU_FWD);
+    EXPECT_TRUE(pwNode->attributes.get_elu_alpha().has_value());
+    EXPECT_FLOAT_EQ(pwNode->attributes.get_elu_alpha().value(), 1.0F);
+}
+
+// Builds a unary pointwise (SOFTPLUS_FWD) graph with softplus_beta scalar,
+// lowers, lifts, and verifies the scalar survives the round trip.
+TEST_F(IntegrationGraphLifting, PointwiseSoftplusBetaPreserved)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("PointwiseSoftplusBetaLiftTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("softplus_op");
+    pwAttrs.set_mode(PointwiseMode::SOFTPLUS_FWD);
+    pwAttrs.set_softplus_beta(2.0F);
+
+    auto out0 = graph->pointwise(in0, pwAttrs);
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
+    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+
+    EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::SOFTPLUS_FWD);
+    EXPECT_TRUE(pwNode->attributes.get_softplus_beta().has_value());
+    EXPECT_FLOAT_EQ(pwNode->attributes.get_softplus_beta().value(), 2.0F);
+}
+
+// Builds a unary pointwise (GEN_INDEX) graph with axis scalar,
+// lowers, lifts, and verifies the scalar survives the round trip.
+TEST_F(IntegrationGraphLifting, PointwiseGenIndexAxisPreserved)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("PointwiseGenIndexAxisLiftTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("gen_index_op");
+    pwAttrs.set_mode(PointwiseMode::GEN_INDEX);
+    pwAttrs.set_axis(2);
+
+    auto out0 = graph->pointwise(in0, pwAttrs);
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[0].get());
+    ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
+
+    EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::GEN_INDEX);
+    EXPECT_TRUE(pwNode->attributes.get_axis().has_value());
+    EXPECT_EQ(pwNode->attributes.get_axis().value(), 2);
+}
+
 } // namespace
