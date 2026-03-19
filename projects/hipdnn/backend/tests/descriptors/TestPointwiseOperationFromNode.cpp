@@ -5,6 +5,7 @@
 #include "TestMacros.hpp"
 #include "descriptors/NodeFactory.hpp"
 #include "descriptors/PointwiseOperationDescriptor.hpp"
+#include "descriptors/ScopedDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 
@@ -239,66 +240,66 @@ TEST_F(TestPointwiseOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_EQ(operation, HIPDNN_POINTWISE_ADD);
 
     // Verify in_0 tensor
-    HipdnnBackendDescriptor* in0TensorDesc = nullptr;
+    hipdnn_backend::ScopedDescriptor in0Scoped;
     int64_t in0Count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &in0Count,
-                       static_cast<void*>(&in0TensorDesc));
+                       static_cast<void*>(in0Scoped.getPtr()));
     ASSERT_EQ(in0Count, 1);
-    ASSERT_NE(in0TensorDesc, nullptr);
+    ASSERT_NE(in0Scoped.get(), nullptr);
     int64_t in0Uid = 0;
     int64_t in0UidCount = 0;
-    in0TensorDesc->getAttribute(
+    in0Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &in0UidCount, &in0Uid);
     EXPECT_EQ(in0Uid, 40);
 
     // Verify out_0 tensor
-    HipdnnBackendDescriptor* out0TensorDesc = nullptr;
+    hipdnn_backend::ScopedDescriptor out0Scoped;
     int64_t out0Count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &out0Count,
-                       static_cast<void*>(&out0TensorDesc));
+                       static_cast<void*>(out0Scoped.getPtr()));
     ASSERT_EQ(out0Count, 1);
-    ASSERT_NE(out0TensorDesc, nullptr);
+    ASSERT_NE(out0Scoped.get(), nullptr);
     int64_t out0Uid = 0;
     int64_t out0UidCount = 0;
-    out0TensorDesc->getAttribute(
+    out0Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &out0UidCount, &out0Uid);
     EXPECT_EQ(out0Uid, 41);
 
     // Verify in_1 tensor (optional, set in standard fixture)
-    HipdnnBackendDescriptor* in1TensorDesc = nullptr;
+    hipdnn_backend::ScopedDescriptor in1Scoped;
     int64_t in1Count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &in1Count,
-                       static_cast<void*>(&in1TensorDesc));
+                       static_cast<void*>(in1Scoped.getPtr()));
     ASSERT_EQ(in1Count, 1);
-    ASSERT_NE(in1TensorDesc, nullptr);
+    ASSERT_NE(in1Scoped.get(), nullptr);
     int64_t in1Uid = 0;
     int64_t in1UidCount = 0;
-    in1TensorDesc->getAttribute(
+    in1Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &in1UidCount, &in1Uid);
     EXPECT_EQ(in1Uid, 3);
 
     // Verify in_2 tensor (optional, set in standard fixture)
-    HipdnnBackendDescriptor* in2TensorDesc = nullptr;
+    hipdnn_backend::ScopedDescriptor in2Scoped;
     int64_t in2Count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &in2Count,
-                       static_cast<void*>(&in2TensorDesc));
+                       static_cast<void*>(in2Scoped.getPtr()));
     ASSERT_EQ(in2Count, 1);
-    ASSERT_NE(in2TensorDesc, nullptr);
+    ASSERT_NE(in2Scoped.get(), nullptr);
     int64_t in2Uid = 0;
     int64_t in2UidCount = 0;
-    in2TensorDesc->getAttribute(
+    in2Scoped.get()->getAttribute(
         HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &in2UidCount, &in2Uid);
     EXPECT_EQ(in2Uid, 4);
 

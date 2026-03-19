@@ -131,7 +131,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvFpropNode)
 
     // Verify via the serialized buffer that the node is preserved
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -166,7 +166,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
 
     // Verify via the serialized buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 2);
     ASSERT_EQ(graphT->tensors.size(), 6);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -196,7 +196,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
 
     // Verify tensor data via the serialized buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Find the X tensor by UID and verify its attributes
@@ -303,7 +303,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesNodeTensorUids)
 
     // Verify node and tensor data via the serialized graph buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
 
@@ -384,7 +384,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
 
     // Verify convolution parameters via the serialized graph buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
@@ -458,7 +458,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolutio
 
     // Verify convolution mode via the serialized graph buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
@@ -504,7 +504,7 @@ TEST_F(TestGraphDescriptorLifting, DoubleRoundTrip)
     EXPECT_EQ(engineId, 77);
 
     // Verify the serialized graph still has 1 node
-    auto graphT = GetGraph(serialized2.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized2.ptr);
     EXPECT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -622,7 +622,7 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     EXPECT_EQ(originalBytes, newBytes);
 
     // Verify the serialized graph content
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -882,6 +882,6 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphName)
 
     // Also verify via the serialized FlatBuffer
     auto reSerializedData = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(reSerializedData.ptr)->UnPack();
+    auto graphT = UnPackGraph(reSerializedData.ptr);
     EXPECT_EQ(graphT->name, graphName);
 }
