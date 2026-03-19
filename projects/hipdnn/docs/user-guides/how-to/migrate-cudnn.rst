@@ -16,7 +16,6 @@ Here's a minimal example of a hipDNN project in ``CMakeLists.txt``:
 
 .. code:: cmake
 
-    cmake_minimum_required(VERSION <your_minimum>)
     project(my_app LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 17)
 
@@ -68,9 +67,9 @@ Tensor dimensions and layouts
 
 Tensor dimension ordering in hipDNN is *operation-specific*, following the same conventions as
 PyTorch and cuDNN. The *memory layout* (channel-first vs channel-last) is always controlled by
-strides and stride order, not by the order of the tensor dimension vector that always holds values as [N,C,H,W] or [N,C,D,H,W]. 
+strides and stride order, not by the order of the tensor dimension vector that always holds values as [N,C,H,W] or [N,C,D,H,W].
 
-For example, memory arranged as NCHW corresponds to stride order {3,2,1,0} (W is the most tightly packed), and NDHWC corresponds to stride order {4,0,3,2,1} (C is the most tightly packed). 
+For example, memory arranged as NCHW corresponds to stride order {3,2,1,0} (W is the most tightly packed), and NDHWC corresponds to stride order {4,0,3,2,1} (C is the most tightly packed).
 Use the ``TensorLayout`` constants and the ``generateStrides()`` utility to compute strides for common layouts.
 
 Convolution
@@ -86,7 +85,7 @@ Convolution
      - Description
    * - Input (x)
      - ``(N, C, H, W)``
-     - ``(N, C, D, H, W)`` 
+     - ``(N, C, D, H, W)``
      - Batch, channels, spatial dims
    * - Weights (w)
      - ``(K, C/groups, R, S)``
@@ -98,7 +97,7 @@ Convolution
      - Batch, output channels, output spatial dims
 
 .. code:: cpp
-  
+
   // Convolution example: dims always follow (N, C, spatial...) ordering
   auto x = TensorAttributes()
               .set_dim({1, 64, 28, 28})   // N=1, C=64, H=28, W=28
@@ -141,10 +140,10 @@ Layer normalization
      - Shape
      - Description
    * - Input (x)
-     - ``(N, ...)`` 
+     - ``(N, ...)``
      - Batch first, then feature dims
    * - Scale, Bias
-     -  ``(1, ...)`` 
+     -  ``(1, ...)``
      - Batch dim = 1, remaining dims match input feature dims
    * - Mean, Inv variance
      - Stats dims

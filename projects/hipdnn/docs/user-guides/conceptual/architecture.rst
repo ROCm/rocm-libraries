@@ -120,12 +120,11 @@ Data SDK (``data_sdk``)
 The Data SDK contains ``FlatBuffers`` schemas and data structures for graph representation.
 The serialized structures allow data to be marshalled and passed between the backend and plugins in a type-safe and highly version-compatible manner.
 
-- **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations.
+- **Purpose**: Provides data structures for graphs, tensors, and configurations.
 - **Expected usage**: Consumed by the backend and plugins for graph data handling.
 - **Core functionality**:
 
   - ``FlatBuffer`` schema definitions for graphs, nodes, and attributes.
-  - Data structures for deserializing serialized graphs.
   - Logging utilities and type helpers (for example, ``half`` and ``bfloat16``).
 
 .. _plugin-sdk:
@@ -208,7 +207,7 @@ Plugin architecture
 Plugin loading
 ~~~~~~~~~~~~~~~
 
-- The backend finds plugins at runtime via the default plugin path, environment variables, or by using ``hipdnnSetEnginePluginPaths_ext`` to provide additional paths from which to load the plugins.
+- The backend finds plugins at runtime via the default plugin path, environment variables (see :ref:`plugin-loading-variables`), or by using ``hipdnnSetEnginePluginPaths_ext`` to provide additional paths from which to load the plugins.
 - Each plugin exports standard entry points defined in the Plugin SDK.
 
 Engine management

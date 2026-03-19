@@ -79,14 +79,8 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 The engine ID system ensures globally unique identifiers across all plugins.
 
 When creating a new engine, select a unique descriptive name.
-During development, add the ``HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")`` macro to a source file in your project.
-This registers the name globally (verifying that it doesn't conflict with plugin names from the official distribution) and creates variables that can be used to retrieve the unique ID for this engine.
-
-Here's the workflow:
-
-1. **Engine names**: Define human-readable string names for your engines (for example, ``MY_CUSTOM_ENGINE``).
-2. **Hash function**: The ``hipdnn_plugin_sdk::engine_names::engineNameToId()`` function converts names to IDs using a FNV-1a hash algorithm.
-3. **Registration**: Engine names are registered with the Plugin SDK for discoverability.
+During development, add the ``HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOME_ENGINE")`` macro to a source file in your project.
+This verifyies that the new plugin name doesn't conflict with plugin names from the official distribution and creates variables that can be used to retrieve the unique ID for this engine.
 
 Benefits
 --------
@@ -104,7 +98,9 @@ Use engine IDs
   #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
   // This macro registers the engine name and creates helper variables
-  // such as EXAMPLE_PLUGIN_RELU_ENGINE_ID for this engine.
+  // such as MY_CUSTOM_ENGINE_ID for this engine.
+  using hipdnn_data_sdk::utilities::engineNameToId;
+  using hipdnn_data_sdk::utilities::EngineRegistrar;
   HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
 
   class MyCustomEngine : public hipdnn_plugin_sdk::IEngine< ... >
@@ -116,7 +112,7 @@ Use engine IDs
       int64_t _id;
   };
   ...
-  auto engine = std::make_unique<MyCustomEngine>(EXAMPLE_PLUGIN_RELU_ENGINE_ID);
+  auto engine = std::make_unique<MyCustomEngine>(MY_CUSTOM_ENGINE_ID);
 
 Register new engine names
 ----------------------------
@@ -127,7 +123,7 @@ To add your engine name to the official registry, submit a GitHub pull request t
 
   HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
 
-Test it locally. You can use unregistered names during development, but you'll need to remove the ``HIPDNN_REGISTER_ENGINE()`` macro from your plugin before it's added to the official registry, as the duplicated registries are interpreted as an engine ID collision error.
+Test it locally. You can use unregistered names during development, but you'll need to remove the ``HIPDNN_REGISTER_ENGINE()`` macro from your plugin before it's added to the official registry.
 
 Create a kernel engine plugin
 =============================
@@ -262,6 +258,8 @@ The hipDNN plugins are installed in the ROCm install folder:
 
 Install your plugin to this folder to have it included automatically by hipDNN. Note that if the ``HIPDNN_PLUGIN_DIR`` environment variable is set, the plugins will only be loaded from that folder and not the ROCm folder.
 
+.. _plugin-loading
+
 Plugin loading
 ==============
 
@@ -271,7 +269,7 @@ Default plugin loading
 ----------------------
 
 By default, hipDNN loads plugins from ``./hipdnn_plugins/engines/``.
-This path is relative to the backend shared library location, typically ``/opt/rocm/lib/``.
+This path is relative to the hipDNN backend shared library location in the ROCm install folder, typically ``/opt/rocm/lib/`` on Linux.
 
 Default structure example:
 
@@ -301,6 +299,8 @@ When ``HIPDNN_PLUGIN_DIR`` is set, hipDNN will *only* load plugins from the spec
 - Running tests with test-specific plugins.
 - Development and debugging of new plugins.
 - Isolating production plugins from test plugins.
+
+See :ref:`plugin-loading-variables` for details on using the ``HIPDNN_PLUGIN_DIR`` to control plugin loading.
 
 Custom plugin paths
 -------------------

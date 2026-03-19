@@ -236,6 +236,8 @@ Plugin lifecycle
 5. **Execution**: ``ExecuteOpGraph``
 6. **Cleanup**: ``DestroyExecutionContext``, ``DestroyEngineDetails``, and ``PluginDestroy``
 
+By default, hipDNN will keep plugins loaded after all hipDNN handles are closed. Holding plugins in memory this way reduces the overhead of reloading plugins when subsequent hipDNN handles are created. The ``hipdnnSetPluginUnloadMode_ext()`` backend API function can be used to change this behaviour so that plugins unload immediately once all hipDNN handles have been closed.
+
 Backend descriptor types
 ========================
 

@@ -13,6 +13,8 @@ Prerequisites
 
 ROCm and hipDNN must be installed along with the dependencies. See :ref:`prerequisites`.
 
+.. _add-hipdnn-steps
+
 Steps
 =====
 
@@ -20,7 +22,6 @@ Steps
 
    .. code:: cmake
 
-     cmake_minimum_required(VERSION <your_minimum>)
      project(my_app LANGUAGES CXX)
      set(CMAKE_CXX_STANDARD 17)
 
