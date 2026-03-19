@@ -636,8 +636,8 @@ public:
 
     /**
      * @brief Verify that no two tensors in the graph share the same UID
-     * @return Error with ErrorCode::INVALID_VALUE listing the duplicate UIDs,
-     *         or OK
+     * @return ErrorCode::OK if all UIDs are unique, or ErrorCode::INVALID_VALUE
+     *         if duplicates exist. Call get_message() for the duplicate UIDs.
      */
     Error checkNoDuplicateTensorIds()
     {
@@ -649,8 +649,9 @@ public:
 
     /**
      * @brief Check that all tensors in the graph have UIDs assigned
-     * @return Error with ErrorCode::ATTRIBUTE_NOT_SET listing tensors without
-     *         UIDs, or OK
+     * @return ErrorCode::OK if all tensors have UIDs, or
+     *         ErrorCode::ATTRIBUTE_NOT_SET if any are missing. Call
+     *         get_message() for the affected tensors.
      */
     Error checkTensorUidsSet() const
     {
@@ -716,9 +717,9 @@ public:
      * Reorders internal nodes so that every node appears after its
      * dependencies.
      *
-     * @return Error with ErrorCode::INVALID_VALUE if the graph contains a cycle
-     *         or multiple disconnected components. Call get_message() for the
-     *         specific failure reason.
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE if the
+     *         graph contains a cycle or multiple disconnected components. Call
+     *         get_message() for the specific failure reason.
      */
     Error topologicallySortGraph()
     {
@@ -768,11 +769,14 @@ public:
 
     /**
      * @brief Build the operation graph descriptor
-     * @param handle The hipDNN handle
-     * @return Error indicating success or failure
      *
-     * This is typically called internally by build(). It creates the backend
-     * operation graph descriptor from the frontend graph representation.
+     * Creates the backend operation graph descriptor from the frontend graph
+     * representation. Typically called internally by build().
+     *
+     * @param handle The hipDNN handle
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR /
+     *         ErrorCode::INVALID_VALUE on failure. Call get_message() for the
+     *         specific failure reason.
      */
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
@@ -882,11 +886,14 @@ protected:
 public:
     /**
      * @brief Get available configuration knobs for a specific engine
+     *
      * @param engineId The engine ID to query
      * @param knobs Output vector of available Knob objects
-     * @return Error indicating success or failure
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
      *
-     * @see Knob, KnobSetting
+     * @see hipdnn_frontend::Knob, hipdnn_frontend::KnobSetting
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
@@ -909,12 +916,18 @@ public:
     }
 
     /**
-     * @brief Get knobs for a specific engine as a lookup map
-     * @param engineId The engine ID to query
-     * @param knobs Output map from knob type to Knob object
-     * @return Error indicating success or failure
+     * @brief Get knobs for a specific engine, indexed by knob type
      *
-     * @see get_knobs_for_engine(), Knob
+     * Convenience wrapper around get_knobs_for_engine() that populates
+     * a map keyed by KnobType_t for direct lookup.
+     *
+     * @param engineId The engine ID to query
+     * @param knobs Output map populated with available knobs, keyed by type
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
+     *
+     * @see get_knobs_for_engine(), hipdnn_frontend::Knob
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knob_lookup_for_engine(int64_t engineId,
@@ -933,9 +946,11 @@ public:
 
     /**
      * @brief Get a ranked list of engine IDs based on heuristics
+     *
      * @param rankedEngineIds Output vector of engine IDs, ranked by expected performance
      * @param modes Heuristic modes to use for ranking
-     * @return Error indicating success or failure
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
@@ -954,11 +969,14 @@ public:
 
     /**
      * @brief Create execution plans using heuristics
-     * @param modes Heuristic modes to use for engine selection
-     * @return Error indicating success or failure
      *
-     * Creates execution plans by querying the backend for available engines
-     * and selecting based on the specified heuristic modes.
+     * Queries the backend for available engines and selects based on the
+     * specified heuristic modes.
+     *
+     * @param modes Heuristic modes to use for engine selection
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
@@ -993,14 +1011,17 @@ public:
 
     /**
      * @brief Create an execution plan with specific engine and knob settings
+     *
+     * Creates an execution plan for a specific engine, configured via knob
+     * settings. Knobs not supported by the engine are warned and skipped.
+     *
      * @param engineId The engine ID to use
-     * @param settings Vector of KnobSetting objects to configure the engine (max 1024)
-     * @return Error indicating success or failure
+     * @param settings Knob settings to apply to the engine
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the graph has not been built. Call get_message() for the
+     *         specific failure reason.
      *
-     * This method allows fine-grained control over engine selection and
-     * configuration through knob settings.
-     *
-     * @see Knob, KnobSetting, get_knobs_for_engine()
+     * @see hipdnn_frontend::Knob, hipdnn_frontend::KnobSetting, get_knobs_for_engine()
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
@@ -1065,7 +1086,9 @@ public:
 
     /**
      * @brief Verify that the execution plan is valid and supported
-     * @return Error indicating success or failure
+     *
+     * @return ErrorCode::OK if valid, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         if the execution plan has not been created.
      */
     Error check_support() // NOLINT(readability-identifier-naming)
     {
@@ -1081,8 +1104,15 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to FlatBuffer DetachedBuffer (const version)
-    /// Returns error if tensor UIDs are not set
+    /**
+     * @brief Serialize the graph to a FlatBuffer DetachedBuffer
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     *
+     * @param buffer Output buffer populated with the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error toFlatBuffer(flatbuffers::DetachedBuffer& buffer) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -1090,15 +1120,26 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to FlatBuffer DetachedBuffer (non-const version)
-    /// Assigns tensor UIDs if not already set
+    /**
+     * @brief Serialize the graph to a FlatBuffer DetachedBuffer
+     *
+     * Assigns UIDs to any tensors that do not already have them.
+     *
+     * @return DetachedBuffer containing the serialized graph
+     */
     flatbuffers::DetachedBuffer toFlatBuffer()
     {
         assignUnsetTensorUids();
         return buildFlatbufferOperationGraphConst();
     }
 
-    /// Deserialize from FlatBuffer Graph object
+    /**
+     * @brief Deserialize the graph from a FlatBuffer Graph object
+     *
+     * @param fbGraph Pointer to the FlatBuffer Graph object
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error fromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         try
@@ -1117,7 +1158,13 @@ public:
         }
     }
 
-    /// Deserialize from FlatBuffer DetachedBuffer
+    /**
+     * @brief Deserialize the graph from a FlatBuffer DetachedBuffer
+     *
+     * @param buffer The buffer containing the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error fromFlatBuffer(const flatbuffers::DetachedBuffer& buffer)
     {
         if(useDescriptorApi())
@@ -1129,27 +1176,58 @@ public:
         return fromFlatBuffer(fbGraph);
     }
 
-    /// Serialize to FlatBuffer DetachedBuffer (const version)
-    /// Returns error if tensor UIDs are not set
+    /**
+     * @brief Serialize the graph to a FlatBuffer DetachedBuffer
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     * Equivalent to toFlatBuffer(buffer).
+     *
+     * @param buffer Output buffer populated with the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error serialize(flatbuffers::DetachedBuffer& buffer) const
     {
         return toFlatBuffer(buffer);
     }
 
-    /// Deserialize from FlatBuffer Graph object
+    /**
+     * @brief Deserialize the graph from a FlatBuffer Graph object
+     *
+     * Equivalent to fromFlatBuffer(fbGraph).
+     *
+     * @param fbGraph Pointer to the FlatBuffer Graph object
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         return fromFlatBuffer(fbGraph);
     }
 
-    /// Deserialize from FlatBuffer DetachedBuffer
+    /**
+     * @brief Deserialize the graph from a FlatBuffer DetachedBuffer
+     *
+     * Equivalent to fromFlatBuffer(buffer).
+     *
+     * @param buffer The buffer containing the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(const flatbuffers::DetachedBuffer& buffer)
     {
         return fromFlatBuffer(buffer);
     }
 
-    /// Serialize to binary (const version)
-    /// Returns error if tensor UIDs are not set
+    /**
+     * @brief Serialize the graph to binary
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     *
+     * @param data Output vector populated with the serialized bytes
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error serialize(std::vector<uint8_t>& data) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -1158,8 +1236,13 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to binary (non-const version)
-    /// Assigns tensor UIDs if not already set
+    /**
+     * @brief Serialize the graph to binary
+     *
+     * Assigns UIDs to any tensors that do not already have them.
+     *
+     * @return Vector of bytes containing the serialized graph
+     */
     std::vector<uint8_t> toBinary()
     {
         assignUnsetTensorUids();
@@ -1167,7 +1250,14 @@ public:
         return {buffer.data(), buffer.data() + buffer.size()};
     }
 
-    /// Deserialize from binary packed FlatBuffer
+    /**
+     * @brief Deserialize the graph from binary
+     *
+     * @param handle The hipDNN handle (can be nullptr)
+     * @param data The serialized graph bytes
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
         if(useDescriptorApi())
@@ -1180,13 +1270,15 @@ public:
     }
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
-    /// Serialize to JSON (const version)
-    /// Returns error if tensor UIDs are not set
-    ///
-    /// Flow: Frontend → FlatBuffer binary → JSON
-    /// GetGraph() is zero-copy (just a pointer into the buffer), so the only
-    /// serialization cost is buildFlatbufferOperationGraphConst(). This keeps
-    /// JSON serialization logic centralized in data_sdk.
+    /**
+     * @brief Serialize the graph to JSON
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     *
+     * @param j Output JSON object populated with the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error serialize(nlohmann::json& j) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -1199,8 +1291,13 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    /// Serialize to JSON (non-const version)
-    /// Assigns tensor UIDs if not already set
+    /**
+     * @brief Serialize the graph to JSON
+     *
+     * Assigns UIDs to any tensors that do not already have them.
+     *
+     * @return JSON object containing the serialized graph
+     */
     nlohmann::json toJson()
     {
         assignUnsetTensorUids();
@@ -1210,7 +1307,13 @@ public:
         return *sdkGraph;
     }
 
-    /// Deserialize from JSON
+    /**
+     * @brief Deserialize the graph from JSON
+     *
+     * @param j JSON object containing a serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(const nlohmann::json& j)
     {
         try
@@ -1237,14 +1340,18 @@ public:
 
     /**
      * @brief Reconstruct the Graph from a finalized backend OperationGraph descriptor
+     *
+     * Extracts operations and graph-level data types from a backend descriptor
+     * and rebuilds the frontend Graph representation. Tensors are shared across
+     * operations via UID-based lookup.
+     *
+     * Currently supports: ConvolutionFprop operations (phased rollout —
+     * additional operation types will be added incrementally).
+     *
      * @param graphDesc A finalized backend OperationGraph descriptor
-     * @return Error indicating success or failure
-     *
-     * This method extracts operations and graph-level data types from a backend
-     * descriptor and rebuilds the frontend Graph representation. Tensors are
-     * shared across operations via UID-based lookup.
-     *
-     * Currently supports: ConvolutionFprop operations (phased rollout — additional operation types will be added incrementally).
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+     *         for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error fromBackendDescriptor(hipdnnBackendDescriptor_t graphDesc)
@@ -1265,14 +1372,23 @@ public:
         return {};
     }
 
-    /// Deserialize from binary via backend C-API descriptor path.
-    /// Creates a backend graph descriptor from serialized bytes and lifts the
-    /// frontend graph via unpackGraphDescriptor(). If a handle is provided,
-    /// the descriptor is finalized for full backend support.
-    ///
-    /// NOTE: Currently supports ConvolutionFprop operations (phased rollout — additional
-    /// operation types will be added incrementally). Graphs containing unsupported
-    /// operation types will fail during unpackOperation().
+    /**
+     * @brief Deserialize the graph from binary via the backend descriptor path
+     *
+     * Creates a backend graph descriptor from serialized bytes and rebuilds
+     * the frontend Graph. If a handle is provided, the descriptor is
+     * finalized for full backend support.
+     *
+     * Currently supports ConvolutionFprop operations (phased rollout —
+     * additional operation types will be added incrementally). Graphs
+     * containing unsupported operation types will fail.
+     *
+     * @param handle The hipDNN handle (can be nullptr)
+     * @param data The serialized graph bytes
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message()
+     *         for the specific failure reason.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_via_backend(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
@@ -1298,9 +1414,11 @@ public:
 
     /**
      * @brief Finalize the execution plan
-     * @return Error indicating success or failure
      *
      * Called internally by build() after create_execution_plans().
+     *
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
      */
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
@@ -1323,11 +1441,6 @@ public:
 
     /**
      * @brief Build the complete graph and create execution plans
-     * @param handle The hipDNN handle
-     * @param modes Heuristic modes for engine selection
-     * @param policy Build plan policy (currently only HEURISTICS_CHOICE is used)
-     * @param do_multithreaded_builds Reserved for future use
-     * @return Error indicating success or failure
      *
      * This is the main method to prepare a graph for execution. It performs:
      * 1. Graph validation
@@ -1342,6 +1455,14 @@ public:
      * Error err = graph.build(handle);
      * if(err.is_bad()) { handleError(); }
      * @endcode
+     *
+     * @param handle The hipDNN handle
+     * @param modes Heuristic modes for engine selection
+     * @param policy Build plan policy (currently only HEURISTICS_CHOICE is used)
+     * @param do_multithreaded_builds Reserved for future use
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+     *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
@@ -1368,10 +1489,12 @@ public:
 
     /**
      * @brief Get the workspace memory size required for execution
-     * @param workspaceSize Output parameter for the workspace size in bytes
-     * @return Error indicating success or failure
      *
      * Call this after build() to determine how much workspace memory to allocate.
+     *
+     * @param workspaceSize Output parameter for the workspace size in bytes
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_workspace_size(int64_t& workspaceSize) const
@@ -1390,11 +1513,15 @@ public:
 
     /**
      * @brief Execute the graph with tensor pointers mapped by tensor handles
+     *
      * @param handle The hipDNN handle
      * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device
      * memory pointers
      * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
-     * @return Error indicating success or failure
+     * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if a tensor
+     *         in the lookup is null or missing a UID, or
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on backend failure. Call
+     *         get_message() for the specific failure reason.
      *
      * @code{.cpp}
      * std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup = {
@@ -1427,10 +1554,12 @@ public:
 
     /**
      * @brief Execute the graph with tensor pointers mapped by UID
+     *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
      * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
-     * @return Error indicating success or failure
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on failure. Call get_message() for the specific failure reason.
      *
      * @code{.cpp}
      * std::unordered_map<int64_t, void*> variantPack = {
