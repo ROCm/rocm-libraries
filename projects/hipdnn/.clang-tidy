@@ -35,7 +35,11 @@ Checks: >
   -readability-math-missing-parentheses,
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
-  -misc-*
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-header-include-cycle,
+  -misc-use-anonymous-namespace
 
 WarningsAsErrors: "*"
 HeaderFileExtensions: ['h','hpp']

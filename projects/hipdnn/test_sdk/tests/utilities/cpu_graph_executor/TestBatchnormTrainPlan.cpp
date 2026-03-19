@@ -39,10 +39,10 @@ protected:
 
 TEST_F(TestBatchnormTrainPlan, ExecutePlan)
 {
-    double epsilon = BATCHNORM_DEFAULT_EPSILON;
-    double momentum = 0.1;
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
+    double const epsilon = BATCHNORM_DEFAULT_EPSILON;
+    double const momentum = 0.1;
+    std::vector<int64_t> const dims = {6, 3, 32, 32};
+    unsigned int const seed = getGlobalTestSeed();
     BatchnormTrainTensorBundle<float, float, float> planTensorBundle(
         dims, seed, TensorLayout::NHWC);
     BatchnormTrainTensorBundle<float, float, float> directTensorBundle(
@@ -87,7 +87,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     patient.execute(variantPack);
 
     auto tolerance = batchnorm::getToleranceTraining<float>();
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
@@ -99,7 +99,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
 
 TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
     BatchnormTrainTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormTrainGraph(
@@ -115,12 +115,11 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        patient;
+                              DataType::FLOAT> const patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    bool const result
         = dynamic_cast<BatchnormTrainPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -128,7 +127,7 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
 
 TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    std::vector<int64_t> const dims = {1, 1, 1, 1};
     BatchnormTrainTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormTrainGraph(
@@ -144,8 +143,7 @@ TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
                               DataType::FLOAT,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        floatPlanBuilder;
+                              DataType::FLOAT> const floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
@@ -153,8 +151,7 @@ TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
                               DataType::HALF,
                               DataType::FLOAT,
                               DataType::FLOAT,
-                              DataType::FLOAT>
-        badTypesPlanBuilder;
+                              DataType::FLOAT> const badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();

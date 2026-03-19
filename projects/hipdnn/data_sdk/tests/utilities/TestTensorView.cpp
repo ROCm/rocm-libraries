@@ -26,7 +26,7 @@ TEST(TestTensorView, BasicIteration)
     for(auto it = view.begin(); it != view.end(); ++it)
     {
         // No cast needed! Direct typed reference
-        float& value = *it;
+        float const& value = *it;
         EXPECT_EQ(value, 1.0f);
         ++count;
     }
@@ -92,7 +92,7 @@ TEST(TestTensorView, ConstIteration)
     tensor.fillWithValue(3.14);
 
     const ITensor* iTensor = &tensor;
-    ConstTensorView<double> view(*iTensor);
+    ConstTensorView<double> const view(*iTensor);
 
     int count = 0;
     for(auto it = view.cbegin(); it != view.cend(); ++it)
@@ -111,7 +111,7 @@ TEST(TestTensorView, ConstViewFromConstTensor)
     tensor.fillWithValue(1.5f);
 
     const ITensor& iTensor = tensor;
-    ConstTensorView<float> view(iTensor);
+    ConstTensorView<float> view(iTensor); // NOLINT(misc-const-correctness) begin() not const
 
     // Should be able to read through const view
     for(const float& value : view)
@@ -126,9 +126,9 @@ TEST(TestTensorView, ConstRangeBasedForLoop)
     tensor.fillWithValue(42.0f);
 
     ITensor* iTensor = &tensor;
-    ConstTensorView<int> view(*iTensor);
+    ConstTensorView<int> view(*iTensor); // NOLINT(misc-const-correctness) begin() not const
 
-    int count = 0;
+    int count = 0; // NOLINT(misc-const-correctness) mutated in loop
     for(const int& value : view)
     {
         EXPECT_EQ(value, 42);
@@ -200,8 +200,8 @@ TEST(TestTensorView, CopyConstructor)
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto it2 = it1; // Copy
 
-    float& val1 = *it1;
-    float& val2 = *it2;
+    float const& val1 = *it1;
+    float const& val2 = *it2;
 
     EXPECT_EQ(&val1, &val2);
     EXPECT_EQ(val1, 2.0f);
@@ -234,7 +234,7 @@ TEST(TestTensorView, MoveConstructor)
     auto it1 = view.begin();
     auto it2 = std::move(it1); // Move
 
-    float& val = *it2;
+    float const& val = *it2;
     EXPECT_EQ(val, 4.0f);
 }
 
@@ -285,7 +285,7 @@ TEST(TestTensorViewDouble, BasicIteration)
     ITensor* iTensor = &tensor;
     TensorView<double> view(*iTensor);
 
-    for(double& value : view)
+    for(double const& value : view)
     {
         EXPECT_DOUBLE_EQ(value, 2.718);
     }
@@ -299,7 +299,7 @@ TEST(TestTensorViewInt, BasicIteration)
     ITensor* iTensor = &tensor;
     TensorView<int> view(*iTensor);
 
-    for(int& value : view)
+    for(int const& value : view)
     {
         EXPECT_EQ(value, 7);
     }
@@ -311,8 +311,8 @@ TEST(TestTensorViewInt, BasicIteration)
 
 TEST(TestTensorView, StridedTensor)
 {
-    std::vector<int64_t> dims = {2, 2};
-    std::vector<int64_t> strides = {3, 1}; // Non-standard strides
+    std::vector<int64_t> const dims = {2, 2};
+    std::vector<int64_t> const strides = {3, 1}; // Non-standard strides
 
     Tensor<float> tensor(dims, strides);
 
@@ -403,7 +403,7 @@ TEST(TestTensorView, FourDimensionalTensor)
 
 TEST(TestTensorView, EmptyTensor)
 {
-    std::vector<int64_t> dims = {}; // Zero dimensions
+    std::vector<int64_t> const dims = {}; // Zero dimensions
     Tensor<float> tensor(dims);
 
     ITensor* iTensor = &tensor;
@@ -423,7 +423,7 @@ TEST(TestTensorView, SingleElement)
     TensorView<int> view(tensor);
 
     int count = 0;
-    for(int& value : view)
+    for(int const& value : view)
     {
         EXPECT_EQ(value, 42);
         ++count;
@@ -444,7 +444,7 @@ TEST(TestTensorView, FromITensorReference)
     ITensor& iTensor = tensor;
     TensorView<float> view(iTensor);
 
-    for(float& value : view)
+    for(float const& value : view)
     {
         EXPECT_EQ(value, 1.0f);
     }
@@ -456,7 +456,7 @@ TEST(TestTensorView, FromConstITensorReference)
     tensor.fillWithValue(2.0f);
 
     const ITensor& iTensor = tensor;
-    ConstTensorView<float> view(iTensor);
+    ConstTensorView<float> view(iTensor); // NOLINT(misc-const-correctness) begin() not const
 
     for(const float& value : view)
     {
@@ -513,7 +513,7 @@ TEST(TestTensorView, StdAccumulate)
     std::iota(view.begin(), view.end(), 1);
 
     // Sum all values
-    int sum = std::accumulate(view.begin(), view.end(), 0);
+    int const sum = std::accumulate(view.begin(), view.end(), 0);
     EXPECT_EQ(sum, 15); // 1+2+3+4+5
 }
 
@@ -530,7 +530,7 @@ TEST(TestTensorView, StdTransform)
 
     // Verify
     int idx = 0;
-    for(float& value : view)
+    for(float const& value : view)
     {
         EXPECT_FLOAT_EQ(value, static_cast<float>((idx + 1) * 2));
         ++idx;
@@ -550,7 +550,7 @@ TEST(TestTensorView, StdForEach)
 
     // Verify
     int expected = 3;
-    for(int& value : view)
+    for(int const& value : view)
     {
         EXPECT_EQ(value, expected);
         expected += 3;
@@ -573,8 +573,8 @@ TEST(TestTensorView, PrefixIncrement)
     auto it2 = ++it; // Prefix increment
 
     // Both should point to same element
-    int& val1 = *it;
-    int& val2 = *it2;
+    int const& val1 = *it;
+    int const& val2 = *it2;
     EXPECT_EQ(&val1, &val2);
     EXPECT_EQ(val1, 20);
 }
@@ -591,10 +591,10 @@ TEST(TestTensorView, PostfixIncrement)
     auto it2 = it++; // Postfix increment
 
     // it2 should point to old position
-    int& val2 = *it2;
+    int const& val2 = *it2;
     EXPECT_EQ(val2, 10);
 
     // it should point to new position
-    int& val1 = *it;
+    int const& val1 = *it;
     EXPECT_EQ(val1, 20);
 }
