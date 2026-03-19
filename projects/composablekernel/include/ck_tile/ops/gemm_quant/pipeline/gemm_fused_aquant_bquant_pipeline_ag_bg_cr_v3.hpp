@@ -116,7 +116,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
         // clang-format off
         constexpr index_t WaveNumM = BlockGemmShape::BlockWarps::at(I0{});
         constexpr index_t WaveNumN = BlockGemmShape::BlockWarps::at(I1{});
-        return concat('_', "abquant_pipeline_AgBgCrCompV3",
+        return concat('_', "fusedaquant_bquant_pipeline_AgBgCrCompV3",
                       concat('x', MPerBlock, NPerBlock, KPerBlock),
                       BlockSize,
                       concat('x', WaveNumM, WaveNumN),
