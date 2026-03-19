@@ -837,7 +837,7 @@ hipblasStatus_t
                                     int*                             returnAlgoCount);
 
 /*! \ingroup library_module
- *  \brief Retrieve the possible algorithms.
+ *  \brief Compute a matrix multiplication on the described inputs.
  *
  *  \details
  *  This function computes the matrix multiplication of matrices A and B to
