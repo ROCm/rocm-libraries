@@ -28,8 +28,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNode)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -39,8 +39,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeMissingValues)
 {
     BatchnormBackwardAttributes batchnormAttributes;
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -48,35 +48,35 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeMissingValues)
     batchnormAttributes = BatchnormBackwardAttributes{};
     batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithDy(std::move(batchnormAttributesCopy), graphAttributes);
+    const BatchnormBackwardNode nodeWithDy(std::move(batchnormAttributesCopy), graphAttributes);
 
     error = nodeWithDy.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithX(std::move(batchnormAttributesCopy), graphAttributes);
+    const BatchnormBackwardNode nodeWithX(std::move(batchnormAttributesCopy), graphAttributes);
 
     error = nodeWithX.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithScale(std::move(batchnormAttributesCopy), graphAttributes);
+    const BatchnormBackwardNode nodeWithScale(std::move(batchnormAttributesCopy), graphAttributes);
 
     error = nodeWithScale.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithDx(std::move(batchnormAttributesCopy), graphAttributes);
+    const BatchnormBackwardNode nodeWithDx(std::move(batchnormAttributesCopy), graphAttributes);
 
     error = nodeWithDx.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithDscale(std::move(batchnormAttributesCopy), graphAttributes);
+    const BatchnormBackwardNode nodeWithDscale(std::move(batchnormAttributesCopy), graphAttributes);
 
     error = nodeWithDscale.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -94,7 +94,7 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeMissingValues)
     scaleTensor->set_dim({1, 64, 1, 1});
 
     batchnormAttributesCopy = batchnormAttributes;
-    BatchnormBackwardNode const nodeWithAllValues(std::move(batchnormAttributesCopy),
+    const BatchnormBackwardNode nodeWithAllValues(std::move(batchnormAttributesCopy),
                                                   graphAttributes);
 
     error = nodeWithAllValues.pre_validate_node();
@@ -129,7 +129,7 @@ TEST(TestBatchnormBackwardNode, InferPropertiesNode)
     auto dbiasTensor = batchnormAttributes.get_dbias();
     dbiasTensor->set_uid(4).set_name("DbiasTensor");
 
-    GraphAttributes const graphAttributes;
+    const GraphAttributes graphAttributes;
     BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -167,8 +167,8 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensors)
 
     batchnormAttributes.set_peer_stats({peerStat1, peerStat2});
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -248,8 +248,8 @@ TEST(TestBatchnormBackwardNode, PackNode)
         .set_stride({2, 1, 1, 1});
     batchnormAttributes.set_dbias(dbiasTensor);
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     // Pack the node
     flatbuffers::FlatBufferBuilder builder;
@@ -301,8 +301,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedInputGradientShapes)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -332,8 +332,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedOutputGradientShapes
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -360,8 +360,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsMismatchedChannelDimensions)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -392,8 +392,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidDscaleTensorShape)
 
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -423,8 +423,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidDbiasTensorShape)
     dbiasTensor->set_dim({2, 64, 1, 1}); // Batch dimension should be 1
     batchnormAttributes.set_dbias(dbiasTensor);
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -455,8 +455,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidMeanTensorShape)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -487,8 +487,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalidInvVarianceTensorShape)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -519,8 +519,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsInvalidSpatialDimensions)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -549,8 +549,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeAcceptsValidSpatialDimensions)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -580,8 +580,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsMismatchedMeanInvVariance)
         batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
         // Intentionally NOT setting inv_variance
 
-        GraphAttributes const graphAttributes;
-        BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+        const GraphAttributes graphAttributes;
+        const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
         auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -610,8 +610,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsMismatchedMeanInvVariance)
         // Intentionally NOT setting mean
         batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
 
-        GraphAttributes const graphAttributes;
-        BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+        const GraphAttributes graphAttributes;
+        const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
         auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -640,8 +640,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsMismatchedMeanInvVariance)
         batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
         batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
 
-        GraphAttributes const graphAttributes;
-        BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+        const GraphAttributes graphAttributes;
+        const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
         auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::OK);
@@ -668,8 +668,8 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsMismatchedMeanInvVariance)
         batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
         // Intentionally NOT setting mean or inv_variance
 
-        GraphAttributes const graphAttributes;
-        BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+        const GraphAttributes graphAttributes;
+        const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
         auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::OK);
@@ -730,8 +730,8 @@ TEST(TestBatchnormBackwardNode, PackNodeWithoutMeanAndInvVariance)
         .set_stride({2, 1, 1, 1});
     batchnormAttributes.set_dbias(dbiasTensor);
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -783,8 +783,8 @@ TEST(TestBatchnormBackwardNode, PreValidateAcceptsValid5DSpatialDimensions)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -811,8 +811,8 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttributes;
-    BatchnormBackwardNode const node(std::move(batchnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -823,7 +823,7 @@ TEST(TestBatchnormBackwardNode, PreValidateRejectsInvalid5DSpatialDimensions)
 
 TEST(TestBatchnormBackwardNode, GetNodeTypeReturnsBatchnormBackward)
 {
-    GraphAttributes const graphAttrs;
-    BatchnormBackwardNode const node(BatchnormBackwardAttributes{}, graphAttrs);
+    const GraphAttributes graphAttrs;
+    const BatchnormBackwardNode node(BatchnormBackwardAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM_BACKWARD);
 }

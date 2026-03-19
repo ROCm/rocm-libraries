@@ -409,7 +409,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorDescriptor)
                                        1,
                                        &elementCount,
                                        static_cast<void*>(&rawX)));
-    std::unique_ptr<HipdnnBackendDescriptor> const retrievedX(rawX);
+    const std::unique_ptr<HipdnnBackendDescriptor> retrievedX(rawX);
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedX, nullptr);
@@ -629,7 +629,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string const str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormInferenceOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=70"), std::string::npos);
     ASSERT_NE(str.find("mean_uid=71"), std::string::npos);
