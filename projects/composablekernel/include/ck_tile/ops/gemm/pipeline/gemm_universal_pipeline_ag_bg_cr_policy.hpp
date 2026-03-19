@@ -49,7 +49,9 @@ struct UniversalGemmBasePolicy
         constexpr index_t kKWarpTile = WarpTile::at(number<2>{});
         // Max K warp tile for transpose load based on data type size
         constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
-        if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        if constexpr(std::is_same_v<ADataType, float>)
+            return false;
+        else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             return false;
         else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
@@ -65,7 +67,9 @@ struct UniversalGemmBasePolicy
         constexpr index_t kKWarpTile = WarpTile::at(number<2>{});
         // Max K warp tile for transpose load based on data type size
         constexpr index_t kMaxKWarpTile = (sizeof(BDataType) == 1) ? 64 : 32;
-        if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        if constexpr(std::is_same_v<BDataType, float>)
+            return false;
+        else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
             return false;
         else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
@@ -532,14 +536,8 @@ struct UniversalGemmBasePolicy
             ck_tile::numeric_traits<remove_cvref_t<DataType>>::PackedSize;
 
         // Assume DataType is even!
-        if constexpr(XPerTile % (PackedSize * 32 / sizeof(DataType)) == 0 &&
-                     elements_per_thread % (PackedSize * 32 / sizeof(DataType)) == 0 &&
-                     PackedSize == 2)
-        {
-            return (PackedSize * 32 / sizeof(DataType));
-        }
-        else if constexpr(XPerTile % (PackedSize * 16 / sizeof(DataType)) == 0 &&
-                          elements_per_thread % (PackedSize * 16 / sizeof(DataType)) == 0)
+        if constexpr(XPerTile % (PackedSize * 16 / sizeof(DataType)) == 0 &&
+                     elements_per_thread % (PackedSize * 16 / sizeof(DataType)) == 0)
         {
             return (PackedSize * 16 / sizeof(DataType));
         }
@@ -713,11 +711,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
     {
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t VecLoadSize =
-            Problem::FixedVectorSize ? Problem::VectorSizeA : GetVectorSizeA<Problem>();
+        constexpr index_t BlockSize     = Problem::kBlockSize;
+        constexpr index_t MPerBlock     = Problem::BlockGemmShape::kM;
+        constexpr index_t KPerBlock     = Problem::BlockGemmShape::kK;
+        constexpr index_t VecLoadSize   = GetVectorSizeA<Problem>();
         constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
 
         using ALayout = remove_cvref_t<
@@ -758,9 +755,7 @@ struct UniversalGemmBasePolicy
         // since the assumption is that A type is going to be the B LDS type
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         constexpr index_t VecLoadSize =
-            IsBCastPolicyBeforeLDSWrite
-                ? (Problem::FixedVectorSize ? Problem::VectorSizeA : GetVectorSizeA<Problem>())
-                : (Problem::FixedVectorSize ? Problem::VectorSizeB : GetVectorSizeB<Problem>());
+            IsBCastPolicyBeforeLDSWrite ? GetVectorSizeA<Problem>() : GetVectorSizeB<Problem>();
         constexpr index_t NumWaveGroups = Problem::NumWaveGroups;
         using BLayout                   = remove_cvref_t<
                               std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::BsLayoutTuple>>>;
@@ -857,30 +852,32 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
     {
         using ADataType                 = remove_cvref_t<typename Problem::ADataType>;
+        constexpr auto APackedSize      = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = Derived::template MakeALdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_a   = integer_least_multiple(
-            a_lds_block_desc.get_element_space_size() * sizeof(ADataType), 16);
+            a_lds_block_desc.get_element_space_size() * sizeof(ADataType) / APackedSize, 16);
         return smem_size_a;
     }
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeB()
     {
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
                                                                         typename Problem::ADataType,
                                                                         typename Problem::BDataType>;
+        constexpr auto BPackedSize                 = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_b   = integer_least_multiple(
-            b_lds_block_desc.get_element_space_size() * sizeof(BDataType), 16);
+            b_lds_block_desc.get_element_space_size() * sizeof(BDataType) / BPackedSize, 16);
         return smem_size_b;
     }
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr index_t GetSmemSize()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr index_t smem_size_a = GetSmemSizeA<Problem>();
         constexpr index_t smem_size_b = GetSmemSizeB<Problem>();
@@ -909,26 +906,28 @@ struct UniversalGemmPipelineAgBgCrPolicy
             : vector_size * 4 == thread_elements              ? WGAttrNumAccessEnum::Quad
                                                               : WGAttrNumAccessEnum::Invalid;
 
-        using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType = remove_cvref_t<typename Problem::BDataType>;
-        using ATypeToUse =
-            std::conditional_t<std::is_same_v<ADataType, pk_int4_t>, BDataType, ADataType>;
+        using ADataType       = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType       = remove_cvref_t<typename Problem::BDataType>;
+        using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
+
+        using ATypeToUse = if_select_t<ADataType, pk_int4_t, BDataType, ADataType>;
         using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
                                                   std::is_same_v<BDataType, pk_fp4_t> ||
                                                   sizeof(BDataType) < sizeof(ADataType),
                                               ADataType,
                                               BDataType>;
 
-        using WarpGemm = WarpGemmDispatcher<ATypeToUse,
-                                            BTypeToUse,
-                                            typename Problem::CDataType,
-                                            WarpTile::at(I0),
-                                            WarpTile::at(I1),
-                                            WarpTile::at(I2),
-                                            Problem::TransposeC,
-                                            false,
-                                            Problem::UseStructuredSparsity,
-                                            wg_attr_num_access>;
+        using WarpGemm =
+            WarpGemmDispatcher<if_select_t<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
+                               if_select_t<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
+                               typename Problem::CDataType,
+                               WarpTile::at(I0),
+                               WarpTile::at(I1),
+                               WarpTile::at(I2),
+                               Problem::TransposeC,
+                               false,
+                               Problem::UseStructuredSparsity,
+                               wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,
                                                                       BTypeToUse,

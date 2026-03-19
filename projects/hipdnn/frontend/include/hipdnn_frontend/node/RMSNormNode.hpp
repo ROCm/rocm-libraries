@@ -8,11 +8,12 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/detail/RMSNormPacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class RMSNormNode : public BaseNode<RMSNormNode>
+class RMSNormNode : public BaseNode<RMSNormNode, NodeType::RMS_NORM>
 {
 public:
     RMSNormAttributes attributes;
@@ -74,7 +75,7 @@ public:
         // SECTION 4: Validate Channel Dimensions and Scale Tensor Shape
         // Scale is per-channel with shape [1, C, 1, 1, ...]
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        int64_t const channels = xDims[1];
 
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
@@ -177,6 +178,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createRMSNormOperation(attributes, tensorDescs, operations);
     }
 };
 }

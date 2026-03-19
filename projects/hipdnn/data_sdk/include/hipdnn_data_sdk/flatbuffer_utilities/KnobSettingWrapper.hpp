@@ -6,7 +6,6 @@
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
 #include <stdexcept>
-#include <typeinfo>
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 
@@ -22,14 +21,13 @@ public:
     virtual bool isValid() const = 0;
     virtual std::string knobId() const = 0;
     virtual hipdnn_data_sdk::data_objects::KnobValue valueType() const = 0;
-    virtual const std::type_info& valueClassType() const = 0;
 
     virtual std::unique_ptr<hipdnn_data_sdk::data_objects::KnobSettingT> toKnobSettingT() const = 0;
 
     template <typename T>
     const T& valueAs() const
     {
-        if(valueClassType() != typeid(T))
+        if(valueType() != hipdnn_data_sdk::data_objects::KnobValueTraits<T>::enum_value)
         {
             throw std::invalid_argument("Value is not of the expected type");
         }
@@ -90,23 +88,6 @@ public:
     {
         throwIfNotValid();
         return _shallowKnobSetting->value_type();
-    }
-
-    const std::type_info& valueClassType() const override
-    {
-        throwIfNotValid();
-        switch(valueType())
-        {
-        case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-            return typeid(hipdnn_data_sdk::data_objects::IntValue);
-        case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-            return typeid(hipdnn_data_sdk::data_objects::FloatValue);
-        case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-            return typeid(hipdnn_data_sdk::data_objects::StringValue);
-        case hipdnn_data_sdk::data_objects::KnobValue::NONE:
-        default:
-            throw std::invalid_argument("Value type is not recognized");
-        }
     }
 
     std::unique_ptr<hipdnn_data_sdk::data_objects::KnobSettingT> toKnobSettingT() const override
