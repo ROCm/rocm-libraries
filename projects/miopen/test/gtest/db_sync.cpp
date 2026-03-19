@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
 
@@ -659,8 +636,6 @@ void CheckDynamicFDBEntry(size_t thread_index,
                 {
                     std::string compile_options = kern.comp_options;
                     auto program_file           = miopen::make_object_file_name(kern.kernel_file);
-                    ASSERT_TRUE(kern.kernel_file.extension() != ".mlir")
-                        << "MLIR detected in dynamic solvers";
                     compile_options += " -mcpu=" + handle.GetDeviceName();
                     auto search = checked_kdbs.find({program_file, compile_options});
                     if(search !=
@@ -787,14 +762,6 @@ void CheckFDBEntry(size_t thread_index,
             auto db         = miopen::GetDb(ctx);
             const auto solv = id.GetSolver();
 
-            // Skip MLIR
-            if(miopen::StartsWith(id.ToString(), "ConvMlir"))
-            {
-                MIOPEN_LOG_I("Skipping MLIR solver");
-                ++fdb_idx;
-                continue;
-            }
-
             if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not solv.IsApplicable(ctx, problem))
             {
                 MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
@@ -883,11 +850,8 @@ void CheckFDBEntry(size_t thread_index,
                         bool found                  = false;
                         std::string compile_options = kern.comp_options;
                         auto program_file = miopen::make_object_file_name(kern.kernel_file);
-                        if(kern.kernel_file.extension() != ".mlir")
-                        {
-                            auto& handle = ctx.GetStream();
-                            compile_options += " -mcpu=" + handle.GetDeviceName();
-                        }
+                        auto& handle      = ctx.GetStream();
+                        compile_options += " -mcpu=" + handle.GetDeviceName();
                         auto search           = checked_kdbs.find({program_file, compile_options});
                         bool reported_already = search != checked_kdbs.end();
                         if(!reported_already) // we have reported this object before, no need to

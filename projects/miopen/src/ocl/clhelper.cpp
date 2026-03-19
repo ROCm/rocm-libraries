@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #include <miopen/clhelper.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/gcn_asm_utils.hpp>
@@ -30,7 +8,6 @@
 #include <miopen/kernel.hpp>
 #include <miopen/kernel_warnings.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/mlir_build.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/ocldeviceinfo.hpp>
 #include <miopen/tmp_dir.hpp>
@@ -150,8 +127,7 @@ ClProgramPtr LoadProgram(cl_context ctx,
     std::string source;
     fs::path program_name{program};
 
-    // For mlir build, leave both source and kernel_src to be empty
-    if((kernel_src.empty()) && program_name.extension() != ".mlir")
+    if(kernel_src.empty())
         source = miopen::GetKernelSrc(program_name);
     else
         source = kernel_src;
@@ -179,14 +155,6 @@ ClProgramPtr LoadProgram(cl_context ctx,
         bin_file_to_str(hsaco_file, buf);
         return LoadBinaryProgram(ctx, device, buf);
     }
-#if MIOPEN_USE_MLIR
-    else if(program_name.extension() == ".mlir")
-    {
-        std::vector<char> buffer;
-        MiirGenBin(params, buffer);
-        return LoadBinaryProgram(ctx, device, buffer);
-    }
-#endif
     else // OpenCL programs.
     {
         ClProgramPtr result{CreateProgram(ctx, source.data(), source.size())};

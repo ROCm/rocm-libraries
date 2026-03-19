@@ -3,6 +3,10 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.0 for ROCm 7.14.0
+### Removed
+* Removed MLIR compilation backend (`MIOPEN_USE_MLIR`) and all MLIR-based solvers
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow

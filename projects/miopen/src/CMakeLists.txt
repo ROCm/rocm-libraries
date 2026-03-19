@@ -226,12 +226,6 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_wrw_v4r4_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_wrw_v4r4_xdlops_padded_gemm.cpp
     solver/conv/conv_MP_bidirectional_winograd.cpp
-    solver/conv/conv_mlir_igemm_bwd.cpp
-    solver/conv/conv_mlir_igemm_bwd_xdlops.cpp
-    solver/conv/conv_mlir_igemm_fwd.cpp
-    solver/conv/conv_mlir_igemm_fwd_xdlops.cpp
-    solver/conv/conv_mlir_igemm_wrw.cpp
-    solver/conv/conv_mlir_igemm_wrw_xdlops.cpp
     solver/conv/conv_multipass_wino3x3WrW.cpp
     solver/conv/conv_hip_dir2D_bwdWrW_53.cpp
     solver/conv/conv_hip_dir2D11x11.cpp
@@ -846,14 +840,6 @@ if(MIOPEN_USE_COMGR)
     list(APPEND MIOpen_Source comgr.cpp)
 endif()
 
-if(MIOPEN_USE_MLIR)
-    list(APPEND MIOpen_Source
-        conv/invokers/mlir_impl_gemm.cpp
-        mlir_build.cpp
-        solver/conv/mlir_common.cpp
-        )
-endif()
-
 # build library
 if(MIOPEN_ENABLE_SQLITE)
     add_library( MIOpen
@@ -928,7 +914,6 @@ target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZ
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)
-    # Temporary workaround on rocMLIR not exporting correctly libraries it depends on.
     target_link_libraries(MIOpen PRIVATE ntdll)
 endif()
 
@@ -1008,17 +993,6 @@ if(hipblaslt_FOUND)
 endif()
 
 target_include_directories( MIOpen SYSTEM PRIVATE ${ROCRAND_INCLUDE_DIR} )
-
-# For backward compatibility with ROCm 5.3
-# Build with library libMLIRMIOpen
-if(LIBMLIRMIOPEN)
-    target_link_libraries(MIOpen PRIVATE ${LIBMLIRMIOPEN})
-endif()
-
-# Build with package rocMLIR
-if(rocMLIR_FOUND)
-    target_link_libraries(MIOpen PRIVATE rocMLIR::rockCompiler)
-endif()
 
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
