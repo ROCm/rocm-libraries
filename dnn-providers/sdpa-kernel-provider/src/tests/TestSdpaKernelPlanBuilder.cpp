@@ -32,5 +32,15 @@ TEST_F(TestSdpaKernelPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
+TEST_F(TestSdpaKernelPlanBuilder, IsApplicableReturnsTrueForSdpaGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
 } // namespace
 } // namespace sdpa_kernel_provider

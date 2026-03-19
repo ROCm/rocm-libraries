@@ -38,5 +38,16 @@ TEST_F(TestSdpaKernelEngine, IsApplicableReturnsFalseForNonSdpaGraph)
     EXPECT_FALSE(_engine.isApplicable(_handle, graphWrapper));
 }
 
+TEST_F(TestSdpaKernelEngine, IsApplicableReturnsTrueForSdpaGraph)
+{
+    // Create a batchnorm inference graph - this does not use SDPA attributes
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
+}
+
 } // namespace
 } // namespace sdpa_kernel_provider

@@ -46,7 +46,7 @@ TEST(TestSdpaKernelContainer, GetEngineManagerReturnsValidReference)
     (void)engineManager;
 }
 
-TEST(TestSdpaKernelContainer, SomeTest)
+TEST(TestSdpaKernelContainer, GetpplicableEngineIds)
 {
     SdpaKernelHandle handle;
     SdpaKernelContainer container;

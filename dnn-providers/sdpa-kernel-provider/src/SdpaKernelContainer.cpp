@@ -29,15 +29,11 @@ namespace sdpa_kernel_provider
 
 using PlanBuilderList = std::vector<std::unique_ptr<IPlanBuilder>>;
 
-// Remove definition
 template <class T>
-PlanBuilderList defaultPlanBuilders()
-{
-    return {};
-}
+PlanBuilderList defaultPlanBuilders();
 
 template <>
-PlanBuilderList defaultPlanBuilders<SdpaKernelPlanBuilder>()
+PlanBuilderList defaultPlanBuilders<SdpaKernelEngine>()
 {
     return makeVector<std::unique_ptr<IPlanBuilder>>(std::make_unique<SdpaKernelPlanBuilder>());
 }
