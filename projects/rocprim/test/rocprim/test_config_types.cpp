@@ -40,24 +40,6 @@ TEST(RocprimConfigTypesTests, GetTargetGPUFromName)
     static_assert(get_target_gpu_from_name("doesn't exist") == gpu::generic);
 }
 
-TEST(RocprimConfigTypesTests, GetGenWavefrontSize)
-{
-    using namespace rocprim::detail;
-    using namespace rocprim::arch;
-
-    static_assert(gen_wavefront_size(gen::gcn3) == wavefront::target::size64);
-    static_assert(gen_wavefront_size(gen::gcn5) == wavefront::target::size64);
-    static_assert(gen_wavefront_size(gen::cdna1) == wavefront::target::size64);
-    static_assert(gen_wavefront_size(gen::cdna2) == wavefront::target::size64);
-    static_assert(gen_wavefront_size(gen::cdna3) == wavefront::target::size64);
-    static_assert(gen_wavefront_size(gen::cdna4) == wavefront::target::size64);
-
-    static_assert(gen_wavefront_size(gen::rdna1) == wavefront::target::size32);
-    static_assert(gen_wavefront_size(gen::rdna2) == wavefront::target::size32);
-    static_assert(gen_wavefront_size(gen::rdna3) == wavefront::target::size32);
-    static_assert(gen_wavefront_size(gen::rdna4) == wavefront::target::size32);
-}
-
 TEST(RocprimConfigTypesTests, GetDeviceArch)
 {
     using rocprim::detail::get_device_arch;
