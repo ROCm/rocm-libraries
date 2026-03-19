@@ -22,6 +22,7 @@ from rrtest.core import (
 def build_dir():
     """Fixture to provide build directory."""
     import os
+
     if "ROCROLLER_BUILD_DIR" in os.environ:
         return Path(os.environ["ROCROLLER_BUILD_DIR"])
 

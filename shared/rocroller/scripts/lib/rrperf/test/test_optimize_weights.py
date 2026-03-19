@@ -12,7 +12,6 @@ import pytest
 import rrperf.optimize_weights as ow
 import yaml
 
-
 weights_subclasses = [ow.FullWeights, ow.SimplifiedWeights]
 
 
