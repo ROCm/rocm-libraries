@@ -391,3 +391,112 @@ TEST_F(TestPointwiseOperationFromNode, FailsWhenOptionalIn2UidSetButTensorMissin
     ASSERT_THROW_HIPDNN_STATUS(PointwiseOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
 }
+
+TEST_F(TestPointwiseOperationFromNode, FromNodePreservesReluScalars)
+{
+    auto attrs = createStandardPointwiseAttrs();
+    attrs.operation = PointwiseMode::RELU_FWD;
+    attrs.relu_lower_clip = -1.0F;
+    attrs.relu_upper_clip = 6.0F;
+    attrs.relu_lower_clip_slope = 0.01F;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+
+    // Verify via getData()
+    EXPECT_TRUE(desc->getData().relu_lower_clip.has_value());
+    EXPECT_FLOAT_EQ(desc->getData().relu_lower_clip.value(), -1.0F);
+    EXPECT_TRUE(desc->getData().relu_upper_clip.has_value());
+    EXPECT_FLOAT_EQ(desc->getData().relu_upper_clip.value(), 6.0F);
+    EXPECT_TRUE(desc->getData().relu_lower_clip_slope.has_value());
+    EXPECT_FLOAT_EQ(desc->getData().relu_lower_clip_slope.value(), 0.01F);
+
+    // Verify round-trip via buildNode()
+    auto rebuiltNode = desc->buildNode();
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    ASSERT_TRUE(rebuiltAttrs->relu_lower_clip.has_value());
+    EXPECT_FLOAT_EQ(rebuiltAttrs->relu_lower_clip.value(), -1.0F);
+    ASSERT_TRUE(rebuiltAttrs->relu_upper_clip.has_value());
+    EXPECT_FLOAT_EQ(rebuiltAttrs->relu_upper_clip.value(), 6.0F);
+    ASSERT_TRUE(rebuiltAttrs->relu_lower_clip_slope.has_value());
+    EXPECT_FLOAT_EQ(rebuiltAttrs->relu_lower_clip_slope.value(), 0.01F);
+}
+
+TEST_F(TestPointwiseOperationFromNode, FromNodePreservesSwishEluSoftplusScalars)
+{
+    auto attrs = createStandardPointwiseAttrs();
+    attrs.operation = PointwiseMode::SWISH_FWD;
+    attrs.swish_beta = 1.5F;
+    attrs.elu_alpha = 0.25F;
+    attrs.softplus_beta = 2.0F;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+
+    EXPECT_TRUE(desc->getData().swish_beta.has_value());
+    EXPECT_FLOAT_EQ(desc->getData().swish_beta.value(), 1.5F);
+    EXPECT_TRUE(desc->getData().elu_alpha.has_value());
+    EXPECT_FLOAT_EQ(desc->getData().elu_alpha.value(), 0.25F);
+    EXPECT_TRUE(desc->getData().softplus_beta.has_value());
+    EXPECT_FLOAT_EQ(desc->getData().softplus_beta.value(), 2.0F);
+
+    auto rebuiltNode = desc->buildNode();
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    ASSERT_TRUE(rebuiltAttrs->swish_beta.has_value());
+    EXPECT_FLOAT_EQ(rebuiltAttrs->swish_beta.value(), 1.5F);
+    ASSERT_TRUE(rebuiltAttrs->elu_alpha.has_value());
+    EXPECT_FLOAT_EQ(rebuiltAttrs->elu_alpha.value(), 0.25F);
+    ASSERT_TRUE(rebuiltAttrs->softplus_beta.has_value());
+    EXPECT_FLOAT_EQ(rebuiltAttrs->softplus_beta.value(), 2.0F);
+}
+
+TEST_F(TestPointwiseOperationFromNode, FromNodePreservesAxis)
+{
+    auto attrs = createStandardPointwiseAttrs();
+    attrs.operation = PointwiseMode::GEN_INDEX;
+    attrs.axis_tensor_uid = 2;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+
+    EXPECT_TRUE(desc->getData().axis_tensor_uid.has_value());
+    EXPECT_EQ(desc->getData().axis_tensor_uid.value(), 2);
+
+    auto rebuiltNode = desc->buildNode();
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    ASSERT_TRUE(rebuiltAttrs->axis_tensor_uid.has_value());
+    EXPECT_EQ(rebuiltAttrs->axis_tensor_uid.value(), 2);
+}
+
+TEST_F(TestPointwiseOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
+{
+    auto node = createStandardNode();
+    auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
+
+    auto rebuiltNode = desc->buildNode();
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+
+    EXPECT_FALSE(rebuiltAttrs->relu_lower_clip.has_value());
+    EXPECT_FALSE(rebuiltAttrs->relu_upper_clip.has_value());
+    EXPECT_FALSE(rebuiltAttrs->relu_lower_clip_slope.has_value());
+    EXPECT_FALSE(rebuiltAttrs->swish_beta.has_value());
+    EXPECT_FALSE(rebuiltAttrs->elu_alpha.has_value());
+    EXPECT_FALSE(rebuiltAttrs->softplus_beta.has_value());
+    EXPECT_FALSE(rebuiltAttrs->axis_tensor_uid.has_value());
+}

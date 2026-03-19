@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -167,6 +168,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
     EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+    EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
 
 // Verifies that tensors are accessible by UID on the reconstructed graph,
@@ -494,15 +496,6 @@ TEST_F(IntegrationGraphLifting, GraphNamePreservedThroughDeserializeViaBackend)
 // Pointwise Lifting Tests
 // ============================================================================
 
-// Test constants for pointwise lifting
-constexpr int64_t K_PW_TENSOR_IN0_UID = 100;
-constexpr int64_t K_PW_TENSOR_IN1_UID = 101;
-constexpr int64_t K_PW_TENSOR_IN2_UID = 102;
-constexpr int64_t K_PW_TENSOR_OUT0_UID = 200;
-
-constexpr std::array<int64_t, 4> K_PW_TENSOR_DIMS = {2, 64, 32, 32};
-constexpr std::array<int64_t, 4> K_PW_TENSOR_STRIDES = {65536, 1024, 32, 1};
-
 // Builds a binary pointwise (ADD) graph, lowers via build_operation_graph(handle),
 // lifts back with fromBackendDescriptor(), and verifies operation mode, tensors,
 // and graph-level data types.
@@ -559,8 +552,12 @@ TEST_F(IntegrationGraphLifting, PointwiseBinaryAddRoundTripViaCApi)
 
     ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN1_UID), 0u);
     EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_data_type(), DataType::FLOAT);
 
     ASSERT_NE(tensorMap.count(K_PW_TENSOR_OUT0_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
     EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_data_type(), DataType::FLOAT);
 
     // Verify the lifted graph has 1 pointwise sub-node
@@ -571,6 +568,7 @@ TEST_F(IntegrationGraphLifting, PointwiseBinaryAddRoundTripViaCApi)
     ASSERT_NE(pwNode, nullptr) << "Expected a PointwiseNode";
 
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::ADD);
+    EXPECT_EQ(pwNode->attributes.get_name(), "add_op");
     EXPECT_EQ(pwNode->attributes.get_input_0()->get_uid(), K_PW_TENSOR_IN0_UID);
     EXPECT_EQ(pwNode->attributes.get_input_1()->get_uid(), K_PW_TENSOR_IN1_UID);
     EXPECT_EQ(pwNode->attributes.get_output_0()->get_uid(), K_PW_TENSOR_OUT0_UID);
@@ -685,10 +683,26 @@ TEST_F(IntegrationGraphLifting, PointwiseTernarySelectRoundTrip)
 
     auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 4u);
-    EXPECT_NE(tensorMap.count(K_PW_TENSOR_IN0_UID), 0u);
-    EXPECT_NE(tensorMap.count(K_PW_TENSOR_IN1_UID), 0u);
-    EXPECT_NE(tensorMap.count(K_PW_TENSOR_IN2_UID), 0u);
-    EXPECT_NE(tensorMap.count(K_PW_TENSOR_OUT0_UID), 0u);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN0_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN0_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN0_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN0_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN1_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN1_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN2_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN2_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN2_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_IN2_UID]->get_data_type(), DataType::FLOAT);
+
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_OUT0_UID), 0u);
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_dim(), toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_stride(), toVec(K_PW_TENSOR_STRIDES));
+    EXPECT_EQ(tensorMap[K_PW_TENSOR_OUT0_UID]->get_data_type(), DataType::FLOAT);
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -987,6 +1001,91 @@ TEST_F(IntegrationGraphLifting, PointwiseGenIndexAxisPreserved)
     EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::GEN_INDEX);
     EXPECT_TRUE(pwNode->attributes.get_axis().has_value());
     EXPECT_EQ(pwNode->attributes.get_axis().value(), 2);
+}
+
+// Builds a conv_fprop + pointwise RELU fusion graph, lowers via the C-API,
+// lifts back, and verifies both operation nodes and the shared virtual tensor.
+TEST_F(IntegrationGraphLifting, ConvFpropReluFusionRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("ConvReluFusionTest")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Conv fprop inputs
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_name("conv_fprop_op");
+    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
+
+    // Conv output y is a virtual intermediate — no UID, not an output
+    auto y = graph->conv_fprop(x, w, convAttrs);
+
+    // Pointwise RELU on the conv output
+    PointwiseAttributes reluAttrs;
+    reluAttrs.set_name("relu_activation");
+    reluAttrs.set_mode(PointwiseMode::RELU_FWD);
+
+    auto reluOut = graph->pointwise(y, reluAttrs);
+    reluOut->set_uid(K_PW_RELU_OUT_UID).set_output(true).set_name("relu_out");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    // Lift back into a new graph
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify 2 operation nodes
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 2u) << "Expected 2 operation nodes (conv + relu)";
+
+    // First node: ConvolutionFpropNode
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr) << "Expected first node to be ConvolutionFpropNode";
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+    EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
+
+    // Second node: PointwiseNode with RELU_FWD
+    auto* pwNode = dynamic_cast<PointwiseNode*>(subNodes[1].get());
+    ASSERT_NE(pwNode, nullptr) << "Expected second node to be PointwiseNode";
+    EXPECT_EQ(pwNode->attributes.get_mode(), PointwiseMode::RELU_FWD);
+    EXPECT_EQ(pwNode->attributes.get_name(), "relu_activation");
+
+    // Verify tensor sharing: conv output and relu input share the same TensorAttributes
+    auto convY = convNode->attributes.get_y();
+    auto reluIn0 = pwNode->attributes.get_input_0();
+    EXPECT_EQ(convY.get(), reluIn0.get())
+        << "Conv output and relu input should share the same TensorAttributes object";
+
+    // Verify tensor map contains external tensors (X, W, relu_out) plus the virtual intermediate
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u) << "X tensor not found";
+    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u) << "W tensor not found";
+    EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u) << "relu_out tensor not found";
 }
 
 } // namespace
