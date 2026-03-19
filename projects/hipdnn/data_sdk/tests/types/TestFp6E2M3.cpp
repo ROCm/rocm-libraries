@@ -25,7 +25,7 @@ using namespace hipdnn_data_sdk::types;
 TEST(TestFp6E2M3, RoundTripAllValues)
 {
     // clang-format off
-    std::vector<float> exactValues = {
+    const std::vector<float> exactValues = {
         // Positive subnormals and zero
         0.0f,   0.125f, 0.25f,  0.375f, 0.5f,   0.625f, 0.75f,  0.875f,
         // Positive normals
@@ -41,9 +41,9 @@ TEST(TestFp6E2M3, RoundTripAllValues)
     };
     // clang-format on
 
-    for(float val : exactValues)
+    for(const float val : exactValues)
     {
-        fp6_e2m3 f6(val);
+        const fp6_e2m3 f6(val);
         EXPECT_EQ(static_cast<float>(f6), val);
     }
 }
@@ -70,7 +70,7 @@ class TestFp6E2M3Rounding : public ::testing::TestWithParam<RoundingTestCase>
 TEST_P(TestFp6E2M3Rounding, Rounding)
 {
     auto [input, expected] = GetParam();
-    fp6_e2m3 val(input);
+    const fp6_e2m3 val(input);
     EXPECT_EQ(static_cast<float>(val), expected);
 }
 
@@ -124,28 +124,28 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(TestFp6E2M3, SaturationPositive)
 {
-    fp6_e2m3 val1(8.0f);
+    const fp6_e2m3 val1(8.0f);
     EXPECT_EQ(static_cast<float>(val1), 7.5f);
 
-    fp6_e2m3 val2(100.0f);
+    const fp6_e2m3 val2(100.0f);
     EXPECT_EQ(static_cast<float>(val2), 7.5f);
 }
 
 TEST(TestFp6E2M3, SaturationNegative)
 {
-    fp6_e2m3 val1(-8.0f);
+    const fp6_e2m3 val1(-8.0f);
     EXPECT_EQ(static_cast<float>(val1), -7.5f);
 
-    fp6_e2m3 val2(-100.0f);
+    const fp6_e2m3 val2(-100.0f);
     EXPECT_EQ(static_cast<float>(val2), -7.5f);
 }
 
 TEST(TestFp6E2M3, SaturationInfinity)
 {
-    fp6_e2m3 posInf(std::numeric_limits<float>::infinity());
+    const fp6_e2m3 posInf(std::numeric_limits<float>::infinity());
     EXPECT_EQ(static_cast<float>(posInf), 7.5f);
 
-    fp6_e2m3 negInf(-std::numeric_limits<float>::infinity());
+    const fp6_e2m3 negInf(-std::numeric_limits<float>::infinity());
     EXPECT_EQ(static_cast<float>(negInf), -7.5f);
 }
 
@@ -155,21 +155,21 @@ TEST(TestFp6E2M3, SaturationInfinity)
 
 TEST(TestFp6E2M3, Underflow)
 {
-    fp6_e2m3 val1(0.05f);
+    const fp6_e2m3 val1(0.05f);
     EXPECT_EQ(static_cast<float>(val1), 0.0f);
 
-    fp6_e2m3 val2(-0.05f);
+    const fp6_e2m3 val2(-0.05f);
     EXPECT_EQ(static_cast<float>(val2), -0.0f);
     EXPECT_TRUE(std::signbit(static_cast<float>(val2)));
 
     // fp32 subnormal inputs (exercises shift > 24 path with fp32Exp == 0)
-    fp6_e2m3 val3(std::numeric_limits<float>::denorm_min());
+    const fp6_e2m3 val3(std::numeric_limits<float>::denorm_min());
     EXPECT_EQ(static_cast<float>(val3), 0.0f);
 
-    fp6_e2m3 val4(-std::numeric_limits<float>::denorm_min());
+    const fp6_e2m3 val4(-std::numeric_limits<float>::denorm_min());
     EXPECT_EQ(static_cast<float>(val4), 0.0f);
 
-    fp6_e2m3 val5(1e-40f);
+    const fp6_e2m3 val5(1e-40f);
     EXPECT_EQ(static_cast<float>(val5), 0.0f);
 }
 
@@ -181,7 +181,7 @@ TEST(TestFp6E2M3, IsnanAlwaysFalse)
 {
     for(uint8_t bits = 0; bits < 64; ++bits)
     {
-        fp6_e2m3 val = fp6_e2m3::from_bits(bits);
+        const fp6_e2m3 val = fp6_e2m3::from_bits(bits);
         EXPECT_FALSE(isnan(val));
     }
 }
@@ -190,7 +190,7 @@ TEST(TestFp6E2M3, IsinfAlwaysFalse)
 {
     for(uint8_t bits = 0; bits < 64; ++bits)
     {
-        fp6_e2m3 val = fp6_e2m3::from_bits(bits);
+        const fp6_e2m3 val = fp6_e2m3::from_bits(bits);
         EXPECT_FALSE(isinf(val));
     }
 }
@@ -199,7 +199,7 @@ TEST(TestFp6E2M3, IsfiniteAlwaysTrue)
 {
     for(uint8_t bits = 0; bits < 64; ++bits)
     {
-        fp6_e2m3 val = fp6_e2m3::from_bits(bits);
+        const fp6_e2m3 val = fp6_e2m3::from_bits(bits);
         EXPECT_TRUE(isfinite(val));
     }
 }
@@ -208,7 +208,7 @@ TEST(TestFp6E2M3, NanConversionToZero)
 {
     // Per OCP MX Spec, conversion from NaN is implementation-defined.
     // This implementation returns zero.
-    fp6_e2m3 fromNan(std::numeric_limits<float>::quiet_NaN());
+    const fp6_e2m3 fromNan(std::numeric_limits<float>::quiet_NaN());
     EXPECT_EQ(static_cast<float>(fromNan), 0.0f);
 }
 
@@ -247,7 +247,7 @@ TEST(TestFp6E2M3, NamedConstants)
 
 TEST(TestFp6x2E2M3, DefaultConstruction)
 {
-    fp6x2_e2m3 val;
+    const fp6x2_e2m3 val;
     EXPECT_EQ(val.data, 0x0000);
     EXPECT_EQ(static_cast<float>(val.lo()), 0.0f);
     EXPECT_EQ(static_cast<float>(val.hi()), 0.0f);
@@ -255,17 +255,17 @@ TEST(TestFp6x2E2M3, DefaultConstruction)
 
 TEST(TestFp6x2E2M3, SingleValueConstruction)
 {
-    fp6_e2m3 elem(3.0f);
-    fp6x2_e2m3 packed(elem);
+    const fp6_e2m3 elem(3.0f);
+    const fp6x2_e2m3 packed(elem);
     EXPECT_EQ(static_cast<float>(packed.lo()), 3.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 0.0f);
 }
 
 TEST(TestFp6x2E2M3, TwoValueConstruction)
 {
-    fp6_e2m3 lo(1.0f);
-    fp6_e2m3 hi(2.0f);
-    fp6x2_e2m3 packed(lo, hi);
+    const fp6_e2m3 lo(1.0f);
+    const fp6_e2m3 hi(2.0f);
+    const fp6x2_e2m3 packed(lo, hi);
     EXPECT_EQ(static_cast<float>(packed.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 2.0f);
 }
@@ -274,7 +274,7 @@ TEST(TestFp6x2E2M3, DataLayout)
 {
     // Verify storage model: lo = bits [5:0], hi = bits [11:6]
     // lo = 0x08 (1.0), hi = 0x10 (2.0) -> data = 0x08 | (0x10 << 6) = 0x08 | 0x400 = 0x408
-    fp6x2_e2m3 packed(fp6_e2m3::from_bits(0x08), fp6_e2m3::from_bits(0x10));
+    const fp6x2_e2m3 packed(fp6_e2m3::from_bits(0x08), fp6_e2m3::from_bits(0x10));
     EXPECT_EQ(packed.data, 0x0408);
     EXPECT_EQ(static_cast<float>(packed.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 2.0f);
@@ -282,40 +282,40 @@ TEST(TestFp6x2E2M3, DataLayout)
 
 TEST(TestFp6x2E2M3, NegativeValuesInLo)
 {
-    fp6_e2m3 neg(-2.0f);
-    fp6x2_e2m3 packed(neg);
+    const fp6_e2m3 neg(-2.0f);
+    const fp6x2_e2m3 packed(neg);
     EXPECT_EQ(static_cast<float>(packed.lo()), -2.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), 0.0f);
 }
 
 TEST(TestFp6x2E2M3, NegativeValuesInHi)
 {
-    fp6_e2m3 lo(1.0f);
-    fp6_e2m3 hi(-3.0f);
-    fp6x2_e2m3 packed(lo, hi);
+    const fp6_e2m3 lo(1.0f);
+    const fp6_e2m3 hi(-3.0f);
+    const fp6x2_e2m3 packed(lo, hi);
     EXPECT_EQ(static_cast<float>(packed.lo()), 1.0f);
     EXPECT_EQ(static_cast<float>(packed.hi()), -3.0f);
 }
 
 TEST(TestFp6x2E2M3, BothNegativeValues)
 {
-    fp6_e2m3 lo(-1.5f);
-    fp6_e2m3 hi(-4.0f);
-    fp6x2_e2m3 packed(lo, hi);
+    const fp6_e2m3 lo(-1.5f);
+    const fp6_e2m3 hi(-4.0f);
+    const fp6x2_e2m3 packed(lo, hi);
     EXPECT_EQ(static_cast<float>(packed.lo()), -1.5f);
     EXPECT_EQ(static_cast<float>(packed.hi()), -4.0f);
 }
 
 TEST(TestFp6x2E2M3, CopyConstruct)
 {
-    fp6x2_e2m3 a(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
-    fp6x2_e2m3 b(a);
+    const fp6x2_e2m3 a(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
+    const fp6x2_e2m3 b(a);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST(TestFp6x2E2M3, CopyAssignment)
 {
-    fp6x2_e2m3 a(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
+    const fp6x2_e2m3 a(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
     fp6x2_e2m3 b;
     b = a;
     EXPECT_EQ(a.data, b.data);
@@ -344,9 +344,9 @@ TEST(TestFp6x4E2M3, DefaultConstruction)
 
 TEST(TestFp6x4E2M3, TwoPairConstruction)
 {
-    fp6x2_e2m3 loPair(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
-    fp6x2_e2m3 hiPair(fp6_e2m3(3.0f), fp6_e2m3(4.0f));
-    fp6x4_e2m3 packed(loPair, hiPair);
+    const fp6x2_e2m3 loPair(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
+    const fp6x2_e2m3 hiPair(fp6_e2m3(3.0f), fp6_e2m3(4.0f));
+    const fp6x4_e2m3 packed(loPair, hiPair);
 
     auto extractedLo = packed.lo_pair();
     auto extractedHi = packed.hi_pair();
@@ -359,9 +359,9 @@ TEST(TestFp6x4E2M3, TwoPairConstruction)
 
 TEST(TestFp6x4E2M3, NegativeValues)
 {
-    fp6x2_e2m3 loPair(fp6_e2m3(-1.0f), fp6_e2m3(-2.0f));
-    fp6x2_e2m3 hiPair(fp6_e2m3(-3.0f), fp6_e2m3(-4.0f));
-    fp6x4_e2m3 packed(loPair, hiPair);
+    const fp6x2_e2m3 loPair(fp6_e2m3(-1.0f), fp6_e2m3(-2.0f));
+    const fp6x2_e2m3 hiPair(fp6_e2m3(-3.0f), fp6_e2m3(-4.0f));
+    const fp6x4_e2m3 packed(loPair, hiPair);
 
     auto extractedLo = packed.lo_pair();
     auto extractedHi = packed.hi_pair();
@@ -374,9 +374,9 @@ TEST(TestFp6x4E2M3, NegativeValues)
 
 TEST(TestFp6x4E2M3, MixedValues)
 {
-    fp6x2_e2m3 loPair(fp6_e2m3(0.5f), fp6_e2m3(7.5f));
-    fp6x2_e2m3 hiPair(fp6_e2m3(-0.5f), fp6_e2m3(-7.5f));
-    fp6x4_e2m3 packed(loPair, hiPair);
+    const fp6x2_e2m3 loPair(fp6_e2m3(0.5f), fp6_e2m3(7.5f));
+    const fp6x2_e2m3 hiPair(fp6_e2m3(-0.5f), fp6_e2m3(-7.5f));
+    const fp6x4_e2m3 packed(loPair, hiPair);
 
     auto extractedLo = packed.lo_pair();
     auto extractedHi = packed.hi_pair();
@@ -389,8 +389,8 @@ TEST(TestFp6x4E2M3, MixedValues)
 
 TEST(TestFp6x4E2M3, CopyConstruct)
 {
-    fp6x2_e2m3 loPair(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
-    fp6x2_e2m3 hiPair(fp6_e2m3(3.0f), fp6_e2m3(4.0f));
+    const fp6x2_e2m3 loPair(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
+    const fp6x2_e2m3 hiPair(fp6_e2m3(3.0f), fp6_e2m3(4.0f));
     fp6x4_e2m3 a(loPair, hiPair);
     fp6x4_e2m3 b(a);
 
@@ -401,8 +401,8 @@ TEST(TestFp6x4E2M3, CopyConstruct)
 
 TEST(TestFp6x4E2M3, CopyAssignment)
 {
-    fp6x2_e2m3 loPair(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
-    fp6x2_e2m3 hiPair(fp6_e2m3(3.0f), fp6_e2m3(4.0f));
+    const fp6x2_e2m3 loPair(fp6_e2m3(1.0f), fp6_e2m3(2.0f));
+    const fp6x2_e2m3 hiPair(fp6_e2m3(3.0f), fp6_e2m3(4.0f));
     fp6x4_e2m3 a(loPair, hiPair);
     fp6x4_e2m3 b;
     b = a;

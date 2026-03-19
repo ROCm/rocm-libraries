@@ -112,7 +112,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    uint32_t sign = (bits >> 16) & 0x8000;
+    const uint32_t sign = (bits >> 16) & 0x8000;
     int32_t exp = static_cast<int32_t>(((bits >> 23) & 0xFF)) - 127 + 15;
     uint32_t mant = bits & 0x007FFFFF;
 
@@ -147,7 +147,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
 
     // Round to nearest even
     uint32_t halfMant = mant >> 13;
-    uint32_t remainder = mant & HALF_REMAINDER_MASK;
+    const uint32_t remainder = mant & HALF_REMAINDER_MASK;
     if(remainder > HALF_ROUND_THRESHOLD
        || (remainder == HALF_ROUND_THRESHOLD && ((halfMant & 1) != 0U)))
     {

@@ -142,7 +142,7 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
         // The guard condition (shift >= 24) ensures we don't shift beyond the
         // 24-bit mantissa, returning zero for values too small to represent.
         mant |= 0x00800000; // Add implicit 1
-        const auto shift = static_cast<uint32_t>(1 - exp + 20); // 23 - 3 = 20 bits to shift
+        auto shift = static_cast<uint32_t>(1 - exp + 20); // 23 - 3 = 20 bits to shift
         if(shift >= 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero

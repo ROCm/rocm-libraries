@@ -108,8 +108,8 @@ inline uint8_t float_to_fp6_e2m3_bits(float f) noexcept
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    uint32_t sign = (bits >> 26) & FP6_E2M3_SIGN_MASK; // Extract sign to bit 5
-    uint32_t fp32Exp = (bits >> 23) & 0xFF;
+    const uint32_t sign = (bits >> 26) & FP6_E2M3_SIGN_MASK; // Extract sign to bit 5
+    const uint32_t fp32Exp = (bits >> 23) & 0xFF;
     // Rebias from float (127) to E2M3 (1)
     int32_t exp = static_cast<int32_t>(fp32Exp) - 127 + FP6_E2M3_EXP_BIAS;
     uint32_t mant = bits & 0x007FFFFF;
@@ -137,8 +137,8 @@ inline uint8_t float_to_fp6_e2m3_bits(float f) noexcept
         }
 
         // Apply round-to-nearest-even for subnormal results
-        uint32_t halfPoint = 1u << (shift - 1);
-        uint32_t remainder = mant & ((1u << shift) - 1);
+        const uint32_t halfPoint = 1u << (shift - 1);
+        const uint32_t remainder = mant & ((1u << shift) - 1);
         mant >>= shift;
 
         // Round to nearest even: round up if above midpoint, or at midpoint with odd result
@@ -158,7 +158,7 @@ inline uint8_t float_to_fp6_e2m3_bits(float f) noexcept
 
     // Normal case: shift mantissa from 23 bits to 3 bits with rounding
     uint32_t fp6Mant = (mant >> 20) & FP6_E2M3_MANT_MASK;
-    uint32_t remainder = mant & 0x000FFFFF;
+    const uint32_t remainder = mant & 0x000FFFFF;
 
     // Round to nearest even
     if(remainder > FP6_E2M3_ROUND_THRESHOLD

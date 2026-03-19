@@ -146,7 +146,7 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     {
         // Denormalized
         mant |= 0x00800000; // Add implicit 1
-        const auto shift = static_cast<uint32_t>(1 - exp + 21); // 23 - 2 = 21 bits to shift
+        auto shift = static_cast<uint32_t>(1 - exp + 21); // 23 - 2 = 21 bits to shift
         if(shift >= 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero

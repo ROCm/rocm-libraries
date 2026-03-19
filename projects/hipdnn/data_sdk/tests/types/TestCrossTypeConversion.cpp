@@ -42,8 +42,8 @@ TEST_F(TestCrossTypeConversion, Bfloat16ToFp4E2M1)
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp6E2M3)
 {
-    bfloat16 a(3.5f);
-    fp6_e2m3 b(a);
+    const bfloat16 a(3.5f);
+    const fp6_e2m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 3.5f);
 }
 
@@ -102,8 +102,8 @@ TEST_F(TestCrossTypeConversion, HalfToFp4E2M1)
 
 TEST_F(TestCrossTypeConversion, HalfToFp6E2M3)
 {
-    half a(5.5f);
-    fp6_e2m3 b(a);
+    const half a(5.5f);
+    const fp6_e2m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 5.5f);
 }
 
@@ -180,28 +180,28 @@ TEST_F(TestCrossTypeConversion, Fp4E2M1ToDouble)
 
 TEST_F(TestCrossTypeConversion, Fp6E2M3ToBfloat16)
 {
-    fp6_e2m3 a(3.5f);
-    bfloat16 b(a);
+    const fp6_e2m3 a(3.5f);
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 3.5f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp6E2M3ToHalf)
 {
-    fp6_e2m3 a(5.0f);
-    half b(a);
+    const fp6_e2m3 a(5.0f);
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 5.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp6E2M3ToFloat)
 {
-    fp6_e2m3 a(7.5f);
+    const fp6_e2m3 a(7.5f);
     auto b = static_cast<float>(a);
     EXPECT_EQ(b, 7.5f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp6E2M3ToDouble)
 {
-    fp6_e2m3 a(4.5f);
+    const fp6_e2m3 a(4.5f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 4.5);
 }
@@ -343,8 +343,8 @@ TEST_F(TestCrossTypeConversion, FloatToFp4E2M1)
 
 TEST_F(TestCrossTypeConversion, FloatToFp6E2M3)
 {
-    float a = 6.5f;
-    fp6_e2m3 b(a);
+    const float a = 6.5f;
+    const fp6_e2m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 6.5f);
 }
 
@@ -396,8 +396,8 @@ TEST_F(TestCrossTypeConversion, DoubleToFp4E2M1)
 
 TEST_F(TestCrossTypeConversion, DoubleToFp6E2M3)
 {
-    double a = 2.5;
-    fp6_e2m3 b(a);
+    const double a = 2.5;
+    const fp6_e2m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
@@ -452,9 +452,9 @@ TEST_F(TestCrossTypeConversion, Fp4E2M1RoundtripViaFloat)
 
 TEST_F(TestCrossTypeConversion, Fp6E2M3RoundtripViaFloat)
 {
-    fp6_e2m3 a(5.5f);
+    const fp6_e2m3 a(5.5f);
     auto f = static_cast<float>(a);
-    fp6_e2m3 b(f);
+    const fp6_e2m3 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 

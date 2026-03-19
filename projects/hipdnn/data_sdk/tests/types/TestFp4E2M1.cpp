@@ -26,7 +26,7 @@ TEST(TestFp4E2M1, RoundTripAllValues)
 {
     // clang-format off
     std::vector<float> const exactValues = {0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
-                                      -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
+                                           -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
     // clang-format on
 
     for(const float val : exactValues)
