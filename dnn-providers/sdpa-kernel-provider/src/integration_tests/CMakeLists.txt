@@ -15,6 +15,7 @@ endif()
 add_executable(
     sdpa_kernel_plugin_integration_tests
     main.cpp
+    IntegrationGpuSdpaForward.cpp
     IntegrationNoEngines.cpp
 )
 
