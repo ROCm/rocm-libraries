@@ -124,11 +124,22 @@ struct MmaPipelineBase
     template <typename VecTA, typename VecTB, typename VecTC>
     CK_TILE_DEVICE static decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        // TODO: c++20: Call template functions with MmaPipelineOptionFlags directly
-        auto pre = Derived::template preApply<Flags_>(
-            std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
-        Derived::execImpl(pre);
-        return Derived::template postApply<Flags_>(std::move(pre));
+        if constexpr(MmaOpTraits<typename Derived::FragWiseMmaOp>::IsSupported)
+        {
+            // TODO: c++20: Call template functions with MmaPipelineOptionFlags directly
+            auto pre = Derived::template preApply<Flags_>(
+                std::forward<VecTA>(a), std::forward<VecTB>(b), std::forward<VecTC>(accum));
+            Derived::execImpl(pre);
+            return Derived::template postApply<Flags_>(std::move(pre));
+        }
+        else
+        {
+            // Return the unsupported exec. This should print a runtime warning. (amdgcn_mma.hpp)
+            // Code should not reach here, but HOST/DEVICE compile passes are
+            // weirdly intertwined and instead of having constexpr in the calling
+            // site (tests) we do this. See also changes by this commit.
+            return Derived::FragWiseMmaOp::exec({}, {}, {});
+        }
     }
 };
 
