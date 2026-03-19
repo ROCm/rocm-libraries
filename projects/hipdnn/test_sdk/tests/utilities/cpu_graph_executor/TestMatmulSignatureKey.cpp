@@ -18,41 +18,41 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestMatmulSignatureKey, EqualityOperator)
 {
-    MatmulSignatureKey const key1{
+    const MatmulSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key2{
+    const MatmulSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    MatmulSignatureKey const key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    MatmulSignatureKey const key4{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    const MatmulSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    const MatmulSignatureKey key4{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    MatmulSignatureKey const key5{
+    const MatmulSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key6{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    const MatmulSignatureKey key6{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    MatmulSignatureKey const key7{
+    const MatmulSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key8{
+    const MatmulSignatureKey key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 }
 
 TEST(TestMatmulSignatureKey, HashFunction)
 {
-    MatmulSignatureKey const key1{
+    const MatmulSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key2{
+    const MatmulSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    MatmulSignatureKey const key3{DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    MatmulSignatureKey const key4{
+    const MatmulSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
+    const MatmulSignatureKey key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    MatmulSignatureKey const key5{
+    const MatmulSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
     auto hash3 = key3.hashSelf();
@@ -64,9 +64,9 @@ TEST(TestMatmulSignatureKey, HashFunction)
 
 TEST(TestMatmulSignatureKey, Copy)
 {
-    MatmulSignatureKey const original{
+    const MatmulSignatureKey original{
         DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    MatmulSignatureKey const copied{original};
+    const MatmulSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.aDataType, DataType::BFLOAT16);
@@ -77,11 +77,11 @@ TEST(TestMatmulSignatureKey, Copy)
 
 TEST(TestMatmulSignatureKey, CreateFromNodeAndTensorMap)
 {
-    MatmulSignatureKey const expectedKey{
+    const MatmulSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> const aDims = {1, 1, 4, 2};
-    std::vector<int64_t> const bDims = {1, 1, 2, 3};
-    std::vector<int64_t> const cDims = {1, 1, 4, 3};
+    const std::vector<int64_t> aDims = {1, 1, 4, 2};
+    const std::vector<int64_t> bDims = {1, 1, 2, 3};
+    const std::vector<int64_t> cDims = {1, 1, 4, 3};
 
     MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, 1);
 
@@ -93,7 +93,7 @@ TEST(TestMatmulSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    MatmulSignatureKey const keyFromNode(
+    const MatmulSignatureKey keyFromNode(
         graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 
     EXPECT_TRUE(keyFromNode == expectedKey);

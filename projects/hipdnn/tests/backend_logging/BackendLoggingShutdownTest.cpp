@@ -132,7 +132,7 @@ void slowUserCallback(hipdnnUserLogCallbackHandle_t userHandle,
 void createAndDestroyHandle(const char* context)
 {
     hipdnnHandle_t handle = nullptr;
-    hipdnnStatus_t const status = hipdnnCreate(&handle);
+    const hipdnnStatus_t status = hipdnnCreate(&handle);
     if(status == HIPDNN_STATUS_SUCCESS && handle != nullptr)
     {
         hipdnnDestroy(handle);
@@ -293,7 +293,7 @@ struct TestLoggerShutdown
         bool allCallbacksReceived = true;
         for(size_t i = 0; i < NUM_CALLBACK_WORKERS; ++i)
         {
-            int const count = callbackData[i].callCount.load();
+            const int count = callbackData[i].callCount.load();
             std::cout << "[Test] Callback worker " << i << " received " << count
                       << " log callbacks\n";
             if(count == 0)
@@ -359,7 +359,7 @@ int main(int argc, char* argv[])
     // Skipped on Windows: remove() would fail because the file is still open (no
     // FILE_SHARE_DELETE with standard fopen).
     std::string logFilePath = "./hipdnn_shutdown_test_XXXXXX";
-    int const logFd = mkstemp(logFilePath.data());
+    const int logFd = mkstemp(logFilePath.data());
     if(logFd < 0)
     {
         std::cerr << "[Test] FAIL: mkstemp failed\n";

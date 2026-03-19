@@ -12,8 +12,8 @@ using namespace hipdnn_data_sdk::data_objects;
 TEST(TestFlatbufferTensorAttributesUtils, UnpackTensorAttributes)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<int64_t> const dims = {1, 3, 224, 224};
-    std::vector<int64_t> const strides = {150528, 50176, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
+    const std::vector<int64_t> strides = {150528, 50176, 224, 1};
     auto attributeOffset
         = CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &strides, &dims);
     builder.Finish(attributeOffset);

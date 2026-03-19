@@ -115,7 +115,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     // Small delay for async callback
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t const logsAfterCreate = recorder.getRecordedLogCount();
+    const size_t logsAfterCreate = recorder.getRecordedLogCount();
     EXPECT_GT(logsAfterCreate, 0);
 
     // Unregister callback with SEV_OFF
@@ -128,7 +128,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UnregisterWithSevOffStopsCapture)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Log count should not increase
-    size_t const finalLogs = recorder.getRecordedLogCount();
+    const size_t finalLogs = recorder.getRecordedLogCount();
     EXPECT_EQ(finalLogs, logsAfterCreate);
 }
 
@@ -219,7 +219,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     ASSERT_EQ(hipdnnCreate(&handle1), HIPDNN_STATUS_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const infoLogs = recorder.getRecordedLogCount();
+    const size_t infoLogs = recorder.getRecordedLogCount();
     EXPECT_GT(infoLogs, 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
@@ -230,7 +230,7 @@ TEST_F(IntegrationBackendUserLoggingApis, UpdateCallbackLevel)
     ASSERT_EQ(hipdnnCreate(&handle2), HIPDNN_STATUS_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const afterUpdate = recorder.getRecordedLogCount();
+    const size_t afterUpdate = recorder.getRecordedLogCount();
 
     // Verify minimal new logs (only WARN+ would be captured now)
     EXPECT_LE(afterUpdate - infoLogs, 1); // May get at most 1 WARN/ERROR log
@@ -338,7 +338,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncGuaranteeOnUnregister)
         trackingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_ASYNC, &handleToken);
 
     // Take snapshot AFTER unregister to avoid race with async queue processing
-    int const countAfterUnregister = s_callbackCount.load();
+    const int countAfterUnregister = s_callbackCount.load();
 
     // After unregister returns, callback should NOT be active
     EXPECT_FALSE(s_callbackActive.load()) << "Callback should not be active after unregister";
@@ -373,7 +373,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Sync: logs immediately available
-    size_t const syncLogs = recorder.getRecordedLogCount();
+    const size_t syncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(syncLogs, 0);
 
     // Update to ASYNC mode (same callback, same handle, different mode)
@@ -383,7 +383,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenSyncAndAsync)
 
     // Async: need delay
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, syncLogs);
 }
 
@@ -401,7 +401,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
 
     // Async: need delay
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, 0);
 
     // Update to SYNC mode (same callback, same handle, different mode)
@@ -410,7 +410,7 @@ TEST_F(IntegrationBackendUserLoggingApis, SwitchBetweenAsyncAndSync)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 
     // Sync: logs immediately available
-    size_t const afterSwitch = recorder.getRecordedLogCount();
+    const size_t afterSwitch = recorder.getRecordedLogCount();
     EXPECT_GT(afterSwitch, asyncLogs);
 }
 
@@ -495,9 +495,9 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
         // With callback registered - logs should be captured
         registerIsolatedCallback(HIPDNN_SEV_INFO, mode);
 
-        size_t const countBefore = recorder.getRecordedLogCount();
+        const size_t countBefore = recorder.getRecordedLogCount();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        size_t const countAfterEnabled = recorder.getRecordedLogCount();
+        const size_t countAfterEnabled = recorder.getRecordedLogCount();
 
         EXPECT_GT(countAfterEnabled, countBefore)
             << "Log count should increase when callback is registered (cycle " << cycle
@@ -506,9 +506,9 @@ TEST_F(IntegrationBackendUserLoggingApis, ConcurrentLoggingWithCallbackToggle)
         // With callback unregistered (SEV_OFF) - logs should NOT be captured
         registerIsolatedCallback(HIPDNN_SEV_OFF, mode);
 
-        size_t const countBeforeDisabled = recorder.getRecordedLogCount();
+        const size_t countBeforeDisabled = recorder.getRecordedLogCount();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        size_t const countAfterDisabled = recorder.getRecordedLogCount();
+        const size_t countAfterDisabled = recorder.getRecordedLogCount();
 
         EXPECT_EQ(countAfterDisabled, countBeforeDisabled)
             << "Log count should NOT increase when callback is unregistered (cycle " << cycle
@@ -570,11 +570,11 @@ TEST_F(IntegrationBackendUserLoggingApis, ReentrantLoggingPrevented)
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Verify the callback was invoked at least once
-    int const invocations = callbackInvocations.load();
+    const int invocations = callbackInvocations.load();
     EXPECT_GT(invocations, 0) << "Callback should be invoked for backend logs";
 
     // Verify recursive attempts were made
-    int const attempts = recursiveAttempts.load();
+    const int attempts = recursiveAttempts.load();
     EXPECT_GT(attempts, 0) << "Should have attempted recursive logging";
 
     // Invocations should equal attempts (if recursion was NOT prevented there would
@@ -640,10 +640,10 @@ TEST_F(IntegrationBackendUserLoggingApis, MultipleCallbacksAllReceiveLogs)
         countingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, &syncCount2);
 
     // Capture counts after unregistering
-    int const async1After = asyncCount1.load();
-    int const async2After = asyncCount2.load();
-    int const sync1After = syncCount1.load();
-    int const sync2After = syncCount2.load();
+    const int async1After = asyncCount1.load();
+    const int async2After = asyncCount2.load();
+    const int sync1After = syncCount1.load();
+    const int sync2After = syncCount2.load();
 
     // Trigger more logging — none of the callbacks should be invoked
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
