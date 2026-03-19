@@ -63,7 +63,7 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     EXPECT_EQ(getEngineNameFromId(FUSILLI_ENGINE_ID), "FUSILLI_ENGINE");
 
     // Test with non-existent ID - should throw
-    int64_t const nonExistentId = 0xDEADBEEF;
+    const int64_t nonExistentId = 0xDEADBEEF;
     EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 

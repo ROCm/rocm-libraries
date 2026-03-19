@@ -54,8 +54,8 @@ TEST(TestLayerNormNode, PreValidateSucceedsMinimal)
     auto x = makeTensor({10});
     auto attrs = makeMinimalAttrs(x);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -66,8 +66,8 @@ TEST(TestLayerNormNode, PreValidateSucceeds2D)
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -78,8 +78,8 @@ TEST(TestLayerNormNode, PreValidateSucceeds4D)
     auto x = makeTensor({2, 64, 28, 28});
     auto attrs = makeMinimalAttrs(x);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -94,8 +94,8 @@ TEST(TestLayerNormNode, PreValidateSucceedsWithScaleAndBias)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
@@ -114,8 +114,8 @@ TEST(TestLayerNormNode, PreValidateFailsForwardPhaseNotSet)
     attrs.set_bias(makeTensor({512}));
     // forward_phase intentionally NOT set
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -132,8 +132,8 @@ TEST(TestLayerNormNode, PreValidateFailsMissingX)
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -151,8 +151,8 @@ TEST(TestLayerNormNode, PreValidateFailsMissingY)
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -167,8 +167,8 @@ TEST(TestLayerNormNode, PreValidateFailsMissingEpsilon)
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -186,8 +186,8 @@ TEST(TestLayerNormNode, PreValidateFailsMissingScale)
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -205,8 +205,8 @@ TEST(TestLayerNormNode, PreValidateFailsMissingBias)
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -222,8 +222,8 @@ TEST(TestLayerNormNode, PreValidateFailsScaleBiasMismatch)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -234,7 +234,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsOutputShape)
     auto attrs = makeMinimalAttrs(x);
     auto y = attrs.get_y();
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -251,7 +251,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsOutputStrides)
     auto attrs = makeMinimalAttrs(x);
     auto y = attrs.get_y();
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -281,7 +281,7 @@ TEST(TestLayerNormNode, InferPropertiesInfersScaleDimsFromX)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -313,7 +313,7 @@ TEST(TestLayerNormNode, InferPropertiesInfersScaleDimsFromX4D)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -349,7 +349,7 @@ TEST(TestLayerNormNode, InferPropertiesPreservesNhwcStrideOrder)
     attrs.set_mean(mean);
     attrs.set_inv_variance(invVariance);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -389,7 +389,7 @@ TEST(TestLayerNormNode, InferPropertiesNhwcScaleStridesMatchX)
     attrs.set_scale(scale);
     attrs.set_bias(bias);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -473,7 +473,7 @@ TEST(TestLayerNormNode, InferPropertiesStatsSkippedInInferenceMode)
     attrs.set_mean(mean);
     attrs.set_inv_variance(invVariance);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -492,7 +492,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsMeanShape)
     auto mean = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -511,7 +511,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsInvVarianceShape)
     auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_inv_variance(invVariance);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -539,7 +539,7 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitOutputShape)
     y->set_stride({512, 1});
     attrs.set_y(y);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -556,8 +556,8 @@ TEST(TestLayerNormNode, PackNode)
     auto attrs = makeMinimalAttrs(x);
     attrs.set_name("TestLayerNorm");
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
 
     flatbuffers::FlatBufferBuilder builder;
     auto packed = node.pack_node(builder);
@@ -589,8 +589,8 @@ TEST(TestLayerNormNode, PreValidateFailsXWithNoDimensions)
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -612,8 +612,8 @@ TEST(TestLayerNormNode, PreValidateFailsEpsilonNotScalar)
     epsilon->set_dim({2});
     attrs.set_epsilon(epsilon);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -633,8 +633,8 @@ TEST(TestLayerNormNode, PreValidateFailsEpsilonNotPassByValue)
     epsilon->set_dim({1});
     attrs.set_epsilon(epsilon);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -652,8 +652,8 @@ TEST(TestLayerNormNode, PreValidateFailsEpsilonWithNoDimensions)
     // Epsilon set but no dimensions
     attrs.set_epsilon(std::make_shared<TensorAttributes>());
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
@@ -676,8 +676,8 @@ TEST(TestLayerNormNode, PreValidateFailsXYShapeMismatch)
     auto y = makeTensor({32, 256});
     attrs.set_y(y);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -688,8 +688,8 @@ TEST(TestLayerNormNode, PreValidateFailsScaleWithNoDimensions)
     auto attrs = makeMinimalAttrs(x);
     attrs.set_scale(std::make_shared<TensorAttributes>()); // No dimensions
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -700,8 +700,8 @@ TEST(TestLayerNormNode, PreValidateFailsBiasWithNoDimensions)
     auto attrs = makeMinimalAttrs(x);
     attrs.set_bias(std::make_shared<TensorAttributes>()); // No dimensions
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
@@ -722,7 +722,7 @@ TEST(TestLayerNormNode, InferPropertiesFailsMissingX)
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -741,7 +741,7 @@ TEST(TestLayerNormNode, InferPropertiesFailsMissingY)
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -754,7 +754,7 @@ TEST(TestLayerNormNode, InferPropertiesCopiesStridesFromX)
     auto attrs = makeMinimalAttrs(x);
     auto y = attrs.get_y();
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -773,7 +773,7 @@ TEST(TestLayerNormNode, InferPropertiesMeanStrideFromXStrideOrder)
     auto mean = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -794,7 +794,7 @@ TEST(TestLayerNormNode, InferPropertiesInvVarianceStrideFromXStrideOrder)
     auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_inv_variance(invVariance);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -816,7 +816,7 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitMeanDims)
     mean->set_dim({32});
     attrs.set_mean(mean);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -839,7 +839,7 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitStatStrides)
     mean->set_stride({1});
     attrs.set_mean(mean);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -860,7 +860,7 @@ TEST(TestLayerNormNode, InferPropertiesSetsBothMeanAndInvVariance)
     attrs.set_mean(mean);
     attrs.set_inv_variance(invVariance);
 
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     LayerNormNode node(std::move(attrs), graphAttrs);
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
@@ -908,8 +908,8 @@ TEST(TestLayerNormNode, GatherHipdnnTensors)
     attrs.set_mean(mean);
     attrs.set_inv_variance(invVariance);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -948,8 +948,8 @@ TEST(TestLayerNormNode, GatherHipdnnTensorsRequired)
     attrs.set_bias(bias);
     attrs.set_epsilon(epsilon);
 
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(std::move(attrs), graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -964,7 +964,7 @@ TEST(TestLayerNormNode, GatherHipdnnTensorsRequired)
 
 TEST(TestLayerNormNode, GetNodeTypeReturnsLayerNorm)
 {
-    GraphAttributes const graphAttrs;
-    LayerNormNode const node(LayernormAttributes{}, graphAttrs);
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(LayernormAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::LAYER_NORM);
 }
