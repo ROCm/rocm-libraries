@@ -327,7 +327,7 @@ public:
         static_assert(AllOfTypes<std::is_integral, Args...>::value,
                       "Indices must be an integral type!");
 
-        std::vector<int64_t> const indexVector = {static_cast<int64_t>(indices)...};
+        const std::vector<int64_t> indexVector = {static_cast<int64_t>(indices)...};
 
         return getIndex(indexVector);
     }
@@ -447,7 +447,7 @@ public:
     template <typename... Args>
     T& operator()(Args... indices)
     {
-        int64_t const index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         auto* data = memory().hostData();
         return data[index];
     }
@@ -455,21 +455,21 @@ public:
     template <typename... Args>
     const T& operator()(Args... indices) const
     {
-        int64_t const index = getIndex(indices...);
+        const int64_t index = getIndex(indices...);
         const auto* data = memory().hostData();
         return data[index];
     }
 
     T& operator()(const std::vector<int64_t>& indices)
     {
-        int64_t const index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         auto* data = memory().hostData();
         return data[index];
     }
 
     const T& operator()(const std::vector<int64_t>& indices) const
     {
-        int64_t const index = getIndex(indices);
+        const int64_t index = getIndex(indices);
         const auto* data = memory().hostData();
         return data[index];
     }
@@ -614,7 +614,7 @@ public:
 
     size_t fillWithData(const void* data, size_t maxBytesCopied) override
     {
-        size_t const bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
+        const size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
         _memory.markHostModified();
         std::memcpy(_memory.hostData(), data, bytesCopied);
         return bytesCopied;

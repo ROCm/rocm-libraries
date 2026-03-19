@@ -132,7 +132,7 @@ TEST(TestConvolutionFwdAttributes, PackAttributes)
 
 TEST(TestConvolutionFwdAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::ConvFpropAttributes const convAttributes;
+    const hipdnn_frontend::graph::ConvFpropAttributes convAttributes;
 
     // Check default convolution mode
     EXPECT_EQ(convAttributes.get_convolution_mode(),
@@ -194,7 +194,7 @@ TEST(TestConvolutionFwdAttributes, SetPaddingBothPreAndPost)
 {
     hipdnn_frontend::graph::ConvFpropAttributes convAttributes;
 
-    std::vector<int64_t> const padding = {5, 5};
+    const std::vector<int64_t> padding = {5, 5};
     convAttributes.set_padding(padding);
 
     // set_padding should set both pre and post padding to the same value
