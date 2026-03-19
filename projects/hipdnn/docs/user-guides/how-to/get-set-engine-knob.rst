@@ -10,7 +10,7 @@ Get and set engine knob configurations in hipDNN
 
 hipDNN has a flexible system of engine configuration knobs that lets hipDNN plugin developers expose custom runtime settings for end users can to adjust.
 
-This topic demonstrates how to query knobs and how to set their values.
+This topic demonstrates how to query ``Knob`` descriptions and how to use ``KnobSetting`` to set their values.
 
 .. note::
 
@@ -19,7 +19,12 @@ This topic demonstrates how to query knobs and how to set their values.
 Query available knobs
 =====================
 
-Use the hipDNN frontend to discover which knobs an engine supports and their constraints:
+The supported knobs for a specific engine can be retrieved as a list or a lookup table.
+
+Retrieving knobs as a list
+--------------------------
+
+Use the hipDNN frontend method ``get_knobs_for_engine()`` to retrieve a list of knobs an engine supports and their constraints.
 
 .. code:: cpp
 
@@ -63,10 +68,10 @@ Use the hipDNN frontend to discover which knobs an engine supports and their con
       std::cerr << "Error getting knobs: " << error.get_message() << "\n";
   }
 
-Use the knob lookup map
-=======================
+Retrieving knobs as a lookup table
+----------------------------------
 
-Use the lookup method to access the knob ID:
+Use the hipDNN frontend method ``get_knob_lookup_for_engine()`` to retrieve a set of knobs an engine supports and their constraints. This is useful for checking if a specific knob exists without iterating through a list.
 
 .. code:: cpp
 
@@ -84,7 +89,7 @@ Use the lookup method to access the knob ID:
 Set knob values
 ===============
 
-You can set the knob values when creating an execution plan. Here's an example:
+You can set the knob values using ``KnobSetting`` when creating an execution plan.
 
 .. code:: cpp
 
@@ -119,13 +124,6 @@ You can set the knob values when creating an execution plan. Here's an example:
       std::cerr << "Error: " << error.get_message() << "\n";
   }
 
-Use type-safe knob setting
---------------------------
-
-Refer to this sample code to implement type-safe knob settings:
-
-.. code:: cpp
-
   // KnobSetting constructor is type-safe
   KnobSetting intSetting("test.knob", 42);                    // int64_t
   KnobSetting floatSetting("test.knob", 3.14);                // double
@@ -137,11 +135,11 @@ Refer to this sample code to implement type-safe knob settings:
 Use the default knob values
 ===========================
 
-If you don't specify a knob setting, the engine will use the default value defined by the knob. To explicitly use defaults for all knobs, follow this example:
+If you don't specify a knob setting, the engine will use the default value defined by the knob.
 
 .. code:: cpp
 
-  // Option 1: Don't specify any settings (simplest)
+  // Option 1: Don't specify any settings (all knobs use default values)
   auto error = graph.create_execution_plan_ext(engineId, {});
 
   // Option 2: Specify only the knobs you want to customize
@@ -220,6 +218,3 @@ Error handling
       // - Invalid knob ID
       // - Value outside valid range
   }
-
-
-

@@ -15,6 +15,10 @@ The backend discovers and manages these plugins, leveraging them across differen
 
   This topic is for advanced users such as senior developers, engineers, and system administrators who are looking to extend hipDNN with custom plugins. Most users should use the default plugins described in :ref:`build-execute`.
 
+.. important::
+
+  Custom plugins installed in the ROCm distribution folder will be included by default when hipDNN graphs are built. If supported graphs fail to build or execute after installing your custom plugin, remove the custom plugin(s) from the ROCm distribution folder. If this resolves the problem then the custom plugin implementation will need to be updated. Logging can be enabled using the ``HIPDNN_LOG_LEVEL`` environment variable to help in diagnosing any issues. See :ref:`variables`
+
 Review the :ref:`architecture` and :ref:`backend-architecture` topics for context before beginning plugin development.
 
 Plugin types

@@ -59,6 +59,9 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   graph.build_plans();
 
   // Define memory for each tensor.
+  // The following code to manage host and device memory may need to be customized or
+  // replace with code more appropriate to your environment. The utilities::Tensor
+  // class is provided for assistance.
   utilities::Tensor<DataType_t::FLOAT> xTensor(x->get_dim(), TensorLayout::NCHW);
   utilities::Tensor<DataType_t::FLOAT> scaleTensor(scale->get_dim());
   utilities::Tensor<DataType_t::FLOAT> biasTensor(bias->get_dim());
@@ -68,7 +71,9 @@ This simplified sample code creates a graph, creates tensors, and adds operation
 
   // [... populate Tensor input data ...]
 
-  // Allocate GPU memory for each tensor.
+  // Allocate GPU memory for each tensor and pass to the engine via the execute()
+  // function's variantPack parameter. How the device memory is allocated may need
+  // to be customized for your environment or application.
   std::unordered_map<int64_t, void*> variantPack;
   variantPack[x->get_uid()] = xTensor.memory().deviceData();
   variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();

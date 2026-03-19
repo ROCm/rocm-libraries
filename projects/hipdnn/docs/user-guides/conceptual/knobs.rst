@@ -32,16 +32,18 @@ Knobs enable you to:
 - Select algorithmic variants (for example, solver selection).
 - Control memory usage (for example, workspace size limits).
 
-Knob types
-==========
+Note that there is a distinction between ``Knob`` and ``KnobSetting``. A ``Knob`` can be considered a description of a specific configuration setting, whereas a ``KnobSetting`` is used to specify the value to set for a specific ``Knob`` when the plan is executed by the specific engine. This document focuses the engine ``Knob``. See :ref:`set-engine-knobs` for examples using both ``Knob`` and ``KnobSetting``.
 
-hipDNN supports two categories of knobs: global and custom knobs.
+Knob categories
+===============
+
+Different engines expose different knobs. However, hipDNN supports two specific categories of knobs: global and custom knobs.
+
 
 Global knobs
 ------------
 
-Global knobs are standard knobs available across all or most engines. They're defined in the ``global.*`` namespace and provide common functionality.
-These knobs use the namespace prefix ``global.*``. They have consistent behavior across engines, are defined by the hipDNN specification, and can't be registered by custom plugins.
+Global knobs are standard knobs to provide common functionality across all or most engines. These knobs use the namespace prefix ``global.*``. Plugins can include these global knobs definitions when the connon functionality defined by the knob is supported by the plugin.
 
 **Examples**:
 
@@ -82,7 +84,7 @@ Plugin-specific namespace:
 
 .. important::
 
-  The ``global.*`` namespace is reserved for standard knobs. Custom plugins can't register knobs in this namespace.
+  The ``global.*`` namespace is reserved for standard knobs.
 
 Standard global knobs
 =====================
@@ -130,6 +132,13 @@ The backend:
 - Uses the default values for any unspecified knob settings.
 
 If the validation fails, hipDNN returns ``HIPDNN_STATUS_BAD_PARAM``.
+
+Deprecation
+===========
+
+The ``Knob::isDeprecated()`` method returns true if the knob shouldn't be used (hipDNN will log a warning if you add a ``KnobSetting`` for a deprecated ``Knob``). A deprecated knob indicates the knob will be removed in a future hipDNN or plugin release. The knob will otherwise continue to operate while deprecated.
+
+Code that uses the deprecated knob should be updated at earliest opportunity to ensure compatibility with future hipDNN and plugin releases.
 
 API reference
 =============
