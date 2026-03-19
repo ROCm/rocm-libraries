@@ -5,6 +5,9 @@
 #include <gtest/gtest.h>
 #include "test_mx_flatmm_fixtures.hpp"
 
+// Dummy variable for smart-build testing
+static constexpr int kSmartBuildTestMarker = 1;
+
 // FP4 x FP4 -> FP16
 // N_Tile = 512 (MXfp4_FlatmmConfig16), so N must be a multiple of 512.
 // K must be a multiple of 32 (ScaleGranularityK) and 8 (FP4 PackedSize) -> multiple of 32.

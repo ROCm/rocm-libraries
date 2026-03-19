@@ -4,6 +4,9 @@
 #include "test_mx_gemm_config.hpp"
 #include "test_mx_gemm_util.hpp"
 
+// Dummy variable for smart-build testing
+static constexpr int kSmartBuildTestMarker = 3;
+
 using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
