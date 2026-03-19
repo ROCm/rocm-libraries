@@ -603,7 +603,9 @@ class Solution(collections.abc.Mapping):
       # (1) UseMFMAF32XEmulation = True
       # (2) UseDot2F32XEmulation = True (set (1) to False)
       # (3) cvt + sub  (set both (1) and (2) False)
-      state["UseMFMAF32XEmulation"] = True # enable MFMA version by default
+      isa = state["ISA"]
+      if isaInfoMap[isa].asmCaps.get("HasMFMA", False):
+        state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
 
