@@ -34,11 +34,11 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct SparseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A),
+struct SparseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A), // TODO: c++20: use MmaPipelineOptionFlags directly
                                           SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>
 {
     static_assert(MmaOpTraits<MmaOp>::IsSupported && MmaOpTraits<MmaOp>::IsSparse);
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A),
+    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::COMPRESS_A), // TODO: c++20: use MmaPipelineOptionFlags directly
                                  SparseMma<ADataType, BDataType, CDataType, FragM, FragN, FragK, CompilerTarget, MmaOp, MmaTransforms>>;
     // clang-format on
 
