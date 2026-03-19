@@ -693,8 +693,8 @@ TEST(TestTensorSentinel, Uint8TensorFilledWithMax)
 
 TEST(TestTensorSentinel, StridedTensorFilledWithNaN)
 {
-    std::vector<int64_t> const dims = {2, 2, 2};
-    std::vector<int64_t> const strides = {2, 4, 8};
+    const std::vector<int64_t> dims = {2, 2, 2};
+    const std::vector<int64_t> strides = {2, 4, 8};
 
     Tensor<float> tensor(dims, strides);
     tensor.fillWithSentinelValue();

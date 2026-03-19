@@ -394,8 +394,8 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, TensorSameElementCountDiffere
 
 TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasNaN)
 {
-    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceMiopenRmsValidation<float> refValidation(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -409,8 +409,8 @@ TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasNaN)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenBothHaveNaN)
 {
-    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceMiopenRmsValidation<float> refValidation(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -422,8 +422,8 @@ TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenBothHaveNaN)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasInf)
 {
-    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceMiopenRmsValidation<float> refValidation(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -437,8 +437,8 @@ TEST(TestCpuFpReferenceMiopenRmsValidationFp32, FailsWhenReferenceHasInf)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationFp32, PassesForFiniteValues)
 {
-    CpuFpReferenceMiopenRmsValidation<float> const refValidation(1.0f);
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceMiopenRmsValidation<float> refValidation(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);

@@ -581,8 +581,8 @@ TEST(TestCpuIntReferenceValidation, TensorSameElementCountDifferentDims)
 
 TEST(TestCpuFpReferenceValidationFp32, FailsWhenReferenceHasNaN)
 {
-    CpuFpReferenceValidation<float> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<float> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -596,8 +596,8 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenReferenceHasNaN)
 
 TEST(TestCpuFpReferenceValidationFp32, FailsWhenImplementationHasNaN)
 {
-    CpuFpReferenceValidation<float> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<float> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -611,8 +611,8 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenImplementationHasNaN)
 
 TEST(TestCpuFpReferenceValidationFp32, FailsWhenBothHaveNaN)
 {
-    CpuFpReferenceValidation<float> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<float> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -624,8 +624,8 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenBothHaveNaN)
 
 TEST(TestCpuFpReferenceValidationFp32, FailsWhenReferenceHasInf)
 {
-    CpuFpReferenceValidation<float> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<float> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -639,8 +639,8 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenReferenceHasInf)
 
 TEST(TestCpuFpReferenceValidationFp32, FailsWhenImplementationHasInf)
 {
-    CpuFpReferenceValidation<float> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<float> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
@@ -654,8 +654,8 @@ TEST(TestCpuFpReferenceValidationFp32, FailsWhenImplementationHasInf)
 
 TEST(TestCpuFpReferenceValidationFp16, FailsWhenBothHaveNaN)
 {
-    CpuFpReferenceValidation<half> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<half> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<half> tensor1(dims);
     Tensor<half> tensor2(dims);
@@ -667,8 +667,8 @@ TEST(TestCpuFpReferenceValidationFp16, FailsWhenBothHaveNaN)
 
 TEST(TestCpuFpReferenceValidationBfp16, FailsWhenBothHaveNaN)
 {
-    CpuFpReferenceValidation<bfloat16> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<bfloat16> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<bfloat16> tensor1(dims);
     Tensor<bfloat16> tensor2(dims);
@@ -680,8 +680,8 @@ TEST(TestCpuFpReferenceValidationBfp16, FailsWhenBothHaveNaN)
 
 TEST(TestCpuFpReferenceValidationFp32, PassesForFiniteValues)
 {
-    CpuFpReferenceValidation<float> const refValidation;
-    std::vector<int64_t> const dims = {2, 2};
+    const CpuFpReferenceValidation<float> refValidation;
+    const std::vector<int64_t> dims = {2, 2};
 
     Tensor<float> tensor1(dims);
     Tensor<float> tensor2(dims);
