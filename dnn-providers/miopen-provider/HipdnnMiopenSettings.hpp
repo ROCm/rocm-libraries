@@ -70,6 +70,21 @@ struct HipdnnMiopenSettings
         return _defaultWorkspaceSize;
     }
 
+    /**
+     * @brief Gets the selected workspace size.
+     *
+     * Prioritizes user selected, then default, then zero as a fallback.
+     *
+     * @return size of the selected workspace
+     */
+    size_t selectedWorkspaceSize() const
+    {
+        size_t selected = 0;
+        selected = _defaultWorkspaceSize.value_or(selected);
+        selected = _workspaceSizeLimit.value_or(selected);
+        return selected;
+    }
+
 private:
     bool _benchmarkingEnabled = false;
     std::optional<size_t> _workspaceSizeLimit;
