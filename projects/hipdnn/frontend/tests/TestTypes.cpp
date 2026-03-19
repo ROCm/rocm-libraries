@@ -348,7 +348,7 @@ TEST(TestTypes, FromHipdnnPointwiseModeAllValidModes)
 {
     using namespace hipdnn_frontend;
 
-    std::vector<std::pair<hipdnnPointwiseMode_t, PointwiseMode>> const validModes = {
+    const std::vector<std::pair<hipdnnPointwiseMode_t, PointwiseMode>> validModes = {
         {HIPDNN_POINTWISE_ABS, PointwiseMode::ABS},
         {HIPDNN_POINTWISE_ADD, PointwiseMode::ADD},
         {HIPDNN_POINTWISE_ADD_SQUARE, PointwiseMode::ADD_SQUARE},

@@ -287,7 +287,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
-    detail::ScopedHipdnnBackendDescriptor const graphDesc(data.data(), data.size());
+    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
@@ -751,7 +751,7 @@ TEST_F(IntegrationGraphLifting, PointwiseLiftWithoutFinalization)
     ASSERT_FALSE(data.empty());
 
     // Create backend descriptor from bytes (no handle, no finalize)
-    detail::ScopedHipdnnBackendDescriptor const graphDesc(data.data(), data.size());
+    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
     ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph
