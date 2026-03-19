@@ -199,7 +199,7 @@ public:
 
         if(fb->block_size() != nullptr)
         {
-            std::vector<int32_t> bs(fb->block_size()->begin(), fb->block_size()->end());
+            std::vector<int32_t> const bs(fb->block_size()->begin(), fb->block_size()->end());
             attr.set_block_size(bs);
         }
 

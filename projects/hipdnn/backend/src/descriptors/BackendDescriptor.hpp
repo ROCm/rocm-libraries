@@ -151,6 +151,12 @@ struct HipdnnBackendDescriptor : public IBackendDescriptor
 
     bool operator==(const HipdnnBackendDescriptor& other) const;
 
+    // Returns the wrapped impl as a shared_ptr to IBackendDescriptor.
+    std::shared_ptr<IBackendDescriptor> getImpl() const
+    {
+        return _impl;
+    }
+
     // Returns a shared_ptr to the IGraphOperation interface if the wrapped impl
     // implements it, or nullptr otherwise. Uses the virtual asGraphOperation()
     // method instead of dynamic_cast, so it works with -fno-rtti.
