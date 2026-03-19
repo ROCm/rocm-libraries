@@ -776,6 +776,16 @@ namespace rocisa
             return {dstAddr, src0, src1};
         }
 
+        virtual const std::vector<InstructionInput> getMsbSrcParams() const
+        {
+            return {dstAddr, src0, src1};
+        }
+
+        virtual const std::shared_ptr<Container> getMsbDstParam() const
+        {
+            return {};
+        }
+
         std::string preStr() const override
         {
             if(kernel().isaVersion[0] < 11)
@@ -810,7 +820,7 @@ namespace rocisa
                 kStr += ds->toString();
             }
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {dstAddr, src0, src1}, nullptr);
+            setMsb(kStr, getMsbSrcParams(), getMsbDstParam());
             return kStr;
         }
     };
@@ -2676,6 +2686,16 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<DSBPermuteB32>(*this);
+        }
+
+        const std::vector<InstructionInput> getMsbSrcParams() const override
+        {
+            return {src0, src1};
+        }
+
+        const std::shared_ptr<Container> getMsbDstParam() const override
+        {
+            return dstAddr;
         }
     };
 
