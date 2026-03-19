@@ -9,8 +9,24 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+// Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
+// #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
+// #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+// #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
+// #include <hipdnn_frontend/node/BatchnormNode.hpp>
+// #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+// #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
+// #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
+// #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+// #include <hipdnn_frontend/node/CustomOpNode.hpp>
+// #include <hipdnn_frontend/node/LayerNormNode.hpp>
+// #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+// #include <hipdnn_frontend/node/PointwiseNode.hpp>
+// #include <hipdnn_frontend/node/RMSNormNode.hpp>
+// #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
+// #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -53,10 +69,62 @@ namespace hipdnn_frontend::detail
 {
     switch(opType)
     {
+    // Uncomment when unpack_from_descriptor() is implemented in the lifting PR:
+    // case HIPDNN_OPERATION_TYPE_BATCHNORM:
+    //     return {std::make_shared<graph::BatchnormNode>(graph::BatchnormAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD:
+    //     return {std::make_shared<graph::BatchnormBackwardNode>(
+    //                 graph::BatchnormBackwardAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE:
+    //     return {std::make_shared<graph::BatchnormInferenceNode>(
+    //                 graph::BatchnormInferenceAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE:
+    //     return {std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
+    //                 graph::BatchnormInferenceAttributesVarianceExt{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE:
+    //     return {std::make_shared<graph::BlockScaleDequantizeNode>(
+    //                 graph::BlockScaleDequantizeAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE:
+    //     return {std::make_shared<graph::BlockScaleQuantizeNode>(
+    //                 graph::BlockScaleQuantizeAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA:
+    //     return {std::make_shared<graph::ConvolutionDgradNode>(graph::ConvDgradAttributes{},
+    //                                                           graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS:
+    //     return {std::make_shared<graph::ConvolutionWgradNode>(graph::ConvWgradAttributes{},
+    //                                                           graphAttrs),
+    //             {}};
     case HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD:
         return {
             std::make_shared<graph::ConvolutionFpropNode>(graph::ConvFpropAttributes{}, graphAttrs),
             {}};
+    // case HIPDNN_OPERATION_TYPE_CUSTOM_OP:
+    //     return {std::make_shared<graph::CustomOpNode>(graph::CustomOpAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_LAYERNORM:
+    //     return {std::make_shared<graph::LayerNormNode>(graph::LayernormAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_MATMUL:
+    //     return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
+    // case HIPDNN_OPERATION_TYPE_POINTWISE:
+    //     return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_RMSNORM:
+    //     return {std::make_shared<graph::RMSNormNode>(graph::RMSNormAttributes{}, graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD:
+    //     return {std::make_shared<graph::SdpaBpropNode>(graph::SdpaBackwardAttributes{},
+    //                                                    graphAttrs),
+    //             {}};
+    // case HIPDNN_OPERATION_TYPE_SDPA_FORWARD:
+    //     return {std::make_shared<graph::SdpaFpropNode>(graph::SdpaAttributes{}, graphAttrs), {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
