@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 enable_testing()
 
+# Add a CMake install test for a given hipDNN package and header.
 function(add_hipdnn_install_test)
     cmake_parse_arguments(ARG "" "PACKAGE;HEADER" "" ${ARGN})
 

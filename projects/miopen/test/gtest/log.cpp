@@ -347,7 +347,7 @@ void TestLogCmdBNormFusion(std::function<void(const miopenFusionPlanDescriptor_t
         ASSERT_FALSE(isSubStr(str, sub_str)) << "str     : " << str << "str_sub : " << sub_str;
 }
 
-void TestLogBufferOn()
+void TestLogBufferEnvEnabled()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
@@ -358,6 +358,8 @@ void TestLogBufferOn()
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
+    ScopedEnvironment<std::string> log_buffer_on_env(MIOPEN_LOG_BUFFER_SIZE,
+                                                     "128"); // enable logging
     // test log dump after error
     miopen::ClearLogBuffer();
     MIOPEN_LOG_W("warn");
@@ -416,7 +418,7 @@ void TestLogBufferOn()
     fs::remove(filename);
 }
 
-void TestLogBufferEnvDisabled()
+void TestLogBufferOff()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
@@ -425,8 +427,6 @@ void TestLogBufferEnvDisabled()
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
-    ScopedEnvironment<std::string> log_buffer_off_env(MIOPEN_LOG_BUFFER_SIZE,
-                                                      "0"); // disable logging
 
     miopen::ClearLogBuffer();
     // log messages
@@ -448,6 +448,8 @@ void TestLogBufferOffAtHighLevel()
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "6"); // miopen::LoggingLevel::Info2
+    ScopedEnvironment<std::string> log_buffer_on_env(MIOPEN_LOG_BUFFER_SIZE,
+                                                     "128"); // enable logging
 
     miopen::ClearLogBuffer();
     // log messages
