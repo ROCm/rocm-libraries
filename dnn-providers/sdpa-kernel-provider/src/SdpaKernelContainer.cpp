@@ -12,19 +12,11 @@
 namespace sdpa_kernel_provider
 {
 
-// ============================================================================
-// Engine Registration
-// ============================================================================
-// Use HIPDNN_REGISTER_ENGINE to register engine names here when adding engines.
-// This will:
-// 1. Create _NAME and _ID constants for the engine
-// 2. Detect hash collisions with other registered engines
-//
-// Example:
-// HIPDNN_REGISTER_ENGINE(SDPA_KERNEL_ENGINE, "SDPA_KERNEL_ENGINE")
-// ============================================================================
-
-// Comma separated list of all engine classes
+/**
+ * @brief ENGINE_TYPES contains a comma separated list of all engine types to be loaded in the container.
+ * A defaultPlanBuilders() specialization must be present for each engine type.
+ *  **/
+// TODO: Consider moving this macro and defaultPlanBuilders to a separate header file
 #define ENGINE_TYPES SdpaKernelEngine
 
 using PlanBuilderList = std::vector<std::unique_ptr<IPlanBuilder>>;
@@ -53,6 +45,9 @@ std::vector<std::unique_ptr<IEngine>> createEngines()
 }
 }
 
+/**
+ * Array of all engine ids for the engines listed in ENGINE_TYPES
+ */
 const auto& engineIdArray()
 {
     static auto s_engineIds = detail::engineIdArray<ENGINE_TYPES>();

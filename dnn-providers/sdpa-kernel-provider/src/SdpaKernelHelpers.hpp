@@ -13,7 +13,7 @@ std::vector<T> makeVector(Args&&... args)
 {
     std::vector<T> v;
     v.reserve(sizeof...(args));
-    (v.push_back(std::forward<Args>(args)), ...); // C++17 fold expression
+    (v.push_back(std::forward<Args>(args)), ...);
     return v;
 }
 
