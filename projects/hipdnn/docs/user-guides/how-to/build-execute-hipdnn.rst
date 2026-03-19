@@ -61,7 +61,9 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   // Define memory for each tensor.
   // The following code to manage host and device memory may need to be customized or
   // replace with code more appropriate to your environment. The utilities::Tensor
-  // class is provided for assistance.
+  // class is provided for assistance. This class ensures sufficient memory is
+  // allocated on the host and GPU for each tensor and uses the MigratableMemory
+  // class to facilitate synchronizing data between host and device.
   utilities::Tensor<DataType_t::FLOAT> xTensor(x->get_dim(), TensorLayout::NCHW);
   utilities::Tensor<DataType_t::FLOAT> scaleTensor(scale->get_dim());
   utilities::Tensor<DataType_t::FLOAT> biasTensor(bias->get_dim());
@@ -69,11 +71,13 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   utilities::Tensor<DataType_t::FLOAT> invVarianceTensor(inv_var->get_dim());
   utilities::Tensor<DataType_t::FLOAT> yTensor(y->get_dim(), TensorLayout::NCHW);
 
-  // [... populate Tensor input data ...]
+  // [... populate Tensor input data on host ...]
 
   // Allocate GPU memory for each tensor and pass to the engine via the execute()
-  // function's variantPack parameter. How the device memory is allocated may need
-  // to be customized for your environment or application.
+  // function's variantPack parameter. The code below to allocate and manage GPU
+  // memory may need to be customized for your environment or application. The
+  // MigratableMemory::deviceData() function will sync the tensor data in host
+  // memory to GPU memory and return the GPU memory address of the data.
   std::unordered_map<int64_t, void*> variantPack;
   variantPack[x->get_uid()] = xTensor.memory().deviceData();
   variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
@@ -102,3 +106,8 @@ This is the basic frontend workflow:
 8. The resulting plan is executed on the GPU hardware.
 
 For complete working examples, see the official `samples on GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_.
+
+Variant pack
+------------
+
+The variant pack specifies which GPU memory address correspond to which tensors. The tensors are added to the variant pack using the tensor UID as the key and the GPU memory address as the value. It is the responsibility of the application to ensure sufficient GPU memory is allocated for each tensor and to ensure data is propoerly to/from GPU and host memory. The Data SDK ``utilities::Tensor`` class is provided to assist with tensor host and GPU memory management thought it may not be suitable for all applications.
