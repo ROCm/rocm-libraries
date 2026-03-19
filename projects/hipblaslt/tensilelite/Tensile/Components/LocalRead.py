@@ -269,7 +269,13 @@ class LocalReadMFMA(LocalRead):
                 tableIdx = idxInBlk // blockW
                 idx = dsReadConvTable[tableIdx] + blockIdx * blockSize
             if TF32EmuInterleaveTreg:
-                idx, XTchar = self.TXInterleaveLayoutIdx(idx, kernel["MIInputPerThread"])
+                if writer.states.doFullPackCodePrefetch:
+                    idx, XTchar = self.TXInterleaveLayoutIdx(idx, kernel["MIInputPerThread"])
+                else:
+                    withinGroup = idx % 8
+                    if withinGroup < 4:
+                        XTchar = "T"
+                        idx = (idx // 8) * 4 + withinGroup
             elif writer.states.doFullPackCodePrefetch:
                 # full pack code prefetch case, dst of local read is always T reg
                 # use T as destination
@@ -284,9 +290,13 @@ class LocalReadMFMA(LocalRead):
                 # no register conversion (use X 0-31)
                 pass
             elif TF32EmuInterleaveTreg:
-                # T reg interleave layout (common for both lrvwTile==1 and >1)
-                # Conversion for src only. No conversion in dst case.
-                idx, XTchar = self.TXInterleaveLayoutIdx(idx, kernel["MIInputPerThread"])
+                if writer.states.doFullPackCodePrefetch:
+                    idx, XTchar = self.TXInterleaveLayoutIdx(idx, kernel["MIInputPerThread"])
+                else:
+                    withinGroup = idx % 8
+                    if withinGroup < 4:
+                        XTchar = "T"
+                        idx = (idx // 8) * 4 + withinGroup
             elif writer.states.doFullPackCodePrefetch:
                 # full pack code prefetch case, dst of local read is always T reg
                 XTchar = "T" # use T reg for wider local read + transpose code
