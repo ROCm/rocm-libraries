@@ -60,12 +60,22 @@ struct MmaPipelineOptionFlags
         result.mFlags = ~result.mFlags;
         return result;
     }
+    constexpr bool testFlag(MmaPipelineOptionFlag flag) const
+    {
+        return (flag == MmaPipelineOptionFlag::NONE) ? mFlags == toType(flag) : *this & flag;
+    }
     constexpr operator bool() const { return mFlags != toType(MmaPipelineOptionFlag::NONE); }
+    constexpr bool operator==(Type rhs) const { return mFlags == rhs; }
 
     private:
     Type mFlags;
     static constexpr Type toType(MmaPipelineOptionFlag f) { return static_cast<Type>(f); }
 };
+
+constexpr bool operator==(MmaPipelineOptionFlags::Type lhs, const MmaPipelineOptionFlags& rhs)
+{
+    return rhs == lhs;
+}
 
 // TODO: c++20: use MmaPipelineOptionFlags directly
 template <MmaPipelineOptionFlags::Type Flags_, typename Derived>
@@ -95,7 +105,7 @@ struct MmaPipelineBase
     template <MmaPipelineOptionFlag Flag>
     constexpr CK_TILE_DEVICE static bool hasFlag()
     {
-        return Flags & Flag;
+        return Flags.testFlag(Flag);
     }
 
     template <typename DstT, typename Transform, typename... Args>

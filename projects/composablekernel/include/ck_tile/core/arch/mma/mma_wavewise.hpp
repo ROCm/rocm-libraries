@@ -74,10 +74,10 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct WaveWiseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE),
+struct WaveWiseMma : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), // TODO: c++20: use MmaPipelineOptionFlags directly
                                             WaveWiseMma<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CompilerTarget, MmaOp, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE),
+    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), // TODO: c++20: use MmaPipelineOptionFlags directly
                                  WaveWiseMma<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CompilerTarget, MmaOp, MmaTransforms>>;
     // clang-format on
     using FragWiseMmaOp = MmaOp;
