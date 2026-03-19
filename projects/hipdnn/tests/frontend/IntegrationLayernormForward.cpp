@@ -326,7 +326,7 @@ protected:
 
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
-        std::vector<int64_t> const dims = {2, 3, 14, 14};
+        const std::vector<int64_t> dims = {2, 3, 14, 14};
         SimpleLayernormTensorBundle<float, float> tensorBundle(dims);
 
         auto [graph, tensors] = createLayernormTestGraphWithUids(

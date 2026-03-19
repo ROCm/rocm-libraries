@@ -237,7 +237,7 @@ TEST_F(TestGraphDescriptorBatchnormBackward, BuildWithPeerStatsTensorArray)
     auto peerStatsDesc0 = createFinalizedTensor(110);
     auto peerStatsDesc1 = createFinalizedTensor(111);
 
-    std::vector<HipdnnBackendDescriptor*> const peerStatsDescs
+    const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {peerStatsDesc0.get(), peerStatsDesc1.get()};
     auto opDesc = createFinalizedBatchnormBackwardOp(dyDesc.get(),
                                                      xDesc.get(),

@@ -49,13 +49,13 @@ HIPDNN_HIDDEN inline std::shared_mutex& getComponentNameMutex()
 
 inline void setComponentName(const std::string& name)
 {
-    std::unique_lock<std::shared_mutex> const lock(getComponentNameMutex());
+    const std::unique_lock<std::shared_mutex> lock(getComponentNameMutex());
     getStoredComponentName() = name;
 }
 
 inline std::string getComponentName()
 {
-    std::shared_lock<std::shared_mutex> const lock(getComponentNameMutex());
+    const std::shared_lock<std::shared_mutex> lock(getComponentNameMutex());
     return getStoredComponentName();
 }
 
