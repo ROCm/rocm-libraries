@@ -650,24 +650,20 @@ TEST_F(TestKnobDescriptor, GetStrideNotSetReturnsZeroCount)
     ASSERT_EQ(count, 0);
 }
 
-TEST_F(TestKnobDescriptor, FinalizeNonPositiveStrideFails)
+TEST_F(TestKnobDescriptor, SetZeroStrideFails)
 {
-    setKnobId("test_knob");
-    setInt64Default(0);
     int64_t stride = 0;
-    ASSERT_NO_THROW(
-        getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 1, &stride));
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 1, &stride),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestKnobDescriptor, FinalizeNegativeStrideFails)
+TEST_F(TestKnobDescriptor, SetNegativeStrideFails)
 {
-    setKnobId("test_knob");
-    setInt64Default(0);
     int64_t stride = -1;
-    ASSERT_NO_THROW(
-        getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 1, &stride));
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 1, &stride),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
 // ============================================================================
@@ -720,44 +716,44 @@ TEST_F(TestKnobDescriptor, SetValidValuesIntNullPtrWithCountFails)
 
 TEST_F(TestKnobDescriptor, SetAndGetValidValuesString)
 {
-    std::vector<std::string> values = {"option_a", "option_b", "option_c"};
-    for(const auto& s : values)
-    {
-        ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                                                      HIPDNN_TYPE_CHAR,
-                                                      static_cast<int64_t>(s.size()),
-                                                      s.c_str()));
-    }
+    // Flat null-separated buffer: "option_a\0option_b\0option_c\0"
+    using namespace std::string_literals;
+    const auto input = "option_a\0option_b\0option_c"s;
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(input.size()),
+                                                  input.data()));
     setKnobId("test_knob");
     setStringDefault("default");
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    // Query total count (requestedElementCount=0)
-    int64_t count = 0;
+    // Size query: total bytes needed
+    int64_t totalBytes = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
-    ASSERT_EQ(count, static_cast<int64_t>(values.size()));
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &totalBytes, nullptr));
+    // "option_a\0option_b\0option_c\0" = 9+9+9 = 27 bytes
+    ASSERT_EQ(totalBytes, 27);
 
-    // Retrieve each string: size query (null buffer), then copy (non-null buffer)
-    for(int64_t i = 0; i < static_cast<int64_t>(values.size()); ++i)
-    {
-        // requestedElementCount=i+1 (1-based index), null buffer → returns byte size
-        int64_t strSize = 0;
-        ASSERT_NO_THROW(getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, i + 1, &strSize, nullptr));
-        ASSERT_EQ(strSize, static_cast<int64_t>(values[static_cast<size_t>(i)].size() + 1));
+    // Copy into buffer and verify
+    std::vector<char> buf(static_cast<size_t>(totalBytes));
+    int64_t written = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  totalBytes,
+                                                  &written,
+                                                  buf.data()));
+    ASSERT_EQ(written, totalBytes);
 
-        // requestedElementCount=i+1 (same 1-based index), non-null buffer → copy
-        std::vector<char> buf(static_cast<size_t>(strSize));
-        int64_t written = 0;
-        ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                                                      HIPDNN_TYPE_CHAR,
-                                                      i + 1,
-                                                      &written,
-                                                      buf.data()));
-        ASSERT_EQ(written, strSize);
-        ASSERT_EQ(std::string(buf.data()), values[static_cast<size_t>(i)]);
-    }
+    // Parse the flat buffer back into strings
+    const char* pos = buf.data();
+    const char* end = pos + written;
+    ASSERT_STREQ(pos, "option_a");
+    pos += std::strlen(pos) + 1;
+    ASSERT_STREQ(pos, "option_b");
+    pos += std::strlen(pos) + 1;
+    ASSERT_STREQ(pos, "option_c");
+    pos += std::strlen(pos) + 1;
+    ASSERT_EQ(pos, end);
 }
 
 TEST_F(TestKnobDescriptor, ValidValuesStringEmpty)
@@ -770,57 +766,81 @@ TEST_F(TestKnobDescriptor, ValidValuesStringEmpty)
     ASSERT_EQ(count, 0);
 }
 
-TEST_F(TestKnobDescriptor, GetValidValuesStringOutOfRangeFails)
+TEST_F(TestKnobDescriptor, GetValidValuesStringTruncatesToBufferSize)
 {
-    makeFinalized(); // no valid values set
-
-    int64_t size = 0;
-    ASSERT_THROW_HIPDNN_STATUS(
-        getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 1, &size, nullptr),
-        HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountNonNullAppendsEmpty)
-{
-    // elementCount=0 with non-null pointer: append an empty string
-    const char* empty = "";
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, empty));
+    // "a\0b\0c\0" = 6 bytes total
+    using namespace std::string_literals;
+    const auto input = "a\0b\0c"s;
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(input.size()),
+                                                  input.data()));
     setKnobId("test_knob");
     setStringDefault("default");
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    int64_t count = 0;
+    // Request buffer of only 4 bytes — fits "a\0b\0" but not "c\0"
+    std::array<char, 4> buf = {};
+    int64_t written = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
-    ASSERT_EQ(count, 1); // one empty string was appended
-
-    // Query size of string[0]: should be 1 (null terminator only)
-    int64_t strSize = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 1, &strSize, nullptr));
-    ASSERT_EQ(strSize, 1);
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 4, &written, buf.data()));
+    ASSERT_EQ(written, 4);
+    ASSERT_STREQ(buf.data(), "a");
+    ASSERT_STREQ(buf.data() + 2, "b");
 }
 
-TEST_F(TestKnobDescriptor, SetValidValuesStringZeroCountNullClears)
+TEST_F(TestKnobDescriptor, SetValidValuesStringNullClears)
 {
-    // Add some values, then clear with elementCount=0 + nullptr
-    const std::string val = "option_a";
+    // Set some values, then clear by passing nullptr
+    using namespace std::string_literals;
+    const auto input = "option_a\0option_b"s;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                                   HIPDNN_TYPE_CHAR,
-                                                  static_cast<int64_t>(val.size()),
-                                                  val.c_str()));
+                                                  static_cast<int64_t>(input.size()),
+                                                  input.data()));
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, nullptr));
     setKnobId("test_knob");
     setStringDefault("default");
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    int64_t count = 99;
+    int64_t totalBytes = 99;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
-    ASSERT_EQ(count, 0); // list was cleared
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &totalBytes, nullptr));
+    ASSERT_EQ(totalBytes, 0);
+}
+
+TEST_F(TestKnobDescriptor, SetValidValuesStringReplaces)
+{
+    // Second set replaces, not appends
+    using namespace std::string_literals;
+    const auto first = "a\0b"s;
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(first.size()),
+                                                  first.data()));
+
+    const auto second = "x"s;
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(second.size()),
+                                                  second.data()));
+
+    setKnobId("test_knob");
+    setStringDefault("default");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    int64_t totalBytes = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 0, &totalBytes, nullptr));
+    ASSERT_EQ(totalBytes, 2); // "x\0"
+
+    std::array<char, 2> buf = {};
+    int64_t written = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING, HIPDNN_TYPE_CHAR, 2, &written, buf.data()));
+    ASSERT_EQ(written, 2);
+    ASSERT_STREQ(buf.data(), "x");
 }
 
 // ============================================================================
@@ -973,14 +993,13 @@ TEST_F(TestKnobDescriptor, ToKnobTWithStringConstraints)
     setKnobId("string_constrained_knob");
     setStringDefault("option_a");
 
+    using namespace std::string_literals;
     const std::vector<std::string> validStrings = {"option_a", "option_b"};
-    for(const auto& s : validStrings)
-    {
-        ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
-                                                      HIPDNN_TYPE_CHAR,
-                                                      static_cast<int64_t>(s.size()),
-                                                      s.c_str()));
-    }
+    const auto validValues = "option_a\0option_b"s;
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
+                                                  HIPDNN_TYPE_CHAR,
+                                                  static_cast<int64_t>(validValues.size()),
+                                                  validValues.data()));
     int64_t maxLen = 32;
     ASSERT_NO_THROW(getDescriptor()->setAttribute(
         HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT64, 1, &maxLen));

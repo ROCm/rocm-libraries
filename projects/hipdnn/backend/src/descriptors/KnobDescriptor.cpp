@@ -116,13 +116,6 @@ void KnobDescriptor::finalize()
                       "KnobDescriptor::finalize() failed: "
                       "MINIMUM_VALUE (DOUBLE) > MAXIMUM_VALUE (DOUBLE).");
     }
-    if(_stride.has_value())
-    {
-        THROW_IF_TRUE(*_stride <= 0,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "KnobDescriptor::finalize() failed: STRIDE must be positive (> 0).");
-    }
-
     HipdnnBackendDescriptorImpl<KnobDescriptor>::finalize();
 }
 
@@ -208,6 +201,9 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                                              elementCount,
                                              arrayOfElements,
                                              "KnobDescriptor::setAttribute()");
+        THROW_IF_TRUE(*_stride <= 0,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "KnobDescriptor::setAttribute(): STRIDE must be positive (> 0).");
         break;
     case HIPDNN_ATTR_KNOB_INFO_DESCRIPTION:
         setBoundedString(_description,
@@ -320,17 +316,37 @@ void KnobDescriptor::setValidValuesString(hipdnnBackendAttributeType_t attribute
                    HIPDNN_STATUS_BAD_PARAM,
                    "KnobDescriptor::setAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
 
-    // elementCount=0 + nullptr: clear the list (mirrors VALID_VALUES_INT semantics).
-    if(elementCount == 0 && arrayOfElements == nullptr)
+    // nullptr clears the list (mirrors VALID_VALUES_INT semantics).
+    if(arrayOfElements == nullptr)
     {
         _validValuesString.clear();
         return;
     }
 
-    // Delegate validation and construction to setString, then append.
-    std::string tmp;
-    setString(tmp, attributeType, elementCount, arrayOfElements, "KnobDescriptor::setAttribute()");
-    _validValuesString.push_back(std::move(tmp));
+    THROW_IF_LT(elementCount,
+                static_cast<int64_t>(1),
+                HIPDNN_STATUS_BAD_PARAM,
+                "KnobDescriptor::setAttribute(): elementCount must be >= 1");
+
+    // Caller passes a flat null-separated buffer: "str1\0str2\0str3\0".
+    // elementCount is the total byte count of the buffer.
+    // Split on embedded null terminators to populate the string list.
+    const auto* data = static_cast<const char*>(arrayOfElements);
+    const auto* end = data + elementCount;
+
+    _validValuesString.clear();
+    while(data < end)
+    {
+        // Each string runs from data to the next \0 (or end of buffer).
+        const auto* strEnd
+            = static_cast<const char*>(std::memchr(data, '\0', static_cast<size_t>(end - data)));
+        if(strEnd == nullptr)
+        {
+            strEnd = end;
+        }
+        _validValuesString.emplace_back(data, strEnd);
+        data = strEnd + 1;
+    }
 }
 
 // ============================================================================
@@ -530,60 +546,59 @@ void KnobDescriptor::getValidValuesString(hipdnnBackendAttributeType_t attribute
                                           int64_t* elementCount,
                                           void* arrayOfElements) const
 {
-    // Two-step retrieval protocol (stateless):
-    //   Step 1 (total count):  requestedElementCount=0, arrayOfElements=nullptr
-    //                          → returns total number of strings in elementCount
-    //   Step 2 (size query):   requestedElementCount=N (1-based index, N>0), arrayOfElements=nullptr
-    //                          → returns byte length of string[N-1] (incl. null) in elementCount
-    //   Step 3 (copy):         requestedElementCount=N (same 1-based index), arrayOfElements=buffer
-    //                          → copies string[N-1] into buffer; caller must have allocated
-    //                            based on size from step 2.
+    // Flat null-separated buffer retrieval:
+    //   Size query: arrayOfElements=nullptr → *elementCount = total bytes needed
+    //               (sum of all string lengths + 1 null per string)
+    //   Copy:       arrayOfElements=char* buffer, requestedElementCount=buffer size in bytes
+    //               → copies "str1\0str2\0str3\0" into buffer, truncating at buffer boundary;
+    //                 *elementCount = bytes written.
 
     THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
                    HIPDNN_STATUS_BAD_PARAM,
                    "KnobDescriptor::getAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
+
+    // Compute total byte size: each string contributes its length + 1 (null terminator).
+    int64_t totalBytes = 0;
+    for(const auto& s : _validValuesString)
+    {
+        totalBytes += static_cast<int64_t>(s.size()) + 1;
+    }
+
+    // Size query
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "KnobDescriptor::getAttribute(): elementCount is null");
+        *elementCount = totalBytes;
+        return;
+    }
 
     THROW_IF_LT(requestedElementCount,
                 static_cast<int64_t>(0),
                 HIPDNN_STATUS_BAD_PARAM,
                 "KnobDescriptor::getAttribute(): requestedElementCount is negative");
 
-    const auto totalCount = static_cast<int64_t>(_validValuesString.size());
+    // Copy "str1\0str2\0str3\0" into caller's buffer.
+    auto* out = static_cast<char*>(arrayOfElements);
+    int64_t remaining = requestedElementCount;
+    int64_t written = 0;
 
-    // Step 1: requestedElementCount == 0 → return total number of strings
-    if(requestedElementCount == 0)
+    for(const auto& s : _validValuesString)
     {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "KnobDescriptor::getAttribute(): elementCount is null");
-        *elementCount = totalCount;
-        return;
+        const auto needed = static_cast<int64_t>(s.size()) + 1; // string + null
+        if(needed > remaining)
+        {
+            break; // not enough room for this string + null; stop cleanly
+        }
+        std::memcpy(out + written, s.c_str(), static_cast<size_t>(needed));
+        written += needed;
+        remaining -= needed;
     }
-
-    // requestedElementCount is a 1-based string index for both size query and copy
-    const int64_t index = requestedElementCount - 1;
-    THROW_IF_TRUE(index >= totalCount,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "KnobDescriptor::getAttribute(): index out of range for VALID_VALUES_STRING");
-
-    const auto& str = _validValuesString[static_cast<size_t>(index)];
-
-    if(arrayOfElements == nullptr)
-    {
-        // Step 2: return byte size of string[index] (incl. null terminator)
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "KnobDescriptor::getAttribute(): elementCount is null");
-        *elementCount = static_cast<int64_t>(str.size() + 1);
-        return;
-    }
-
-    // Step 3: copy string[index] into caller's buffer
-    std::memcpy(arrayOfElements, str.c_str(), str.size() + 1);
 
     if(elementCount != nullptr)
     {
-        *elementCount = static_cast<int64_t>(str.size() + 1);
+        *elementCount = written;
     }
 }
 
