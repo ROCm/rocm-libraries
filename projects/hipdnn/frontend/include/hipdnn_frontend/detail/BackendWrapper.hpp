@@ -127,6 +127,15 @@ public:
         return hipdnnSetEnginePluginPaths_ext(numPaths, pluginPaths, mode);
     }
 
+    hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
+                                                 size_t* numPluginPaths,
+                                                 char** pluginPaths,
+                                                 size_t* maxStringLen) override
+    {
+        return hipdnnGetLoadedEnginePluginPaths_ext(
+            handle, numPluginPaths, pluginPaths, maxStringLen);
+    }
+
 private:
     hipdnn_data_sdk::utilities::Version _version;
 };

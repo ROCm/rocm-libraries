@@ -43,7 +43,7 @@ namespace hipdnn_frontend
             std::array<char, 1024> backend_err_msg{};                                             \
             hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),  \
                                                                          backend_err_msg.size()); \
-            std::string full_error_msg                                                            \
+            const std::string full_error_msg                                                      \
                 = std::string(error_message) + " Backend error: " + backend_err_msg.data();       \
             return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                        \
         }                                                                                         \

@@ -279,7 +279,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)
                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                          1,
                                          nullptr,
-                                         graph.getPtr()));
+                                         static_cast<void*>(graph.getPtr())));
     ASSERT_EQ(*graph.get(), *(_mockGraphWrapper.get()));
 
     int64_t count;
@@ -287,7 +287,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)
                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                          1,
                                          &count,
-                                         graph2.getPtr()));
+                                         static_cast<void*>(graph2.getPtr())));
     ASSERT_EQ(count, 1);
 }
 
