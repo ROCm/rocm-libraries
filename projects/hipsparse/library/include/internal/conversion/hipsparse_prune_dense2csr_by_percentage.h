@@ -33,7 +33,7 @@ extern "C" {
 *  \brief
 *  \p hipsparseXpruneDense2csrByPercentage_bufferSize functions convert the size of the user-allocated temporary
 *  storage buffer used when converting a dense matrix to a pruned CSR matrix where the pruning is done
-*  based on a percentage.
+*  based on a \p percentage.
 *
 *  \details
 *  When converting and pruning a dense matrix \p A to a CSR matrix by percentage, the
@@ -46,7 +46,7 @@ extern "C" {
 *  (whose size is determined by the value at \p nnzTotalDevHostPtr) and calling
 *  \ref hipsparseSpruneDense2csrByPercentage "hipsparseXpruneDense2csrByPercentage()".
 *
-*  The pruning by percentage works by first sorting the absolute values of the dense
+*  The pruning by \p percentage works by first sorting the absolute values of the dense
 *  matrix \p A. Users can then determine a position in this sorted array by
 *  \f[
 *    pos = ceil(m \cdot n \cdot (percentage/100)) - 1 \\
@@ -129,10 +129,10 @@ hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandl
 /*! \ingroup conv_module
 *  \brief
 *  This function computes the size of the user-allocated temporary storage buffer used
-*  when converting and pruning by percentage a dense matrix to a CSR matrix.
+*  when converting and pruning by \p percentage a dense matrix to a CSR matrix.
 *
 *  \details
-*  When converting and pruning a dense matrix \p A to a CSR matrix by percentage, the
+*  When converting and pruning a dense matrix \p A to a CSR matrix by \p percentage, the
 *  following steps are performed. First, the user calls
 *  \p hipsparseXpruneDense2csrByPercentage_bufferSizeExt, which determines the size of the
 *  temporary storage buffer. After this is determined, this buffer must be allocated by the user.
@@ -142,7 +142,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandl
 *  (whose size is determined by the value at \p nnzTotalDevHostPtr) and calling
 *  \ref hipsparseSpruneDense2csrByPercentage "hipsparseXpruneDense2csrByPercentage()".
 *
-*  The pruning by percentage works by first sorting the absolute values of the dense
+*  The pruning by \p percentage works by first sorting the absolute values of the dense
 *  matrix \p A. Users can then determine a position in this sorted array by
 *  \f[
 *    pos = ceil(m \cdot n \cdot (percentage/100)) - 1 \\
@@ -228,11 +228,11 @@ hipsparseStatus_t
 /*! \ingroup conv_module
 *  \brief
 *  This function computes the number of non-zero elements per row and the total number of
-*  non-zero elements in a dense matrix when converting and pruning by percentage a dense
+*  non-zero elements in a dense matrix when converting and pruning by \p percentage a dense
 *  matrix to a CSR matrix.
 *
 *  \details
-*  When converting and pruning a dense matrix \p A to a CSR matrix by percentage, the
+*  When converting and pruning a dense matrix \p A to a CSR matrix by \p percentage, the
 *  following steps are performed. First, the user calls
 *  \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()",
 *  which determines the size of the temporary storage buffer. After this is determined, this buffer must be allocated
@@ -242,7 +242,7 @@ hipsparseStatus_t
 *  at \p nnzTotalDevHostPtr) and calling \ref hipsparseSpruneDense2csrByPercentage
 *  "hipsparseXpruneDense2csrByPercentage()".
 *
-*  The pruning by percentage works by first sorting the absolute values of the dense
+*  The pruning by \p percentage works by first sorting the absolute values of the dense
 *  matrix \p A. Users can then determine a position in this sorted array by
 *  \f[
 *    pos = ceil(m \cdot n \cdot (percentage/100)) - 1 \\
@@ -321,11 +321,11 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 /*! \ingroup conv_module
 *  \brief
 *  This function computes the number of non-zero elements per row and the total number of
-*  non-zero elements in a dense matrix when converting and pruning by percentage a dense
+*  non-zero elements in a dense matrix when converting and pruning by \p percentage a dense
 *  matrix to a CSR matrix.
 *
 *  \details
-*  When converting and pruning a dense matrix \p A to a CSR matrix by percentage, the
+*  When converting and pruning a dense matrix \p A to a CSR matrix by \p percentage, the
 *  following steps are performed. First, the user calls \ref hipsparseSpruneDense2csrByPercentage_bufferSize
 *  "hipsparseXpruneDense2csrByPercentage_bufferSize()", which determines the size of the
 *  temporary storage buffer. After this is determined, this buffer must be allocated by the user.
@@ -334,7 +334,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *  user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays (which have a size
 *  determined by the value at \p nnzTotalDevHostPtr) and calling \p hipsparseXpruneDense2csrByPercentage.
 *
-*  The pruning by percentage works by first sorting the absolute values of the dense
+*  The pruning by \p percentage works by first sorting the absolute values of the dense
 *  matrix \p A. Users can then determine a position in this sorted array by
 *  \f[
 *    pos = ceil(m \ cdot n \cdot (percentage/100)) - 1 \\

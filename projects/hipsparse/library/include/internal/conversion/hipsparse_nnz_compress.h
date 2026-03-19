@@ -37,7 +37,7 @@ extern "C" {
 *  in each row of the matrix if elements less than the tolerance were removed. It also computes the total number
 *  of remaining elements in the matrix.
 *
-*  Given an input sparse matrix \p A in CSR format, the resulting compressed sparse CSR matrix C is
+*  Given an input sparse matrix \f$A\f$ in CSR format, the resulting compressed sparse CSR matrix \f$C\f$ is
 *  computed using:
 *  \f[
 *   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}

@@ -41,7 +41,7 @@ extern "C" {
 *  desired index base in the output CSR matrix is set in the \ref hipsparseMatDescr_t. See
 *  \ref hipsparseSetMatIndexBase().
 *
-*  As an example, if using index base zero (whcih is the default) and the dense
+*  As an example, if using index base zero (which is the default) and the dense
 *  matrix:
 *
 *  \f[

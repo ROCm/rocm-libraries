@@ -52,7 +52,7 @@ extern "C" {
 *  It can return before the actual computation has finished.
 *
 *  \note
-*  If \p nnz is zero, the function returns successfully with ``result`` set to zero.
+*  If \p nnz is zero, the function returns successfully with \p result set to zero.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 

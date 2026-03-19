@@ -660,10 +660,10 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
 *  determine the required user-allocated temporary buffer size. The user then allocates this
 *  buffer and also allocates \p csrRowPtrC to have size \p m+1. Both the temporary storage
 *  buffer and \p csrRowPtrC array are then passed to \ref hipsparseXcsrgemm2Nnz, which fills
-*  in the \p csrRowPtrC array and computes the total number of nonzeros in C, \p nnzC.
+*  in the \p csrRowPtrC array and computes the total number of nonzeros in \f$C\f$, \p nnzC.
 *  The user then allocates both arrays \p csrColIndC and \p csrValC to have size \p nnzC and
 *  calls \p hipsparseXcsrgemm2 to complete the computation. The desired index base in the output
-*  CSR matrix C is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*  CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note If \f$\alpha == 0\f$, then \f$C = \beta \cdot D\f$ will be computed.
 *  \note If \f$\beta == 0\f$, then \f$C = \alpha \cdot A \cdot B\f$ will be computed.

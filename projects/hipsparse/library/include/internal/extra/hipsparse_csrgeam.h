@@ -546,9 +546,9 @@ hipsparseStatus_t hipsparseXcsrgeam2Nnz(hipsparseHandle_t         handle,
 *  required user allocated temporary buffer size. The user then allocates this buffer and also allocates
 *  \p csrRowPtrC to have size \p m+1. Both the temporary storage buffer and \p csrRowPtrC array are then
 *  passed to \ref hipsparseXcsrgeam2Nnz, which fills in the \p csrRowPtrC array and computes the total
-*  number of non-zeros in C, \p nnzC. The user then allocates both arrays \p csrColIndC and \p csrValC to have
+*  number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both arrays \p csrColIndC and \p csrValC to have
 *  size \p nnzC and calls \p hipsparseXcsrgeam2 to complete the computation. The desired index base in
-*  the output CSR matrix C is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*  the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
 *  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.

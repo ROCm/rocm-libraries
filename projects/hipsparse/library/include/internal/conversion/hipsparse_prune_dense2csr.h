@@ -153,7 +153,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 *
 *  \details
 *  Given an input dense column ordered matrix \p A, with leading dimension \p lda where \p lda>=m,
-*  the resulting pruned sparse CSR matrix C is computed using:
+*  the resulting pruned sparse CSR matrix \f$C\f$ is computed using:
 *  \f[
 *   |C(i,j)| = A(i, j) \text{  if |A(i, j)| > threshold}
 *  \f]

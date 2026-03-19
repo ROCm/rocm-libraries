@@ -30,7 +30,7 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpSM_createDescr creates a sparse matrix triangular solve with multiple rhs descriptors. It should be
+*  \p hipsparseSpSM_createDescr creates a sparse matrix triangular solve (with multiple rhs) descriptor. It should be
 *  destroyed at the end using \ref hipsparseSpSM_destroyDescr().
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
@@ -40,7 +40,7 @@ hipsparseStatus_t hipsparseSpSM_createDescr(hipsparseSpSMDescr_t* descr);
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpSM_destroyDescr destroys a sparse matrix triangular solve with multiple rhs descriptors and releases all
+*  \p hipsparseSpSM_destroyDescr destroys a sparse matrix triangular solve (with multiple rhs) descriptor and releases all
 *  resources used by the descriptor.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
