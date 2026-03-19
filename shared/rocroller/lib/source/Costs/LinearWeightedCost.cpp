@@ -19,6 +19,9 @@ namespace rocRoller
 
         static void mapping(IO& io, Scheduling::Weights& weights)
         {
+            // The YAML files from Python now have a `type` field that denotes
+            // which subset of the weights is included; this is irrelevant in
+            // C++.
             std::string type;
             iot::mapOptional(io, "type", type);
 
