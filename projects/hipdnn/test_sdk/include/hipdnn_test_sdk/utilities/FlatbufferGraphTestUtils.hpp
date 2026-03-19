@@ -1689,14 +1689,33 @@ inline flatbuffers::FlatBufferBuilder
         &derivedStrides,
         &derivedDims));
 
+    // inv_rms (inverse RMS from forward pass)
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "inv_rms",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    // dbias (gradient of bias)
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        7,
+        "dbias",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
     auto rmsnormBwdAttributes
         = hipdnn_data_sdk::data_objects::CreateRMSNormBackwardAttributes(builder,
                                                                          1, // dy uid
                                                                          2, // x uid
                                                                          3, // scale uid
-                                                                         flatbuffers::nullopt,
+                                                                         6, // inv_rms uid
                                                                          4, // dx uid
-                                                                         5 // dscale uid
+                                                                         5, // dscale uid
+                                                                         7 // dbias uid
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
