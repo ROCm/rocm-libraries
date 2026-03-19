@@ -4,6 +4,7 @@
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <limits>
 
 namespace miopen_plugin
 {
@@ -19,8 +20,35 @@ MiopenTensor::MiopenTensor(const hipdnn_data_sdk::data_objects::TensorAttributes
     PLUGIN_THROW_IF_NULL(tensor.strides(),
                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                          "Tensor strides pointer is null for tensor UID: " + std::to_string(_uid));
-    std::vector<int> dims(tensor.dims()->begin(), tensor.dims()->end());
-    std::vector<int> strides(tensor.strides()->begin(), tensor.strides()->end());
+
+    // Validate dimensions and strides fit in int (MIOpen uses int for these values)
+    std::vector<int> dims;
+    dims.reserve(tensor.dims()->size());
+    for(auto d : *tensor.dims())
+    {
+        if(d > std::numeric_limits<int>::max() || d < std::numeric_limits<int>::min())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Tensor dimension value " + std::to_string(d)
+                    + " exceeds int range for tensor UID: " + std::to_string(_uid));
+        }
+        dims.push_back(static_cast<int>(d));
+    }
+
+    std::vector<int> strides;
+    strides.reserve(tensor.strides()->size());
+    for(auto s : *tensor.strides())
+    {
+        if(s > std::numeric_limits<int>::max() || s < std::numeric_limits<int>::min())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Tensor stride value " + std::to_string(s)
+                    + " exceeds int range for tensor UID: " + std::to_string(_uid));
+        }
+        strides.push_back(static_cast<int>(s));
+    }
     THROW_ON_MIOPEN_FAILURE(
         miopenSetTensorDescriptor(_descriptor,
                                   miopen_utils::tensorDataTypeToMiopenDataType(tensor.data_type()),
