@@ -564,6 +564,8 @@ Tests:
   beta: 1
   api: [ C_64 ]
   os_flags: LINUX
+  # TODO include all after revising batched hiplaslt API (see earlier TODO)
+  gpu_arch: ['90a','942']
 
 - name: gemm_batched_ex_ILP64
   category: pre_checkin
