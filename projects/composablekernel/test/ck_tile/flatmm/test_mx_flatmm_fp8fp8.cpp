@@ -5,8 +5,6 @@
 #include <gtest/gtest.h>
 #include "test_mx_flatmm_fixtures.hpp"
 
-// Dummy variable for smart-build testing
-static constexpr int kSmartBuildTestMarker = 2;
 
 // FP8 x FP8 -> FP16
 // N_Tile = 256, K must be a multiple of 32.
@@ -21,7 +19,7 @@ TYPED_TEST_SUITE(TestMXFlatmm, FP8FP8Types);
 // K=256 -> num_loop=1: has_hot_loop=false, tail=Odd
 TYPED_TEST(TestMXFlatmm, SmallMNK)
 {
-    this->run_test_with_validation(128, 256, 256, 1, false, ck_tile::TailNumber::Odd);
+    this->run_test_with_validation(128, 256, 512, 1, false, ck_tile::TailNumber::Odd);
 }
 
 // K=512 -> num_loop=2: has_hot_loop=false, tail=Even
