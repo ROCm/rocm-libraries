@@ -17,6 +17,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
     {
     case NodeAttributes::ConvolutionFwdAttributes:
         return ConvolutionFwdOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::PointwiseAttributes:
+        return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,

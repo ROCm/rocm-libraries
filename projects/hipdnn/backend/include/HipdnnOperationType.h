@@ -28,4 +28,5 @@ typedef enum
     HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD = 5, ///< Batch normalization backward pass
     HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE
     = 6, ///< Batch normalization inference with variance
+    HIPDNN_OPERATION_TYPE_POINTWISE = 7, ///< Pointwise (element-wise) operation
 } hipdnnOperationType_t;

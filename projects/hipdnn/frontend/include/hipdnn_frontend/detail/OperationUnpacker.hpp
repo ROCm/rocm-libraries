@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
+#include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -57,6 +58,9 @@ namespace hipdnn_frontend::detail
         return {
             std::make_shared<graph::ConvolutionFpropNode>(graph::ConvFpropAttributes{}, graphAttrs),
             {}};
+    case HIPDNN_OPERATION_TYPE_POINTWISE:
+        return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
+                {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,

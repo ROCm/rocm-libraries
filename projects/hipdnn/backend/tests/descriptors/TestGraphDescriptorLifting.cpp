@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -638,11 +639,11 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
 
 TEST_F(TestGraphDescriptorLifting, DeserializeUnsupportedNodeTypeThrows)
 {
-    // Build a FlatBuffer GraphT manually with a node that has PointwiseAttributes type
-    // (not ConvolutionFwdAttributes), which is not yet supported by NodeFactory
+    // Build a FlatBuffer GraphT manually with a node that has MatmulAttributes type,
+    // which is not yet supported by NodeFactory
     flatbuffers::FlatBufferBuilder builder;
 
-    // Create a minimal tensor for the pointwise node
+    // Create minimal tensors for the matmul node
     TensorAttributesT tensorT;
     tensorT.uid = 1;
     tensorT.dims = {1, 64, 32, 32};
@@ -652,14 +653,14 @@ TEST_F(TestGraphDescriptorLifting, DeserializeUnsupportedNodeTypeThrows)
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorOffsets;
     tensorOffsets.push_back(TensorAttributes::Pack(builder, &tensorT));
 
-    // Create a node with PointwiseAttributes
+    // Create a node with MatmulAttributes (unsupported by NodeFactory)
     NodeT nodeT;
     nodeT.compute_data_type = DataType::FLOAT;
-    PointwiseAttributesT pointwiseAttrs;
-    pointwiseAttrs.operation = PointwiseMode::RELU_FWD;
-    pointwiseAttrs.in_0_tensor_uid = 1;
-    pointwiseAttrs.out_0_tensor_uid = 1;
-    nodeT.attributes.Set(pointwiseAttrs);
+    MatmulAttributesT matmulAttrs;
+    matmulAttrs.a_tensor_uid = 1;
+    matmulAttrs.b_tensor_uid = 1;
+    matmulAttrs.c_tensor_uid = 1;
+    nodeT.attributes.Set(matmulAttrs);
 
     std::vector<flatbuffers::Offset<Node>> nodeOffsets;
     nodeOffsets.push_back(Node::Pack(builder, &nodeT));
@@ -687,7 +688,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializeUnsupportedNodeTypeThrows)
                             static_cast<const void*>(&handle));
     graphDesc->finalize();
 
-    // Lazy unpack: NodeFactory throws NOT_SUPPORTED for the unsupported Pointwise node type
+    // Lazy unpack: NodeFactory throws NOT_SUPPORTED for the unsupported Matmul node type
     int64_t elementCount = 0;
     std::array<HipdnnBackendDescriptor*, 1> returnedOps = {nullptr};
     ASSERT_THROW_HIPDNN_STATUS(graphDesc->getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,

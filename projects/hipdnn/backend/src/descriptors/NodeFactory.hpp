@@ -5,6 +5,7 @@
 
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
+#include "PointwiseOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <memory>
