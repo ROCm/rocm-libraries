@@ -3423,7 +3423,7 @@ private:
     /// and ensures all specialization names are unique.
     size_t compute_max_specialization_width(std::string_view algorithm)
     {
-        size_t                          max_width = 0;
+        size_t                          max_width = sizeof("Specialization") - 1;
         std::unordered_set<std::string> seen_names;
 
         for(const auto& bp : specializations)
