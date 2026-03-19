@@ -200,6 +200,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
             auto tolerance
                 = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+            auto floatTolerance = static_cast<float>(tolerance);
             auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
                 tolerance, tolerance);
             auto statsValidator
@@ -209,39 +210,39 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
             std::cout << "CPU reference validation:\n";
             bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
-                std::cout, "y", yValidator, yRefTensor, yTensor, tolerance, tolerance);
+                std::cout, "y", yValidator, yRefTensor, yTensor, floatTolerance, floatTolerance);
             bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "saved_mean",
                 statsValidator,
                 savedMeanRefTensor,
                 savedMeanTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
             bool invVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "saved_inv_variance",
                 statsValidator,
                 savedInvVarRefTensor,
                 savedInvVarTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
             bool nextMeanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "next_running_mean",
                 statsValidator,
                 nextMeanRefTensor,
                 nextMeanTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
             bool nextVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "next_running_var",
                 statsValidator,
                 nextVarRefTensor,
                 nextVarTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
 
             validationPassed = yValid && meanValid && invVarValid && nextMeanValid && nextVarValid;
         }
@@ -269,6 +270,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
             auto tolerance
                 = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+            auto floatTolerance = static_cast<float>(tolerance);
             auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
                 tolerance, tolerance);
             auto statsValidator
@@ -278,23 +280,23 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
             std::cout << "CPU reference validation:\n";
             bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
-                std::cout, "y", yValidator, yRefTensor, yTensor, tolerance, tolerance);
+                std::cout, "y", yValidator, yRefTensor, yTensor, floatTolerance, floatTolerance);
             bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "saved_mean",
                 statsValidator,
                 savedMeanRefTensor,
                 savedMeanTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
             bool invVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "saved_inv_variance",
                 statsValidator,
                 savedInvVarRefTensor,
                 savedInvVarTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
 
             validationPassed = yValid && meanValid && invVarValid;
         }

@@ -7,6 +7,9 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
+#include <string>
+#include <thread>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -46,7 +49,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
     using hipdnn_data_sdk::types::fabs;
 
     TensorDiffSummary summary{};
-    summary.totalElements = reference.elementCount();
+    summary.totalElements = 0;
     summary.mismatchCount = 0;
     summary.maxAbsDiff = 0.0f;
     summary.meanAbsDiff = 0.0f;
@@ -57,10 +60,13 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
         return summary;
     }
 
+    summary.totalElements = reference.elementCount();
+
     hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
     hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
     double sumAbsDiff = 0.0;
+    std::mutex mtx;
 
     auto diffFunc = [&](const std::vector<int64_t>& indices) {
         T refValue = refView.getHostValue(indices);
@@ -71,6 +77,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
 
         if(absDiff > threshold)
         {
+            std::lock_guard<std::mutex> lock(mtx);
             ++summary.mismatchCount;
             sumAbsDiff += static_cast<double>(absDiff);
 
@@ -111,7 +118,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
 
     auto parallelFunc
         = hipdnn_test_sdk::detail::makeParallelTensorFunctor(diffFunc, reference.dims());
-    parallelFunc(1);
+    parallelFunc(std::thread::hardware_concurrency());
 
     if(summary.mismatchCount > 0)
     {
@@ -133,11 +140,14 @@ inline void printTensorDiffSummary(std::ostream& os,
 {
     os << "  Tensor diff for \"" << tensorName << "\":\n";
     os << "    Total elements: " << summary.totalElements << "\n";
+    double mismatchPct = 0.0;
+    if(summary.totalElements > 0)
+    {
+        mismatchPct = 100.0 * static_cast<double>(summary.mismatchCount)
+                      / static_cast<double>(summary.totalElements);
+    }
     os << "    Mismatched:     " << summary.mismatchCount << " (" << std::fixed
-       << std::setprecision(2)
-       << (100.0 * static_cast<double>(summary.mismatchCount)
-           / static_cast<double>(summary.totalElements))
-       << "%)\n";
+       << std::setprecision(2) << mismatchPct << "%)\n";
     os << "    Max abs diff:   " << std::scientific << std::setprecision(6) << summary.maxAbsDiff;
     if(!summary.maxDiffIndices.empty())
     {
@@ -177,7 +187,7 @@ void printTensorDiff(std::ostream& os,
 template <class T>
 bool validateAndReport(std::ostream& os,
                        const std::string& tensorName,
-                       IReferenceValidation& validator,
+                       const IReferenceValidation& validator,
                        hipdnn_data_sdk::utilities::ITensor& reference,
                        hipdnn_data_sdk::utilities::ITensor& implementation,
                        float absoluteTolerance,

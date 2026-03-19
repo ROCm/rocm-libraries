@@ -214,6 +214,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+        auto floatTolerance = static_cast<float>(tolerance);
         auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
         auto statsValidator
@@ -226,24 +227,24 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                                yValidator,
                                                                                activatedYRefTensor,
                                                                                activatedYTensor,
-                                                                               tolerance,
-                                                                               tolerance);
-        bool meanValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-            std::cout,
-            "saved_mean",
-            statsValidator,
-            savedMeanRefTensor,
-            savedMeanTensor,
-            static_cast<float>(tolerance),
-            static_cast<float>(tolerance));
-        bool invVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-            std::cout,
-            "saved_inv_variance",
-            statsValidator,
-            savedInvVarRefTensor,
-            savedInvVarTensor,
-            static_cast<float>(tolerance),
-            static_cast<float>(tolerance));
+                                                                               floatTolerance,
+                                                                               floatTolerance);
+        bool meanValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "saved_mean",
+                                                                              statsValidator,
+                                                                              savedMeanRefTensor,
+                                                                              savedMeanTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
+        bool invVarValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "saved_inv_variance",
+                                                                              statsValidator,
+                                                                              savedInvVarRefTensor,
+                                                                              savedInvVarTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
 
         bool nextMeanValid = true;
         bool nextVarValid = true;
@@ -255,16 +256,16 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                 statsValidator,
                 nextMeanRefTensor,
                 nextMeanTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
             nextVarValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
                 std::cout,
                 "next_running_variance",
                 statsValidator,
                 nextVarRefTensor,
                 nextVarTensor,
-                static_cast<float>(tolerance),
-                static_cast<float>(tolerance));
+                floatTolerance,
+                floatTolerance);
         }
 
         validationPassed = yValid && meanValid && invVarValid && nextMeanValid && nextVarValid;

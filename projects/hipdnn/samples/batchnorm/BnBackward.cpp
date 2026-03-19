@@ -111,6 +111,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                       &savedInvVarTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
+        auto floatTolerance = static_cast<float>(tolerance);
 
         auto dxValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
@@ -120,23 +121,23 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
         std::cout << "CPU reference validation:\n";
         bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
-            std::cout, "dx", dxValidator, dxRefTensor, dxTensor, tolerance, tolerance);
-        bool dscaleValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-            std::cout,
-            "dscale",
-            dscaleDbiasValidator,
-            dscaleRefTensor,
-            dscaleTensor,
-            static_cast<float>(tolerance),
-            static_cast<float>(tolerance));
-        bool dbiasValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
-            std::cout,
-            "dbias",
-            dscaleDbiasValidator,
-            dbiasRefTensor,
-            dbiasTensor,
-            static_cast<float>(tolerance),
-            static_cast<float>(tolerance));
+            std::cout, "dx", dxValidator, dxRefTensor, dxTensor, floatTolerance, floatTolerance);
+        bool dscaleValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "dscale",
+                                                                              dscaleDbiasValidator,
+                                                                              dscaleRefTensor,
+                                                                              dscaleTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
+        bool dbiasValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "dbias",
+                                                                              dscaleDbiasValidator,
+                                                                              dbiasRefTensor,
+                                                                              dbiasTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
 
         validationPassed = dxValid && dscaleValid && dbiasValid;
     }

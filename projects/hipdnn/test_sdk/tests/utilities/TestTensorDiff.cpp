@@ -93,6 +93,7 @@ TEST(TestComputeTensorDiff, ShapeMismatchReturnsEmptySummary)
 
     auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f);
 
+    EXPECT_EQ(summary.totalElements, 0u);
     EXPECT_EQ(summary.mismatchCount, 0u);
     EXPECT_TRUE(summary.worstMismatches.empty());
 }
