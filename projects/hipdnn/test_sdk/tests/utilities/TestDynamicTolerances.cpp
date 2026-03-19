@@ -1773,9 +1773,9 @@ TEST(TestCalculatePointwiseTolerance, LowPrecisionMultiplierNotLessThanHigh)
         auto epsBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
         auto epsHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
 
-        double cHigh = static_cast<double>(tolHigh) / epsFloat;
-        double cLowBf16 = static_cast<double>(tolLowBf16) / epsBf16;
-        double cLowHalf = static_cast<double>(tolLowHalf) / epsHalf;
+        const double cHigh = static_cast<double>(tolHigh) / epsFloat;
+        const double cLowBf16 = static_cast<double>(tolLowBf16) / epsBf16;
+        const double cLowHalf = static_cast<double>(tolLowHalf) / epsHalf;
 
         EXPECT_GE(cLowBf16, cHigh)
             << "C_low(bf16) < C_high for class " << static_cast<int>(errorClass);
@@ -1787,8 +1787,8 @@ TEST(TestCalculatePointwiseTolerance, LowPrecisionMultiplierNotLessThanHigh)
 // Test that calculatePointwiseTolerance detects wrong outputs
 TEST(TestCalculatePointwiseTolerance, DetectsFailure)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1};
-    std::vector<int64_t> strides = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> strides = {1, 1, 1, 1};
 
     auto baseline = hipdnn_data_sdk::utilities::createTensor(
         hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
