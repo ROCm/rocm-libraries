@@ -122,7 +122,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvFpropNode)
 {
     auto conv = createDefaultConvOp();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     // Deserialize and finalize
@@ -158,7 +158,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
         K_TENSOR_Y2_UID, toVec(K_TENSOR_Y2_DIMS), toVec(K_TENSOR_Y2_STRIDES));
     auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv1.convOp.get(), convOp2.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv1.convOp.get(), convOp2.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     auto liftedGraph = deserializeAndFinalize(serializedBytes);
@@ -188,7 +188,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
 {
     auto conv = createDefaultConvOp();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     auto liftedGraph = deserializeAndFinalize(serializedBytes);
@@ -224,7 +224,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphLevelAttributes)
 {
     auto conv = createDefaultConvOp();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(
         ops, HIPDNN_DATA_HALF, HIPDNN_DATA_BFLOAT16, HIPDNN_DATA_FLOAT, 42);
 
@@ -273,7 +273,7 @@ TEST_F(TestGraphDescriptorLifting, LiftedGraphSerializesToSameBinary)
 {
     auto conv = createDefaultConvOp();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto originalBytes = buildAndSerializeGraph(
         ops, HIPDNN_DATA_HALF, HIPDNN_DATA_BFLOAT16, HIPDNN_DATA_FLOAT, 99);
 
@@ -282,7 +282,7 @@ TEST_F(TestGraphDescriptorLifting, LiftedGraphSerializesToSameBinary)
 
     // Re-serialize the lifted graph
     auto reSerializedData = liftedGraph->getSerializedGraph();
-    std::vector<uint8_t> const reSerializedBytes(static_cast<const uint8_t*>(reSerializedData.ptr),
+    const std::vector<uint8_t> reSerializedBytes(static_cast<const uint8_t*>(reSerializedData.ptr),
                                                  static_cast<const uint8_t*>(reSerializedData.ptr)
                                                      + reSerializedData.size);
 
@@ -295,7 +295,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesNodeTensorUids)
 {
     auto conv = createDefaultConvOp();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     auto liftedGraph = deserializeAndFinalize(serializedBytes);
@@ -376,7 +376,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {convWrapper.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {convWrapper.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     auto liftedGraph = deserializeAndFinalize(serializedBytes);
@@ -450,7 +450,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolutio
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {convWrapper.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {convWrapper.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     auto liftedGraph = deserializeAndFinalize(serializedBytes);
@@ -470,21 +470,21 @@ TEST_F(TestGraphDescriptorLifting, DoubleRoundTrip)
     // Build -> Serialize -> Deserialize -> Serialize -> Deserialize -> Verify
     auto conv = createDefaultConvOp();
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto originalBytes = buildAndSerializeGraph(
         ops, HIPDNN_DATA_HALF, HIPDNN_DATA_BFLOAT16, HIPDNN_DATA_FLOAT, 77);
 
     // First round-trip
     auto liftedGraph1 = deserializeAndFinalize(originalBytes);
     auto serialized1 = liftedGraph1->getSerializedGraph();
-    std::vector<uint8_t> const bytes1(static_cast<const uint8_t*>(serialized1.ptr),
+    const std::vector<uint8_t> bytes1(static_cast<const uint8_t*>(serialized1.ptr),
                                       static_cast<const uint8_t*>(serialized1.ptr)
                                           + serialized1.size);
 
     // Second round-trip
     auto liftedGraph2 = deserializeAndFinalize(bytes1);
     auto serialized2 = liftedGraph2->getSerializedGraph();
-    std::vector<uint8_t> const bytes2(static_cast<const uint8_t*>(serialized2.ptr),
+    const std::vector<uint8_t> bytes2(static_cast<const uint8_t*>(serialized2.ptr),
                                       static_cast<const uint8_t*>(serialized2.ptr)
                                           + serialized2.size);
 
@@ -522,7 +522,7 @@ TEST_F(TestGraphDescriptorLifting, SetOperationsAfterDeserializeThrows)
 {
     // Build and serialize a single conv op graph
     auto conv1 = createDefaultConvOp();
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv1.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv1.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     // Create a new GraphDescriptor and deserialize the bytes (FlatBuffer flow)
@@ -550,7 +550,7 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeOpsAfterDeserializeSucceeds)
 {
     // Build and serialize a single conv op graph
     auto conv1 = createDefaultConvOp();
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv1.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv1.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     // Deserialize and finalize (FlatBuffer flow)
@@ -567,7 +567,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializeOnlyFinalize)
 {
     // Build and serialize a graph with specific graph-level attributes
     auto conv = createDefaultConvOp();
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto originalBytes = buildAndSerializeGraph(
         ops, HIPDNN_DATA_HALF, HIPDNN_DATA_BFLOAT16, HIPDNN_DATA_FLOAT, 42);
 
@@ -585,7 +585,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializeOnlyFinalize)
 
     // Get the re-serialized bytes
     auto serialized = graphDesc->getSerializedGraph();
-    std::vector<uint8_t> const reSerializedBytes(static_cast<const uint8_t*>(serialized.ptr),
+    const std::vector<uint8_t> reSerializedBytes(static_cast<const uint8_t*>(serialized.ptr),
                                                  static_cast<const uint8_t*>(serialized.ptr)
                                                      + serialized.size);
 
@@ -598,7 +598,7 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
 {
     // Build and serialize a single conv op graph
     auto conv1 = createDefaultConvOp();
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv1.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv1.convOp.get()};
     auto originalBytes = buildAndSerializeGraph(ops);
 
     // Deserialize, set handle, finalize (FlatBuffer flow)
@@ -615,7 +615,7 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
 
     // Get serialized bytes — they should be identical to the original
     auto serialized = graphDesc->getSerializedGraph();
-    std::vector<uint8_t> const newBytes(static_cast<const uint8_t*>(serialized.ptr),
+    const std::vector<uint8_t> newBytes(static_cast<const uint8_t*>(serialized.ptr),
                                         static_cast<const uint8_t*>(serialized.ptr)
                                             + serialized.size);
     EXPECT_EQ(originalBytes, newBytes);
@@ -797,7 +797,7 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeOpsOnFlatBufferFlowWorksWithoutFi
 {
     // Build and serialize a conv graph
     auto conv = createDefaultConvOp();
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto serializedBytes = buildAndSerializeGraph(ops);
 
     // Create a new GraphDescriptor and deserialize (no handle, no finalize)
@@ -816,7 +816,7 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeDataTypesWithoutFinalization)
 {
     // Build and serialize a conv graph with specific data types
     auto conv = createDefaultConvOp(HIPDNN_DATA_HALF);
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto serializedBytes
         = buildAndSerializeGraph(ops, HIPDNN_DATA_HALF, HIPDNN_DATA_BFLOAT16, HIPDNN_DATA_FLOAT);
 
@@ -858,7 +858,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphName)
     auto conv = createDefaultConvOp();
     const std::string graphName = "TestGraphName";
 
-    std::vector<HipdnnBackendDescriptor*> const ops = {conv.convOp.get()};
+    const std::vector<HipdnnBackendDescriptor*> ops = {conv.convOp.get()};
     auto bytes = buildAndSerializeGraph(
         ops, HIPDNN_DATA_FLOAT, HIPDNN_DATA_FLOAT, HIPDNN_DATA_FLOAT, std::nullopt, graphName);
 

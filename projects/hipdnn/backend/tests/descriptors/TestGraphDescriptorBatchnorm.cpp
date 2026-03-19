@@ -314,7 +314,7 @@ TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
 {
-    std::vector<HipdnnBackendDescriptor*> const peerStatsDescs
+    const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
         = {_peerStatsDesc0.get(), _peerStatsDesc1.get()};
     auto opDesc
         = makeOp(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, peerStatsDescs);

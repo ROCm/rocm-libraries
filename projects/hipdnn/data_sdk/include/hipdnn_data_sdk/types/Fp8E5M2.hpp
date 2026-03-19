@@ -121,8 +121,8 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    uint32_t const sign = (bits >> 24) & 0x80; // Extract sign to bit 7
-    uint32_t const fp32Exp = (bits >> 23) & 0xFF;
+    const uint32_t sign = (bits >> 24) & 0x80; // Extract sign to bit 7
+    const uint32_t fp32Exp = (bits >> 23) & 0xFF;
     int32_t exp = static_cast<int32_t>(fp32Exp) - 127 + 15; // Rebias from float (127) to E5M2 (15)
     uint32_t mant = bits & 0x007FFFFF;
 
@@ -147,7 +147,7 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     {
         // Denormalized
         mant |= 0x00800000; // Add implicit 1
-        uint32_t const shift = static_cast<uint32_t>(1 - exp + 21); // 23 - 2 = 21 bits to shift
+        const uint32_t shift = static_cast<uint32_t>(1 - exp + 21); // 23 - 2 = 21 bits to shift
         if(shift >= 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero
@@ -158,7 +158,7 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
 
     // Normal case: shift mantissa from 23 bits to 2 bits with rounding
     uint32_t fp8Mant = (mant >> 21) & 0x03;
-    uint32_t const remainder = mant & 0x001FFFFF;
+    const uint32_t remainder = mant & 0x001FFFFF;
 
     // Round to nearest even
     if(remainder > FP8_E5M2_ROUND_THRESHOLD

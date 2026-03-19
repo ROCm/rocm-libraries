@@ -413,7 +413,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << "OUT_0 tensor UID " << pwNode->out_0_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> const nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {pwNode->in_0_tensor_uid, pwNode->in_1_tensor_uid.value(), pwNode->out_0_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Pointwise node tensor UIDs are not distinct";
 }

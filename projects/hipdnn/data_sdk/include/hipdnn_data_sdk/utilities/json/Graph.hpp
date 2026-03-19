@@ -143,7 +143,7 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
     auto name = entry.at("name").get<std::string>();
     auto computeDataType = entry.at("compute_data_type").get<data_objects::DataType>();
 
-    flatbuffers::Offset<void> const node = [&]() {
+    const flatbuffers::Offset<void> node = [&]() {
         switch(type)
         {
         case data_objects::NodeAttributes::BatchnormInferenceAttributes:
