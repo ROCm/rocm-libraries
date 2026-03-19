@@ -64,9 +64,6 @@ private:
     hipDataType outputType = HIP_C_32F;
 
     bool isinitialized = false;
-    
-    // FIXME: add a member to determine if this struct has been initialzied, and throw exceptions if
-    // one asks for information about this struct before it has been initialized.
 
 public:
 
@@ -346,7 +343,7 @@ struct hipfftHandle_t
     rocfft_plan ip_inverse = nullptr;
     rocfft_plan op_inverse = nullptr;
 
-    // return true if the plans have been initialized - hipfftCreate
+    // Return true if the plans have been initialized - hipfftCreate
     // merely allocates a handle and a hipfftMakePlan* API initializes
     // them.
     bool initialized() const
@@ -372,15 +369,15 @@ struct hipfftHandle_t
     // Brick decomposition for multi-device transforms
     std::vector<hipfft_brick> spaceBricks;
     std::vector<hipfft_brick> freqBricks;
-    // hipFFT will decompose the problem across multiple devices in a
-    // single process (i.e. via hipfftXtSetGPUs)
+    // hipFFT will decompose the problem across multiple devices in a single process (i.e. via
+    // hipfftXtSetGPUs)
     bool singleProcMultiDevice = false;
 
-    // multi-processing communicator
+    // Multi-processing communicator
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
 
-    // FIXME: documentation:
+    // Get the data type based on the sub-format value.
     auto brick_format_to_type(const int subFormat)
         {
         switch(subFormat)
@@ -605,7 +602,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         std::vector<size_t> batchlength = {plan->batch};
         batchlength.insert(batchlength.end(), plan->lengths.begin(), plan->lengths.end());
         
-        // FIXME: do we really know the subformat for complex/complex?  Does it matter?
         const hipfftXtSubFormat spacesubformat
             = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPUT;
         hipfftxt_bricks(batchlength, plan->spaceBricks, isrealcomplex, spacesubformat);
