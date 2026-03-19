@@ -273,7 +273,7 @@ private:
                                               + toString(type));
                 }
 
-                plugin->setLoggingCallback(logging::hipdnnLoggingCallback);
+                plugin->setLoggingCallback(logging::backendLoggingCallback);
 
                 validateBeforeAdding(*plugin);
 

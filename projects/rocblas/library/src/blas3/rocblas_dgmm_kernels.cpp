@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_dgmm.hpp"
@@ -215,7 +216,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
             static constexpr int DGMM_DIM_X = 32;
-            static constexpr int DGMM_DIM_Y = 32;
+            static constexpr int DGMM_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 8, 32>;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
             rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;
@@ -248,7 +249,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
             static constexpr int DGMM_DIM_X = 32;
-            static constexpr int DGMM_DIM_Y = 32;
+            static constexpr int DGMM_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 8, 32>;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
             rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;

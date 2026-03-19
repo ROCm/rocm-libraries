@@ -19,7 +19,7 @@ TEST(IntegrationSetPluginPathsExt, ValidInputs)
 {
     std::array<const char*, 3> paths = {getTestPluginCustomDir().c_str(), "./", "../directory/"};
 
-    hipdnnStatus_t status = hipdnnSetEnginePluginPaths_ext(
+    hipdnnStatus_t const status = hipdnnSetEnginePluginPaths_ext(
         paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
@@ -49,7 +49,7 @@ TEST(IntegrationSetPluginPathsExt, NullStringInList)
 {
     std::array<const char*, 2> paths = {"./valid/path.so", nullptr};
 
-    hipdnnStatus_t status = hipdnnSetEnginePluginPaths_ext(
+    hipdnnStatus_t const status = hipdnnSetEnginePluginPaths_ext(
         paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
@@ -78,7 +78,7 @@ TEST(IntegrationSetPluginPathsExt, IneligibleHandle)
 
 TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     hipdnnStatus_t status
@@ -92,7 +92,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 
     auto loadedPlugins = test_util::getLoadedPlugins(handle);
 
-    std::string expectedPluginPath = getDefaultPluginPath();
+    std::string const expectedPluginPath = testDefaultGoodPluginPath();
 
     EXPECT_EQ(loadedPlugins.size(), 1);
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, expectedPluginPath));
@@ -101,7 +101,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 
 TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAdditiveLoadsBothDefaultAndCustom)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths = {getTestPluginCustomDir().c_str()};
@@ -117,7 +117,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAdditiveLoadsBothDefaultA
     auto loadedPlugins = test_util::getLoadedPlugins(handle);
     EXPECT_GE(loadedPlugins.size(), 2);
 
-    auto defaultPluginPath = getDefaultPluginPath();
+    auto defaultPluginPath = testDefaultGoodPluginPath();
     const auto& testPluginPath = testGoodPluginPath();
 
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, defaultPluginPath));

@@ -243,19 +243,20 @@ static inline BatchedTransposeParam HeuristicGet(const ExecutionContext& ctx,
         // Early heuristic for cases that has very large width, very small height (or vice versa)
         if(hw_radio <= 48)
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 64, 1, 1, 1, 1}
-                                : BatchedTransposeParam{64, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 64, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{64, 4, 1, 1, 1, 1};
         }
         else if(hw_radio <= 128)
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 128, 1, 1, 1, 1}
-                                : BatchedTransposeParam{128, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 128, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{128, 4, 1, 1, 1, 1};
         }
         else
         {
-            return (width <= 8) ? BatchedTransposeParam{4, 256, 1, 1, 1, 1}
-                                : BatchedTransposeParam{256, 4, 1, 1, 1, 1};
+            best_kernel = (width <= 8) ? BatchedTransposeParam{4, 256, 1, 1, 1, 1}
+                                       : BatchedTransposeParam{256, 4, 1, 1, 1, 1};
         }
+        return best_kernel;
     }
 
     for(const auto& it : std::ranges::reverse_view(kernel_list))

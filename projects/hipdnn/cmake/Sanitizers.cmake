@@ -8,15 +8,6 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_THREAD_SANITIZER)
     )
 endif()
 
-# Standalone sanitizer builds require Linux-specific compiler runtime libraries and flags.
-# See: https://github.com/ROCm/rocm-libraries/issues/5022
-if(BUILD_ADDRESS_SANITIZER AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "BUILD_ADDRESS_SANITIZER is only supported on Linux. "
-                        "The standalone sanitizer build flow requires Linux-specific "
-                        "compiler runtime libraries and flags."
-    )
-endif()
-
 if(BUILD_THREAD_SANITIZER AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "BUILD_THREAD_SANITIZER is only supported on Linux. "
                         "Thread Sanitizer is not available on Windows and the standalone "
@@ -26,31 +17,68 @@ if(BUILD_THREAD_SANITIZER AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 # Enable Address Sanitizer and set linker flags. This configuration is for standalone builds outside
-# of TheRock
+# of TheRock. Windows and Linux are supported.
 if(BUILD_ADDRESS_SANITIZER)
 
-    # Address Sanitizer requires specific GPU targets which support XNACK.
-    set(GPU_TARGETS
-        gfx908:xnack+ # MI100 (Arcturus)
-        gfx90a:xnack+ # MI200 series (MI210, MI250, MI250X)
-        gfx942:xnack+ # MI300X (GPU)
-    )
+    # Windows configuration
+    if (WIN32)
+        message(STATUS "Configuring Address Sanitizer for Windows")
 
-    # Query the compiler for the resource directory to locate sanitizer libraries reliably
-    execute_process(
-        COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir OUTPUT_VARIABLE CLANG_RESOURCE_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    link_directories(${CLANG_RESOURCE_DIR}/lib/linux)
+        # ASAN is incompatible with the MSVC debug CRT (/MDd). Force the release CRT (/MD)
+        # to avoid false "bad-free" errors from ucrtbased.dll during static initialization.
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 
-    # Define sanitizer flags as variables for reuse
-    set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
+        # Windows: MSVC uses /fsanitize=address, Clang uses -fsanitize=address.
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            set(SANITIZER_COMPILE_FLAGS /fsanitize=address)
+            set(SANITIZER_LINK_FLAGS    /fsanitize=address)
+        else()
+            set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
+            set(SANITIZER_LINK_FLAGS    -fsanitize=address -fno-omit-frame-pointer)
 
-    set(SANITIZER_LINK_FLAGS -fsanitize=address -fno-omit-frame-pointer -shared-libasan)
+            # -print-resource-dir is clang-specific; only query it for non-MSVC compilers.
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+                OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            link_directories(${CLANG_RESOURCE_DIR}/lib/windows)
+        endif()
 
-    # Apply sanitizer flags globally (can be overridden per target)
-    add_compile_options(${SANITIZER_COMPILE_FLAGS})
-    add_link_options(${SANITIZER_LINK_FLAGS})
+        add_compile_options(${SANITIZER_COMPILE_FLAGS})
+        add_link_options(${SANITIZER_LINK_FLAGS})
+
+    # Linux configuration
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(STATUS "Configuring Address Sanitizer for Linux")
+
+        # GPU targets for Linux ASAN
+        set(GPU_TARGETS
+            gfx908:xnack+
+            gfx90a:xnack+
+            gfx942:xnack+
+        )
+
+        # Query the compiler for the resource directory to locate sanitizer runtime libraries.
+        execute_process(
+            COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+            OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        link_directories(${CLANG_RESOURCE_DIR}/lib/linux)
+
+        set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
+        set(SANITIZER_LINK_FLAGS    -fsanitize=address -fno-omit-frame-pointer -shared-libasan)
+
+        add_compile_options(${SANITIZER_COMPILE_FLAGS})
+        add_link_options(${SANITIZER_LINK_FLAGS})
+
+    # Unsupported platform
+    else()
+        message(FATAL_ERROR
+            "BUILD_ADDRESS_SANITIZER is only supported on Windows or Linux."
+        )
+    endif()
 
 endif()
 

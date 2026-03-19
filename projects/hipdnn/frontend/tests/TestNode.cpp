@@ -31,10 +31,10 @@ public:
 
 TEST(TestNode, PostValidateNodeComputeDataType)
 {
-    GraphAttributes graphAttributes;
+    GraphAttributes const graphAttributes;
     FakeNode node(FakeAttributes{}, graphAttributes);
 
-    std::vector<std::pair<DataType, ErrorCode>> expectedResults
+    std::vector<std::pair<DataType, ErrorCode>> const expectedResults
         = {{DataType::NOT_SET, ErrorCode::ATTRIBUTE_NOT_SET},
            {DataType::FLOAT, ErrorCode::OK},
            {DataType::HALF, ErrorCode::OK},
@@ -112,7 +112,7 @@ TEST_P(TestNodePostValidateNodeTensors, Correctness)
 
               for(const auto& [id, tensor] : tensors)
               {
-                  std::string isValid = (tensor->validate().is_good()) ? "VALID" : "INVALID";
+                  std::string const isValid = (tensor->validate().is_good()) ? "VALID" : "INVALID";
                   ret += isValid + ", ";
               }
 
@@ -125,9 +125,9 @@ TEST_P(TestNodePostValidateNodeTensors, Correctness)
               return ret;
           };
 
-    std::string caseString = "Inputs: " + tensorsToString(_attributes.inputs)
-                             + " Outputs: " + tensorsToString(_attributes.outputs);
-    FakeNode node(std::move(_attributes), _graphAttributes);
+    std::string const caseString = "Inputs: " + tensorsToString(_attributes.inputs)
+                                   + " Outputs: " + tensorsToString(_attributes.outputs);
+    FakeNode const node(std::move(_attributes), _graphAttributes);
 
     auto nodes = node.getNodeOutputTensorAttributes();
 

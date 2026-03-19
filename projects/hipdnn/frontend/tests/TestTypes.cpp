@@ -177,7 +177,7 @@ TEST(TestTypes, GetKnobValueTypeFromVariantInt64)
 {
     using namespace hipdnn_frontend;
 
-    std::variant<int64_t, double, std::string> value = static_cast<int64_t>(42);
+    std::variant<int64_t, double, std::string> const value = static_cast<int64_t>(42);
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::INT64);
 }
 
@@ -185,7 +185,7 @@ TEST(TestTypes, GetKnobValueTypeFromVariantFloat64)
 {
     using namespace hipdnn_frontend;
 
-    std::variant<int64_t, double, std::string> value = 3.14;
+    std::variant<int64_t, double, std::string> const value = 3.14;
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::FLOAT64);
 }
 
@@ -193,7 +193,7 @@ TEST(TestTypes, GetKnobValueTypeFromVariantString)
 {
     using namespace hipdnn_frontend;
 
-    std::variant<int64_t, double, std::string> value = std::string("test");
+    std::variant<int64_t, double, std::string> const value = std::string("test");
     EXPECT_EQ(getKnobValueTypeFromVariant(value), KnobValueType::STRING);
 }
 
@@ -247,4 +247,99 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E4M3), HIPDNN_DATA_FP8_E4M3);
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E5M2), HIPDNN_DATA_FP8_E5M2);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
+{
+    using namespace hipdnn_frontend;
+
+    auto check = [](hipdnnDataType_t hipdnnType, DataType expected) {
+        auto [dt, err] = fromHipdnnDataType(hipdnnType);
+        EXPECT_TRUE(err.is_good())
+            << "Error for " << static_cast<int>(hipdnnType) << ": " << err.get_message();
+        EXPECT_EQ(dt, expected);
+    };
+
+    check(HIPDNN_DATA_FLOAT, DataType::FLOAT);
+    check(HIPDNN_DATA_DOUBLE, DataType::DOUBLE);
+    check(HIPDNN_DATA_HALF, DataType::HALF);
+    check(HIPDNN_DATA_INT8, DataType::INT8);
+    check(HIPDNN_DATA_INT32, DataType::INT32);
+    check(HIPDNN_DATA_UINT8, DataType::UINT8);
+    check(HIPDNN_DATA_BFLOAT16, DataType::BFLOAT16);
+    check(HIPDNN_DATA_FP8_E4M3, DataType::FP8_E4M3);
+    check(HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2);
+}
+
+TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownType = static_cast<hipdnnDataType_t>(9999);
+    auto [dt, err] = fromHipdnnDataType(unknownType);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(dt, DataType::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto dt : {DataType::FLOAT,
+                   DataType::DOUBLE,
+                   DataType::HALF,
+                   DataType::INT8,
+                   DataType::INT32,
+                   DataType::UINT8,
+                   DataType::BFLOAT16,
+                   DataType::FP8_E4M3,
+                   DataType::FP8_E5M2})
+    {
+        auto hipdnnOpt = toHipdnnDataType(dt);
+        ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);
+        auto [roundTripped, err] = fromHipdnnDataType(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good()) << "fromHipdnnDataType failed for " << to_string(dt);
+        EXPECT_EQ(roundTripped, dt) << "Round-trip mismatch for " << to_string(dt);
+    }
+}
+
+TEST(TestTypes, FromHipdnnConvModeValidModes)
+{
+    using namespace hipdnn_frontend;
+
+    auto [xcorr, xcorrErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    EXPECT_TRUE(xcorrErr.is_good());
+    EXPECT_EQ(xcorr, ConvolutionMode::CROSS_CORRELATION);
+
+    auto [conv, convErr] = fromHipdnnConvMode(HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    EXPECT_TRUE(convErr.is_good());
+    EXPECT_EQ(conv, ConvolutionMode::CONVOLUTION);
+}
+
+TEST(TestTypes, FromHipdnnConvModeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownMode = static_cast<hipdnnConvolutionMode_t>(9999);
+    auto [mode, err] = fromHipdnnConvMode(unknownMode);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(mode, ConvolutionMode::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnConvModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto mode : {ConvolutionMode::CROSS_CORRELATION, ConvolutionMode::CONVOLUTION})
+    {
+        auto hipdnnOpt = toBackendConvMode(mode);
+        ASSERT_TRUE(hipdnnOpt.has_value());
+        auto [roundTripped, err] = fromHipdnnConvMode(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good());
+        EXPECT_EQ(roundTripped, mode);
+    }
 }

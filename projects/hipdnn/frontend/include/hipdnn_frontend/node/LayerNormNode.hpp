@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+
+/**
+ * @file LayerNormNode.hpp
+ * @brief Graph node for layer normalization operations
+ */
+
 #pragma once
 
 #include "Node.hpp"
@@ -8,11 +14,21 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
+#include <hipdnn_frontend/detail/LayerNormPacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class LayerNormNode : public BaseNode<LayerNormNode>
+/**
+ * @class LayerNormNode
+ * @brief Graph node that performs layer normalization
+ *
+ * Validates input tensors, infers output shapes, and serializes the
+ * layer normalization operation to FlatBuffer format.
+ *
+ * @see LayernormAttributes, Graph::layernorm()
+ */
+class LayerNormNode : public BaseNode<LayerNormNode, NodeType::LAYER_NORM>
 {
 public:
     LayernormAttributes attributes;
@@ -265,6 +281,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createLayernormOperation(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph

@@ -49,12 +49,17 @@ struct GemmPipelineAgBgCrImplBase
     // that only work for certain K warp tile sizes based on data type size:
     // - For 1-byte types (fp8/bf8): K warp tile <= 64
     // - For 2-byte types (fp16/bf16): K warp tile <= 32
+    // - For 4-byte types (float/tf32): transpose load not supported
     static constexpr bool is_a_load_tr = []() {
         using WarpTile                  = typename BlockGemmShape::WarpTile;
         constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
         constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
-        if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        if constexpr(std::is_same_v<ADataType, float>)
             return false;
+        else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+            return false;
+        else if constexpr(sizeof(ADataType) >= 4)
+            return false; // 4-byte types (float/tf32) don't support transpose load
         else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
         else
@@ -65,8 +70,12 @@ struct GemmPipelineAgBgCrImplBase
         using WarpTile                  = typename BlockGemmShape::WarpTile;
         constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
         constexpr index_t kMaxKWarpTile = (sizeof(BDataType) == 1) ? 64 : 32;
-        if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+        if constexpr(std::is_same_v<BDataType, float>)
             return false;
+        else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+            return false;
+        else if constexpr(sizeof(BDataType) >= 4)
+            return false; // 4-byte types (float/tf32) don't support transpose load
         else if constexpr(kKWarpTile > kMaxKWarpTile)
             return false;
         else
@@ -137,8 +146,11 @@ struct GemmPipelineAgBgCrImplBase
         auto a_lds_block = make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
 
         // TODO: LDS alignment should come from Policy!
-        constexpr index_t a_lds_block_space_size_aligned = integer_least_multiple(
-            sizeof(OverrideADataType) * a_lds_block_desc.get_element_space_size(), 16);
+        constexpr index_t APackedSize = numeric_traits<OverrideADataType>::PackedSize;
+        constexpr index_t a_lds_block_space_size =
+            sizeof(OverrideADataType) * a_lds_block_desc.get_element_space_size() / APackedSize;
+        constexpr index_t a_lds_block_space_size_aligned =
+            integer_least_multiple(a_lds_block_space_size, 16);
 
         // B tile in LDS
         OverrideBDataType* __restrict__ p_b_lds = static_cast<OverrideBDataType*>(
