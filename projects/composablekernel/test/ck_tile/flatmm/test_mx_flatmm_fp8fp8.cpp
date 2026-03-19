@@ -5,7 +5,6 @@
 #include <gtest/gtest.h>
 #include "test_mx_flatmm_fixtures.hpp"
 
-
 // FP8 x FP8 -> FP16
 // N_Tile = 256, K must be a multiple of 32.
 // clang-format off

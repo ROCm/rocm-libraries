@@ -4,7 +4,6 @@
 #include "test_mx_gemm_config.hpp"
 #include "test_mx_gemm_util.hpp"
 
-
 using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
