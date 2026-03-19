@@ -183,7 +183,6 @@ bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                      = problem.GetBatchSize();
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                      = problem.GetInChannels() + problem.GetOutChannels();
     auto g                      = problem.GetGroupCount();
@@ -419,7 +418,6 @@ bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                      = problem.GetBatchSize();
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                      = problem.GetInChannels() + problem.GetOutChannels();
     auto g                      = problem.GetGroupCount();

@@ -376,10 +376,7 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
 
     auto b                      = problem.GetBatchSize();
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
-    auto g                      = problem.GetGroupCount();
     auto spatial_per_batch      = s / b;
-    auto channels_per_group     = c / g;
 
     if(is_gfx11 || is_gfx12)
     {
