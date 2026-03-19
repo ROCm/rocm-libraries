@@ -18,61 +18,61 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestBatchnormTrainSignatureKey, EqualityOperator)
 {
-    BatchnormTrainSignatureKey const key1{
+    const BatchnormTrainSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key2{
+    const BatchnormTrainSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    BatchnormTrainSignatureKey const key3{
+    const BatchnormTrainSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    BatchnormTrainSignatureKey const key4{
+    const BatchnormTrainSignatureKey key4{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_TRUE(key3 == key4);
 
-    BatchnormTrainSignatureKey const key5{
+    const BatchnormTrainSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key6{
+    const BatchnormTrainSignatureKey key6{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key5 == key6);
 
-    BatchnormTrainSignatureKey const key7{
+    const BatchnormTrainSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key8{
+    const BatchnormTrainSignatureKey key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    BatchnormTrainSignatureKey const key9{
+    const BatchnormTrainSignatureKey key9{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key10{
+    const BatchnormTrainSignatureKey key10{
         DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
 
-    BatchnormTrainSignatureKey const key11{
+    const BatchnormTrainSignatureKey key11{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key12{
+    const BatchnormTrainSignatureKey key12{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key11 == key12);
 }
 
 TEST(TestBatchnormTrainSignatureKey, HashFunction)
 {
-    BatchnormTrainSignatureKey const key1{
+    const BatchnormTrainSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key2{
+    const BatchnormTrainSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    BatchnormTrainSignatureKey const key3{
+    const BatchnormTrainSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    BatchnormTrainSignatureKey const key4{
+    const BatchnormTrainSignatureKey key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key5{
+    const BatchnormTrainSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key6{
+    const BatchnormTrainSignatureKey key6{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    BatchnormTrainSignatureKey const key7{
+    const BatchnormTrainSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
@@ -88,9 +88,9 @@ TEST(TestBatchnormTrainSignatureKey, HashFunction)
 
 TEST(TestBatchnormTrainSignatureKey, Copy)
 {
-    BatchnormTrainSignatureKey const original{
+    const BatchnormTrainSignatureKey original{
         DataType::FLOAT, DataType::HALF, DataType::DOUBLE, DataType::FLOAT, DataType::BFLOAT16};
-    BatchnormTrainSignatureKey const copied{original};
+    const BatchnormTrainSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
@@ -102,9 +102,9 @@ TEST(TestBatchnormTrainSignatureKey, Copy)
 
 TEST(TestBatchnormTrainSignatureKey, CreateFromNodeAndTensorMap)
 {
-    BatchnormTrainSignatureKey const expectedKey{
+    const BatchnormTrainSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     BatchnormTrainTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormTrainGraph(
@@ -116,7 +116,7 @@ TEST(TestBatchnormTrainSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    BatchnormTrainSignatureKey const keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    const BatchnormTrainSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
