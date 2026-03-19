@@ -5330,17 +5330,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vwm = kernel["GlobalReadVectorWidthMetadata"]
 
     # force lrvwTile = 1 for numBytes >= 4 + MIInputPerThread > 1
-    # Enabled lrvwTile>1 for UseF32XEmulation except for UseCustomMainLoopSchedule (TODO: enable for CMS)
-    # TODO: implement extra logic to swap vgprs after local read to suport lrvwTile > 1 for umBytes >= 4 + MIInputPerThread > 1
-    #       (except for UseF32XEmulation)
+    # Exempt from forcing lrvwTile=1:
+    #   - MFMA-based XF32 emulation (gfx950): pack code already handles lrvwTile > 1
+    #   - CMS kernels: schedules are designed with lrvwTile > 1 and manage pack-code placement explicitly
+    # Non-MFMA XF32 (e.g. gfx1250 WMMA) without CMS must use lrvwTile=1 because
+    # the default scheduler's local reads don't match the XF32 pack code's expectations.
+    # TODO: implement extra logic to swap vgprs after local read to suport lrvwTile > 1 for numBytes >= 4 + MIInputPerThread > 1
+    isCMS = kernel["UseCustomMainLoopSchedule"]
+    isMfmaXf32 = kernel["UseMFMAF32XEmulation"]
     forceLrvwTile1 = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
-      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1 and (not kernel["UseF32XEmulation"]))
+      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1) and \
+      not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS))
     if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1:
       self.states.lrvwTileA = kernel["VectorWidthA"]
     else:
       self.states.lrvwTileA = 1
     forceLrvwTile1 = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
-      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThreadB"] > 1 and (not kernel["UseF32XEmulation"]))
+      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThreadB"] > 1) and \
+      not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS))
     if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1:
       self.states.lrvwTileB = kernel["VectorWidthB"]
     else:
