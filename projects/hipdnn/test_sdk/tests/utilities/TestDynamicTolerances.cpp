@@ -1173,6 +1173,8 @@ struct MatmulToleranceTestCase
     }
 };
 
+namespace
+{
 // Helper to create a tensor where each row is filled with a per-row constant value.
 // rowValues[i] specifies the constant value for all elements in row i.
 // This ensures different rows have different sums, exercising the max-row-sum logic
@@ -1206,6 +1208,7 @@ hipdnn_data_sdk::utilities::Tensor<T>
 
     return tensor;
 }
+} // namespace
 
 using hipdnn_test_sdk::utilities::computeGamma;
 
