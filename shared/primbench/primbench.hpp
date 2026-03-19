@@ -1439,10 +1439,20 @@ inline void print_dry_header(std::string_view algo_name,
     size_t      status_col_width = status_header.size();
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(specialization_col_width) << std::left << "Specialization" << "  "
-              << "Index/" << specialization_count << "\n";
+              << std::setw(specialization_col_width) << std::left << "Specialization" << "  ";
 
-    size_t underline_width = status_col_width + 2 + specialization_col_width + 2 + family_col_width;
+    if(specialization_count > 1)
+    {
+        std::cout << "Index/" << specialization_count;
+    }
+    std::cout << "\n";
+
+    size_t underline_width = status_col_width + 2 + specialization_col_width;
+
+    if(specialization_count > 1)
+    {
+        underline_width += 2 + family_col_width;
+    }
 
     for(size_t i = 0; i < underline_width; ++i)
         std::cout << horizontal_bar;
@@ -1465,12 +1475,21 @@ inline void print_header(std::string_view          algo_name,
               << std::setw(noise_col_width) << std::left << "Noise" << "  "
               << std::setw(gpu_temp_col_width) << std::left << "GPU °C" << "  "
               << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec" << "  "
-              << std::setw(specialization_col_width) << std::left << "Specialization" << "  "
-              << "Index/" << specialization_count << "\n";
+              << std::setw(specialization_col_width) << std::left << "Specialization" << "  ";
+
+    if(specialization_count > 1)
+    {
+        std::cout << "Index/" << specialization_count;
+    }
+    std::cout << "\n";
 
     size_t underline_width = status_col_width + 2 + noise_col_width + 2 + gpu_temp_col_width + 2
-                             + bytes_per_sec_col_width + 2 + specialization_col_width + 2
-                             + family_col_width;
+                             + bytes_per_sec_col_width + 2 + specialization_col_width;
+
+    if(specialization_count > 1)
+    {
+        underline_width += 2 + family_col_width;
+    }
 
     for(size_t i = 0; i < underline_width; ++i)
         std::cout << horizontal_bar;
@@ -1496,7 +1515,8 @@ inline void print_dry_progress(std::string_view specialization,
                                std::string_view algo_name,
                                size_t           family_index,
                                size_t           specialization_col_width,
-                               size_t           family_col_width)
+                               size_t           family_col_width,
+                               bool             print_index)
 {
     std::ostringstream line;
 
@@ -1506,7 +1526,11 @@ inline void print_dry_progress(std::string_view specialization,
     line << clearline << green << std::setw(status_col_width) << std::left << "Success" << reset;
 
     line << "  " << std::setw(specialization_col_width) << std::left << specialization;
-    line << "  " << std::setw(family_col_width) << std::right << family_index;
+
+    if(print_index)
+    {
+        line << "  " << std::setw(family_col_width) << std::right << family_index;
+    }
 
     std::cout << line.str() << "\n" << std::flush;
 }
@@ -1525,7 +1549,8 @@ inline void print_progress(uint64_t         iteration,
                            double           elapsed_host_secs,
                            double           noise_timeout_secs,
                            double           noise_tolerance_percent,
-                           uint16_t         gpu_temp)
+                           uint16_t         gpu_temp,
+                           bool             print_index)
 {
     std::string status_header = "Status of " + std::string(algo_name);
 
@@ -1605,9 +1630,14 @@ inline void print_progress(uint64_t         iteration,
     line << "  " << std::setw(bytes_per_sec_col_width) << std::right << std::scientific
          << std::setprecision(2) << bytes_per_sec;
 
-    // Specialization and index.
+    // Specialization.
     line << "  " << std::setw(specialization_col_width) << std::left << specialization;
-    line << "  " << std::setw(family_col_width) << std::right << family_index;
+
+    // Index.
+    if(print_index)
+    {
+        line << "  " << std::setw(family_col_width) << std::right << family_index;
+    }
 
     // Colorized status messages.
     if(status_msg.find("Success") != std::string::npos)
@@ -2092,6 +2122,7 @@ public:
     state(std::string_view algo,
           json             meta,
           size_t           family_index,
+          bool             print_index,
           stream_t         stream,
           logger&          logger,
           monitor&         monitor,
@@ -2108,6 +2139,7 @@ public:
         , m_algo(algo)
         , m_meta(std::move(meta))
         , m_family_index(family_index)
+        , m_print_index(print_index)
         , m_logger(logger)
         , m_monitor(monitor)
         , m_stream_blocker(stream_blocker)
@@ -2339,7 +2371,8 @@ private:
                                  elapsed_host_secs,
                                  s.noise_timeout_secs,
                                  s.noise_tolerance_percent,
-                                 gpu_temp);
+                                 gpu_temp,
+                                 m_print_index);
 
         if(stop_early || noise_timeout)
         {
@@ -2562,7 +2595,9 @@ private:
 
     std::string m_algo;
     const json  m_meta;
-    size_t      m_family_index;
+
+    size_t m_family_index;
+    bool   m_print_index;
 
     logger&         m_logger;
     monitor&        m_monitor;
@@ -3172,6 +3207,8 @@ public:
         m_family_col_width
             = std::string("Index/").size() + std::to_string(specializations.size()).size();
 
+        m_print_index = specializations.size() > 1;
+
         print_header(algorithm);
 
         run_all_specializations();
@@ -3494,6 +3531,7 @@ private:
         return state(algo,
                      std::move(meta),
                      family_index,
+                     m_print_index,
                      m_stream,
                      get_logger(),
                      get_monitor(),
@@ -3530,7 +3568,8 @@ private:
                                              algo,
                                              family_index,
                                              m_specialization_col_width,
-                                             m_family_col_width);
+                                             m_family_col_width,
+                                             m_print_index);
 
         get_logger().output_specialization(family_index,
                                            name,
@@ -3565,6 +3604,8 @@ private:
 
     /// This vector is static, as benchmarks can be registered in global scope.
     inline static specializations_t specializations;
+
+    bool m_print_index; ///< Whether to print the index column.
 
     settings m_settings; ///< CLI user settings.
 
