@@ -1011,21 +1011,21 @@ TYPED_TEST(CpuFpReferenceConvolutionBwdDataBasic, ConvolutionBwdDataBasic)
     Tensor<TypeParam> outputTensor({1, 1, 2, 2});
 
     // gradOutput values: simple pattern
-    outputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 0);
-    outputTensor.setHostValue(static_cast<TypeParam>(2.0), 0, 0, 0, 1);
-    outputTensor.setHostValue(static_cast<TypeParam>(3.0), 0, 0, 1, 0);
-    outputTensor.setHostValue(static_cast<TypeParam>(4.0), 0, 0, 1, 1);
+    outputTensor.setHostValue(safeTestTypeCast<TypeParam>(1.0), 0, 0, 0, 0);
+    outputTensor.setHostValue(safeTestTypeCast<TypeParam>(2.0), 0, 0, 0, 1);
+    outputTensor.setHostValue(safeTestTypeCast<TypeParam>(3.0), 0, 0, 1, 0);
+    outputTensor.setHostValue(safeTestTypeCast<TypeParam>(4.0), 0, 0, 1, 1);
 
     // Weight values: simple 3x3 kernel
-    std::array<TypeParam, 9> weightData = {static_cast<TypeParam>(1.0),
-                                           static_cast<TypeParam>(2.0),
-                                           static_cast<TypeParam>(3.0),
-                                           static_cast<TypeParam>(4.0),
-                                           static_cast<TypeParam>(5.0),
-                                           static_cast<TypeParam>(6.0),
-                                           static_cast<TypeParam>(7.0),
-                                           static_cast<TypeParam>(8.0),
-                                           static_cast<TypeParam>(9.0)};
+    std::array<TypeParam, 9> weightData = {safeTestTypeCast<TypeParam>(1.0),
+                                           safeTestTypeCast<TypeParam>(2.0),
+                                           safeTestTypeCast<TypeParam>(3.0),
+                                           safeTestTypeCast<TypeParam>(4.0),
+                                           safeTestTypeCast<TypeParam>(5.0),
+                                           safeTestTypeCast<TypeParam>(6.0),
+                                           safeTestTypeCast<TypeParam>(7.0),
+                                           safeTestTypeCast<TypeParam>(8.0),
+                                           safeTestTypeCast<TypeParam>(9.0)};
 
     for(size_t i = 0; i < 9; ++i)
     {
@@ -1756,19 +1756,19 @@ TYPED_TEST(CpuFpReferenceConvolutionWrwBasic, TypesConvolutionWrwBasic)
     Tensor<TypeParam> gradOutputTensor({1, 1, 2, 2});
 
     // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 0);
-    inputTensor.setHostValue(static_cast<TypeParam>(2.0), 0, 0, 0, 1);
-    inputTensor.setHostValue(static_cast<TypeParam>(3.0), 0, 0, 1, 0);
-    inputTensor.setHostValue(static_cast<TypeParam>(4.0), 0, 0, 1, 1);
+    inputTensor.setHostValue(safeTestTypeCast<TypeParam>(1.0), 0, 0, 0, 0);
+    inputTensor.setHostValue(safeTestTypeCast<TypeParam>(2.0), 0, 0, 0, 1);
+    inputTensor.setHostValue(safeTestTypeCast<TypeParam>(3.0), 0, 0, 1, 0);
+    inputTensor.setHostValue(safeTestTypeCast<TypeParam>(4.0), 0, 0, 1, 1);
 
     // Set gradient output values: [1; 1; 1; 1]
-    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 1, 1);
+    gradOutputTensor.setHostValue(safeTestTypeCast<TypeParam>(1.0), 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(safeTestTypeCast<TypeParam>(1.0), 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(safeTestTypeCast<TypeParam>(1.0), 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(safeTestTypeCast<TypeParam>(1.0), 0, 0, 1, 1);
 
     // Initialize weight to zero
-    gradWeightTensor.setHostValue(static_cast<TypeParam>(0.0), 0, 0, 0, 0);
+    gradWeightTensor.setHostValue(safeTestTypeCast<TypeParam>(0.0), 0, 0, 0, 0);
 
     std::vector<int64_t> const strides = {1, 1};
     std::vector<int64_t> const dilations = {1, 1};
