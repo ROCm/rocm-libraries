@@ -54,6 +54,7 @@ add_executable(
     descriptors/TestGraphDescriptorSdpaFprop.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp

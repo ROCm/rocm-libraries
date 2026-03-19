@@ -538,7 +538,6 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT),
                  "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT");
-
     // Block scale dequantize operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT),
                  "HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT");
@@ -555,6 +554,60 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT),
                  "HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT");
+
+    // Operation extension attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_NAME_EXT),
+                 "HIPDNN_ATTR_OPERATION_NAME_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_TYPE_EXT),
+                 "HIPDNN_ATTR_OPERATION_TYPE_EXT");
+
+    // Unknown attribute
+    EXPECT_STREQ(hipdnnGetAttributeNameString(static_cast<hipdnnBackendAttributeName_t>(-1)),
+                 "HIPDNN_ATTR_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetOperationTypeString)
+{
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_BATCHNORM),
+                 "HIPDNN_OPERATION_TYPE_BATCHNORM");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD),
+                 "HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE),
+                 "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE),
+                 "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE),
+                 "HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE),
+                 "HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA),
+                 "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_DATA");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS),
+                 "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD),
+                 "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_CUSTOM_OP),
+                 "HIPDNN_OPERATION_TYPE_CUSTOM_OP");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_LAYERNORM),
+                 "HIPDNN_OPERATION_TYPE_LAYERNORM");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_MATMUL),
+                 "HIPDNN_OPERATION_TYPE_MATMUL");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_NOT_SET),
+                 "HIPDNN_OPERATION_TYPE_NOT_SET");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_POINTWISE),
+                 "HIPDNN_OPERATION_TYPE_POINTWISE");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_REDUCTION),
+                 "HIPDNN_OPERATION_TYPE_REDUCTION");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_RMSNORM),
+                 "HIPDNN_OPERATION_TYPE_RMSNORM");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_SDPA_BACKWARD),
+                 "HIPDNN_OPERATION_TYPE_SDPA_BACKWARD");
+    EXPECT_STREQ(hipdnnGetOperationTypeString(HIPDNN_OPERATION_TYPE_SDPA_FORWARD),
+                 "HIPDNN_OPERATION_TYPE_SDPA_FORWARD");
+
+    // Unknown type
+    EXPECT_STREQ(hipdnnGetOperationTypeString(static_cast<hipdnnOperationType_t>(-1)),
+                 "HIPDNN_OPERATION_TYPE_UNKNOWN");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
