@@ -242,7 +242,8 @@ typedef NormFwdPhase NormFwdPhase_t; ///< @brief Type alias for NormFwdPhase
  * Knobs are configuration parameters for engine execution. This enum
  * indicates what type of value a particular knob expects.
  *
- * @see Knob, KnobSetting
+ * @see hipdnn_frontend::Knob
+ * @see hipdnn_frontend::KnobSetting
  */
 enum class KnobValueType
 {

@@ -624,6 +624,7 @@ public:
         max_seq_len_kv = value;
         return *this;
     }
+    /// @brief Set the diagonal alignment for causal masking
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_alignment(DiagonalAlignment value)
     {
@@ -636,6 +637,7 @@ public:
         mma_core_mode = value;
         return *this;
     }
+    /// @brief Set the execution strategy for SDPA
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_implementation(AttentionImplementation value)
     {

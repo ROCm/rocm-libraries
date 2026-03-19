@@ -2767,6 +2767,7 @@ public:
      *       No device memory is allocated. Device pointers are provided
      *       at execution time via the variant pack.
      *
+     * @see execute() for passing device memory pointers at execution time
      * @see tensor_like() for creating a tensor with cleared UID and custom name
      */
     static std::shared_ptr<TensorAttributes> tensor(const TensorAttributes& tensor)
