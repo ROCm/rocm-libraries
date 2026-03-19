@@ -45,6 +45,7 @@ Datatypes:
         norm_dist: 666
         uniform_01: 777
         integer_exact: 888
+        fp16_accumulator_probe: 889
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:

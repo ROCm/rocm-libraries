@@ -30,6 +30,7 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include <hipblaslt/hipblaslt.h>
+#include <type_traits>
 
 template <typename T, typename F>
 __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
@@ -309,6 +310,43 @@ void hipblaslt_init_device(ABC_dims                 abc,
                     auto value    = small_int_positive<T>(idx + kBSeedOffset);
                     return (i ^ j) & 1 ? value : negate(value);
                 });
+            }
+            break;
+        case hipblaslt_initialization::fp16_accumulator_probe:
+            if constexpr(std::is_same_v<T, hipblasLtHalf>)
+            {
+                if(abc == ABC_dims::A)
+                {
+                    const float fmax = 65504.f - 4.f;
+                    fill_batch(A, M, N, lda, stride, batch_count, [fmax](size_t) -> T {
+                        return T(hipblasLtHalf(fmax));
+                    });
+                }
+                else if(abc == ABC_dims::B)
+                {
+                    // Match integer_exact B: use effective_stride in fill_batch so batch_count>1 with
+                    // stride==0 still covers every batch slab (stride_b defaults to 0 in Arguments).
+                    size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
+                    fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda](size_t idx) -> T {
+                        auto b        = idx / effective_stride;
+                        auto in_batch = idx - b * effective_stride;
+                        auto n        = in_batch / lda;
+                        auto k        = in_batch - n * lda;
+                        (void)n;
+                        const float f2 = 2.f;
+                        if((k % 2) == 0)
+                            return T(hipblasLtHalf(f2));
+                        return T(hipblasLtHalf(-f2));
+                    });
+                }
+                else
+                {
+                    fill_batch(A, M, N, lda, stride, batch_count, [](size_t) -> T { return T(0); });
+                }
+            }
+            else
+            {
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t) -> T { return T(0); });
             }
             break;
         default:
