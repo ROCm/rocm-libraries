@@ -79,7 +79,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
-    auto plan_cache_disable = hiptensor::getEnvironmentVariable("HIPTENSOR_DISABLE_PLAN_CACHE");
+    auto plan_cache_disable = getEnvironmentVariable("HIPTENSOR_DISABLE_PLAN_CACHE");
     if(!plan_cache_disable || *plan_cache_disable != "ON")
     {
         hiptensor::PlanCache* planCache = new hiptensor::PlanCache;

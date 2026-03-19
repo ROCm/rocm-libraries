@@ -44,44 +44,40 @@
 // Cross-platform safe file open (definition in platform.cpp)
 HIPTENSOR_EXPORT FILE* safeFopen(const char* filename, const char* mode);
 
-namespace hiptensor
+// Cross-platform safe environment variable access
+inline std::optional<std::string> getEnvironmentVariable(const char* name)
 {
-    // Cross-platform safe environment variable access
-    inline std::optional<std::string> getEnvironmentVariable(const char* name)
-    {
 #ifdef _WIN32
-        char   buffer[256];
-        size_t required_size = 0;
-        if(getenv_s(&required_size, buffer, sizeof(buffer), name) != 0
-           || required_size == 0 || required_size > sizeof(buffer))
-        {
-            return std::nullopt;
-        }
-        return std::string(buffer);
-#else
-        const char* val = std::getenv(name);
-        return val ? std::optional<std::string>{val} : std::nullopt;
-#endif
-    }
-
-    // Cross-platform safe localtime
-    inline bool safeLocaltime(const time_t* t, struct tm* tmInfo)
+    char   buffer[256];
+    size_t required_size = 0;
+    if(getenv_s(&required_size, buffer, sizeof(buffer), name) != 0
+       || required_size == 0 || required_size > sizeof(buffer))
     {
-#ifdef _WIN32
-        return localtime_s(tmInfo, t) == 0;
-#else
-        return localtime_r(t, tmInfo) != nullptr;
-#endif
+        return std::nullopt;
     }
-
-    // Cross-platform process ID
-    inline int getProcessId()
-    {
-#ifdef _WIN32
-        return _getpid();
+    return std::string(buffer);
 #else
-        return getpid();
+    const char* val = std::getenv(name);
+    return val ? std::optional<std::string>{val} : std::nullopt;
 #endif
-    }
+}
 
-} // namespace hiptensor
+// Cross-platform safe localtime
+inline bool safeLocaltime(const time_t* t, struct tm* tmInfo)
+{
+#ifdef _WIN32
+    return localtime_s(tmInfo, t) == 0;
+#else
+    return localtime_r(t, tmInfo) != nullptr;
+#endif
+}
+
+// Cross-platform process ID
+inline int getProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#else
+    return getpid();
+#endif
+}

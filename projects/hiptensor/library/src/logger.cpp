@@ -228,7 +228,7 @@ namespace hiptensor
         // Retrieve the time information
         time(&t);
 
-        if(!hiptensor::safeLocaltime(&t, &tmInfo))
+        if(!safeLocaltime(&t, &tmInfo))
         {
             memset(&tmInfo, 0, sizeof(tmInfo));
         }
@@ -266,7 +266,7 @@ namespace hiptensor
     /* static */
     int32_t Logger::appPid()
     {
-        static int pid = hiptensor::getProcessId();
+        static int pid = getProcessId();
         return pid;
     }
 

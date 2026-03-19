@@ -114,7 +114,7 @@ function(create_hiptensor_shared_library)
     endif()
 
     # HIP libs symbols are required by hipTensor and users of hipTensor
-    target_link_libraries(hiptensor PUBLIC hip::device hip::host)
+    target_link_libraries(hiptensor INTERFACE hip::device hip::host)
     target_link_libraries(hiptensor PRIVATE Threads::Threads)
     set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()
