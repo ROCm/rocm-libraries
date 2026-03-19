@@ -28,9 +28,6 @@
 #include <numeric>
 #include <vector>
 
-#include <iostream> // FIXME: temp
-
-
 #include "fft_enums.h"
 #include "data_layout.h"
 #include "../library/include/hipfft/hipfft.h"
@@ -109,9 +106,6 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
                             const bool isrealcomplex,
                             const hipfftXtSubFormat subformat)
 {
-
-    std::cout << "isrealcomplex: " << isrealcomplex << std::endl;
-    
     // We assume that the brick vector has already been allocated, but the brick data is not yet
     // computed.
     if(bricks.size() == 0)
@@ -208,16 +202,11 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         }
         brick.field_upper[splitdim] = brick.field_lower[splitdim] + bricksplitlen;
 
-        // FIXME: for 3D transforms, do we need to do this?
         brick.brick_stride = default_strides(isherm ? fft_transform_type_complex_forward :dft_type,
                                              placement,
                                              io,
                                              brick.field_lower,
                                              brick.field_upper);
-        std::cout << "new brick_stride:";
-        for(auto val : brick.brick_stride)
-            std::cout << " " << val;
-        std::cout << std::endl;
     }
 }
 

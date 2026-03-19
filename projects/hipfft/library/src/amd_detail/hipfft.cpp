@@ -32,8 +32,6 @@
 #include <string>
 #include <vector>
 
-#include <iostream> // FIXME: temp
-
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
 #endif
@@ -61,11 +59,25 @@
 
 struct hipfftIOType
 {
+private:
     hipDataType inputType  = HIP_C_32F;
     hipDataType outputType = HIP_C_32F;
 
+    bool isinitialized = false;
+    
     // FIXME: add a member to determine if this struct has been initialzied, and throw exceptions if
     // one asks for information about this struct before it has been initialized.
+
+public:
+
+    auto get_inputType() const
+        {
+            return inputType;
+        }
+    auto get_outputType() const
+        {
+            return outputType;
+        }
     
     hipfftIOType() = default;
 
@@ -101,6 +113,7 @@ struct hipfftIOType
         default:
             return HIPFFT_NOT_IMPLEMENTED;
         }
+        isinitialized = true;
         return HIPFFT_SUCCESS;
     }
 
@@ -143,11 +156,15 @@ struct hipfftIOType
 
         inputType  = input;
         outputType = output;
+        isinitialized = true;
         return HIPFFT_SUCCESS;
     }
 
     rocfft_precision precision() const
     {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
         switch(inputType)
         {
         case HIP_R_16F:
@@ -166,6 +183,9 @@ struct hipfftIOType
 
     bool is_real_to_complex() const
     {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
         switch(inputType)
         {
         case HIP_R_16F:
@@ -183,6 +203,9 @@ struct hipfftIOType
 
     bool is_complex_to_real() const
     {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
         switch(outputType)
         {
         case HIP_R_16F:
@@ -200,6 +223,9 @@ struct hipfftIOType
 
     bool is_complex_to_complex() const
     {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
         return !is_complex_to_real() && !is_real_to_complex();
     }
 
@@ -220,6 +246,9 @@ struct hipfftIOType
 
     std::vector<rocfft_transform_type> transform_types() const
     {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
         std::vector<rocfft_transform_type> ret;
         if(is_real_to_complex())
             ret.push_back(rocfft_transform_type_real_forward);
@@ -236,6 +265,9 @@ struct hipfftIOType
 
     rocfft_array_type array_type(fft_io io) const
     {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
         validate_or_throw(io, "hipfftIOType::array_type");
         if(is_real_to_complex())
         {
@@ -255,6 +287,9 @@ struct hipfftIOType
 
     hipDataType spaceType() const
         {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
             if(is_complex_to_complex())
             {
                 if(inputType != outputType)
@@ -274,6 +309,9 @@ struct hipfftIOType
 
         hipDataType freqType() const
         {
+        if(!isinitialized)
+            throw std::runtime_error("hipfftIOType not intialized");
+            
             if(is_complex_to_complex())
             {
                 if(inputType != outputType)
@@ -342,7 +380,6 @@ struct hipfftHandle_t
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
 
-
     // FIXME: documentation:
     auto brick_format_to_type(const int subFormat)
         {
@@ -350,10 +387,10 @@ struct hipfftHandle_t
         {
         case HIPFFT_XT_FORMAT_INPUT: 
         case HIPFFT_XT_FORMAT_INPLACE:
-            return type.inputType;
+            return type.get_inputType();
         case HIPFFT_XT_FORMAT_OUTPUT:
         case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            return type.outputType;
+            return type.get_outputType();
         default:
             throw HIPFFT_INVALID_VALUE;
         }
@@ -473,8 +510,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     
     const bool isrealcomplex = !iotype.is_complex_to_complex();
 
-    std::cout << "isrealcomplex: " << isrealcomplex << std::endl;
-    
     if(!plan || plan->initialized())
     {
         // plan initialization can be done only once in the plan's lifetime
@@ -582,87 +617,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
     if(plan->singleProcMultiDevice)
     {
-        // FIXME: make sure we don't have a communicator.
+        // tODO: make sure we don't have a communicator.
         
         std::vector<size_t> batches = {plan->batch};
         std::vector<size_t> batchlengths = batches;
         batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
 
-        const size_t dim = batchlengths.size();
-        const size_t lastdim = batchlengths.size() - 1;
-
-        const size_t ngpus = plan->spaceBricks.size();
-        
-        // FIXME: check for 3D and output formats, as well as multi-batch.
-        // Dimension includes batch dimension.
-        const size_t spacesplitdim = 1;
-        const size_t freqsplitdim = 2;
-
-        // FIXME: we already set bricks, so don't do it again.
-        auto sethipbricks = [&plan](std::vector<hipfft_brick> &hipBricks,
-                                    const std::vector<size_t> &batchlengths,
-                                    const size_t splitdim,
-                                    const bool space)
-            {
-                std::cout << "splitdim : " << splitdim << "\n";
-                std::cout << "space : " << space << "\n";
-                const size_t ngpus = hipBricks.size();
-                for(size_t igpu = 0; igpu < ngpus; ++igpu)
-                {
-                    hipBricks[igpu].field_lower.resize(batchlengths.size());
-                    std::fill(hipBricks[igpu].field_lower.begin(),
-                              hipBricks[igpu].field_lower.end(), 0);
-                    hipBricks[igpu].field_upper = batchlengths;
-                    if(igpu > 0)
-                    {
-                        hipBricks[igpu].field_lower[splitdim]
-                            = hipBricks[igpu - 1].field_upper[splitdim];
-                    }
-                    const auto l = batchlengths[splitdim];
-                    const auto splitlength = l / ngpus + ((igpu < l % ngpus) ? 1 : 0);
-                    hipBricks[igpu].field_upper[splitdim] =
-                        hipBricks[igpu].field_lower[splitdim] + splitlength;
-                    std::cout << "splitlength: " << splitlength << std::endl;
-
-                    // FIXME: cleanup.
-                    const auto dft_type
-                        = //plan->type.is_complex_to_complex()
-                        //?
-                        fft_transform_type_complex_forward
-                        //: fft_transform_type_real_forward
-                        ;
-                    // hipBricks[igpu].brick_stride = default_strides(dft_type,
-                    //                                                fft_placement_inplace, // ???
-                    //                                                space ? fft_io_in : fft_io_out,
-                    //                                                hipBricks[igpu].field_lower,
-                    //                                                hipBricks[igpu].field_upper);
-                    std::cout << "\t" << igpu << " brick_stride";
-                    for(auto val : hipBricks[igpu].brick_stride)
-                    {
-                        std::cout << " " << val;
-                    }
-                    std::cout << std::endl;
-                }                
-            };
-
-        std::vector<size_t> spacebatchlengths = batchlengths;
-        sethipbricks(plan->spaceBricks, batchlengths, spacesplitdim, true);
-        std::vector<size_t> freqbatchlengths = batchlengths;
-        if(isrealcomplex)
-        {
-            freqbatchlengths[freqbatchlengths.size() - 1]
-                = freqbatchlengths[freqbatchlengths.size() - 1] / 2 + 1;
-        }
-        sethipbricks(plan->freqBricks, freqbatchlengths, freqsplitdim, false);
-        
-        std::cout << "freqbatchlengths";
-        for(auto val : freqbatchlengths)
-        {
-            std::cout << " " << val;
-        }
-        std::cout << std::endl;
-                    
-        
         // Lambda for converting hipfft-bricks to rocfft-bricks and adding them to a rocfft
         // description:
         auto hipBricks2Desc = [](std::vector<hipfft_brick> & hipBricks, rocfft_field& destField)
@@ -929,9 +889,6 @@ try
 
     hipfftIOType iotype;
     HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
-
-    
-    std::cout << "hipfftMakePlan2d: " << iotype.is_complex_to_complex() << std::endl;
     
     return hipfftMakePlan_internal(plan,
                                    2,
@@ -1897,19 +1854,10 @@ try
 
     std::vector<hipfft_brick>* bricks           = nullptr;
 
-    // FIXME: deal with Hermitian-complex data split in the symmetrized dimension.
-
     std::vector<size_t> batches = {plan->batch};
     std::vector<size_t> batchlengths = batches;
     batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
-    const size_t lastdim = batchlengths.size() - 1;
     const bool isinput = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
-
-    // FIXME: check for 3D and output formats
-    const size_t splitdim = isinput ? 1 : 2;
-    //const size_t splitdim = isinput ? lastdim - 1 : lastdim; 
-
-    const bool realcomplex = !plan->type.is_complex_to_complex();
 
     const bool isinplace
         = format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
@@ -1925,8 +1873,6 @@ try
         rocfft_scoped_device dev(brick.device);
         
         xt_desc->GPUs[idx] = brick.device;
-
-        std::cout << "xtmalloc " << idx << std::endl;
         
         if(isinplace)
         {
@@ -1935,17 +1881,11 @@ try
                                                 plan->spaceBricks[idx].brick_stride);
             const size_t space_bytes_per_element
                 = hipDataType_bits(plan->type.spaceType()) / 8;
-            std::cout << "\tspacebufsize: " << spacebufsize << std::endl;
-            std::cout << "\tspace_bytes_per_element: " << space_bytes_per_element << std::endl;
-            
             auto freqbufsize = compute_ptrdiff(plan->freqBricks[idx].field_lower,
                                                 plan->freqBricks[idx].field_upper,
                                                 plan->freqBricks[idx].brick_stride);
             const size_t freq_bytes_per_element
                 = hipDataType_bits(plan->type.freqType()) / 8;
-            std::cout << "\tfreqbufsize: " << freqbufsize << std::endl;
-            std::cout << "\tfreq_bytes_per_element: " << freq_bytes_per_element << std::endl;
-            
             xt_desc->size[idx] = std::max( spacebufsize * space_bytes_per_element,
                                            freqbufsize * freq_bytes_per_element);
         }
@@ -1957,9 +1897,6 @@ try
                 = hipDataType_bits(plan->brick_format_to_type(format));
             xt_desc->size[idx] = bufsize * bits_per_element / 8;
         }
-
-        // FIXME: temp
-        std::cout << "xt_desc->size[idx]: " << xt_desc->size[idx] << std::endl;
         
         if(xt_desc->size[idx] == 0)
             return HIPFFT_INTERNAL_ERROR;
@@ -2005,7 +1942,6 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
        || (brick_length.size() != field_stride.size())
        ||  (brick_stride.size() != field_stride.size()))
     {
-        std::cout << "Inconsistent sadfasdfadsf\n";
         throw std::runtime_error("Inconsistent dimensions for collapse_contiguous_dims.\n"
                                  + paramstring());
     }
@@ -2024,7 +1960,6 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
     // Collapse contiguous memory sections:
     for(size_t idx = brick_length.size(); idx-- > 1;)
     {
-        std::cout << idx << std::endl;
         if(brick_length[idx] * brick_stride[idx] == brick_stride[idx - 1]
            && brick_length[idx] * field_stride[idx] == field_stride[idx - 1])
         {
@@ -2039,7 +1974,6 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
     // Fastest dim is expected to be contiguous
     if(brick_stride.back() != 1 || field_stride.back() != 1)
     {
-        std::cout << "fastest dim not contiguous after collapsing" << std::endl;
         throw std::runtime_error("fastest dim not contiguous after collapsing");
     }
 }
@@ -2077,8 +2011,6 @@ try
         }
     };
 
-    // FIXME: use handle-level function
-    // FIXME FIXME: this now disagrees with handle-level function
     // This determines whether we use the input brick decomposition or the output brick
     // decomposition for the copy operation.
     auto brick_format = [plan](int subFormat) -> hipDataType {
@@ -2100,8 +2032,6 @@ try
     case HIPFFT_COPY_HOST_TO_DEVICE:
     case HIPFFT_COPY_DEVICE_TO_HOST:
     {
-        std::cout << "hipfftXtMemcpy" << std::endl;
-        
         const bool h2d = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
         
         auto myDesc = static_cast<hipLibXtDesc*>(h2d ? dest : src);
@@ -2142,26 +2072,11 @@ try
             hostDataLengths[lastdim] = 2 * (hostDataLengths[lastdim] / 2 + 1);
         }
 
-        // // FIXME:
-        std::cout << "lastdim: " << lastdim << "\n";
-        if(realdata)
-            std::cout << "realdata\n";
-        std::cout << "hostDataLengths:";
-        for(const auto val : hostDataLengths)
-            std::cout << " " << val;
-        std::cout << "\n";
-        std::cout << "hostDataStride:";
-        for(const auto val : hostDataStride)
-            std::cout << " " << val;
-        std::cout << "\n";
-        
         for(size_t idx = 0; idx < static_cast<size_t>(myDesc->descriptor->nGPUs); ++idx)
         {
-            std::cout << "brick " << idx << "\n";
-            
             rocfft_scoped_device dev(myDesc->descriptor->GPUs[idx]);
 
-            // space bricks of frequency bricks:
+            // Space bricks or frequency bricks:
             const auto& brick = brick_layout(myDesc->subFormat)[idx];
             
             auto brick_length = brick.length();
@@ -2172,15 +2087,6 @@ try
             }
             auto brick_stride = brick.brick_stride;
 
-            std::cout << "\tbrickLengths:";
-            for(const auto val : brick_length)
-                std::cout << " " << val;
-            std::cout << "\n";
-            std::cout << "\tbrick_stride:";
-            for(const auto val : brick_stride)
-                std::cout << " " << val;
-            std::cout << "\n";
-
             const auto host_offset
                 = offset_buffer(h2d ? src : dest, brick_format(myDesc->subFormat),
                                 brick.field_lower, hostDataStride);
@@ -2190,20 +2096,6 @@ try
             auto hostDataStride_collapsed = hostDataStride;
             collapse_contiguous_dims(brick_length_collapsed, brick_stride_collapsed,
                                      hostDataStride_collapsed);
-            
-            std::cout << "\t\thostDataStride_collapsed";
-            for(const auto val: hostDataStride_collapsed)
-                std::cout << " " << val;
-            std::cout << std::endl;
-            std::cout << "\t\tbrick_length_collapsed";
-            for(const auto val: brick_length_collapsed)
-                std::cout << " " << val;
-            std::cout << std::endl;
-            std::cout << "\t\tbrick_stride_collapsed";
-            for(const auto val: brick_stride_collapsed)
-                std::cout << " " << val;
-            std::cout << std::endl;
-
                 
             auto destptr = h2d ? myDesc->descriptor->data[idx] : host_offset;
             const auto srcptr = h2d ? host_offset : myDesc->descriptor->data[idx];
@@ -2240,20 +2132,10 @@ try
                 if(!realdata)
                     valsize *= 2;
 
-                std::cout << "\thipMemcpy2D:\n";
-                std::cout << "\t\tvalsize : " << valsize << std::endl;
-
                 size_t dpitch = h2d ? brick_stride_collapsed[0]: hostDataStride_collapsed[0];
-                std::cout << "\t\tdpitch : " << dpitch << std::endl;
-
                 size_t spitch = h2d ? hostDataStride_collapsed[0] : brick_stride_collapsed[0];
-                std::cout << "\t\tspitch : " << spitch << std::endl;
-
                 size_t width = brick_length_collapsed[1];
-                std::cout << "\t\twidth : " << width << std::endl;
-
                 size_t height = brick_length_collapsed[0];
-                std::cout << "\t\theight : " << height << std::endl;
 
                 auto ret = hipMemcpy2D(
                     destptr,
@@ -2264,11 +2146,7 @@ try
                     height,            // height (how many rows)
                     cpdirection);                
                 if(ret != hipSuccess)
-                {
-                    std::cout << "hipMemcpy " << idx << " failed: "
-                              << hipGetErrorString(ret) << " " << ret << std::endl;
                     return HIPFFT_INTERNAL_ERROR;
-                }
             break;
             }
             default:
