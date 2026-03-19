@@ -30,3 +30,8 @@ Tests:
   category: pre_checkin
   function: spattern_descr_bad_arg
   precision: *single_double_precisions
+
+- name: spattern_descr
+  category: quick
+  function: spattern_descr
+  formatA: [rocsparse_format_csr]

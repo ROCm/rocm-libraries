@@ -125,7 +125,8 @@ try
         case rocsparse_format_coo:
         case rocsparse_format_coo_aos:
         {
-            break;
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error,
+                                                   "invalid format");
         }
         }
 

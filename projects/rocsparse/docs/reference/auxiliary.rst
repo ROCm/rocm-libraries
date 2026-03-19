@@ -633,20 +633,20 @@ rocsparse_dnmat_set_strided_batch
 .. doxygenfunction:: rocsparse_dnmat_set_strided_batch
 
 
-rocsparse_idvec_create
-----------------------
+rocsparse_idvec_descr_create
+----------------------------
 
-.. doxygenfunction:: rocsparse_idvec_create
+.. doxygenfunction:: rocsparse_idvec_descr_create
 
-rocsparse_idvec_create_batched
-------------------------------
+rocsparse_idvec_descr_create_batched
+------------------------------------
 
-.. doxygenfunction:: rocsparse_idvec_create_batched
+.. doxygenfunction:: rocsparse_idvec_descr_create_batch
 
-rocsparse_idvec_destroy
------------------------
+rocsparse_idvec_descr_destroy
+-----------------------------
 
-.. doxygenfunction:: rocsparse_idvec_destroy
+.. doxygenfunction:: rocsparse_idvec_descr_destroy
 
 rocsparse_idvec_get_prop
 ------------------------
@@ -762,4 +762,160 @@ rocsparse_dnvec_get_strided_batch
 rocsparse_dnvec_set_strided_batch
 ---------------------------------
 .. doxygenfunction:: rocsparse_dnvec_set_strided_batch
+
+rocsparse_dnvec_descr_create
+----------------------------
+.. doxygenfunction:: rocsparse_dnvec_descr_create
+
+rocsparse_dnvec_descr_create_batch
+----------------------------------
+.. doxygenfunction:: rocsparse_dnvec_descr_create_batch
+
+rocsparse_dnvec_destroy
+-----------------------
+.. doxygenfunction:: rocsparse_dnvec_destroy
+
+rocsparse_dnvec_get_prop
+------------------------
+.. doxygenfunction:: rocsparse_dnvec_get_prop
+
+rocsparse_dnvec_set_prop
+------------------------
+.. doxygenfunction:: rocsparse_dnvec_set_prop
+
+rocsparse_dnvec_get_data
+------------------------
+.. doxygenfunction:: rocsparse_dnvec_get_data
+
+rocsparse_dnvec_set_data
+------------------------
+.. doxygenfunction:: rocsparse_dnvec_set_data
+
+rocsparse_dnvec_get_const_data
+------------------------------
+.. doxygenfunction:: rocsparse_dnvec_get_const_data
+
+rocsparse_dnvec_set_const_data
+------------------------------
+.. doxygenfunction:: rocsparse_dnvec_set_const_data
+
+rocsparse_dnmat_descr_destroy
+-----------------------------
+.. doxygenfunction:: rocsparse_dnmat_descr_destroy
+
+rocsparse_dnmat_descr_create
+----------------------------
+.. doxygenfunction:: rocsparse_dnmat_descr_create
+
+rocsparse_dnmat_descr_create_batch
+----------------------------------
+.. doxygenfunction:: rocsparse_dnmat_descr_create_batch
+
+rocsparse_dnmat_destroy
+-----------------------
+.. doxygenfunction:: rocsparse_dnmat_destroy
+
+rocsparse_dnmat_get_prop
+------------------------
+.. doxygenfunction:: rocsparse_dnmat_get_prop
+
+rocsparse_dnmat_set_prop
+------------------------
+.. doxygenfunction:: rocsparse_dnmat_set_prop
+
+rocsparse_dnmat_get_data
+------------------------
+.. doxygenfunction:: rocsparse_dnmat_get_data
+
+rocsparse_dnmat_set_data
+------------------------
+.. doxygenfunction:: rocsparse_dnmat_set_data
+
+rocsparse_dnmat_get_const_data
+------------------------------
+.. doxygenfunction:: rocsparse_dnmat_get_const_data
+
+rocsparse_dnmat_set_const_data
+------------------------------
+.. doxygenfunction:: rocsparse_dnmat_set_const_data
+
+rocsparse_spattern_descr_destroy
+--------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_destroy
+
+rocsparse_spattern_descr_create_coo
+-----------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_coo
+
+rocsparse_spattern_descr_create_coo_aos
+---------------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_coo_aos
+
+rocsparse_spattern_descr_create_csr
+-----------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_csr
+
+rocsparse_spattern_descr_create_csc
+-----------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_csc
+
+rocsparse_spattern_descr_create_ell
+-----------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_ell
+
+rocsparse_spattern_descr_create_bell
+------------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_bell
+
+rocsparse_spattern_descr_create_bsr
+-----------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_bsr
+
+rocsparse_spattern_descr_create_sell
+------------------------------------
+.. doxygenfunction:: rocsparse_spattern_descr_create_sell
+
+rocsparse_spattern_get_prop
+---------------------------
+.. doxygenfunction:: rocsparse_spattern_get_prop
+
+rocsparse_spattern_set_prop
+---------------------------
+.. doxygenfunction:: rocsparse_spattern_set_prop
+
+rocsparse_spattern_get_data
+---------------------------
+.. doxygenfunction:: rocsparse_spattern_get_data
+
+rocsparse_spattern_set_data
+---------------------------
+.. doxygenfunction:: rocsparse_spattern_set_data
+
+rocsparse_spmat_descr_destroy
+-----------------------------
+.. doxygenfunction:: rocsparse_spmat_descr_destroy
+
+rocsparse_spmat_descr_create_coo
+--------------------------------
+.. doxygenfunction:: rocsparse_spmat_descr_create_coo
+
+rocsparse_spmat_get_prop
+------------------------
+.. doxygenfunction:: rocsparse_spmat_get_prop
+
+rocsparse_spmat_get_spattern
+----------------------------
+.. doxygenfunction:: rocsparse_spmat_get_spattern
+
+rocsparse_spmat_set_spattern
+----------------------------
+.. doxygenfunction:: rocsparse_spmat_set_spattern
+
+rocsparse_spmat_get_data
+------------------------
+.. doxygenfunction:: rocsparse_spmat_get_data
+
+rocsparse_spmat_set_data
+------------------------
+.. doxygenfunction:: rocsparse_spmat_set_data
 

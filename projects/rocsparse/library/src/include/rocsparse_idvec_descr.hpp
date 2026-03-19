@@ -43,6 +43,7 @@ protected:
     void*                  m_values{};
     rocsparse_pointer_mode m_pointer_mode{};
     bool                   m_own_values{};
+    bool                   m_init{};
 
 public:
     rocsparse_status validate();

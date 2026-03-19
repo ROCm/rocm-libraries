@@ -54,9 +54,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_dnmat_prop value_)
 extern "C" {
 #endif
 
-rocsparse_status rocsparse_dnmat_destroy(rocsparse_handle      handle,
-                                         rocsparse_dnmat_descr descr,
-                                         rocsparse_error*      p_error)
+rocsparse_status rocsparse_dnmat_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_dnmat_descr descr,
+                                               rocsparse_error*      p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -75,16 +75,16 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_dnmat_create(rocsparse_handle       handle,
-                                        rocsparse_dnmat_descr* p_descr,
-                                        rocsparse_datatype     data_type,
-                                        rocsparse_order        order,
-                                        int64_t                rows,
-                                        int64_t                cols,
-                                        int64_t                ld,
-                                        const void*            const_data,
-                                        void*                  data,
-                                        rocsparse_error*       p_error)
+rocsparse_status rocsparse_dnmat_descr_create(rocsparse_handle       handle,
+                                              rocsparse_dnmat_descr* p_descr,
+                                              rocsparse_datatype     data_type,
+                                              rocsparse_order        order,
+                                              int64_t                rows,
+                                              int64_t                cols,
+                                              int64_t                ld,
+                                              const void*            const_data,
+                                              void*                  data,
+                                              rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -108,20 +108,20 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_dnmat_create_batched(rocsparse_handle       handle,
-                                                rocsparse_dnmat_descr* p_descr,
-                                                rocsparse_datatype     data_type,
-                                                rocsparse_order        order,
-                                                int64_t                rows,
-                                                int64_t                cols,
-                                                int64_t                ld,
-                                                rocsparse_batchtype    batch_type,
-                                                rocsparse_batchstorage batch_storage,
-                                                int64_t                batch_count,
-                                                int64_t                batch_dist,
-                                                const void*            const_data,
-                                                void*                  data,
-                                                rocsparse_error*       p_error)
+rocsparse_status rocsparse_dnmat_descr_create_batch(rocsparse_handle       handle,
+                                                    rocsparse_dnmat_descr* p_descr,
+                                                    rocsparse_datatype     data_type,
+                                                    rocsparse_order        order,
+                                                    int64_t                rows,
+                                                    int64_t                cols,
+                                                    int64_t                ld,
+                                                    rocsparse_batchtype    batch_type,
+                                                    rocsparse_batchstorage batch_storage,
+                                                    int64_t                batch_count,
+                                                    int64_t                batch_dist,
+                                                    const void*            const_data,
+                                                    void*                  data,
+                                                    rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

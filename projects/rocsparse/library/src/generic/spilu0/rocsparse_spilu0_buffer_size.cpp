@@ -38,7 +38,7 @@ namespace rocsparse
                                                size_t*                     buffer_size_in_bytes)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format format = A->format;
+        const rocsparse_format format = A->get_format();
         switch(format)
         {
         case rocsparse_format_csr:

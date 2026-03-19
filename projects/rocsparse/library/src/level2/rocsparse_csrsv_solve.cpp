@@ -79,7 +79,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     // done array
     int32_t*     done_array = reinterpret_cast<int32_t*>(ptr);
     const size_t done_array_size_in_bytes
-        = ((sizeof(int32_t) * A->rows * batch_count - 1) / 256 + 1) * 256;
+        = ((sizeof(int32_t) * A->get_rows() * batch_count - 1) / 256 + 1) * 256;
     ptr += done_array_size_in_bytes;
 
     // Initialize buffers
@@ -91,7 +91,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
 
-    csrsv_info->create_singularity_numeric_exact(batch_count, A->col_type, handle->stream);
+    csrsv_info->create_singularity_numeric_exact(batch_count, A->get_col_type(), handle->stream);
 
     // If diag type is unit, re-initialize zero pivot to remove structural zeros
 
@@ -100,8 +100,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     case rocsparse_diag_type_unit:
     {
         RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::assign_max_async(1, A->col_type, csrsv_info->get_position(), stream));
-        if(A->col_type == rocsparse_indextype_i32)
+            rocsparse::assign_max_async(1, A->get_col_type(), csrsv_info->get_position(), stream));
+        if(A->get_col_type() == rocsparse_indextype_i32)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 batch_count,
@@ -122,7 +122,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     }
     case rocsparse_diag_type_non_unit:
     {
-        if(A->col_type == rocsparse_indextype_i32)
+        if(A->get_col_type() == rocsparse_indextype_i32)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 batch_count,
@@ -185,7 +185,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         local_row_data        = csrsv->get_transposed_row_ptr();
         local_col_data        = csrsv->get_transposed_col_ind();
         local_val_data        = csrt_val;
-        local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
+        local_val_data_stride = (A->get_batch_count() > 1) ? A->get_nnz() : 0;
         fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
                                                                          : rocsparse_fill_mode_lower;
     }
@@ -207,7 +207,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     auto numeric_exact_position = csrsv_info->get_singularity_numeric_exact();
     csrsv_launch_kernel(handle,
                         batch_count,
-                        A->rows,
+                        A->get_rows(),
                         alpha,
                         alpha_stride,
                         local_row_data,

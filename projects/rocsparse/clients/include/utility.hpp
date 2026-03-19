@@ -934,6 +934,57 @@ public:
     }
 };
 
+/*! \brief  local indexing dense vector structure which is automatically created and destroyed  */
+class rocsparse_local_idvec
+{
+    rocsparse_idvec_descr descr{};
+    rocsparse_handle      handle{};
+
+public:
+    rocsparse_local_idvec(){};
+    rocsparse_local_idvec(rocsparse_handle     handle,
+                          int64_t              size,
+                          void*                values,
+                          rocsparse_indextype  indextype,
+                          int64_t              inc,
+                          rocsparse_index_base base)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+        const rocsparse_status status = rocsparse_idvec_descr_create(
+            handle, &this->descr, indextype, base, size, inc, values, values, nullptr);
+        if(status != rocsparse_status_success)
+        {
+            throw(status);
+        }
+    }
+
+    template <memory_mode::value_t MODE, typename T>
+    explicit rocsparse_local_idvec(rocsparse_handle       handle,
+                                   dense_vector<MODE, T>& h,
+                                   rocsparse_index_base   base)
+        : rocsparse_local_idvec(handle, h.size(), h.data(), get_indextype<T>(), 1, base)
+    {
+    }
+
+    ~rocsparse_local_idvec()
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+        if(this->handle != nullptr)
+            std::ignore = rocsparse_idvec_descr_destroy(this->handle, this->descr, nullptr);
+    }
+
+    // Allow rocsparse_local_idvec to be used anywhere rocsparse_idvec_descr is expected
+    operator rocsparse_idvec_descr&()
+    {
+        return this->descr;
+    }
+    operator const rocsparse_idvec_descr&() const
+    {
+        return this->descr;
+    }
+};
+
 /*! \brief  local dense matrix structure which is automatically created and destroyed  */
 class rocsparse_local_dnmat
 {

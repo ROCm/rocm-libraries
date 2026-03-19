@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
 template <typename I, typename J, typename T>
@@ -231,13 +232,6 @@ void testing_spmat_descr_bad_arg(const Arguments& arg)
                                 rocsparse_status_success);
         EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
                                 rocsparse_status_success);
-#if 0
-    EXPECT_ROCSPARSE_STATUS(
-			    rocsparse_create_csr_descr(
-							     descr, rows, cols, 0, nullptr, nullptr, nullptr, row_ptr_type, col_ind_type, idx_base, data_type),
-			    rocsparse_status_success);
-    EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr), rocsparse_status_success);
-#endif
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_csc_descr(descr,
                                                            rows,
                                                            0,
@@ -281,21 +275,6 @@ void testing_spmat_descr_bad_arg(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr),
                                 rocsparse_status_success);
 
-#if 0
-    EXPECT_ROCSPARSE_STATUS(rocsparse_create_bell_descr(descr,
-                                                              0,
-                                                              cols,
-                                                              ell_block_dir,
-                                                              ell_block_dim,
-                                                              ell_cols,
-                                                              nullptr,
-                                                              nullptr,
-                                                              idx_type,
-                                                              idx_base,
-                                                              data_type),
-                            rocsparse_status_success);
-    EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(local_descr), rocsparse_status_success);
-#endif
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_bell_descr(descr,
                                                             rows,
                                                             0,
@@ -540,9 +519,358 @@ void testing_spmat_descr_bad_arg(const Arguments& arg)
         }
     }
 }
+
 template <typename I, typename J, typename T>
 void testing_spmat_descr(const Arguments& arg)
 {
+
+    rocsparse_local_handle local_handle;
+    rocsparse_handle       handle  = local_handle;
+    static constexpr bool  verbose = false;
+
+    //
+    // Create coo pattern.
+    //
+    for(auto format : rocsparse_format_t::values)
+    {
+        if(verbose)
+            std::cout << "format :" << rocsparse_format2string(format) << std::endl;
+        rocsparse_spattern_descr   spattern_descr   = nullptr;
+        rocsparse_spmat_descr      spmat_descr      = nullptr;
+        int64_t                    width            = 2;
+        int64_t                    bell_width       = 2;
+        int64_t                    batch_count      = 1;
+        int64_t                    block_dim        = 2;
+        int64_t                    rows             = 4;
+        int64_t                    cols             = 4;
+        int64_t                    nnz              = 16;
+        int64_t                    rowsb            = rows / block_dim;
+        int64_t                    colsb            = cols / block_dim;
+        int64_t                    nnzb             = nnz / block_dim;
+        rocsparse_direction        block_dir        = rocsparse_direction_row;
+        const rocsparse_index_base base             = arg.baseA;
+        int64_t                    sell_slice_size  = 4;
+        int64_t                    sell_colval_size = 4;
+        int64_t                    row_size         = 0;
+        int64_t                    col_size         = 0;
+        int64_t                    val_size         = 0;
+        switch(format)
+        {
+
+        case rocsparse_format_coo:
+        {
+            row_size = nnz;
+            col_size = nnz;
+            val_size = nnz;
+            break;
+        }
+
+        case rocsparse_format_coo_aos:
+        {
+            row_size = nnz;
+            col_size = nnz;
+            val_size = nnz;
+            break;
+        }
+
+        case rocsparse_format_csr:
+        {
+            row_size = rows + 1;
+            col_size = nnz;
+            val_size = nnz;
+            break;
+        }
+
+        case rocsparse_format_bsr:
+        {
+            row_size = rowsb + 1;
+            col_size = nnzb;
+            val_size = nnzb * block_dim * block_dim;
+            break;
+        }
+
+        case rocsparse_format_bell:
+        {
+            row_size = 0;
+            col_size = rowsb * bell_width;
+            val_size = rowsb * bell_width * block_dim * block_dim;
+            break;
+        }
+
+        case rocsparse_format_sell:
+        {
+            row_size = (rows - 1) / sell_slice_size + 1;
+            col_size = sell_colval_size;
+            val_size = sell_colval_size;
+            break;
+        }
+
+        case rocsparse_format_csc:
+        {
+            row_size = nnz;
+            col_size = cols + 1;
+            val_size = nnz;
+            break;
+        }
+
+        case rocsparse_format_ell:
+        {
+            row_size = 0;
+            col_size = rows * width;
+            val_size = rows * width;
+            break;
+        }
+        }
+
+        device_dense_vector<int32_t> drow_indices(row_size);
+        device_dense_vector<int32_t> dcol_indices(col_size);
+        device_dense_vector<float>   dval_indices(val_size);
+        rocsparse_local_idvec        row_data(handle, drow_indices, base);
+        rocsparse_local_idvec        col_data(handle, dcol_indices, base);
+        rocsparse_local_dnvec        val_data(dval_indices);
+        rocsparse_error*             p_error = nullptr;
+        switch(format)
+        {
+        case rocsparse_format_coo:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_coo(
+                handle, &spattern_descr, rows, cols, nnz, row_data, col_data, p_error));
+
+            block_dir        = rocsparse_direction_column;
+            block_dim        = 1;
+            width            = 0;
+            bell_width       = 0;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+
+        case rocsparse_format_coo_aos:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_coo_aos(
+                handle, &spattern_descr, rows, cols, nnz, row_data, col_data, p_error));
+            block_dir        = rocsparse_direction_column;
+            block_dim        = 1;
+            width            = 0;
+            bell_width       = 0;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+
+        case rocsparse_format_csr:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_csr(
+                handle, &spattern_descr, rows, cols, nnz, row_data, col_data, p_error));
+            block_dir        = rocsparse_direction_column;
+            block_dim        = 1;
+            bell_width       = 0;
+            width            = 0;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+
+        case rocsparse_format_bsr:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_bsr(handle,
+                                                                      &spattern_descr,
+                                                                      rowsb,
+                                                                      colsb,
+                                                                      nnzb,
+                                                                      block_dir,
+                                                                      block_dim,
+                                                                      row_data,
+                                                                      col_data,
+                                                                      p_error));
+
+            rows             = rowsb * block_dim;
+            cols             = colsb * block_dim;
+            nnz              = nnzb * block_dim * block_dim;
+            width            = 0;
+            bell_width       = 0;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+
+        case rocsparse_format_bell:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_bell(handle,
+                                                                       &spattern_descr,
+                                                                       rowsb,
+                                                                       colsb,
+                                                                       bell_width,
+                                                                       block_dir,
+                                                                       block_dim,
+                                                                       col_data,
+                                                                       p_error));
+
+            rows             = rowsb * block_dim;
+            cols             = colsb * block_dim;
+            nnz              = bell_width * rowsb * block_dim * block_dim;
+            width            = 0;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+
+        case rocsparse_format_sell:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_sell(handle,
+                                                                       &spattern_descr,
+                                                                       rows,
+                                                                       cols,
+                                                                       nnz,
+                                                                       sell_slice_size,
+                                                                       sell_colval_size,
+                                                                       row_data,
+                                                                       col_data,
+                                                                       p_error));
+            block_dir  = rocsparse_direction_column;
+            block_dim  = 1;
+            width      = 0;
+            bell_width = 0;
+
+            break;
+        }
+
+        case rocsparse_format_csc:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_csc(
+                handle, &spattern_descr, rows, cols, nnz, row_data, col_data, p_error));
+            block_dir = rocsparse_direction_column;
+            block_dim = 1;
+            width     = 0;
+
+            bell_width       = 0;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+
+        case rocsparse_format_ell:
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spattern_descr_create_ell(
+                handle, &spattern_descr, rows, cols, width, col_data, p_error));
+            block_dir        = rocsparse_direction_column;
+            block_dim        = 1;
+            bell_width       = 0;
+            nnz              = rows * width;
+            sell_slice_size  = 0;
+            sell_colval_size = 0;
+            break;
+        }
+        }
+
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_descr_create(handle, &spmat_descr, spattern_descr, val_data, p_error));
+
+        {
+            rocsparse_dnvec_descr data;
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_data(handle, spmat_descr, &data, p_error));
+            if(data != val_data)
+            {
+                unit_check_scalar(0, 1);
+            }
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_data(
+                handle, spmat_descr, ((rocsparse_dnvec_descr)0x4), p_error));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_data(handle, spmat_descr, &data, p_error));
+
+            if(data != ((rocsparse_dnvec_descr)0x4))
+            {
+                unit_check_scalar(0, 1);
+            }
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_data(handle, spmat_descr, val_data, p_error));
+        }
+
+        {
+            rocsparse_spattern_descr spattern;
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_get_spattern(handle, spmat_descr, &spattern, p_error));
+            if(spattern != spattern_descr)
+            {
+                unit_check_scalar(0, 1);
+            }
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_spattern(
+                handle, spmat_descr, ((rocsparse_spattern_descr)0x4), p_error));
+
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_get_spattern(handle, spmat_descr, &spattern, p_error));
+
+            if(spattern != ((rocsparse_spattern_descr)0x4))
+            {
+                unit_check_scalar(0, 1);
+            }
+
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_set_spattern(handle, spmat_descr, spattern_descr, p_error));
+        }
+
+        //
+        // Test get_prop
+        //
+        for(auto spmat_prop : rocsparse_spmat_prop_t::values)
+        {
+            if(verbose)
+                std::cout << "prop :" << rocsparse_spmat_prop_t::to_string(spmat_prop) << std::endl;
+            switch(spmat_prop)
+            {
+            case rocsparse_spmat_prop_format:
+            {
+                rocsparse_format value;
+
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_prop(
+                    handle, spmat_descr, spmat_prop, &value, sizeof(value), p_error));
+                unit_check_enum(format, value);
+
+                break;
+            }
+
+            case rocsparse_spmat_prop_rows:
+            {
+                int64_t value;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_prop(
+                    handle, spmat_descr, spmat_prop, &value, sizeof(value), p_error));
+                unit_check_scalar(value, rows);
+                break;
+            }
+
+            case rocsparse_spmat_prop_cols:
+            {
+                int64_t value;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_prop(
+                    handle, spmat_descr, spmat_prop, &value, sizeof(value), p_error));
+                unit_check_scalar(value, cols);
+                break;
+            }
+
+            case rocsparse_spmat_prop_nnz:
+            {
+                int64_t value;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_prop(
+                    handle, spmat_descr, spmat_prop, &value, sizeof(value), p_error));
+                unit_check_scalar(value, nnz);
+                break;
+            }
+
+            case rocsparse_spmat_prop_batch_count:
+            {
+                int64_t value;
+                CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_prop(
+                    handle, spmat_descr, spmat_prop, &value, sizeof(value), p_error));
+                unit_check_scalar(value, batch_count);
+                break;
+            }
+            }
+        } // end for : prop
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmat_descr_destroy(handle, spmat_descr, p_error));
+    }
 }
 
 #define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                                  \

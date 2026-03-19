@@ -38,7 +38,7 @@ extern "C" {
 /*! \ingroup aux_module
  *  \brief Destroy a sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_destroy destroys a sparsity pattern descriptor.
+ *  \p rocsparse_spattern_descr_destroy destroys a sparsity pattern descriptor.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -51,15 +51,15 @@ extern "C" {
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_destroy(rocsparse_handle         handle,
-                                            rocsparse_spattern_descr descr,
-                                            rocsparse_error*         p_error);
+rocsparse_status rocsparse_spattern_descr_destroy(rocsparse_handle         handle,
+                                                  rocsparse_spattern_descr descr,
+                                                  rocsparse_error*         p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a CSR sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the CSR format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_csr creates a sparsity pattern descriptor using the CSR format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -84,20 +84,66 @@ rocsparse_status rocsparse_spattern_destroy(rocsparse_handle         handle,
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_csr(rocsparse_handle          handle,
-                                               rocsparse_spattern_descr* p_descr,
-                                               int64_t                   rows,
-                                               int64_t                   cols,
-                                               int64_t                   nnz,
-                                               rocsparse_idvec_descr     row_data,
-                                               rocsparse_idvec_descr     col_data,
-                                               rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_csr(rocsparse_handle          handle,
+                                                     rocsparse_spattern_descr* p_descr,
+                                                     int64_t                   rows,
+                                                     int64_t                   cols,
+                                                     int64_t                   nnz,
+                                                     rocsparse_idvec_descr     row_data,
+                                                     rocsparse_idvec_descr     col_data,
+                                                     rocsparse_error*          p_error);
+
+/*! \ingroup aux_module
+ *  \brief Create a sparse sliced ELL matrix descriptor
+ *  \details
+ *  \p rocsparse_descr_create_sell creates a sparse slice ELL matrix descriptor. It should be
+ *  destroyed at the end using \p rocsparse_spmat_descr_destroy.
+ *
+ *  Currently the only routine that supports the sliced ELL format is \ref rocsparse_spmv.
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[out]
+ *  p_descr                   the pointer to the sparse sliced ELL matrix descriptor.
+ *  @param[in]
+ *  rows                    number of rows in the sliced ELL matrix.
+ *  @param[in]
+ *  cols                    number of columns in the sliced ELL matrix
+ *  @param[in]
+ *  nnz                     number of non-zeros in the sliced ELL matrix.
+ *  @param[in]
+ *  sell_slice_size         slice size in the sliced ELL matrix.
+ *  @param[in]
+ *  sell_colval_size        size of the column and value arrays in the sliced ELL matrix.
+ *  @param[in]
+ *  row_data     slice offsets into column and value arrays (must be array of length \p nslices+1 where \p nslice=m/sell_slice_size ).
+ *  @param[in]
+ *  col_data            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  @param[out]
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p p_descr or \p row_data or \p col_data is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz pr \p sell_slice_size or \p sell_colval_size is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spattern_descr_create_sell(rocsparse_handle          handle,
+                                                      rocsparse_spattern_descr* p_descr,
+                                                      int64_t                   rows,
+                                                      int64_t                   cols,
+                                                      int64_t                   nnz,
+                                                      int64_t                   sell_slice_size,
+                                                      int64_t                   sell_colval_size,
+                                                      rocsparse_idvec_descr     row_data,
+                                                      rocsparse_idvec_descr     col_data,
+                                                      rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a BSR sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the BSR format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_bsr creates a sparsity pattern descriptor using the BSR format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
  *
  *  @param[in]
@@ -118,30 +164,30 @@ rocsparse_status rocsparse_spattern_create_csr(rocsparse_handle          handle,
  *  row_data  row offsets of the BSR matrix (must be array of length \p rows+1 ).
  *  @param[in]
  *  col_data  column indices of the BSR matrix (must be array of length \p nnz ).
-   *  @param[out]
-   *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
-   *
+ *  @param[out]
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p row_data or \p col_data is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p p_descr or \p row_data or \p col_data is invalid.
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_bsr(rocsparse_handle          handle,
-                                               rocsparse_spattern_descr* p_descr,
-                                               int64_t                   rowsb,
-                                               int64_t                   colsb,
-                                               int64_t                   nnzb,
-                                               rocsparse_direction       block_direction,
-                                               int64_t                   block_dim,
-                                               rocsparse_idvec_descr     row_data,
-                                               rocsparse_idvec_descr     col_data,
-                                               rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_bsr(rocsparse_handle          handle,
+                                                     rocsparse_spattern_descr* p_descr,
+                                                     int64_t                   rowsb,
+                                                     int64_t                   colsb,
+                                                     int64_t                   nnzb,
+                                                     rocsparse_direction       block_direction,
+                                                     int64_t                   block_dim,
+                                                     rocsparse_idvec_descr     row_data,
+                                                     rocsparse_idvec_descr     col_data,
+                                                     rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a CSC sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the CSC format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_csr creates a sparsity pattern descriptor using the CSC format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -166,20 +212,20 @@ rocsparse_status rocsparse_spattern_create_bsr(rocsparse_handle          handle,
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_csc(rocsparse_handle          handle,
-                                               rocsparse_spattern_descr* p_descr,
-                                               int64_t                   rows,
-                                               int64_t                   cols,
-                                               int64_t                   nnz,
-                                               rocsparse_idvec_descr     row_data,
-                                               rocsparse_idvec_descr     col_data,
-                                               rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_csc(rocsparse_handle          handle,
+                                                     rocsparse_spattern_descr* p_descr,
+                                                     int64_t                   rows,
+                                                     int64_t                   cols,
+                                                     int64_t                   nnz,
+                                                     rocsparse_idvec_descr     row_data,
+                                                     rocsparse_idvec_descr     col_data,
+                                                     rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a COO sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the COO format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_csr creates a sparsity pattern descriptor using the COO format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -204,20 +250,20 @@ rocsparse_status rocsparse_spattern_create_csc(rocsparse_handle          handle,
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_coo(rocsparse_handle          handle,
-                                               rocsparse_spattern_descr* p_descr,
-                                               int64_t                   rows,
-                                               int64_t                   cols,
-                                               int64_t                   nnz,
-                                               rocsparse_idvec_descr     row_data,
-                                               rocsparse_idvec_descr     col_data,
-                                               rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_coo(rocsparse_handle          handle,
+                                                     rocsparse_spattern_descr* p_descr,
+                                                     int64_t                   rows,
+                                                     int64_t                   cols,
+                                                     int64_t                   nnz,
+                                                     rocsparse_idvec_descr     row_data,
+                                                     rocsparse_idvec_descr     col_data,
+                                                     rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a COOAOS sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the COOAOS format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_csr creates a sparsity pattern descriptor using the COOAOS format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -242,20 +288,20 @@ rocsparse_status rocsparse_spattern_create_coo(rocsparse_handle          handle,
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_coo_aos(rocsparse_handle          handle,
-                                                   rocsparse_spattern_descr* p_descr,
-                                                   int64_t                   rows,
-                                                   int64_t                   cols,
-                                                   int64_t                   nnz,
-                                                   rocsparse_idvec_descr     row_data,
-                                                   rocsparse_idvec_descr     col_data,
-                                                   rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_coo_aos(rocsparse_handle          handle,
+                                                         rocsparse_spattern_descr* p_descr,
+                                                         int64_t                   rows,
+                                                         int64_t                   cols,
+                                                         int64_t                   nnz,
+                                                         rocsparse_idvec_descr     row_data,
+                                                         rocsparse_idvec_descr     col_data,
+                                                         rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a ELL sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the ELL format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_csr creates a sparsity pattern descriptor using the ELL format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -278,20 +324,22 @@ rocsparse_status rocsparse_spattern_create_coo_aos(rocsparse_handle          han
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_ell(rocsparse_handle          handle,
-                                               rocsparse_spattern_descr* p_descr,
-                                               int64_t                   rows,
-                                               int64_t                   cols,
-                                               int64_t                   width,
-                                               rocsparse_idvec_descr     col_data,
-                                               rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_ell(rocsparse_handle          handle,
+                                                     rocsparse_spattern_descr* p_descr,
+                                                     int64_t                   rows,
+                                                     int64_t                   cols,
+                                                     int64_t                   width,
+                                                     rocsparse_idvec_descr     col_data,
+                                                     rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a BELL sparsity pattern descriptor
  *  \details
- *  \p rocsparse_spattern_create_csr creates a sparsity pattern descriptor using the BELL format. It should be
- *  destroyed at the end using \p rocsparse_spattern_destroy.
+ *  \p rocsparse_spattern_descr_create_csr creates a sparsity pattern descriptor using the BELL format. It should be
+ *  destroyed at the end using \p rocsparse_spattern_descr_destroy.
  *
+   *  @param[in]
+   *  handle  handle to the rocsparse library context queue.
  *  @param[out]
  *  p_descr       the pointer to the sparse BELL matrix descriptor.
  *  @param[in]
@@ -315,15 +363,15 @@ rocsparse_status rocsparse_spattern_create_ell(rocsparse_handle          handle,
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spattern_create_bell(rocsparse_handle          handle,
-                                                rocsparse_spattern_descr* p_descr,
-                                                int64_t                   rowsb,
-                                                int64_t                   colsb,
-                                                int64_t                   width,
-                                                rocsparse_direction       block_direction,
-                                                int64_t                   block_dim,
-                                                rocsparse_idvec_descr     col_data,
-                                                rocsparse_error*          p_error);
+rocsparse_status rocsparse_spattern_descr_create_bell(rocsparse_handle          handle,
+                                                      rocsparse_spattern_descr* p_descr,
+                                                      int64_t                   rowsb,
+                                                      int64_t                   colsb,
+                                                      int64_t                   width,
+                                                      rocsparse_direction       block_direction,
+                                                      int64_t                   block_dim,
+                                                      rocsparse_idvec_descr     col_data,
+                                                      rocsparse_error*          p_error);
 
 /*! \ingroup aux_module
    *  \brief Get sparsity pattern property.
@@ -338,15 +386,15 @@ rocsparse_status rocsparse_spattern_create_bell(rocsparse_handle          handle
    *  @param[in]
    *  prop   select from \ref rocsparse_spattern_prop.
    *  @param[out]
-   *  p_value   pointer to the value.
+   *  value   pointer to the value.
    *  @param[in]
-   *  value_size_in_bytes size in bytes of the memory \p p_value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_idvec_prop.
+   *  value_size_in_bytes size in bytes of the memory \p value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_idvec_prop.
    *  @param[out]
    *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p descr or \p p_value is invalid.
+   *  \retval rocsparse_status_invalid_pointer if \p descr or \p value is invalid.
    *  \retval rocsparse_status_invalid_value if \p prop is invalid or if \p value_size_in_bytes does not match the required size.
    */
 
@@ -372,15 +420,15 @@ rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle               hand
    *  @param[in]
    *  prop   select from \ref rocsparse_spattern_prop.
    *  @param[out]
-   *  p_value   pointer to the value.
+   *  value   pointer to the value.
    *  @param[in]
-   *  value_size_in_bytes size in bytes of the memory \p p_value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_spattern_prop.
+   *  value_size_in_bytes size in bytes of the memory \p value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_spattern_prop.
    *  @param[out]
    *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p descr or \p p_value is invalid.
+   *  \retval rocsparse_status_invalid_pointer if \p descr or \p value is invalid.
    *  \retval rocsparse_status_invalid_value if \p prop is invalid or if \p value_size_in_bytes does not match the required size.
    */
 ROCSPARSE_EXPORT

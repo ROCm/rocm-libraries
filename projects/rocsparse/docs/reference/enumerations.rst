@@ -394,3 +394,42 @@ rocsparse_itilu0_option
 
 .. doxygenenum:: rocsparse_itilu0_option
 
+rocsparse_batchtype
+-------------------
+
+.. doxygenenum:: rocsparse_batchtype
+
+rocsparse_batchstorage
+----------------------
+
+.. doxygenenum:: rocsparse_batchstorage
+
+rocsparse_idvec_prop
+--------------------
+
+.. doxygenenum:: rocsparse_idvec_prop
+
+rocsparse_dnvec_prop
+--------------------
+
+.. doxygenenum:: rocsparse_dnvec_prop
+
+rocsparse_dnmat_prop
+--------------------
+
+.. doxygenenum:: rocsparse_dnmat_prop
+
+rocsparse_spattern_prop
+-----------------------
+
+.. doxygenenum:: rocsparse_spattern_prop
+
+rocsparse_spattern_data
+-----------------------
+
+.. doxygenenum:: rocsparse_spattern_data
+
+rocsparse_spmat_prop
+--------------------
+
+.. doxygenenum:: rocsparse_spmat_prop

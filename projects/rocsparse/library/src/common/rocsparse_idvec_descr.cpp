@@ -199,6 +199,7 @@ rocsparse_status _rocsparse_idvec_descr::destroy(hipStream_t stream)
         RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->m_values, stream));
     }
 
+    this->m_init          = false;
     this->m_own_values    = false;
     this->m_indextype     = rocsparse_indextype_i32;
     this->m_base          = rocsparse_index_base_zero;
@@ -231,6 +232,7 @@ _rocsparse_idvec_descr::_rocsparse_idvec_descr(rocsparse_indextype  indextype_,
     , m_const_values(const_values_)
     , m_values(values_)
     , m_pointer_mode(rocsparse_pointer_mode_device)
+    , m_init(true)
 {
 }
 
@@ -255,6 +257,7 @@ _rocsparse_idvec_descr::_rocsparse_idvec_descr(rocsparse_indextype    indextype_
     , m_const_values(const_values_)
     , m_values(values_)
     , m_pointer_mode(rocsparse_pointer_mode_device)
+    , m_init(true)
 {
 }
 
@@ -265,6 +268,8 @@ void _rocsparse_idvec_descr::define(rocsparse_indextype  indextype_,
                                     const void*          const_values_,
                                     void*                values_)
 {
+    this->m_init = true;
+
     this->m_indextype     = indextype_;
     this->m_base          = base_;
     this->m_size          = size_;
@@ -289,6 +294,7 @@ void _rocsparse_idvec_descr::define(rocsparse_indextype    indextype_,
                                     const void*            const_values_,
                                     void*                  values_)
 {
+    this->m_init          = true;
     this->m_indextype     = indextype_;
     this->m_base          = base_;
     this->m_size          = size_;

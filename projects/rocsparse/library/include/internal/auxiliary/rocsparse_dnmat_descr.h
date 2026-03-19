@@ -36,193 +36,10 @@ extern "C" {
 #endif
 
 /*! \ingroup aux_module
- *  \brief Create a dense matrix descriptor
- *  \details
- *  \p rocsparse_create_dnmat_descr creates a dense matrix descriptor. It should be
- *  destroyed at the end using rocsparse_destroy_dnmat_descr().
- *
- *  @param[out]
- *  descr     the pointer to the dense matrix descriptor.
- *  @param[in]
- *  rows      number of rows in the dense matrix.
- *  @param[in]
- *  cols      number of columns in the dense matrix.
- *  @param[in]
- *  ld        leading dimension of the dense matrix.
- *  @param[in]
- *  values    non-zero values in the dense vector (must be array of length
- *            \p ld*rows if \p order=rocsparse_order_column or \p ld*cols if \p order=rocsparse_order_row ).
- *  @param[in]
- *  data_type \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
- *            \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
- *  @param[in]
- *  order     \ref rocsparse_order_row or \ref rocsparse_order_column.
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p values is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p ld is invalid.
- *  \retval rocsparse_status_invalid_value if \p data_type or \p order is invalid.
- */
-/**@{*/
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_create_dnmat_descr(rocsparse_dnmat_descr* descr,
-                                              int64_t                rows,
-                                              int64_t                cols,
-                                              int64_t                ld,
-                                              void*                  values,
-                                              rocsparse_datatype     data_type,
-                                              rocsparse_order        order);
-
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_create_const_dnmat_descr(rocsparse_const_dnmat_descr* descr,
-                                                    int64_t                      rows,
-                                                    int64_t                      cols,
-                                                    int64_t                      ld,
-                                                    const void*                  values,
-                                                    rocsparse_datatype           data_type,
-                                                    rocsparse_order              order);
-/**@}*/
-
-/*! \ingroup aux_module
- *  \brief Destroy a dense matrix descriptor
- *
- *  \details
- *  \p rocsparse_destroy_dnmat_descr destroys a dense matrix descriptor and releases all
- *  resources used by the descriptor.
- *
- *  @param[in]
- *  descr   the matrix descriptor.
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
- */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_destroy_dnmat_descr(rocsparse_const_dnmat_descr descr);
-
-/*! \ingroup aux_module
- *  \brief Get the fields of the dense matrix descriptor
- *
- *  @param[in]
- *  descr   the pointer to the dense matrix descriptor.
- *  @param[out]
- *  rows   number of rows in the dense matrix.
- *  @param[out]
- *  cols   number of columns in the dense matrix.
- *  @param[out]
- *  ld        leading dimension of the dense matrix.
- *  @param[out]
- *  values    non-zero values in the dense matrix (must be array of length
- *            \p ld*rows if \p order=rocsparse_order_column or \p ld*cols if \p order=rocsparse_order_row ).
- *  @param[out]
- *  data_type   \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
- *              \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
- *  @param[out]
- *  order     \ref rocsparse_order_row or \ref rocsparse_order_column.
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p values is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p ld is invalid.
- *  \retval rocsparse_status_invalid_value if \p data_type or \p order is invalid.
- */
-/**@{*/
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_get(const rocsparse_dnmat_descr descr,
-                                     int64_t*                    rows,
-                                     int64_t*                    cols,
-                                     int64_t*                    ld,
-                                     void**                      values,
-                                     rocsparse_datatype*         data_type,
-                                     rocsparse_order*            order);
-
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_const_dnmat_get(rocsparse_const_dnmat_descr descr,
-                                           int64_t*                    rows,
-                                           int64_t*                    cols,
-                                           int64_t*                    ld,
-                                           const void**                values,
-                                           rocsparse_datatype*         data_type,
-                                           rocsparse_order*            order);
-/**@}*/
-
-/*! \ingroup aux_module
- *  \brief Get the values array from the dense matrix descriptor
- *
- *  @param[in]
- *  descr   the pointer to the dense matrix descriptor.
- *  @param[out]
- *  values    non-zero values in the dense matrix (must be array of length
- *            \p ld*rows if \p order=rocsparse_order_column or \p ld*cols if \p order=rocsparse_order_row ).
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p values is invalid.
- */
-/**@{*/
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_get_values(const rocsparse_dnmat_descr descr, void** values);
-
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_const_dnmat_get_values(rocsparse_const_dnmat_descr descr,
-                                                  const void**                values);
-/**@}*/
-
-/*! \ingroup aux_module
- *  \brief Set the values array in a dense matrix descriptor
- *
- *  @param[inout]
- *  descr   the matrix descriptor.
- *  @param[in]
- *  values    non-zero values in the dense matrix (must be array of length
- *            \p ld*rows if \p order=rocsparse_order_column or \p ld*cols if \p order=rocsparse_order_row ).
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer \p descr or \p values is invalid.
- */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_set_values(rocsparse_dnmat_descr descr, void* values);
-
-/*! \ingroup aux_module
- *  \brief Get the batch count and batch stride from the dense matrix descriptor
- *
- *  @param[in]
- *  descr        the pointer to the dense matrix descriptor.
- *  @param[out]
- *  batch_count  the batch count in the dense matrix.
- *  @param[out]
- *  batch_stride the batch stride in the dense matrix.
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
- */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr descr,
-                                                   rocsparse_int*              batch_count,
-                                                   int64_t*                    batch_stride);
-
-/*! \ingroup aux_module
- *  \brief Set the batch count and batch stride in the dense matrix descriptor
- *
- *  @param[inout]
- *  descr        the pointer to the dense matrix descriptor.
- *  @param[in]
- *  batch_count  the batch count in the dense matrix.
- *  @param[in]
- *  batch_stride the batch stride in the dense matrix.
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
- */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
-                                                   rocsparse_int         batch_count,
-                                                   int64_t               batch_stride);
-
-/*! \ingroup aux_module
    *  \brief Destroy a dense matrix descriptor
    *
    *  \details
-   *  \p rocsparse_dnmat_destroy destroys a dense matrix descriptor and releases all
+   *  \p rocsparse_dnmat_descr_destroy destroys a dense matrix descriptor and releases all
    *  resources used by the descriptor.
    *
    *  @param[in]
@@ -236,15 +53,15 @@ rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
    */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_destroy(rocsparse_handle      handle,
-                                         rocsparse_dnmat_descr descr,
-                                         rocsparse_error*      p_error);
+rocsparse_status rocsparse_dnmat_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_dnmat_descr descr,
+                                               rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a dense matrix descriptor
  *  \details
- *  \p rocsparse_dnmat_create creates a dense matrix descriptor. It should be
- *  destroyed at the end using rocsparse_dnmat_destroy().
+ *  \p rocsparse_dnmat_descr_create creates a dense matrix descriptor. It should be
+ *  destroyed at the end using rocsparse_dnmat_descr_destroy().
    *  @param[in]
    *  handle  handle to the rocsparse library context queue.
  *  @param[out]
@@ -260,39 +77,41 @@ rocsparse_status rocsparse_dnmat_destroy(rocsparse_handle      handle,
  *  @param[in]
  *  ld        leading dimension of the dense matrix.
  *  @param[in]
- *  values    non-zero values in the dense matrix
+ *  const_data    non-mutable non-zero data in the dense matrix
+ *  @param[in]
+ *  data    mutable non-zero data in the dense matrix
    *  @param[out]
    *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
-   *  \retval rocsparse_status_invalid_pointer if \p p_descr or \p values is invalid.
+   *  \retval rocsparse_status_invalid_pointer if \p p_descr or \p data is invalid.
    *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p ld is invalid.
    *  \retval rocsparse_status_invalid_value if \p data_type or \p order is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_create(rocsparse_handle       handle,
-                                        rocsparse_dnmat_descr* p_descr,
-                                        rocsparse_datatype     data_type,
-                                        rocsparse_order        order,
-                                        int64_t                rows,
-                                        int64_t                cols,
-                                        int64_t                ld,
-                                        const void*            const_data,
-                                        void*                  data,
-                                        rocsparse_error*       p_error);
+rocsparse_status rocsparse_dnmat_descr_create(rocsparse_handle       handle,
+                                              rocsparse_dnmat_descr* p_descr,
+                                              rocsparse_datatype     data_type,
+                                              rocsparse_order        order,
+                                              int64_t                rows,
+                                              int64_t                cols,
+                                              int64_t                ld,
+                                              const void*            const_data,
+                                              void*                  data,
+                                              rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
-   *  \brief Create a batched dense matrix descriptor
+   *  \brief Create a batch dense matrix descriptor
    *  \details
-   *  \p rocsparse_dnvec_create_batched creates a batched dense matrix descriptor. It should be
+   *  \p rocsparse_dnvec_create_batch creates a batch dense matrix descriptor. It should be
    *  destroyed at the end using rocsparse_dnvec_destroy().
    *
-   *  In the case of a strided batched data type, \ref rocsparse_batchtype_strided, this offers the flexibility to define batched data such that the \f(i^{th},j^{th}\f element \fe\f of the \fk^{th}\f matrix is:
+   *  In the case of a strided batch data type, \ref rocsparse_batchtype_strided, this offers the flexibility to define batch data such that the \f$i^{th},j^{th}\f$ element \f$e\f$ of the \f$k^{th}\f$ matrix is:
    *  \f[
    *    e := A[ k * batch_dist + j * ld + i], where the order is \rocsparse_order_column, j is the batch index, and A is the appropriate pointer type.
    *  \f]
    *
-   *  In the case of an array of pointers data type, \ref rocsparse_batchtype_pointerarray, this offers the flexibility to define batched data such that the \f(i^{th},j^{th}\f element \fe\f of the \fk^{th}\f matrix is:
+   *  In the case of an array of pointers data type, \ref rocsparse_batchtype_pointerarray, this offers the flexibility to define batch data such that the \f$i^{th},j^{th}\f$ element \f$e\f$ of the \f$k^{th}\f$ matrix is:
    *  \f[
    *    e := A[k * batch_dist][j * ld + i], where  the order is \rocsparse_order_column, j is the batch index, and A is the appropriate pointer type.
    *  \f]
@@ -314,43 +133,42 @@ rocsparse_status rocsparse_dnmat_create(rocsparse_handle       handle,
  *  @param[in]
  *  ld        leading dimension of the dense matrix.
    *  @param[in]
-   *  batch_type  type of the batched data.
+   *  batch_type  type of the batch data.
    *  @param[in]
-   *  batch_storage  storage type of the batched data.
+   *  batch_storage  storage type of the batch data.
    *  @param[in]
-   *  batch_count  size of the batched data, must be positive.
+   *  batch_count  size of the batch data, must be positive.
    *  @param[in]
    *  batch_dist   batch distance, arbitrary value.
    *  @param[in]
-   *  const_values  non-mutable non-zero values in the dense matrix.
+   *  const_data  non-mutable non-zero data in the dense matrix.
    *  @param[in]
-   *  values   mutable non-zero values in the dense matrix.
+   *  data   mutable non-zero data in the dense matrix.
    *  @param[out]
    *  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
    *
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p p_descr, \p const_data is invalid, \p const_data are invalid if these are null pointers wheras \p size is positive.
-   *  \retval rocsparse_status_invalid_pointer if \p data is a non-null pointer and is different from \p const_data.
+   *  \retval rocsparse_status_invalid_pointer if \p p_descr, \p const_data is invalid, \p const_data are invalid if these are null pointers wheras \p size is positive, or if \p data is a non-null pointer and is different from \p const_data.
    *  \retval rocsparse_status_invalid_size if \p size is negative.
    *  \retval rocsparse_status_invalid_value if \p batch_type or \p data_type is invalid.
    */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnmat_create_batched(rocsparse_handle       handle,
-                                                rocsparse_dnmat_descr* p_descr,
-                                                rocsparse_datatype     data_type,
-                                                rocsparse_order        order,
-                                                int64_t                rows,
-                                                int64_t                cols,
-                                                int64_t                ld,
-                                                rocsparse_batchtype    batch_type,
-                                                rocsparse_batchstorage batch_storage,
-                                                int64_t                batch_count,
-                                                int64_t                batch_dist,
-                                                const void*            const_data,
-                                                void*                  data,
-                                                rocsparse_error*       p_error);
+rocsparse_status rocsparse_dnmat_descr_create_batch(rocsparse_handle       handle,
+                                                    rocsparse_dnmat_descr* p_descr,
+                                                    rocsparse_datatype     data_type,
+                                                    rocsparse_order        order,
+                                                    int64_t                rows,
+                                                    int64_t                cols,
+                                                    int64_t                ld,
+                                                    rocsparse_batchtype    batch_type,
+                                                    rocsparse_batchstorage batch_storage,
+                                                    int64_t                batch_count,
+                                                    int64_t                batch_dist,
+                                                    const void*            const_data,
+                                                    void*                  data,
+                                                    rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
    *  \brief Set a property of the dense matrix descriptor
@@ -374,8 +192,7 @@ rocsparse_status rocsparse_dnmat_create_batched(rocsparse_handle       handle,
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
    *  \retval rocsparse_status_invalid_pointer if \p descr or \p p_value is invalid.
-   *  \retval rocsparse_status_invalid_value if \p prop is invalid.
-   *  \retval rocsparse_status_invalid_value if \p value_size_in_bytes does not match the required size.
+   *  \retval rocsparse_status_invalid_value if \p prop is invalid, or if \p value_size_in_bytes does not match the required size.
    */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_get_prop(rocsparse_handle            handle,
@@ -407,8 +224,7 @@ rocsparse_status rocsparse_dnmat_get_prop(rocsparse_handle            handle,
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
    *  \retval rocsparse_status_invalid_pointer if \p descr or \p p_value is invalid.
-   *  \retval rocsparse_status_invalid_value if \p prop is invalid.
-   *  \retval rocsparse_status_invalid_value if \p value_size_in_bytes does not match the required size.
+   *  \retval rocsparse_status_invalid_value if \p prop is invalid, or if \p value_size_in_bytes does not match the required size.
    */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_set_prop(rocsparse_handle      handle,

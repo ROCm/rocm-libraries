@@ -21,12 +21,12 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_idvec_descr.hpp"
 #include "internal/auxiliary/rocsparse_idvec_descr.h"
 #include "rocsparse_argdescr.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_idvec_descr.hpp"
 #include "rocsparse_logging.hpp"
 #include "rocsparse_memstat.hpp"
 
@@ -55,9 +55,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_idvec_prop value_)
 extern "C" {
 #endif
 
-rocsparse_status rocsparse_idvec_destroy(rocsparse_handle      handle,
-                                         rocsparse_idvec_descr descr,
-                                         rocsparse_error*      p_error)
+rocsparse_status rocsparse_idvec_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_idvec_descr descr,
+                                               rocsparse_error*      p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -76,15 +76,15 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_idvec_create(rocsparse_handle       handle,
-                                        rocsparse_idvec_descr* p_descr,
-                                        rocsparse_indextype    indextype,
-                                        rocsparse_index_base   base,
-                                        int64_t                size,
-                                        int64_t                inc,
-                                        const void*            const_data,
-                                        void*                  data,
-                                        rocsparse_error*       p_error)
+rocsparse_status rocsparse_idvec_descr_create(rocsparse_handle       handle,
+                                              rocsparse_idvec_descr* p_descr,
+                                              rocsparse_indextype    indextype,
+                                              rocsparse_index_base   base,
+                                              int64_t                size,
+                                              int64_t                inc,
+                                              const void*            const_data,
+                                              void*                  data,
+                                              rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -108,19 +108,19 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_idvec_create_batched(rocsparse_handle       handle,
-                                                rocsparse_idvec_descr* p_descr,
-                                                rocsparse_indextype    indextype,
-                                                rocsparse_index_base   base,
-                                                int64_t                size,
-                                                int64_t                inc,
-                                                rocsparse_batchtype    batch_type,
-                                                rocsparse_batchstorage batch_storage,
-                                                int64_t                batch_count,
-                                                int64_t                batch_dist,
-                                                const void*            const_data,
-                                                void*                  data,
-                                                rocsparse_error*       p_error)
+rocsparse_status rocsparse_idvec_descr_create_batch(rocsparse_handle       handle,
+                                                    rocsparse_idvec_descr* p_descr,
+                                                    rocsparse_indextype    indextype,
+                                                    rocsparse_index_base   base,
+                                                    int64_t                size,
+                                                    int64_t                inc,
+                                                    rocsparse_batchtype    batch_type,
+                                                    rocsparse_batchstorage batch_storage,
+                                                    int64_t                batch_count,
+                                                    int64_t                batch_dist,
+                                                    const void*            const_data,
+                                                    void*                  data,
+                                                    rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -437,7 +437,8 @@ catch(...)
 rocsparse_status rocsparse_idvec_set_const_data(rocsparse_handle      handle,
                                                 rocsparse_idvec_descr descr,
                                                 const void*           const_data,
-                                                rocsparse_error*      p_error)try
+                                                rocsparse_error*      p_error)
+try
 {
     ROCSPARSE_ROUTINE_TRACE;
     ROCSPARSE_CHECKARG_HANDLE(0, handle);

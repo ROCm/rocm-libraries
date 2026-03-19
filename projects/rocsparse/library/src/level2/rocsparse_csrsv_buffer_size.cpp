@@ -128,15 +128,16 @@ rocsparse_status rocsparse::csrsv_solve_buffer_size(rocsparse_handle            
     // rocsparse_int max_nnz
     buffer_size[0] = 256;
     // rocsparse_int done_array[m]
-    const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
+    const int64_t batch_count = (y) ? y->get_batch_count() : A->get_batch_count();
 
-    buffer_size[0] += ((sizeof(int32_t) * A->rows * batch_count - 1) / 256 + 1) * 256;
+    buffer_size[0] += ((sizeof(int32_t) * A->get_rows() * batch_count - 1) / 256 + 1) * 256;
 
     // On transposed case, we might need more temporary storage for transposing
     if(op != rocsparse_operation_none)
     {
-        const size_t sizeof_T       = rocsparse::datatype_sizeof(A->data_type);
-        const size_t transpose_size = ((sizeof_T * A->batch_count * A->nnz - 1) / 256 + 1) * 256;
+        const size_t sizeof_T = rocsparse::datatype_sizeof(A->get_data_type());
+        const size_t transpose_size
+            = ((sizeof_T * A->get_batch_count() * A->get_nnz() - 1) / 256 + 1) * 256;
         buffer_size[0] += transpose_size;
     }
     return rocsparse_status_success;

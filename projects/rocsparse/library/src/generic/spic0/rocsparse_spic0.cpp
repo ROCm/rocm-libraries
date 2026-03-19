@@ -66,10 +66,10 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(2,
                            A,
-                           (A->data_type != spic0_descr->get_compute_datatype()),
+                           (A->get_data_type() != spic0_descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
 
-        const rocsparse_format      format         = A->format;
+        const rocsparse_format      format         = A->get_format();
         const rocsparse_spic0_stage previous_stage = spic0_descr->get_stage();
 
         switch(spic0_stage)
@@ -98,7 +98,7 @@ namespace rocsparse
             }
             }
 
-            spic0_descr->m_batch_count                      = A->batch_count;
+            spic0_descr->m_batch_count                      = A->get_batch_count();
             const rocsparse_analysis_policy analysis_policy = spic0_descr->get_analysis_policy();
             if(rocsparse::enum_utils::is_invalid(analysis_policy))
             {
@@ -120,7 +120,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    spic0_descr->set_shared_csric0_info(A->info->get_shared_csric0_info());
+                    spic0_descr->set_shared_csric0_info(A->get_info()->get_shared_csric0_info());
                     csric0_info = spic0_descr->get_csric0_info();
                     break;
                 }
@@ -156,7 +156,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    spic0_descr->set_shared_bsric0_info(A->info->get_shared_bsric0_info());
+                    spic0_descr->set_shared_bsric0_info(A->get_info()->get_shared_bsric0_info());
                     bsric0_info = spic0_descr->get_bsric0_info();
                     break;
                 }
@@ -213,7 +213,7 @@ namespace rocsparse
                     "before "
                     "the stage rocsparse_spic0_stage_compute");
             }
-            spic0_descr->m_batch_count = A->batch_count;
+            spic0_descr->m_batch_count = A->get_batch_count();
 
             switch(format)
             {

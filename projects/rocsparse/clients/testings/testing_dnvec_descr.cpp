@@ -30,7 +30,7 @@ static void testing_dnvec_descr_bad_arg(const Arguments& arg)
     rocsparse_error        p_error[1];
 
     //
-    // rocsparse_dnvec_create
+    // rocsparse_dnvec_descr_create
     //
     {
         rocsparse_dnvec_descr* p_descr    = (rocsparse_dnvec_descr*)0x4;
@@ -39,18 +39,20 @@ static void testing_dnvec_descr_bad_arg(const Arguments& arg)
         const void*            const_data = (const void*)0x4;
         void*                  data       = (void*)0x4;
         rocsparse_datatype     datatype   = rocsparse_datatype_f32_r;
-#define PARAMS_CREATE handle, p_descr, datatype, size, inc, const_data, data, p_error
+#define PARAMS_DESCR_CREATE handle, p_descr, datatype, size, inc, const_data, data, p_error
         {
             static constexpr int32_t nargs_to_exclude                  = 3;
             const int32_t            args_to_exclude[nargs_to_exclude] = {4, 6, 7};
-            select_bad_arg_analysis(
-                rocsparse_dnvec_create, nargs_to_exclude, args_to_exclude, PARAMS_CREATE);
+            select_bad_arg_analysis(rocsparse_dnvec_descr_create,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_DESCR_CREATE);
         }
-#undef PARAMS_CREATE
+#undef PARAMS_DESCR_CREATE
     }
 
     //
-    // rocsparse_dnvec_create_batched
+    // rocsparse_dnvec_descr_create_batch
     //
     {
         rocsparse_dnvec_descr* p_descr       = (rocsparse_dnvec_descr*)0x4;
@@ -63,18 +65,18 @@ static void testing_dnvec_descr_bad_arg(const Arguments& arg)
         int64_t                batch_dist    = 0;
         const void*            const_data    = (const void*)0x4;
         void*                  data          = (void*)0x4;
-#define PARAMS_CREATE_BATCHED                                                                 \
+#define PARAMS_DESCR_CREATE_BATCH                                                             \
     handle, p_descr, datatype, size, inc, batch_type, batch_storage, batch_count, batch_dist, \
         const_data, data, p_error
         {
             static constexpr int32_t nargs_to_exclude                  = 4;
             const int32_t            args_to_exclude[nargs_to_exclude] = {4, 8, 10, 11};
-            select_bad_arg_analysis(rocsparse_dnvec_create_batched,
+            select_bad_arg_analysis(rocsparse_dnvec_descr_create_batch,
                                     nargs_to_exclude,
                                     args_to_exclude,
-                                    PARAMS_CREATE_BATCHED);
+                                    PARAMS_DESCR_CREATE_BATCH);
         }
-#undef PARAMS_CREATE_BATCHED
+#undef PARAMS_DESCR_CREATE_BATCH
     }
 
     //
@@ -185,18 +187,20 @@ static void testing_dnvec_descr_bad_arg(const Arguments& arg)
     }
 
     //
-    // rocsparse_dnvec_destroy
+    // rocsparse_dnvec_descr_destroy
     //
     {
         rocsparse_dnvec_descr descr = (rocsparse_dnvec_descr)0x4;
-#define PARAMS_DESTROY handle, descr, p_error
+#define PARAMS_DESCR_DESTROY handle, descr, p_error
         {
             static constexpr int32_t nargs_to_exclude                  = 2;
             const int32_t            args_to_exclude[nargs_to_exclude] = {1, 2};
-            select_bad_arg_analysis(
-                rocsparse_dnvec_destroy, nargs_to_exclude, args_to_exclude, PARAMS_DESTROY);
+            select_bad_arg_analysis(rocsparse_dnvec_descr_destroy,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_DESCR_DESTROY);
         }
-#undef PARAMS_DESTROY
+#undef PARAMS_DESCR_DESTROY
     }
 }
 
@@ -218,9 +222,9 @@ void testing_dnvec_descr_bad_arg(const Arguments& arg)
             void*                  values    = (void*)0x4;
             rocsparse_datatype     data_type = local_data_type;
 
-#define PARAMS_CREATE descr, size, values, data_type
-            bad_arg_analysis(rocsparse_create_dnvec_descr, PARAMS_CREATE);
-#undef PARAMS_CREATE
+#define PARAMS_DESCR_CREATE descr, size, values, data_type
+            bad_arg_analysis(rocsparse_create_dnvec_descr, PARAMS_DESCR_CREATE);
+#undef PARAMS_DESCR_CREATE
             // Check valid descriptor creations
             EXPECT_ROCSPARSE_STATUS(rocsparse_create_dnvec_descr(descr, 0, nullptr, data_type),
                                     rocsparse_status_success);
@@ -253,7 +257,10 @@ void testing_dnvec_descr_bad_arg(const Arguments& arg)
 
 #include "rocsparse_enum.hpp"
 
-void testing_dnvec_descr_extra(const Arguments& arg)
+void testing_dnvec_descr_extra(const Arguments& arg) {}
+
+template <typename T>
+void testing_dnvec_descr(const Arguments& arg)
 {
     rocsparse_local_handle handle;
     rocsparse_dnvec_descr  descr{};
@@ -269,18 +276,37 @@ void testing_dnvec_descr_extra(const Arguments& arg)
     rocsparse_batchtype    batch_type    = rocsparse_batchtype_strided;
     rocsparse_batchstorage batch_storage = rocsparse_batchstorage_soa;
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_create_batched(handle,
-                                                         &descr,
-                                                         datatype,
-                                                         size,
-                                                         inc,
-                                                         batch_type,
-                                                         batch_storage,
-                                                         batch_count,
-                                                         batch_dist,
-                                                         const_data,
-                                                         data,
-                                                         p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_descr_create_batch(handle,
+                                                             &descr,
+                                                             datatype,
+                                                             size,
+                                                             inc,
+                                                             batch_type,
+                                                             batch_storage,
+                                                             batch_count,
+                                                             batch_dist,
+                                                             const_data,
+                                                             data,
+                                                             p_error));
+
+    {
+        void* inject_data = (void*)0x4;
+        CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_set_data(handle, descr, inject_data, p_error));
+        void* fetch_data;
+        CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_get_data(handle, descr, &fetch_data, p_error));
+        ASSERT_EQ(fetch_data, inject_data);
+        CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_set_data(handle, descr, data, p_error));
+    }
+
+    {
+        const void* inject_const_data = (const void*)0x4;
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_dnvec_set_const_data(handle, descr, inject_const_data, p_error));
+        const void* fetch_data;
+        CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_get_const_data(handle, descr, &fetch_data, p_error));
+        ASSERT_EQ(fetch_data, inject_const_data);
+        CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_set_const_data(handle, descr, const_data, p_error));
+    }
 
     for(rocsparse_dnvec_prop prop : rocsparse_dnvec_prop_t::values)
     {
@@ -360,13 +386,13 @@ void testing_dnvec_descr_extra(const Arguments& arg)
         }
     }
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_destroy(handle, descr, p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_descr_destroy(handle, descr, p_error));
 
     //
     // Create.
     //
-    CHECK_ROCSPARSE_ERROR(
-        rocsparse_dnvec_create(handle, &descr, datatype, size, inc, const_data, data, p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_descr_create(
+        handle, &descr, datatype, size, inc, const_data, data, p_error));
 
     for(rocsparse_dnvec_prop prop : rocsparse_dnvec_prop_t::values)
     {
@@ -556,12 +582,7 @@ void testing_dnvec_descr_extra(const Arguments& arg)
         }
     }
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_destroy(handle, descr, p_error));
-}
-
-template <typename T>
-void testing_dnvec_descr(const Arguments& arg)
-{
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_descr_destroy(handle, descr, p_error));
 }
 
 #define INSTANTIATE(TTYPE)                                                  \

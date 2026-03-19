@@ -54,9 +54,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_dnvec_prop value_)
 extern "C" {
 #endif
 
-rocsparse_status rocsparse_dnvec_destroy(rocsparse_handle      handle,
-                                         rocsparse_dnvec_descr descr,
-                                         rocsparse_error*      p_error)
+rocsparse_status rocsparse_dnvec_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_dnvec_descr descr,
+                                               rocsparse_error*      p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -75,14 +75,14 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_dnvec_create(rocsparse_handle       handle,
-                                        rocsparse_dnvec_descr* p_descr,
-                                        rocsparse_datatype     datatype,
-                                        int64_t                size,
-                                        int64_t                inc,
-                                        const void*            const_data,
-                                        void*                  data,
-                                        rocsparse_error*       p_error)
+rocsparse_status rocsparse_dnvec_descr_create(rocsparse_handle       handle,
+                                              rocsparse_dnvec_descr* p_descr,
+                                              rocsparse_datatype     datatype,
+                                              int64_t                size,
+                                              int64_t                inc,
+                                              const void*            const_data,
+                                              void*                  data,
+                                              rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -105,18 +105,18 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_dnvec_create_batched(rocsparse_handle       handle,
-                                                rocsparse_dnvec_descr* p_descr,
-                                                rocsparse_datatype     datatype,
-                                                int64_t                size,
-                                                int64_t                inc,
-                                                rocsparse_batchtype    batch_type,
-                                                rocsparse_batchstorage batch_storage,
-                                                int64_t                batch_count,
-                                                int64_t                batch_dist,
-                                                const void*            const_data,
-                                                void*                  data,
-                                                rocsparse_error*       p_error)
+rocsparse_status rocsparse_dnvec_descr_create_batch(rocsparse_handle       handle,
+                                                    rocsparse_dnvec_descr* p_descr,
+                                                    rocsparse_datatype     datatype,
+                                                    int64_t                size,
+                                                    int64_t                inc,
+                                                    rocsparse_batchtype    batch_type,
+                                                    rocsparse_batchstorage batch_storage,
+                                                    int64_t                batch_count,
+                                                    int64_t                batch_dist,
+                                                    const void*            const_data,
+                                                    void*                  data,
+                                                    rocsparse_error*       p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -234,9 +234,9 @@ try
         *reinterpret_cast<int64_t*>(p_value) = descr->get_batch_dist();
         return rocsparse_status_success;
     }
+        // LCOV_EXCL_START
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_START
 }
 catch(...)
 {

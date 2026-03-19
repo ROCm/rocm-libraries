@@ -1357,48 +1357,13 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
     }
 
     case rocsparse_format_bell:
-    {
-#if 0
-	row_size = m_ + 1;
-	col_size = m_ * width_;
-	val_size = m_ * width_ * block_dim_ * block_dim_;
-#endif
-        break;
-    }
-
     case rocsparse_format_sell:
-    {
-#if 0
-	row_size = m_ + 1;
-	col_size = m_ * width_;
-	val_size = m_ * width_;
-#endif
-        break;
-    }
-
     case rocsparse_format_csc:
-    {
-        break;
-    }
-
     case rocsparse_format_coo:
-    {
-        break;
-    }
-
     case rocsparse_format_coo_aos:
-    {
-        break;
-    }
-
     case rocsparse_format_ell:
     {
-#if 0
-	row_size = 0;
-	col_size = m_ * width_;
-	val_size = nnz_;
-#endif
-        break;
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
     }
 
@@ -1429,29 +1394,13 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
     }
 
     case rocsparse_format_bell:
-    {
-#if 0
-	spattern->define_bell(rows,
-			      cols,
-			      width,
-			      row,
-			      col,
-			      descr_,
-      info_);
-#endif
-        break;
-    }
-
     case rocsparse_format_sell:
-    {
-        break;
-    }
-
     case rocsparse_format_csc:
     case rocsparse_format_coo:
     case rocsparse_format_coo_aos:
     case rocsparse_format_ell:
     {
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
         break;
     }
     }
@@ -1491,27 +1440,20 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
     int64_t val_size{};
     switch(format_)
     {
+    case rocsparse_format_ell:
+    case rocsparse_format_sell:
+    case rocsparse_format_bsr:
+    case rocsparse_format_bell:
+    {
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        break;
+    }
+
     case rocsparse_format_csr:
     {
         row_size = m_ + 1;
         col_size = nnz_;
         val_size = nnz_;
-        break;
-    }
-
-    case rocsparse_format_bsr:
-    case rocsparse_format_bell:
-    {
-        break;
-    }
-
-    case rocsparse_format_sell:
-    {
-#if 0
-	row_size = m_ + 1;
-	col_size = m_ * width_;
-	val_size = m_ * width_;
-#endif
         break;
     }
 
@@ -1538,22 +1480,10 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
         val_size = nnz_;
         break;
     }
-
-    case rocsparse_format_ell:
-    {
-#if 0
-	row_size = 0;
-	col_size = m_ * width_;
-	val_size = m_ * width_;
-#endif
-        break;
-    }
     }
 
     row->define(row_indextype_, base_, row_size, 1, const_row_data_, row_data_);
-
     col->define(col_indextype_, base_, col_size, 1, const_col_data_, col_data_);
-
     val->define(val_datatype_,
                 val_size,
                 1,
@@ -1573,36 +1503,11 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
         break;
     }
 
+    case rocsparse_format_bell:
+    case rocsparse_format_sell:
     case rocsparse_format_bsr:
     {
-#if 0
-	spattern->define_bsr(rows,
-			     cols,
-			     nnz,
-			     row,
-			     col,
-			     descr_,
-      info_);
-#endif
-        break;
-    }
-
-    case rocsparse_format_bell:
-    {
-#if 0
-	spattern->define_bell(rows,
-			      cols,
-			      width,
-			      row,
-			      col,
-			      descr_,
-      info_);
-#endif
-        break;
-    }
-
-    case rocsparse_format_sell:
-    {
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
         break;
     }
 
@@ -2139,13 +2044,39 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, batch_count);
     ROCSPARSE_CHECKARG_POINTER(2, batch_stride);
 
-    *batch_count  = descr->batch_count;
-    *batch_stride = descr->batch_stride;
+    *batch_count  = descr->get_batch_count();
+    *batch_stride = descr->get_batch_stride();
 
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_dnvec_set_strided_batch sets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
+                                                   rocsparse_int         batch_count,
+                                                   int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+
+    descr->set_batch_count(batch_count);
+    descr->set_batch_stride(batch_stride);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

@@ -153,9 +153,6 @@ void _rocsparse_spmat_descr::set_columns_values_batch_stride(int64_t value)
 
 void _rocsparse_spmat_descr::set_offsets_batch_stride(int64_t value)
 {
-    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
-    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
-    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     if(this->get_spattern()->get_format() == rocsparse_format_csc)
     {
         this->get_spattern()->get_col_data()->set_batch_dist(value);
@@ -235,7 +232,14 @@ rocsparse_datatype _rocsparse_spmat_descr::get_data_type() const
 }
 rocsparse_index_base _rocsparse_spmat_descr::get_idx_base() const
 {
-    return this->get_spattern()->get_row_data()->get_base();
+    if(this->get_spattern()->get_row_data())
+    {
+        return this->get_spattern()->get_row_data()->get_base();
+    }
+    else
+    {
+        return this->get_spattern()->get_col_data()->get_base();
+    }
 }
 
 const _rocsparse_spattern_descr* _rocsparse_spmat_descr::get_spattern() const
@@ -297,6 +301,82 @@ bool _rocsparse_spmat_descr::get_init() const
 void _rocsparse_spmat_descr::set_init(bool value)
 {
     this->init = value;
+}
+
+int64_t _rocsparse_spmat_descr::get_total_nnz() const
+{
+    const auto format = this->get_format();
+    const auto value  = this->get_nnz();
+    switch(format)
+    {
+    case rocsparse_format_csr:
+    case rocsparse_format_csc:
+    case rocsparse_format_coo:
+    case rocsparse_format_coo_aos:
+    case rocsparse_format_sell:
+    {
+        return value;
+    }
+    case rocsparse_format_ell:
+    {
+        return this->get_rows() * this->get_ell_width();
+    }
+    case rocsparse_format_bsr:
+    {
+        return value * this->get_block_dim() * this->get_block_dim();
+    }
+    case rocsparse_format_bell:
+    {
+        return this->get_rows() * this->get_ell_cols() * this->get_block_dim()
+               * this->get_block_dim();
+    }
+    }
+}
+
+int64_t _rocsparse_spmat_descr::get_total_cols() const
+{
+    const auto format = this->get_format();
+    const auto value  = this->get_cols();
+    switch(format)
+    {
+    case rocsparse_format_csr:
+    case rocsparse_format_csc:
+    case rocsparse_format_ell:
+    case rocsparse_format_coo:
+    case rocsparse_format_coo_aos:
+    case rocsparse_format_sell:
+    {
+        return value;
+    }
+    case rocsparse_format_bsr:
+    case rocsparse_format_bell:
+    {
+        return value * this->get_block_dim();
+    }
+    }
+}
+
+int64_t _rocsparse_spmat_descr::get_total_rows() const
+{
+    const auto format = this->get_format();
+    const auto M      = this->get_rows();
+    switch(format)
+    {
+    case rocsparse_format_csr:
+    case rocsparse_format_csc:
+    case rocsparse_format_ell:
+    case rocsparse_format_coo:
+    case rocsparse_format_coo_aos:
+    case rocsparse_format_sell:
+    {
+        return M;
+    }
+    case rocsparse_format_bsr:
+    case rocsparse_format_bell:
+    {
+        return M * this->get_block_dim();
+    }
+    }
 }
 
 int64_t _rocsparse_spmat_descr::get_rows() const

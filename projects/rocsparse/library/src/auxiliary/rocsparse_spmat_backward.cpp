@@ -228,10 +228,12 @@ static void define_bell(rocsparse_spmat_descr that,
 {
 
     auto          spattern = that->get_spattern();
+    auto          row      = spattern->get_row_data();
     auto          col      = spattern->get_col_data();
     auto          val      = that->get_values();
     const int64_t nnz_s    = rows * width;
     const int64_t nnz_n    = rows * width * block_dim * block_dim;
+    row->define(idx_type, idx_base, 0, 1, nullptr, nullptr);
     col->define(idx_type, idx_base, nnz_s, 1, const_ind_data, ind_data);
     val->define(val_type, nnz_n, 1, const_val_data, val_data);
     spattern->define_bell(rows, cols, width, block_dir, block_dim, col, mat_descr, mat_info);
@@ -255,136 +257,14 @@ static void define_ell(rocsparse_spmat_descr that,
     auto spattern = that->get_spattern();
     auto col      = spattern->get_col_data();
     auto val      = that->get_values();
+    auto row      = spattern->get_row_data();
+    row->define(idx_type, idx_base, 0, 1, nullptr, nullptr);
     col->define(idx_type, idx_base, width * rows, 1, const_ind_data, ind_data);
     val->define(val_type, width * rows, 1, const_val_data, val_data);
     spattern->define_ell(rows, cols, width, col, mat_descr, mat_info);
     that->define(spattern, val, mat_info);
 }
-#if 0
-  void define_sell(int64_t              rows,
-		   int64_t              cols,
-		   int64_t              nnz,
-		   int64_t              sell_slice_size,
-		   int64_t              sell_colval_size,
-		   const void*          const_row_data,
-		   void*                row_data,
-		   const void*          const_col_data,
-		   void*                col_data,
-		   const void*          const_val_data,
-		   void*                val_data,
-		   rocsparse_indextype  row_type,
-		   rocsparse_indextype  col_type,
-		   rocsparse_index_base idx_base,
-		   rocsparse_datatype   val_type,
-		 rocsparse_mat_descr mat_descr,
-		 rocsparse_mat_info mat_info);
 
-  void define_coo(int64_t              rows,
-		  int64_t              cols,
-		  int64_t              nnz,
-		  const void*          const_row_data,
-		  void*                row_data,
-		  const void*          const_col_data,
-		  void*                col_data,
-		  const void*          const_val,
-		  void*                val,
-		  rocsparse_indextype  idx_type,
-		  rocsparse_index_base idx_base,
-		  rocsparse_datatype   val_type,
-		  rocsparse_mat_descr mat_descr,
-		  rocsparse_mat_info mat_info);
-
-  void define_coo_aos(int64_t     rows,
-		    int64_t     cols,
-		    int64_t     nnz,
-		    const void* const_ind_data,
-		    void*       ind_data,
-		    const void*          const_val,
-		    void*                val,
-		    rocsparse_indextype  idx_type,
-		    rocsparse_index_base idx_base,
-		    rocsparse_datatype   val_type,
-		  rocsparse_mat_descr mat_descr,
-		  rocsparse_mat_info mat_info);
-
-  void define_bsr(int64_t             mb,
-		  int64_t             nb,
-		  int64_t             nnzb,
-		  rocsparse_direction block_dir,
-		  int64_t             block_dim,
-		  const void*          const_row_data,
-		  void*                row_data,
-		  const void*          const_col_data,
-		  void*                col_data,
-		  const void*          const_val,
-		  void*                val,
-		  rocsparse_indextype  row_type,
-		  rocsparse_indextype  col_type,
-		  rocsparse_index_base idx_base,
-		  rocsparse_datatype   val_type,
-		  rocsparse_mat_descr mat_descr,
-		  rocsparse_mat_info mat_info);
-
-  void define_csr(int64_t              rows,
-		  int64_t              cols,
-		  int64_t              nnz,
-		  const void*          const_row_data,
-		  void*                row_data,
-		  const void*          const_col_data,
-		  void*                col_data,
-		  const void*          const_val,
-		  void*                val,
-		  rocsparse_indextype  row_type,
-		  rocsparse_indextype  col_type,
-		  rocsparse_index_base idx_base,
-		  rocsparse_datatype   val_type,
-		  rocsparse_mat_descr mat_descr,
-		  rocsparse_mat_info mat_info);
-
-  void define_csc(int64_t              rows,
-		  int64_t              cols,
-                                            int64_t              nnz,
-		  const void*          const_row_data,
-		  void*                row_data,
-		  const void*          const_col_data,
-		  void*                col_data,
-		  const void*          const_val,
-		  void*                val,
-		  rocsparse_indextype  row_type,
-		  rocsparse_indextype  col_type,
-		  rocsparse_index_base idx_base,
-		  rocsparse_datatype   val_type,
-		  rocsparse_mat_descr mat_descr,
-		  rocsparse_mat_info mat_info);
-
-  void define_bell(int64_t              rows,
-		   int64_t              cols,
-		   rocsparse_direction  block_dir,
-		   int64_t              block_dim,
-		   const void*          const_ind_data,
-		   void*                ind_data,
-		   const void*          const_val,
-		   void*                val,
-		   int64_t              width,
-		   rocsparse_indextype  idx_type,
-		   rocsparse_index_base idx_base,
-		   rocsparse_datatype   val_type,
-		   rocsparse_mat_descr mat_descr,
-		   rocsparse_mat_info mat_info);
-
-  void define_ell(int64_t              rows,
-		  int64_t              cols,
-		  const void*          const_ind_data,
-		  void*                ind_data,
-		  const void*          const_val,
-		  void*                val,
-		  int64_t              width,
-		  rocsparse_indextype  idx_type,
-		  rocsparse_index_base idx_base,
-		  rocsparse_datatype   val_type,
-		  rocsparse_mat_descr mat_descr,
-		  rocsparse_mat_info mat_info);
-#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -784,14 +664,14 @@ try
                rows,
                cols,
                nnz,
-               csc_col_ptr,
-               csc_col_ptr,
                csc_row_ind,
                csc_row_ind,
+               csc_col_ptr,
+               csc_col_ptr,
                csc_val,
                csc_val,
-               col_ptr_type,
                row_ind_type,
+               col_ptr_type,
                idx_base,
                data_type,
                nullptr,
@@ -839,14 +719,14 @@ try
                rows,
                cols,
                nnz,
-               csc_col_ptr,
-               nullptr,
                csc_row_ind,
+               nullptr,
+               csc_col_ptr,
                nullptr,
                csc_val,
                nullptr,
-               col_ptr_type,
                row_ind_type,
+               col_ptr_type,
                idx_base,
                data_type,
                nullptr,
@@ -1849,18 +1729,14 @@ try
     ROCSPARSE_CHECKARG_POINTER(6, idx_type);
     ROCSPARSE_CHECKARG_POINTER(7, idx_base);
     ROCSPARSE_CHECKARG_POINTER(8, data_type);
-
-    *rows = descr->get_rows();
-    *cols = descr->get_cols();
-
+    *rows        = descr->get_rows();
+    *cols        = descr->get_cols();
     *ell_col_ind = descr->get_col_data();
     *ell_val     = descr->get_val_data();
     *ell_width   = descr->get_ell_width();
-
-    *idx_type  = descr->get_row_type();
-    *idx_base  = descr->get_idx_base();
-    *data_type = descr->get_data_type();
-
+    *idx_type    = descr->get_col_type();
+    *idx_base    = descr->get_idx_base();
+    *data_type   = descr->get_data_type();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -1901,7 +1777,7 @@ try
     *ell_val     = descr->get_const_val_data();
     *ell_width   = descr->get_ell_width();
 
-    *idx_type  = descr->get_row_type();
+    *idx_type  = descr->get_col_type();
     *idx_base  = descr->get_idx_base();
     *data_type = descr->get_data_type();
 
@@ -1955,7 +1831,7 @@ try
     *ell_block_dir = descr->get_block_dir();
     *ell_block_dim = descr->get_block_dim();
 
-    *idx_type  = descr->get_row_type();
+    *idx_type  = descr->get_col_type();
     *idx_base  = descr->get_idx_base();
     *data_type = descr->get_data_type();
 
@@ -2005,7 +1881,7 @@ try
     *ell_block_dir = descr->get_block_dir();
     *ell_block_dim = descr->get_block_dim();
 
-    *idx_type  = descr->get_row_type();
+    *idx_type  = descr->get_col_type();
     *idx_base  = descr->get_idx_base();
     *data_type = descr->get_data_type();
 
@@ -2289,7 +2165,6 @@ rocsparse_status
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, ell_col_ind);
@@ -2300,7 +2175,6 @@ try
 
     descr->set_const_col_data(ell_col_ind);
     descr->set_const_val_data(ell_val);
-
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

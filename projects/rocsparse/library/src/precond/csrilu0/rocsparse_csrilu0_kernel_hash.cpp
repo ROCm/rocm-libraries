@@ -333,8 +333,8 @@ namespace rocsparse
 
         // done array
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
-        const int64_t done_array_stride = A->rows;
-        const int64_t A_batch_count     = (A->batch_stride == 0) ? 1 : A->batch_count;
+        const int64_t done_array_stride = A->get_rows();
+        const int64_t A_batch_count     = (A->get_batch_stride() == 0) ? 1 : A->get_batch_count();
 
         const auto boost_enable           = boost->get_enable();
         const auto boost_tol_size         = rocsparse::datatype_sizeof(boost->get_tol_datatype());
@@ -345,9 +345,10 @@ namespace rocsparse
         const double* boost_tol_64 = reinterpret_cast<const double*>(boost->get_tol());
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
-        int64_t stride = A->columns_values_batch_stride;
-        dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A_batch_count);
-        dim3 csrilu0_threads(BLOCKSIZE);
+        int64_t stride = A->get_columns_values_batch_stride();
+        dim3    csrilu0_blocks((A->get_rows() * handle->wavefront_size - 1) / BLOCKSIZE + 1,
+                            A_batch_count);
+        dim3    csrilu0_threads(BLOCKSIZE);
 
         auto                         numeric_exact = csrilu0_info->get_singularity_numeric_exact();
         auto                         numeric_near  = csrilu0_info->get_singularity_numeric_near();
@@ -365,10 +366,10 @@ namespace rocsparse
             csrilu0_threads,
             0,
             handle->stream,
-            static_cast<J>(A->rows),
-            reinterpret_cast<const I*>(A->const_row_data),
-            reinterpret_cast<const J*>(A->const_col_data),
-            reinterpret_cast<T*>(A->val_data),
+            static_cast<J>(A->get_rows()),
+            reinterpret_cast<const I*>(A->get_const_row_data()),
+            reinterpret_cast<const J*>(A->get_const_col_data()),
+            reinterpret_cast<T*>(A->get_val_data()),
             stride,
             reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             done_array,
@@ -384,7 +385,7 @@ namespace rocsparse
             ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_64),
             (tolerance_pointer_mode == rocsparse_pointer_mode_host),
             //
-            A->descr->base,
+            A->get_descr()->base,
             boost_enable,
             boost_tol_size,
             ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_tol_pointer_mode, boost_tol_32),
@@ -487,6 +488,9 @@ rocsparse::csrilu0_kernel_launch_t rocsparse::find_csrilu0_kernel_hash_launch(
 {
     auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-    return rocsparse::transform_wf<256>(
-        handle->wavefront_size, trm_info->get_max_nnz(), A->data_type, A->row_type, A->col_type);
+    return rocsparse::transform_wf<256>(handle->wavefront_size,
+                                        trm_info->get_max_nnz(),
+                                        A->get_data_type(),
+                                        A->get_row_type(),
+                                        A->get_col_type());
 }

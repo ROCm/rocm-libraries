@@ -301,9 +301,9 @@ namespace rocsparse
 
         // done array
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
-        const int64_t done_array_stride = A->rows;
-        const dim3    csric0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                 A->batch_count);
+        const int64_t done_array_stride = A->get_rows();
+        const dim3    csric0_blocks((A->get_rows() * handle->wavefront_size - 1) / BLOCKSIZE + 1,
+                                 A->get_batch_count());
         const dim3    csric0_threads(BLOCKSIZE);
 
         auto                         numeric_exact = csric0_info->get_singularity_numeric_exact();
@@ -322,11 +322,11 @@ namespace rocsparse
             csric0_threads,
             0,
             handle->stream,
-            static_cast<J>(A->rows),
-            reinterpret_cast<const I*>(A->const_row_data),
-            reinterpret_cast<const J*>(A->const_col_data),
-            reinterpret_cast<T*>(A->val_data),
-            A->batch_stride,
+            static_cast<J>(A->get_rows()),
+            reinterpret_cast<const I*>(A->get_const_row_data()),
+            reinterpret_cast<const J*>(A->get_const_col_data()),
+            reinterpret_cast<T*>(A->get_val_data()),
+            A->get_batch_stride(),
             reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             done_array,
             done_array_stride,
@@ -339,7 +339,7 @@ namespace rocsparse
             ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_32),
             ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_64),
             (tolerance_pointer_mode == rocsparse_pointer_mode_host),
-            A->descr->base);
+            A->get_descr()->base);
 
         return rocsparse_status_success;
     }
@@ -476,11 +476,13 @@ rocsparse::csric0_kernel_launch_t rocsparse::find_csric0_kernel_hash_launch(
     {
     case 32:
     {
-        return rocsparse::transform_mxnnz<256, 32>(max_nnz, A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_mxnnz<256, 32>(
+            max_nnz, A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
     case 64:
     {
-        return rocsparse::transform_mxnnz<256, 64>(max_nnz, A->data_type, A->row_type, A->col_type);
+        return rocsparse::transform_mxnnz<256, 64>(
+            max_nnz, A->get_data_type(), A->get_row_type(), A->get_col_type());
     }
     default:
     {

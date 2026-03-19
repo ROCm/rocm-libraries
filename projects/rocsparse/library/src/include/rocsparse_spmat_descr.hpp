@@ -64,9 +64,11 @@ public:
     void             set_format(rocsparse_format);
     //
     int64_t get_rows() const;
+    int64_t get_total_rows() const;
     void    set_rows(int64_t);
     //
     int64_t get_cols() const;
+    int64_t get_total_cols() const;
     void    set_cols(int64_t);
     //
     const _rocsparse_spattern_descr* get_spattern() const;
@@ -94,6 +96,7 @@ public:
     void    set_block_dim(int64_t);
     //
     int64_t  get_nnz() const;
+    int64_t  get_total_nnz() const;
     int64_t* get_pnnz();
     void     set_nnz(const int64_t value);
     //

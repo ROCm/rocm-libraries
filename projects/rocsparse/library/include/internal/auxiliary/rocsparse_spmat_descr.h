@@ -38,7 +38,7 @@ extern "C" {
 /*! \ingroup aux_module
  *  \brief Destroy a sparse matrix descriptor
  *  \details
- *  \p rocsparse_spmat_destroy destroys a sparse matrix descriptor.
+ *  \p rocsparse_spmat_descr_destroy destroys a sparse matrix descriptor.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -51,15 +51,15 @@ extern "C" {
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spmat_destroy(rocsparse_handle      handle,
-                                         rocsparse_spmat_descr descr,
-                                         rocsparse_error*      p_error);
+rocsparse_status rocsparse_spmat_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_spmat_descr descr,
+                                               rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
  *  \brief Create a sparse matrix descriptor
  *  \details
- *  \p rocsparse_spmat_create creates a sparse matrix descriptor. It should be
- *  destroyed at the end using \p rocsparse_spmat_destroy.
+ *  \p rocsparse_spmat_descr_create creates a sparse matrix descriptor. It should be
+ *  destroyed at the end using \p rocsparse_spmat_descr_destroy.
  *
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
@@ -78,11 +78,11 @@ rocsparse_status rocsparse_spmat_destroy(rocsparse_handle      handle,
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spmat_create(rocsparse_handle         handle,
-                                        rocsparse_spmat_descr*   p_descr,
-                                        rocsparse_spattern_descr spattern,
-                                        rocsparse_dnvec_descr    values,
-                                        rocsparse_error*         p_error);
+rocsparse_status rocsparse_spmat_descr_create(rocsparse_handle         handle,
+                                              rocsparse_spmat_descr*   p_descr,
+                                              rocsparse_spattern_descr spattern,
+                                              rocsparse_dnvec_descr    values,
+                                              rocsparse_error*         p_error);
 
 /*! \ingroup aux_module
    *  \brief Get sparse matrix property.
@@ -97,15 +97,15 @@ rocsparse_status rocsparse_spmat_create(rocsparse_handle         handle,
    *  @param[in]
    *  prop   select from \ref rocsparse_spmat_prop.
    *  @param[out]
-   *  p_value   pointer to the value.
+   *  value   pointer to the value.
    *  @param[in]
-   *  value_size_in_bytes size in bytes of the memory \p p_value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_idvec_prop.
+   *  value_size_in_bytes size in bytes of the memory \p value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_idvec_prop.
    *  @param[out]
    *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p descr or \p p_value is invalid.
+   *  \retval rocsparse_status_invalid_pointer if \p descr or \p value is invalid.
    *  \retval rocsparse_status_invalid_value if \p prop is invalid or if \p value_size_in_bytes does not match the required size.
    */
 ROCSPARSE_EXPORT
@@ -115,40 +115,6 @@ rocsparse_status rocsparse_spmat_get_prop(rocsparse_handle            handle,
                                           void*                       value,
                                           size_t                      value_size_in_bytes,
                                           rocsparse_error*            p_error);
-
-/*! \ingroup aux_module
-   *  \brief Set sparse matrix property property.
-   *
-   *  \details
-   *  \p rocsparse_spmat_set_prop sets the sparsity pattern property.
-   *
-   *
-   *  @param[in]
-   *  handle  handle to the rocsparse library context queue.
-   *  @param[in]
-   *  descr   the matrix descriptor.
-   *  @param[in]
-   *  prop   select from \ref rocsparse_spmat_prop.
-   *  @param[out]
-   *  p_value   pointer to the value.
-   *  @param[in]
-   *  value_size_in_bytes size in bytes of the memory \p p_value points to, this must match the required size given from the underlying type given by the documentation of \ref rocsparse_spmat_prop.
-   *  @param[out]
-   *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
-   *
-   *  \retval rocsparse_status_success the operation completed successfully.
-   *  \retval rocsparse_status_invalid_handle if \p handle is invalid.
-   *  \retval rocsparse_status_invalid_pointer if \p descr or \p p_value is invalid.
-   *  \retval rocsparse_status_invalid_value if \p prop is invalid or if \p value_size_in_bytes does not match the required size.
-   */
-
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spmat_set_prop(rocsparse_handle      handle,
-                                          rocsparse_spmat_descr descr,
-                                          rocsparse_spmat_prop  prop,
-                                          const void*           value,
-                                          size_t                value_size_in_bytes,
-                                          rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
    *  \brief Get the sparsity pattern from the sparse matrix.

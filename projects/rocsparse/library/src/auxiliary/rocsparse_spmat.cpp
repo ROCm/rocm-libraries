@@ -29,9 +29,9 @@
 #include "rocsparse_logging.hpp"
 #include "rocsparse_spattern_descr.hpp"
 
-extern "C" rocsparse_status rocsparse_spmat_destroy(rocsparse_handle      handle,
-                                                    rocsparse_spmat_descr descr,
-                                                    rocsparse_error*      p_error)
+extern "C" rocsparse_status rocsparse_spmat_descr_destroy(rocsparse_handle      handle,
+                                                          rocsparse_spmat_descr descr,
+                                                          rocsparse_error*      p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -66,11 +66,11 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmat_prop value_)
     return true;
 }
 
-extern "C" rocsparse_status rocsparse_spmat_create(rocsparse_handle         handle,
-                                                   rocsparse_spmat_descr*   p_descr,
-                                                   rocsparse_spattern_descr spattern,
-                                                   rocsparse_dnvec_descr    values,
-                                                   rocsparse_error*         p_error)
+extern "C" rocsparse_status rocsparse_spmat_descr_create(rocsparse_handle         handle,
+                                                         rocsparse_spmat_descr*   p_descr,
+                                                         rocsparse_spattern_descr spattern,
+                                                         rocsparse_dnvec_descr    values,
+                                                         rocsparse_error*         p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -132,7 +132,7 @@ extern "C" rocsparse_status rocsparse_spmat_get_prop(rocsparse_handle           
                                (sizeof(int64_t) != value_size_in_bytes),
                                rocsparse_status_invalid_value);
 
-            *reinterpret_cast<int64_t*>(p_value) = descr->get_rows();
+            *reinterpret_cast<int64_t*>(p_value) = descr->get_total_rows();
             return rocsparse_status_success;
         }
         case rocsparse_spmat_prop_cols:
@@ -142,7 +142,7 @@ extern "C" rocsparse_status rocsparse_spmat_get_prop(rocsparse_handle           
                                (sizeof(int64_t) != value_size_in_bytes),
                                rocsparse_status_invalid_value);
 
-            *reinterpret_cast<int64_t*>(p_value) = descr->get_cols();
+            *reinterpret_cast<int64_t*>(p_value) = descr->get_total_cols();
             return rocsparse_status_success;
         }
         case rocsparse_spmat_prop_nnz:
@@ -151,12 +151,12 @@ extern "C" rocsparse_status rocsparse_spmat_get_prop(rocsparse_handle           
                                value_size_in_bytes,
                                (sizeof(int64_t) != value_size_in_bytes),
                                rocsparse_status_invalid_value);
-            *reinterpret_cast<int64_t*>(p_value) = descr->get_nnz();
+            *reinterpret_cast<int64_t*>(p_value) = descr->get_total_nnz();
             return rocsparse_status_success;
         }
+            // LCOV_EXCL_START
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_START
     }
     catch(...)
     {
@@ -164,85 +164,6 @@ extern "C" rocsparse_status rocsparse_spmat_get_prop(rocsparse_handle           
     }
     // LCOV_EXCL_STOP
 }
-
-extern "C" rocsparse_status rocsparse_spmat_set_prop(rocsparse_handle      handle,
-                                                     rocsparse_spmat_descr descr,
-                                                     rocsparse_spmat_prop  prop,
-                                                     const void*           p_value,
-                                                     size_t                value_size_in_bytes,
-                                                     rocsparse_error*      p_error)
-try
-{
-    ROCSPARSE_ROUTINE_TRACE;
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    ROCSPARSE_CHECKARG_POINTER(1, descr);
-    ROCSPARSE_CHECKARG_ENUM(2, prop);
-    ROCSPARSE_CHECKARG_POINTER(3, p_value);
-
-    switch(prop)
-    {
-    case rocsparse_spmat_prop_format:
-    {
-        ROCSPARSE_CHECKARG(4,
-                           value_size_in_bytes,
-                           (sizeof(rocsparse_format) != value_size_in_bytes),
-                           rocsparse_status_invalid_value);
-        descr->set_format(*reinterpret_cast<const rocsparse_format*>(p_value));
-        return rocsparse_status_success;
-    }
-    case rocsparse_spmat_prop_batch_count:
-    {
-        ROCSPARSE_CHECKARG(4,
-                           value_size_in_bytes,
-                           (sizeof(int64_t) != value_size_in_bytes),
-                           rocsparse_status_invalid_value);
-
-        descr->set_batch_count(*reinterpret_cast<const int64_t*>(p_value));
-        return rocsparse_status_success;
-    }
-    case rocsparse_spmat_prop_rows:
-    {
-
-        ROCSPARSE_CHECKARG(4,
-                           value_size_in_bytes,
-                           (sizeof(int64_t) != value_size_in_bytes),
-                           rocsparse_status_invalid_value);
-
-        descr->set_rows(*reinterpret_cast<const int64_t*>(p_value));
-
-        return rocsparse_status_success;
-    }
-    case rocsparse_spmat_prop_cols:
-    {
-
-        ROCSPARSE_CHECKARG(4,
-                           value_size_in_bytes,
-                           (sizeof(int64_t) != value_size_in_bytes),
-                           rocsparse_status_invalid_value);
-
-        descr->set_cols(*reinterpret_cast<const int64_t*>(p_value));
-
-        return rocsparse_status_success;
-    }
-    case rocsparse_spmat_prop_nnz:
-    {
-        ROCSPARSE_CHECKARG(4,
-                           value_size_in_bytes,
-                           (sizeof(int64_t) != value_size_in_bytes),
-                           rocsparse_status_invalid_value);
-        descr->set_nnz(*reinterpret_cast<const int64_t*>(p_value));
-        return rocsparse_status_success;
-    }
-    }
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_START
-}
-catch(...)
-{
-    RETURN_ROCSPARSE_EXCEPTION();
-}
-// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_spmat_get_spattern(rocsparse_handle          handle,
                                                          rocsparse_spmat_descr     descr,

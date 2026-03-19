@@ -46,12 +46,13 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
                        ((A->get_rows() > 0) && (trm_info == nullptr)),
                        rocsparse_status_invalid_pointer);
 
-    bsrilu0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
+    bsrilu0_info->create_singularity_numeric_exact(
+        A->get_batch_count(), A->get_col_type(), handle->stream);
 
-    if(A->col_type == rocsparse_indextype_i32)
+    if(A->get_col_type() == rocsparse_indextype_i32)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int32_t*)bsrilu0_info->get_singularity_numeric_exact()->get_position(),
             (const int32_t*)bsrilu0_info->get_position(),
             handle->stream));
@@ -59,7 +60,7 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int64_t*)bsrilu0_info->get_singularity_numeric_exact()->get_position(),
             (const int64_t*)bsrilu0_info->get_position(),
             handle->stream));

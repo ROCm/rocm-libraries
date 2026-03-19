@@ -278,8 +278,6 @@ rocsparse_status rocsparse::spmat_csr2ell(rocsparse_handle            handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
-                              source->get_col_type() != target->get_row_type());
-    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               source->get_col_type() != target->get_col_type());
     if(target->get_val_data() != nullptr && source->get_val_data() != nullptr)
     {

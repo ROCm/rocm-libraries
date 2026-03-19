@@ -39,7 +39,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const rocsparse_format format = A->format;
+        const rocsparse_format format = A->get_format();
         p_buffer_size_in_bytes[0]     = std::numeric_limits<size_t>::max();
 
         switch(format)

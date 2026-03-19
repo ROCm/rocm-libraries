@@ -50,8 +50,8 @@ protected:
     int64_t             m_ell_width{};
     int64_t             m_ell_cols{};
     bool                m_own_data{};
-    rocsparse_direction m_block_dir{};
-    int64_t             m_block_dim{};
+    rocsparse_direction m_block_dir{rocsparse_direction_column};
+    int64_t             m_block_dim{1};
 
     int64_t m_sell_slice_size{};
     int64_t m_sell_colval_size{};

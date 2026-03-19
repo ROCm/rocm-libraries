@@ -206,31 +206,6 @@ rocsparse_mat_descr _rocsparse_spattern_descr::get_mat_descr() const
     return this->m_p_mat_descr;
 }
 
-//
-// Constructor.
-//
-#if 0
-_rocsparse_spattern_descr::_rocsparse_spattern_descr(rocsparse_format      format_,
-                                                     int64_t               rows_,
-                                                     int64_t               cols_,
-                                                     int64_t               nnz_,
-                                                     rocsparse_idvec_descr row_data_,
-                                                     rocsparse_idvec_descr col_data_,
-                                                     rocsparse_mat_descr   mat_descr_)
-: m_p_row_data(row_data_)
-    , m_p_col_data(col_data_)
-    , m_p_mat_descr(mat_descr_)
-  ,  m_format(format_)
-    , m_rows(rows_)
-    , m_cols(cols_)
-    , m_nnz(nnz_)
-    , m_ell_width(0)
-    , m_ell_cols(0)
-    , m_own_data(false)
-{
-}
-#endif
-
 void _rocsparse_spattern_descr::define_csr(int64_t               rows,
                                            int64_t               cols,
                                            int64_t               nnz,
@@ -601,13 +576,17 @@ void _rocsparse_spattern_descr::define_ell(int64_t               rows,
                                            rocsparse_mat_descr   mat_descr,
                                            rocsparse_mat_info    mat_info)
 {
-    this->m_format     = rocsparse_format_coo;
-    this->m_rows       = rows;
-    this->m_cols       = cols;
-    this->m_nnz        = rows * width;
-    this->m_ell_width  = width;
-    this->m_p_row_data = nullptr;
+    this->m_format    = rocsparse_format_ell;
+    this->m_rows      = rows;
+    this->m_cols      = cols;
+    this->m_nnz       = rows * width;
+    this->m_ell_width = width;
+    // this->m_p_row_data = nullptr;
     this->m_p_col_data = col_data;
+    if(col_data)
+    {
+        this->m_p_row_data->set_indextype(col_data->get_indextype());
+    }
     if(mat_descr != nullptr)
     {
         this->m_p_mat_descr = mat_descr;
@@ -667,11 +646,16 @@ void _rocsparse_spattern_descr::define_bell(int64_t               rows,
                                             rocsparse_mat_descr   mat_descr,
                                             rocsparse_mat_info    mat_info)
 {
-    this->m_format     = rocsparse_format_bell;
-    this->m_rows       = rows;
-    this->m_cols       = cols;
-    this->m_ell_cols   = width;
-    this->m_p_row_data = nullptr;
+    this->m_format   = rocsparse_format_bell;
+    this->m_rows     = rows;
+    this->m_cols     = cols;
+    this->m_ell_cols = width;
+    //    this->m_p_row_data = nullptr;
+    if(col_data)
+    {
+        this->m_p_row_data->set_indextype(col_data->get_indextype());
+    }
+
     this->m_p_col_data = col_data;
     this->m_nnz        = rows * width;
     this->m_block_dim  = block_dim;

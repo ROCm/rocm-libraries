@@ -34,6 +34,216 @@
 #include <hip/hip_runtime_api.h>
 #include <vector>
 
+struct rocsparse_dnmat_prop_t
+{
+    using value_t                     = rocsparse_dnmat_prop;
+    static constexpr uint32_t nvalues = 9;
+    // clang-format off
+  static constexpr value_t  values[nvalues] =
+    {
+    rocsparse_dnmat_prop_datatype,
+    rocsparse_dnmat_prop_order,
+    rocsparse_dnmat_prop_rows,
+    rocsparse_dnmat_prop_cols,
+    rocsparse_dnmat_prop_ld,
+    rocsparse_dnmat_prop_batchtype,
+    rocsparse_dnmat_prop_batchstorage,
+    rocsparse_dnmat_prop_batch_count,
+    rocsparse_dnmat_prop_batch_dist
+    };
+    // clang-format on
+
+    static const char* to_string(rocsparse_dnmat_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_dnmat_prop_datatype:
+        {
+            return "rocsparse_dnmat_prop_datatype";
+        }
+        case rocsparse_dnmat_prop_order:
+        {
+            return "rocsparse_dnmat_prop_order";
+        }
+        case rocsparse_dnmat_prop_rows:
+        {
+            return "rocsparse_dnmat_prop_rows";
+        }
+        case rocsparse_dnmat_prop_cols:
+        {
+            return "rocsparse_dnmat_prop_cols";
+        }
+        case rocsparse_dnmat_prop_ld:
+        {
+            return "rocsparse_dnmat_prop_ld";
+        }
+        case rocsparse_dnmat_prop_batchtype:
+        {
+            return "rocsparse_dnmat_prop_batchtype";
+        }
+        case rocsparse_dnmat_prop_batchstorage:
+        {
+            return "rocsparse_dnmat_prop_batchstorage";
+        }
+        case rocsparse_dnmat_prop_batch_count:
+        {
+            return "rocsparse_dnmat_prop_batch_count";
+        }
+        case rocsparse_dnmat_prop_batch_dist:
+        {
+            return "    rocsparse_dnmat_prop_batch_dist";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_spattern_data_t
+{
+    using value_t                     = rocsparse_spattern_data;
+    static constexpr uint32_t nvalues = 2;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = {
+    rocsparse_spattern_data_row,
+    rocsparse_spattern_data_column
+  };
+    // clang-format on
+
+    static const char* to_string(rocsparse_spattern_data prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_spattern_data_row:
+        {
+            return "rocsparse_spattern_data_row";
+        }
+        case rocsparse_spattern_data_column:
+        {
+            return "rocsparse_spattern_data_column";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_spmat_prop_t
+{
+    using value_t                     = rocsparse_spmat_prop;
+    static constexpr uint32_t nvalues = 5;
+    // clang-format off
+  static constexpr value_t  values[nvalues] =
+    {
+      rocsparse_spmat_prop_format,
+      rocsparse_spmat_prop_rows,
+      rocsparse_spmat_prop_cols,
+      rocsparse_spmat_prop_nnz,
+      rocsparse_spmat_prop_batch_count
+    };
+    // clang-format on
+
+    static const char* to_string(rocsparse_spmat_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_spmat_prop_format:
+        {
+            return "rocsparse_spmat_prop_format";
+        }
+        case rocsparse_spmat_prop_rows:
+        {
+            return "rocsparse_spmat_prop_rows";
+        }
+        case rocsparse_spmat_prop_cols:
+        {
+            return "rocsparse_spmat_prop_cols";
+        }
+        case rocsparse_spmat_prop_nnz:
+        {
+            return "rocsparse_spmat_prop_nnz";
+        }
+        case rocsparse_spmat_prop_batch_count:
+        {
+            return "rocsparse_spmat_prop_batch_count";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_spattern_prop_t
+{
+    using value_t                     = rocsparse_spattern_prop;
+    static constexpr uint32_t nvalues = 11;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = {
+
+    rocsparse_spattern_prop_format,
+    rocsparse_spattern_prop_rows,
+    rocsparse_spattern_prop_cols,
+    rocsparse_spattern_prop_nnz,
+    rocsparse_spattern_prop_block_dim,
+    rocsparse_spattern_prop_block_dir,
+    rocsparse_spattern_prop_ell_width,
+    rocsparse_spattern_prop_bell_width,
+    rocsparse_spattern_prop_sell_slice_size,
+    rocsparse_spattern_prop_sell_colval_size,
+    rocsparse_spattern_prop_batch_count
+  };
+    // clang-format on
+
+    static const char* to_string(rocsparse_spattern_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_spattern_prop_format:
+        {
+            return "rocsparse_spattern_prop_format";
+        }
+        case rocsparse_spattern_prop_rows:
+        {
+            return "rocsparse_spattern_prop_rows";
+        }
+        case rocsparse_spattern_prop_cols:
+        {
+            return "rocsparse_spattern_prop_cols";
+        }
+        case rocsparse_spattern_prop_nnz:
+        {
+            return "rocsparse_spattern_prop_nnz";
+        }
+        case rocsparse_spattern_prop_block_dim:
+        {
+            return "rocsparse_spattern_prop_block_dim";
+        }
+        case rocsparse_spattern_prop_block_dir:
+        {
+            return "rocsparse_spattern_prop_block_dir";
+        }
+        case rocsparse_spattern_prop_ell_width:
+        {
+            return "rocsparse_spattern_prop_ell_width";
+        }
+        case rocsparse_spattern_prop_bell_width:
+        {
+            return "rocsparse_spattern_prop_bell_width";
+        }
+        case rocsparse_spattern_prop_sell_slice_size:
+        {
+            return "rocsparse_spattern_prop_sell_slice_size";
+        }
+        case rocsparse_spattern_prop_sell_colval_size:
+        {
+            return "rocsparse_spattern_prop_sell_colval_size";
+        }
+        case rocsparse_spattern_prop_batch_count:
+        {
+            return "rocsparse_spattern_prop_batch_count";
+        }
+        }
+        return "unknown";
+    }
+};
+
 struct rocsparse_idvec_prop_t
 {
     using value_t                     = rocsparse_idvec_prop;

@@ -200,9 +200,9 @@ extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle        
             *reinterpret_cast<int64_t*>(p_value) = descr->get_nnz();
             return rocsparse_status_success;
         }
+            // LCOV_EXCL_START
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_START
     }
     catch(...)
     {
@@ -214,7 +214,7 @@ extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle        
 extern "C" rocsparse_status rocsparse_spattern_set_prop(rocsparse_handle         handle,
                                                         rocsparse_spattern_descr descr,
                                                         rocsparse_spattern_prop  prop,
-                                                        const void*              p_value,
+                                                        const void*              value,
                                                         size_t           value_size_in_bytes,
                                                         rocsparse_error* p_error)
 try
@@ -223,7 +223,7 @@ try
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, descr);
     ROCSPARSE_CHECKARG_ENUM(2, prop);
-    ROCSPARSE_CHECKARG_POINTER(3, p_value);
+    ROCSPARSE_CHECKARG_POINTER(3, value);
 
     switch(prop)
     {
@@ -233,7 +233,7 @@ try
                            value_size_in_bytes,
                            (sizeof(rocsparse_format) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_format(*reinterpret_cast<const rocsparse_format*>(p_value));
+        descr->set_format(*reinterpret_cast<const rocsparse_format*>(value));
         return rocsparse_status_success;
     }
     case rocsparse_spattern_prop_batch_count:
@@ -243,7 +243,7 @@ try
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
 
-        descr->set_batch_count(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_batch_count(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
     case rocsparse_spattern_prop_rows:
@@ -253,7 +253,7 @@ try
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
 
-        descr->set_rows(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_rows(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
     case rocsparse_spattern_prop_cols:
@@ -263,7 +263,7 @@ try
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
 
-        descr->set_cols(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_cols(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
     case rocsparse_spattern_prop_nnz:
@@ -272,7 +272,7 @@ try
                            value_size_in_bytes,
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_nnz(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_nnz(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
     case rocsparse_spattern_prop_block_dir:
@@ -281,7 +281,7 @@ try
                            value_size_in_bytes,
                            (sizeof(rocsparse_direction) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_block_dir(*reinterpret_cast<const rocsparse_direction*>(p_value));
+        descr->set_block_dir(*reinterpret_cast<const rocsparse_direction*>(value));
         return rocsparse_status_success;
     }
 
@@ -291,7 +291,7 @@ try
                            value_size_in_bytes,
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_ell_width(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_ell_width(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
 
@@ -301,7 +301,7 @@ try
                            value_size_in_bytes,
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_ell_cols(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_ell_cols(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
 
@@ -311,7 +311,7 @@ try
                            value_size_in_bytes,
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_sell_slice_size(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_sell_slice_size(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
 
@@ -321,7 +321,7 @@ try
                            value_size_in_bytes,
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_sell_colval_size(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_sell_colval_size(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
 
@@ -331,13 +331,13 @@ try
                            value_size_in_bytes,
                            (sizeof(int64_t) != value_size_in_bytes),
                            rocsparse_status_invalid_value);
-        descr->set_block_dim(*reinterpret_cast<const int64_t*>(p_value));
+        descr->set_block_dim(*reinterpret_cast<const int64_t*>(value));
         return rocsparse_status_success;
     }
-    }
 
+        // LCOV_EXCL_START
+    }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_START
 }
 catch(...)
 {
@@ -369,9 +369,9 @@ try
         p_data[0] = (rocsparse_idvec_descr)descr->get_col_data();
         return rocsparse_status_success;
     }
+        // LCOV_EXCL_START
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_START
 }
 catch(...)
 {
@@ -405,8 +405,8 @@ try
         return rocsparse_status_success;
     }
     }
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_START
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
 catch(...)
 {
@@ -414,14 +414,14 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_create_csr(rocsparse_handle          handle,
-                                                          rocsparse_spattern_descr* p_descr,
-                                                          int64_t                   rows,
-                                                          int64_t                   cols,
-                                                          int64_t                   nnz,
-                                                          rocsparse_idvec_descr     row_data,
-                                                          rocsparse_idvec_descr     col_data,
-                                                          rocsparse_error*          p_error)
+extern "C" rocsparse_status rocsparse_spattern_descr_create_csr(rocsparse_handle          handle,
+                                                                rocsparse_spattern_descr* p_descr,
+                                                                int64_t                   rows,
+                                                                int64_t                   cols,
+                                                                int64_t                   nnz,
+                                                                rocsparse_idvec_descr     row_data,
+                                                                rocsparse_idvec_descr     col_data,
+                                                                rocsparse_error*          p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -443,16 +443,16 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_create_bsr(rocsparse_handle          handle,
-                                                          rocsparse_spattern_descr* p_descr,
-                                                          int64_t                   rowsb,
-                                                          int64_t                   colsb,
-                                                          int64_t                   nnzb,
-                                                          rocsparse_direction       block_direction,
-                                                          int64_t                   block_dim,
-                                                          rocsparse_idvec_descr     row_data,
-                                                          rocsparse_idvec_descr     col_data,
-                                                          rocsparse_error*          p_error)
+extern "C" rocsparse_status rocsparse_spattern_descr_create_bsr(rocsparse_handle          handle,
+                                                                rocsparse_spattern_descr* p_descr,
+                                                                int64_t                   rowsb,
+                                                                int64_t                   colsb,
+                                                                int64_t                   nnzb,
+                                                                rocsparse_direction block_direction,
+                                                                int64_t             block_dim,
+                                                                rocsparse_idvec_descr row_data,
+                                                                rocsparse_idvec_descr col_data,
+                                                                rocsparse_error*      p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -477,14 +477,14 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_create_csc(rocsparse_handle          handle,
-                                                          rocsparse_spattern_descr* p_descr,
-                                                          int64_t                   rows,
-                                                          int64_t                   cols,
-                                                          int64_t                   nnz,
-                                                          rocsparse_idvec_descr     row_data,
-                                                          rocsparse_idvec_descr     col_data,
-                                                          rocsparse_error*          p_error)
+extern "C" rocsparse_status rocsparse_spattern_descr_create_csc(rocsparse_handle          handle,
+                                                                rocsparse_spattern_descr* p_descr,
+                                                                int64_t                   rows,
+                                                                int64_t                   cols,
+                                                                int64_t                   nnz,
+                                                                rocsparse_idvec_descr     row_data,
+                                                                rocsparse_idvec_descr     col_data,
+                                                                rocsparse_error*          p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -506,14 +506,14 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_create_coo(rocsparse_handle          handle,
-                                                          rocsparse_spattern_descr* p_descr,
-                                                          int64_t                   rows,
-                                                          int64_t                   cols,
-                                                          int64_t                   nnz,
-                                                          rocsparse_idvec_descr     row_data,
-                                                          rocsparse_idvec_descr     col_data,
-                                                          rocsparse_error*          p_error)
+extern "C" rocsparse_status rocsparse_spattern_descr_create_coo(rocsparse_handle          handle,
+                                                                rocsparse_spattern_descr* p_descr,
+                                                                int64_t                   rows,
+                                                                int64_t                   cols,
+                                                                int64_t                   nnz,
+                                                                rocsparse_idvec_descr     row_data,
+                                                                rocsparse_idvec_descr     col_data,
+                                                                rocsparse_error*          p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -535,14 +535,15 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_create_coo_aos(rocsparse_handle          handle,
-                                                              rocsparse_spattern_descr* p_descr,
-                                                              int64_t                   rows,
-                                                              int64_t                   cols,
-                                                              int64_t                   nnz,
-                                                              rocsparse_idvec_descr     row_data,
-                                                              rocsparse_idvec_descr     col_data,
-                                                              rocsparse_error*          p_error)
+extern "C" rocsparse_status
+    rocsparse_spattern_descr_create_coo_aos(rocsparse_handle          handle,
+                                            rocsparse_spattern_descr* p_descr,
+                                            int64_t                   rows,
+                                            int64_t                   cols,
+                                            int64_t                   nnz,
+                                            rocsparse_idvec_descr     row_data,
+                                            rocsparse_idvec_descr     col_data,
+                                            rocsparse_error*          p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -564,13 +565,13 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_create_ell(rocsparse_handle          handle,
-                                                          rocsparse_spattern_descr* p_descr,
-                                                          int64_t                   rows,
-                                                          int64_t                   cols,
-                                                          int64_t                   width,
-                                                          rocsparse_idvec_descr     col_data,
-                                                          rocsparse_error*          p_error)
+extern "C" rocsparse_status rocsparse_spattern_descr_create_ell(rocsparse_handle          handle,
+                                                                rocsparse_spattern_descr* p_descr,
+                                                                int64_t                   rows,
+                                                                int64_t                   cols,
+                                                                int64_t                   width,
+                                                                rocsparse_idvec_descr     col_data,
+                                                                rocsparse_error*          p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -591,9 +592,9 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spattern_destroy(rocsparse_handle         handle,
-                                                       rocsparse_spattern_descr descr,
-                                                       rocsparse_error*         p_error)
+extern "C" rocsparse_status rocsparse_spattern_descr_destroy(rocsparse_handle         handle,
+                                                             rocsparse_spattern_descr descr,
+                                                             rocsparse_error*         p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -612,15 +613,51 @@ catch(...)
 }
 
 // LCOV_EXCL_STOP
-extern "C" rocsparse_status rocsparse_spattern_create_bell(rocsparse_handle          handle,
-                                                           rocsparse_spattern_descr* p_descr,
-                                                           int64_t                   rowsb,
-                                                           int64_t                   colsb,
-                                                           int64_t                   width,
-                                                           rocsparse_direction   block_direction,
-                                                           int64_t               block_dim,
-                                                           rocsparse_idvec_descr col_data,
-                                                           rocsparse_error*      p_error)
+
+extern "C" rocsparse_status rocsparse_spattern_descr_create_sell(rocsparse_handle          handle,
+                                                                 rocsparse_spattern_descr* p_descr,
+                                                                 int64_t                   rows,
+                                                                 int64_t                   cols,
+                                                                 int64_t                   nnz,
+                                                                 int64_t sell_slice_size,
+                                                                 int64_t sell_colval_size,
+                                                                 rocsparse_idvec_descr row_data,
+                                                                 rocsparse_idvec_descr col_data,
+                                                                 rocsparse_error*      p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, p_descr);
+    ROCSPARSE_CHECKARG_SIZE(2, rows);
+    ROCSPARSE_CHECKARG_SIZE(3, cols);
+    ROCSPARSE_CHECKARG_SIZE(4, nnz);
+    ROCSPARSE_CHECKARG_SIZE(5, sell_slice_size);
+    ROCSPARSE_CHECKARG_SIZE(6, sell_colval_size);
+    ROCSPARSE_CHECKARG_POINTER(7, row_data);
+    ROCSPARSE_CHECKARG_POINTER(8, col_data);
+    p_descr[0] = new _rocsparse_spattern_descr;
+    p_descr[0]->define_sell(
+        rows, cols, nnz, sell_slice_size, sell_colval_size, row_data, col_data, nullptr, nullptr);
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+extern "C" rocsparse_status
+    rocsparse_spattern_descr_create_bell(rocsparse_handle          handle,
+                                         rocsparse_spattern_descr* p_descr,
+                                         int64_t                   rowsb,
+                                         int64_t                   colsb,
+                                         int64_t                   width,
+                                         rocsparse_direction       block_direction,
+                                         int64_t                   block_dim,
+                                         rocsparse_idvec_descr     col_data,
+                                         rocsparse_error*          p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

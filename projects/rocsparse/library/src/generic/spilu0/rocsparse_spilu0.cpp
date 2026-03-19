@@ -50,10 +50,10 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(2,
                            A,
-                           (A->data_type != spilu0_descr->get_compute_datatype()),
+                           (A->get_data_type() != spilu0_descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
 
-        const rocsparse_format       format         = A->format;
+        const rocsparse_format       format         = A->get_format();
         const rocsparse_spilu0_stage previous_stage = spilu0_descr->get_stage();
         switch(spilu0_stage)
         {
@@ -92,7 +92,7 @@ namespace rocsparse
             // Record the matrix format.
             //
             spilu0_descr->set_format(format);
-            spilu0_descr->m_batch_count = A->batch_count;
+            spilu0_descr->m_batch_count = A->get_batch_count();
             switch(format)
             {
             case rocsparse_format_csr:
@@ -102,7 +102,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    spilu0_descr->set_shared_csrilu0_info(A->info->get_shared_csrilu0_info());
+                    spilu0_descr->set_shared_csrilu0_info(A->get_info()->get_shared_csrilu0_info());
                     csrilu0_info = spilu0_descr->get_csrilu0_info();
                     break;
                 }
@@ -143,7 +143,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    spilu0_descr->set_shared_bsrilu0_info(A->info->get_shared_bsrilu0_info());
+                    spilu0_descr->set_shared_bsrilu0_info(A->get_info()->get_shared_bsrilu0_info());
                     bsrilu0_info = spilu0_descr->get_bsrilu0_info();
                     break;
                 }
@@ -200,7 +200,7 @@ namespace rocsparse
                     "the stage rocsparse_spilu0_stage_compute");
             }
 
-            spilu0_descr->m_batch_count = A->batch_count;
+            spilu0_descr->m_batch_count = A->get_batch_count();
             switch(format)
             {
             case rocsparse_format_csr:

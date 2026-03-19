@@ -548,7 +548,7 @@ namespace rocsparse
             //
             //
             sptrsv_descr->set_format(format);
-            sptrsv_descr->m_batch_count = dnvec_descr_y->batch_count;
+            sptrsv_descr->m_batch_count = dnvec_descr_y->get_batch_count();
 
             switch(format)
             {
@@ -670,7 +670,7 @@ namespace rocsparse
                 handle, sptrsv_descr, sptrsv_descr->get_scalar_alpha(), &alpha));
 
             const rocsparse_datatype alpha_datatype = sptrsv_descr->get_compute_datatype();
-            sptrsv_descr->m_batch_count             = dnvec_descr_y->batch_count;
+            sptrsv_descr->m_batch_count             = dnvec_descr_y->get_batch_count();
             switch(format)
             {
             case rocsparse_format_csr:

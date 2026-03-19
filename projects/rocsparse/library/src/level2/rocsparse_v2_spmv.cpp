@@ -744,6 +744,10 @@ namespace rocsparse
                 rocsparse_cscmv_info cscmv_info = spmv_descr->get_cscmv_info();
                 if(cscmv_info == nullptr)
                 {
+                    std::cout << "row type 32? " << (row_type == rocsparse_indextype_i32)
+                              << std::endl;
+                    std::cout << "col type 32? " << (col_type == rocsparse_indextype_i32)
+                              << std::endl;
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,
                                                                          operation,
                                                                          alg_csrmv,

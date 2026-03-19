@@ -38,8 +38,8 @@ extern "C" {
 /*! \ingroup aux_module
    *  \brief Create an indexing vector descriptor
    *  \details
-   *  \p rocsparse_idvec_create creates an indexing vector descriptor. It should be
-   *  destroyed at the end using rocsparse_idvec_destroy().
+   *  \p rocsparse_idvec_descr_create creates an indexing vector descriptor. It should be
+   *  destroyed at the end using rocsparse_idvec_descr_destroy().
    *
    *  This offers the flexibility to define data such that the ith element \f$e\f$
    *  \f[
@@ -73,28 +73,28 @@ extern "C" {
    *  \retval rocsparse_status_invalid_value if \p indextype is invalid.
    */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_idvec_create(rocsparse_handle       handle,
-                                        rocsparse_idvec_descr* descr,
-                                        rocsparse_indextype    indextype,
-                                        rocsparse_index_base   base,
-                                        int64_t                size,
-                                        int64_t                inc,
-                                        const void*            const_data,
-                                        void*                  data,
-                                        rocsparse_error*       p_error);
+rocsparse_status rocsparse_idvec_descr_create(rocsparse_handle       handle,
+                                              rocsparse_idvec_descr* descr,
+                                              rocsparse_indextype    indextype,
+                                              rocsparse_index_base   base,
+                                              int64_t                size,
+                                              int64_t                inc,
+                                              const void*            const_data,
+                                              void*                  data,
+                                              rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
-   *  \brief Create a batched indexing vector descriptor
+   *  \brief Create a batch indexing vector descriptor
    *  \details
-   *  \p rocsparse_idvec_create_batched creates a batched indexing vector descriptor. It should be
-   *  destroyed at the end using rocsparse_idvec_destroy().
+   *  \p rocsparse_idvec_descr_create_batch creates a batch indexing vector descriptor. It should be
+   *  destroyed at the end using rocsparse_idvec_descr_destroy().
    *
-   *  In the case of a strided batched data type, \ref rocsparse_batchtype_strided, this offers the flexibility to define batched data such that the \f$i^{th}\f$ element \f$e\f$ of the \f$j^{th}\f$ vector is:
+   *  In the case of a strided batch data type, \ref rocsparse_batchtype_strided, this offers the flexibility to define batch data such that the \f$i^{th}\f$ element \f$e\f$ of the \f$j^{th}\f$ vector is:
    *  \f[
    *    e := A[ j * batch_dist + i * inc], where j is the batch index, and A is the appropriate pointer type.
    *  \f]
    *
-   *  In the case of an array of pointers data type, \ref rocsparse_batchtype_pointerarray, this offers the flexibility to define batched data such that the \f$i^{th}\f$ element \f$e\f$ of the \f$j^{th}\f$ vector is:
+   *  In the case of an array of pointers data type, \ref rocsparse_batchtype_pointerarray, this offers the flexibility to define batch data such that the \f$i^{th}\f$ element \f$e\f$ of the \f$j^{th}\f$ vector is:
    *  \f[
    *    e := A[j * batch_dist][i * inc], where j is the batch index, and A is the appropriate pointer type.
    *  \f]
@@ -114,11 +114,11 @@ rocsparse_status rocsparse_idvec_create(rocsparse_handle       handle,
    *  @param[in]
    *  inc   increment, arbitrary value.
    *  @param[in]
-   *  batch_type  type of the batched data.
+   *  batch_type  type of the batch data.
    *  @param[in]
-   *  batch_storage  storage type of the batched data.
+   *  batch_storage  storage type of the batch data.
    *  @param[in]
-   *  batch_count  size of the batched data, must be positive.
+   *  batch_count  size of the batch data, must be positive.
    *  @param[in]
    *  batch_dist   batch distance, arbitrary value.
    *  @param[in]
@@ -136,25 +136,25 @@ rocsparse_status rocsparse_idvec_create(rocsparse_handle       handle,
    *  \retval rocsparse_status_invalid_value if \p batch_type or \p indextype is invalid.
    */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_idvec_create_batched(rocsparse_handle       handle,
-                                                rocsparse_idvec_descr* descr,
-                                                rocsparse_indextype    indextype,
-                                                rocsparse_index_base   base,
-                                                int64_t                size,
-                                                int64_t                inc,
-                                                rocsparse_batchtype    batch_type,
-                                                rocsparse_batchstorage batch_storage,
-                                                int64_t                batch_count,
-                                                int64_t                batch_dist,
-                                                const void*            const_data,
-                                                void*                  data,
-                                                rocsparse_error*       p_error);
+rocsparse_status rocsparse_idvec_descr_create_batch(rocsparse_handle       handle,
+                                                    rocsparse_idvec_descr* descr,
+                                                    rocsparse_indextype    indextype,
+                                                    rocsparse_index_base   base,
+                                                    int64_t                size,
+                                                    int64_t                inc,
+                                                    rocsparse_batchtype    batch_type,
+                                                    rocsparse_batchstorage batch_storage,
+                                                    int64_t                batch_count,
+                                                    int64_t                batch_dist,
+                                                    const void*            const_data,
+                                                    void*                  data,
+                                                    rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
    *  \brief Destroy an indexing vector descriptor
    *
    *  \details
-   *  \p rocsparse_idvec_destroy destroys an indexing vector descriptor and releases all
+   *  \p rocsparse_idvec_descr_destroy destroys an indexing vector descriptor and releases all
    *  resources used by the descriptor.
    *
    *  @param[in]
@@ -169,9 +169,9 @@ rocsparse_status rocsparse_idvec_create_batched(rocsparse_handle       handle,
    *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
    */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_idvec_destroy(rocsparse_handle      handle,
-                                         rocsparse_idvec_descr descr,
-                                         rocsparse_error*      p_error);
+rocsparse_status rocsparse_idvec_descr_destroy(rocsparse_handle      handle,
+                                               rocsparse_idvec_descr descr,
+                                               rocsparse_error*      p_error);
 
 /*! \ingroup aux_module
    *  \brief Get a property of the indexing vector descriptor

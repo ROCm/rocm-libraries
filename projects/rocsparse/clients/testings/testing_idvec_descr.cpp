@@ -30,7 +30,7 @@ static void testing_idvec_descr_bad_arg(const Arguments& arg)
     rocsparse_error        p_error[1];
 
     //
-    // rocsparse_idvec_create
+    // rocsparse_idvec_descr_create
     //
     {
         rocsparse_idvec_descr* p_descr    = (rocsparse_idvec_descr*)0x4;
@@ -40,18 +40,20 @@ static void testing_idvec_descr_bad_arg(const Arguments& arg)
         void*                  data       = (void*)0x4;
         rocsparse_indextype    indextype  = rocsparse_indextype_i32;
         rocsparse_index_base   base       = rocsparse_index_base_zero;
-#define PARAMS_CREATE handle, p_descr, indextype, base, size, inc, const_data, data, p_error
+#define PARAMS_DESCR_CREATE handle, p_descr, indextype, base, size, inc, const_data, data, p_error
         {
             static constexpr int32_t nargs_to_exclude                  = 3;
             const int32_t            args_to_exclude[nargs_to_exclude] = {5, 7, 8};
-            select_bad_arg_analysis(
-                rocsparse_idvec_create, nargs_to_exclude, args_to_exclude, PARAMS_CREATE);
+            select_bad_arg_analysis(rocsparse_idvec_descr_create,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_DESCR_CREATE);
         }
-#undef PARAMS_CREATE
+#undef PARAMS_DESCR_CREATE
     }
 
     //
-    // rocsparse_idvec_create_batched
+    // rocsparse_idvec_descr_create_batch
     //
     {
         rocsparse_idvec_descr* p_descr       = (rocsparse_idvec_descr*)0x4;
@@ -65,18 +67,18 @@ static void testing_idvec_descr_bad_arg(const Arguments& arg)
         int64_t                batch_dist    = 0;
         const void*            const_data    = (const void*)0x4;
         void*                  data          = (void*)0x4;
-#define PARAMS_CREATE_BATCHED                                                            \
+#define PARAMS_DESCR_CREATE_BATCH                                                        \
     handle, p_descr, indextype, base, size, inc, batch_type, batch_storage, batch_count, \
         batch_dist, const_data, data, p_error
         {
             static constexpr int32_t nargs_to_exclude                  = 4;
             const int32_t            args_to_exclude[nargs_to_exclude] = {5, 9, 11, 12};
-            select_bad_arg_analysis(rocsparse_idvec_create_batched,
+            select_bad_arg_analysis(rocsparse_idvec_descr_create_batch,
                                     nargs_to_exclude,
                                     args_to_exclude,
-                                    PARAMS_CREATE_BATCHED);
+                                    PARAMS_DESCR_CREATE_BATCH);
         }
-#undef PARAMS_CREATE_BATCHED
+#undef PARAMS_DESCR_CREATE_BATCH
     }
 
     //
@@ -187,18 +189,20 @@ static void testing_idvec_descr_bad_arg(const Arguments& arg)
     }
 
     //
-    // rocsparse_idvec_destroy
+    // rocsparse_idvec_descr_destroy
     //
     {
         rocsparse_idvec_descr descr = (rocsparse_idvec_descr)0x4;
-#define PARAMS_DESTROY handle, descr, p_error
+#define PARAMS_DESCR_DESTROY handle, descr, p_error
         {
             static constexpr int32_t nargs_to_exclude                  = 2;
             const int32_t            args_to_exclude[nargs_to_exclude] = {1, 2};
-            select_bad_arg_analysis(
-                rocsparse_idvec_destroy, nargs_to_exclude, args_to_exclude, PARAMS_DESTROY);
+            select_bad_arg_analysis(rocsparse_idvec_descr_destroy,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_DESCR_DESTROY);
         }
-#undef PARAMS_DESTROY
+#undef PARAMS_DESCR_DESTROY
     }
 }
 
@@ -210,7 +214,10 @@ void testing_idvec_descr_bad_arg(const Arguments& arg)
 
 #include "rocsparse_enum.hpp"
 
-void testing_idvec_descr_extra(const Arguments& arg)
+void testing_idvec_descr_extra(const Arguments& arg) {}
+
+template <typename T>
+void testing_idvec_descr(const Arguments& arg)
 {
     rocsparse_local_handle handle;
     rocsparse_idvec_descr  descr{};
@@ -227,19 +234,38 @@ void testing_idvec_descr_extra(const Arguments& arg)
     rocsparse_batchstorage batch_storage = rocsparse_batchstorage_soa;
     rocsparse_index_base   base          = rocsparse_index_base_one;
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_create_batched(handle,
-                                                         &descr,
-                                                         indextype,
-                                                         base,
-                                                         size,
-                                                         inc,
-                                                         batch_type,
-                                                         batch_storage,
-                                                         batch_count,
-                                                         batch_dist,
-                                                         const_data,
-                                                         data,
-                                                         p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_descr_create_batch(handle,
+                                                             &descr,
+                                                             indextype,
+                                                             base,
+                                                             size,
+                                                             inc,
+                                                             batch_type,
+                                                             batch_storage,
+                                                             batch_count,
+                                                             batch_dist,
+                                                             const_data,
+                                                             data,
+                                                             p_error));
+
+    {
+        void* inject_data = (void*)0x4;
+        CHECK_ROCSPARSE_ERROR(rocsparse_idvec_set_data(handle, descr, inject_data, p_error));
+        void* fetch_data;
+        CHECK_ROCSPARSE_ERROR(rocsparse_idvec_get_data(handle, descr, &fetch_data, p_error));
+        ASSERT_EQ(fetch_data, inject_data);
+        CHECK_ROCSPARSE_ERROR(rocsparse_idvec_set_data(handle, descr, data, p_error));
+    }
+
+    {
+        const void* inject_const_data = (const void*)0x4;
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_idvec_set_const_data(handle, descr, inject_const_data, p_error));
+        const void* fetch_data;
+        CHECK_ROCSPARSE_ERROR(rocsparse_idvec_get_const_data(handle, descr, &fetch_data, p_error));
+        ASSERT_EQ(fetch_data, inject_const_data);
+        CHECK_ROCSPARSE_ERROR(rocsparse_idvec_set_const_data(handle, descr, const_data, p_error));
+    }
 
     for(rocsparse_idvec_prop prop : rocsparse_idvec_prop_t::values)
     {
@@ -328,12 +354,12 @@ void testing_idvec_descr_extra(const Arguments& arg)
         }
     }
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_destroy(handle, descr, p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_descr_destroy(handle, descr, p_error));
 
     //
     // Create.
     //
-    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_create(
+    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_descr_create(
         handle, &descr, indextype, base, size, inc, const_data, data, p_error));
 
     for(rocsparse_idvec_prop prop : rocsparse_idvec_prop_t::values)
@@ -547,15 +573,7 @@ void testing_idvec_descr_extra(const Arguments& arg)
         }
     }
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_destroy(handle, descr, p_error));
-}
-
-template <typename T>
-void testing_idvec_descr(const Arguments& arg)
-{
-    //
-    //
-    //
+    CHECK_ROCSPARSE_ERROR(rocsparse_idvec_descr_destroy(handle, descr, p_error));
 }
 
 #define INSTANTIATE(TTYPE)                                                  \

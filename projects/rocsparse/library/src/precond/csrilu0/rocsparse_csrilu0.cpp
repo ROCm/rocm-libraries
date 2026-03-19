@@ -61,11 +61,12 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
                        (A->get_descr()->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    csrilu0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
-    if(A->col_type == rocsparse_indextype_i32)
+    csrilu0_info->create_singularity_numeric_exact(
+        A->get_batch_count(), A->get_col_type(), handle->stream);
+    if(A->get_col_type() == rocsparse_indextype_i32)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int32_t*)csrilu0_info->get_singularity_numeric_exact()->get_position(),
             (const int32_t*)csrilu0_info->get_position(),
             handle->stream));
@@ -73,18 +74,19 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int64_t*)csrilu0_info->get_singularity_numeric_exact()->get_position(),
             (const int64_t*)csrilu0_info->get_position(),
             handle->stream));
     }
 
-    csrilu0_info->create_singularity_numeric_near(A->batch_count, A->col_type, handle->stream);
+    csrilu0_info->create_singularity_numeric_near(
+        A->get_batch_count(), A->get_col_type(), handle->stream);
 
-    if(A->col_type == rocsparse_indextype_i32)
+    if(A->get_col_type() == rocsparse_indextype_i32)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int32_t*)csrilu0_info->get_singularity_numeric_near()->get_position(),
             (const int32_t*)csrilu0_info->get_position(),
             handle->stream));
@@ -92,7 +94,7 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int64_t*)csrilu0_info->get_singularity_numeric_near()->get_position(),
             (const int64_t*)csrilu0_info->get_position(),
             handle->stream));

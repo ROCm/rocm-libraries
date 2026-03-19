@@ -40,21 +40,23 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
     ROCSPARSE_CHECKARG_POINTER(1, csrilu0_info);
     ROCSPARSE_CHECKARG_POINTER(2, A);
 
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->get_rows() == 0 || A->get_batch_count() == 0)
     {
         return rocsparse_status_success;
     }
 
     ROCSPARSE_CHECKARG_ARRAY(8, buffer_size, buffer);
 
-    ROCSPARSE_CHECKARG(2, A, (A->descr == nullptr), rocsparse_status_invalid_pointer);
-
-    ROCSPARSE_CHECKARG(
-        2, A, (A->descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, A, (A->get_descr() == nullptr), rocsparse_status_invalid_pointer);
 
     ROCSPARSE_CHECKARG(2,
                        A,
-                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       (A->get_descr()->type != rocsparse_matrix_type_general),
+                       rocsparse_status_not_implemented);
+
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       (A->get_descr()->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
     auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
@@ -79,10 +81,10 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
         launch = rocsparse::find_csrilu0_kernel_hash_launch(handle, csrilu0_info, A);
     }
 
-    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
+    const int64_t A_batch_count = (A->get_batch_stride() == 0) ? 1 : A->get_batch_count();
     RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                        0,
-                                       sizeof(int32_t) * A->rows * A_batch_count,
+                                       sizeof(int32_t) * A->get_rows() * A_batch_count,
                                        handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrilu0_info, A, boost, buffer_size, buffer));

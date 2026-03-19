@@ -318,9 +318,9 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnmat_set_strided_batch`        |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_idvec_create`                   |
+|:cpp:func:`rocsparse_idvec_descr_create`             |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_idvec_create_batched`           |
+|:cpp:func:`rocsparse_idvec_descr_create_batch`       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_idvec_destroy`                  |
 +-----------------------------------------------------+
@@ -335,6 +335,84 @@ Auxiliary functions
 |:cpp:func:`rocsparse_idvec_get_const_data`           |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_idvec_set_const_data`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_descr_create`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_descr_create_batch`       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_destroy`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_get_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_set_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_get_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_set_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_get_const_data`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_set_const_data`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_descr_destroy`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_descr_create`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_descr_create_batch`       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_destroy`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_get_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_set_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_get_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_set_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_get_const_data`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_set_const_data`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_destroy`         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_coo`      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_coo_aos`  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_csr`      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_csc`      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_ell`      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_bell`     |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_bsr`      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_descr_create_sell`     |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_get_prop`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_set_prop`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_get_data`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spattern_set_data`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_descr_destroy`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_descr_create_coo`         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_get_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_get_spattern`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_set_spattern`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_get_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_set_data`                 |
 +-----------------------------------------------------+
 
 Sparse level 1 functions

@@ -30,3 +30,8 @@ Tests:
   category: pre_checkin
   function: idvec_descr_bad_arg
   precision: *single_double_precisions
+
+
+- name: idvec_descr
+  category: quick
+  function: idvec_descr

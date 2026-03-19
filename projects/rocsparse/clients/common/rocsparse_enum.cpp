@@ -26,6 +26,24 @@
 
 #include "rocsparse_enum.hpp"
 
+constexpr rocsparse_idvec_prop_t::value_t
+    rocsparse_idvec_prop_t::values[rocsparse_idvec_prop_t::nvalues];
+
+constexpr rocsparse_dnvec_prop_t::value_t
+    rocsparse_dnvec_prop_t::values[rocsparse_dnvec_prop_t::nvalues];
+
+constexpr rocsparse_dnmat_prop_t::value_t
+    rocsparse_dnmat_prop_t::values[rocsparse_dnmat_prop_t::nvalues];
+
+constexpr rocsparse_spmat_prop_t::value_t
+    rocsparse_spmat_prop_t::values[rocsparse_spmat_prop_t::nvalues];
+
+constexpr rocsparse_spattern_prop_t::value_t
+    rocsparse_spattern_prop_t::values[rocsparse_spattern_prop_t::nvalues];
+
+constexpr rocsparse_spattern_data_t::value_t
+    rocsparse_spattern_data_t::values[rocsparse_spattern_data_t::nvalues];
+
 constexpr rocsparse_matrix_type_t::value_t
     rocsparse_matrix_type_t::values[rocsparse_matrix_type_t::nvalues];
 

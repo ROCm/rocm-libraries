@@ -1356,7 +1356,13 @@ typedef enum rocsparse_batchtype_
  */
 typedef enum rocsparse_batchstorage_
 {
+    /*!
+   * @brief Structure Of Arrays.
+   */
     rocsparse_batchstorage_soa,
+    /*!
+   * @brief Array of Structs.
+   */
     rocsparse_batchstorage_aos
 } rocsparse_batchstorage;
 
@@ -1431,7 +1437,7 @@ typedef enum rocsparse_dnvec_prop_
      */
     rocsparse_dnvec_prop_batchtype,
     /*!
-     * @brief The batch storage, \ref rocsparse_batchstorage.
+     * @brief The batch storage, \ref rocsparse_batchstorage, \ref rocsparse_batchstorage_soa by default.
      */
     rocsparse_dnvec_prop_batchstorage,
     /*!
@@ -1553,6 +1559,9 @@ typedef enum rocsparse_spattern_data_
     rocsparse_spattern_data_column,
 } rocsparse_spattern_data;
 
+/*!
+ * @brief Properties of a sparse matrix.
+ */
 typedef enum rocsparse_spmat_prop_
 {
     /*!

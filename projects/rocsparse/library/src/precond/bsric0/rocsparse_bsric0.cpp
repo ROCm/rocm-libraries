@@ -38,7 +38,7 @@ rocsparse_status rocsparse::bsric0(rocsparse_handle      handle,
 
     ROCSPARSE_CHECKARG_POINTER(2, A);
 
-    const bool quick_return = (A->rows == 0 || A->batch_count == 0);
+    const bool quick_return = (A->get_rows() == 0 || A->get_batch_count() == 0);
 
     ROCSPARSE_CHECKARG(4,
                        buffer,
@@ -52,7 +52,7 @@ rocsparse_status rocsparse::bsric0(rocsparse_handle      handle,
 
     ROCSPARSE_CHECKARG_POINTER(1, bsric0_info);
 
-    const rocsparse_mat_descr descr = A->descr;
+    const rocsparse_mat_descr descr = A->get_descr();
     ROCSPARSE_CHECKARG(
         2, A, (descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
 
@@ -61,12 +61,13 @@ rocsparse_status rocsparse::bsric0(rocsparse_handle      handle,
                        (descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    bsric0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
+    bsric0_info->create_singularity_numeric_exact(
+        A->get_batch_count(), A->get_col_type(), handle->stream);
 
-    if(A->col_type == rocsparse_indextype_i32)
+    if(A->get_col_type() == rocsparse_indextype_i32)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int32_t*)bsric0_info->get_singularity_numeric_exact()->get_position(),
             (const int32_t*)bsric0_info->get_position(),
             handle->stream));
@@ -74,13 +75,13 @@ rocsparse_status rocsparse::bsric0(rocsparse_handle      handle,
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
-            A->batch_count,
+            A->get_batch_count(),
             (int64_t*)bsric0_info->get_singularity_numeric_exact()->get_position(),
             (const int64_t*)bsric0_info->get_position(),
             handle->stream));
     }
 
-    if(A->val_data != nullptr)
+    if(A->get_val_data() != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::bsric0_kernel_launch(handle, bsric0_info, A, buffer_size, buffer));
