@@ -377,54 +377,25 @@ MIOPEN_INTERNALS_EXPORT void BufferLog(std::string&& line);
 
 MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
 
-#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                       \
-    do                                                                                             \
-    {                                                                                              \
-        const bool is_logging = miopen::IsLogging(level, disableQuieting);                         \
-        if(is_logging)                                                                             \
-        {                                                                                          \
-            /* Path 1: Logging to stderr is enabled - use full prefix */                           \
-            auto& miopen_log_ss = miopen::GetThreadLocalLogStream();                               \
-            miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] "        \
-                          << __VA_ARGS__ << std::endl;                                             \
-            std::cerr << miopen_log_ss.str();                                                      \
-            /* Also buffer if buffer is enabled */                                                 \
-            const bool buffer_on = miopen::IsLogBufferOn();                                        \
-            if(buffer_on)                                                                          \
-            {                                                                                      \
-                const bool is_logging_i2 =                                                         \
-                    miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting);               \
-                if(!is_logging_i2 && level < miopen::LoggingLevel::Trace)                          \
-                {                                                                                  \
-                    miopen::BufferLog(miopen_log_ss.str());                                        \
-                }                                                                                  \
-                if(level == miopen::LoggingLevel::Error)                                           \
-                {                                                                                  \
-                    miopen::OutputBufferedLogs();                                                  \
-                }                                                                                  \
-            }                                                                                      \
-        }                                                                                          \
-        else                                                                                       \
-        {                                                                                          \
-            /* Path 2: Logging disabled, buffer-only - use minimal prefix */                       \
-            const bool buffer_on = miopen::IsLogBufferOn();                                        \
-            if(buffer_on)                                                                          \
-            {                                                                                      \
-                const bool is_logging_i2 =                                                         \
-                    miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting);               \
-                if(!is_logging_i2 && level < miopen::LoggingLevel::Trace)                          \
-                {                                                                                  \
-                    auto& miopen_log_ss = miopen::GetThreadLocalLogStream();                       \
-                    miopen_log_ss << miopen::LoggingPrefixMinimal() << category << " [" << fn_name \
-                                  << "] " << __VA_ARGS__ << std::endl;                             \
-                    miopen::BufferLog(miopen_log_ss.str());                                        \
-                }                                                                                  \
-                if(level == miopen::LoggingLevel::Error)                                           \
-                {                                                                                  \
-                    miopen::OutputBufferedLogs();                                                  \
-                }                                                                                  \
-            }                                                                                      \
-        }                                                                                          \
+/// Internal helper that contains all branching logic for MIOPEN_LOG_XQ_CUSTOM.
+/// Keeping the logic here (rather than inline in the macro) prevents the macro
+/// from inflating the cyclomatic complexity of every translation unit that uses it.
+MIOPEN_INTERNALS_EXPORT void LogXQCustomImpl(LoggingLevel level,
+                                             bool disableQuieting,
+                                             std::string_view category,
+                                             std::string_view fn_name,
+                                             std::string message);
+
+#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)     \
+    do                                                                           \
+    {                                                                            \
+        if(miopen::IsLogging(level, disableQuieting) || miopen::IsLogBufferOn()) \
+        {                                                                        \
+            auto& miopen_log_ss = miopen::GetThreadLocalLogStream();             \
+            miopen_log_ss << __VA_ARGS__;                                        \
+            miopen::LogXQCustomImpl(                                             \
+                level, disableQuieting, category, fn_name, miopen_log_ss.str()); \
+        }                                                                        \
     } while(false)
 
 #define MIOPEN_LOG_XQ_(level, disableQuieting, fn_name, ...) \

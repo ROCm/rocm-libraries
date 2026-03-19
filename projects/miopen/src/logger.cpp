@@ -123,6 +123,49 @@ void BufferLog(std::string&& line)
     log_buffer_i             = (log_buffer_i + 1) % GetBufferSize();
 }
 
+void LogXQCustomImpl(const LoggingLevel level,
+                     const bool disableQuieting,
+                     const std::string_view category,
+                     const std::string_view fn_name,
+                     std::string message)
+{
+    const bool is_logging = IsLogging(level, disableQuieting);
+    if(is_logging)
+    {
+        // Path 1: Logging to stderr is enabled - use full prefix.
+        auto& miopen_log_ss = GetThreadLocalLogStream();
+        miopen_log_ss << LoggingPrefix() << category << " [" << fn_name << "] " << message
+                      << std::endl;
+        std::cerr << miopen_log_ss.str();
+        // Also buffer if buffer is enabled.
+        if(IsLogBufferOn())
+        {
+            if(!IsLogging(LoggingLevel::Info2, disableQuieting) && level < LoggingLevel::Trace)
+            {
+                BufferLog(miopen_log_ss.str());
+            }
+            if(level == LoggingLevel::Error)
+                OutputBufferedLogs();
+        }
+    }
+    else
+    {
+        // Path 2: Logging disabled, buffer-only - use minimal prefix.
+        if(IsLogBufferOn())
+        {
+            if(!IsLogging(LoggingLevel::Info2, disableQuieting) && level < LoggingLevel::Trace)
+            {
+                auto& miopen_log_ss = GetThreadLocalLogStream();
+                miopen_log_ss << LoggingPrefixMinimal() << category << " [" << fn_name << "] "
+                              << message << std::endl;
+                BufferLog(miopen_log_ss.str());
+            }
+            if(level == LoggingLevel::Error)
+                OutputBufferedLogs();
+        }
+    }
+}
+
 void OutputBufferedLogs()
 {
     auto& log_buffer     = GetLogBuffer();
