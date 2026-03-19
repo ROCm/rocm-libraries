@@ -137,8 +137,7 @@ template <typename ADataType_,
           index_t kCMPerLane_,
           index_t kCMNumAccess_,
           typename OpType_,
-          MmaOpFamily OpFamily_,
-          index_t kCompressionRatio_ = 1>
+          MmaOpFamily OpFamily_>
 struct amdgcn_mma_base
 {
     using OpType                          = OpType_;
@@ -162,11 +161,9 @@ struct amdgcn_mma_base
     static constexpr index_t kBRepeat     = kBRepeat_;     // RDNA3 repetition and MFMA block-hiding
     static constexpr index_t kCMPerLane   = kCMPerLane_;   // M2 * M0
     static constexpr index_t kCMNumAccess = kCMNumAccess_; // M2
-    static constexpr index_t kCompressionRatio =
-        kCompressionRatio_; // Sparse intrisics matrix A compression
 
     // K-dimension compression ratio for A matrix, always 2 for sparse intrinsics.
-    // static constexpr index_t kCompressionRatio = (OpFamily == MmaOpFamily::SPARSE) ? 2 : 1;
+    static constexpr index_t kCompressionRatio = (OpFamily == MmaOpFamily::SPARSE) ? 2 : 1;
 
     // Layout checks
     static_assert(kK % kABKPerLane == 0);
