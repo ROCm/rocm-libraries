@@ -183,7 +183,7 @@ TEST_F(TestUnpackOperation, FailsWhenTypeCannotBeDetermined)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     hipdnnBackendDescriptor_t desc = nullptr;
 
     auto [node, err] = unpackOperation(desc, tensorMap, graphAttrs);
@@ -213,7 +213,7 @@ TEST_F(TestUnpackOperation, FailsForUnsupportedOperationType)
                         Return(HIPDNN_STATUS_SUCCESS)));
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     hipdnnBackendDescriptor_t desc = nullptr;
 
     auto [node, err] = unpackOperation(desc, tensorMap, graphAttrs);
@@ -255,7 +255,7 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     hipdnnBackendDescriptor_t desc = nullptr;
 
     auto [node, err] = unpackOperation(desc, tensorMap, graphAttrs);
@@ -553,7 +553,7 @@ TEST_F(TestUnpackOperation, UnpackOperationSuccessConvFprop)
 
     // --- Execute ---
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     hipdnnBackendDescriptor_t desc = nullptr;
 
     auto [node, err] = unpackOperation(desc, tensorMap, graphAttrs);
@@ -939,7 +939,7 @@ protected:
     static std::pair<std::shared_ptr<graph::INode>, Error> executeUnpack()
     {
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
-        GraphAttributes const graphAttrs;
+        const GraphAttributes graphAttrs;
         hipdnnBackendDescriptor_t desc = nullptr;
         return unpackOperation(desc, tensorMap, graphAttrs);
     }
@@ -1128,7 +1128,7 @@ TEST_F(TestUnpackConvFpropErrors, UnpackConvFpropOperationNameFails)
 
 TEST(TestCreateNodeForType, CreatesConvFpropNode)
 {
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD, graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
@@ -1138,7 +1138,7 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
 {
-    GraphAttributes const graphAttrs;
+    const GraphAttributes graphAttrs;
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE, graphAttrs);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);

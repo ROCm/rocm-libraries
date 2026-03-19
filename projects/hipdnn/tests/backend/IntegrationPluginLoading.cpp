@@ -100,7 +100,7 @@ void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
 
 TEST_F(IntegrationPluginLoading, EmptyPluginPath)
 {
-    hipdnn_test_sdk::utilities::ScopedDirectory const pluginDir("empty_plugins");
+    const hipdnn_test_sdk::utilities::ScopedDirectory pluginDir("empty_plugins");
     auto pluginPath = pluginDir.path().string();
     const std::array<const char*, 1> paths = {pluginPath.c_str()};
     ASSERT_EQ(
@@ -171,7 +171,7 @@ TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
     std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
     hipdnnGetLastErrorString(buffer.data(), buffer.size());
 
-    std::string const expectedError
+    const std::string expectedError
         = fmt::format("Engine ID {} already exists",
                       hipdnn_tests::plugin_constants::engineId<DuplicateIdBPlugin>());
 
@@ -262,7 +262,7 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsNoApplicableEngines)
 
 TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths
@@ -296,7 +296,7 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsOneApplicableEngine)
 TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
 {
 
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths
@@ -330,7 +330,7 @@ TEST_F(IntegrationPluginLoading, MultiplePluginsMultipleApplicableEngines)
 TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
 {
 
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter const envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths

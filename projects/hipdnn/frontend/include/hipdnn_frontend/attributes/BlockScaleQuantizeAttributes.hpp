@@ -160,7 +160,7 @@ public:
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        flatbuffers::Optional<int64_t> const fbAxis = axis;
+        const flatbuffers::Optional<int64_t> fbAxis = axis;
 
         // NOLINTBEGIN(bugprone-unchecked-optional-access)
         // Throws if block_size not set; requires prior validation

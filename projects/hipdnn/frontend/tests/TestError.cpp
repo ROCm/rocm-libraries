@@ -6,7 +6,7 @@
 
 TEST(TestError, DefaultConstructor)
 {
-    hipdnn_frontend::Error const error;
+    const hipdnn_frontend::Error error;
     EXPECT_EQ(error.get_code(), hipdnn_frontend::ErrorCode::OK);
     EXPECT_TRUE(error.is_good());
     EXPECT_FALSE(error.is_bad());
@@ -15,7 +15,7 @@ TEST(TestError, DefaultConstructor)
 
 TEST(TestError, ParameterizedConstructor)
 {
-    hipdnn_frontend::Error const error(hipdnn_frontend::ErrorCode::INVALID_VALUE,
+    const hipdnn_frontend::Error error(hipdnn_frontend::ErrorCode::INVALID_VALUE,
                                        "Invalid value provided");
     EXPECT_EQ(error.get_code(), hipdnn_frontend::ErrorCode::INVALID_VALUE);
     EXPECT_FALSE(error.is_good());
@@ -25,9 +25,9 @@ TEST(TestError, ParameterizedConstructor)
 
 TEST(TestError, EqualityOperators)
 {
-    hipdnn_frontend::Error const error1(hipdnn_frontend::ErrorCode::INVALID_VALUE, "Error 1");
-    hipdnn_frontend::Error const error2(hipdnn_frontend::ErrorCode::INVALID_VALUE, "Error 2");
-    hipdnn_frontend::Error const error3(hipdnn_frontend::ErrorCode::ATTRIBUTE_NOT_SET, "Error 3");
+    const hipdnn_frontend::Error error1(hipdnn_frontend::ErrorCode::INVALID_VALUE, "Error 1");
+    const hipdnn_frontend::Error error2(hipdnn_frontend::ErrorCode::INVALID_VALUE, "Error 2");
+    const hipdnn_frontend::Error error3(hipdnn_frontend::ErrorCode::ATTRIBUTE_NOT_SET, "Error 3");
 
     EXPECT_TRUE(error1 == error2);
     EXPECT_FALSE(error1 == error3);
@@ -37,7 +37,7 @@ TEST(TestError, EqualityOperators)
 
 TEST(TestError, CodeEqualityOperators)
 {
-    hipdnn_frontend::Error const error(hipdnn_frontend::ErrorCode::INVALID_VALUE,
+    const hipdnn_frontend::Error error(hipdnn_frontend::ErrorCode::INVALID_VALUE,
                                        "Invalid value provided");
 
     EXPECT_TRUE(error == hipdnn_frontend::ErrorCode::INVALID_VALUE);
@@ -61,7 +61,7 @@ TEST(TestError, CheckHipdnnErrorMacro)
         return {hipdnn_frontend::ErrorCode::OK, "Should not reach here"};
     };
 
-    hipdnn_frontend::Error const result = testFunction();
+    const hipdnn_frontend::Error result = testFunction();
     EXPECT_EQ(result.get_code(), hipdnn_frontend::ErrorCode::INVALID_VALUE);
     EXPECT_EQ(result.get_message(), "Failure");
 }

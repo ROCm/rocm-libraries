@@ -80,7 +80,7 @@ TEST(TestDescriptorAttributeUtils, SetInt64VectorSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNegativeRequestedElementCount)
 {
-    std::vector<int64_t> const source = {1, 2, 3};
+    const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
@@ -91,7 +91,7 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNegativeRequestedElemen
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnNullArray)
 {
-    std::vector<int64_t> const source = {1, 2, 3};
+    const std::vector<int64_t> source = {1, 2, 3};
     int64_t count = 0;
 
     ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, nullptr, "test"));
@@ -100,7 +100,7 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnZeroRequestedCount)
 {
-    std::vector<int64_t> const source = {10, 20, 30, 40};
+    const std::vector<int64_t> source = {10, 20, 30, 40};
     int64_t count = 0;
     std::array<int64_t, 4> output = {};
 
@@ -110,7 +110,7 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnZeroRequested
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryThrowsWhenBothPointersNull)
 {
-    std::vector<int64_t> const source = {1, 2, 3};
+    const std::vector<int64_t> source = {1, 2, 3};
 
     ASSERT_THROW_HIPDNN_STATUS(
         getInt64Vector(source, HIPDNN_TYPE_INT64, 3, nullptr, nullptr, "test"),
@@ -119,7 +119,7 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryThrowsWhenBothPointersNull
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNullErrorPrefix)
 {
-    std::vector<int64_t> const source = {1, 2, 3};
+    const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
@@ -130,7 +130,7 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnWrongAttributeType)
 {
-    std::vector<int64_t> const source = {1, 2, 3};
+    const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
@@ -141,7 +141,7 @@ TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, GetInt64VectorSuccess)
 {
-    std::vector<int64_t> const source = {10, 20, 30};
+    const std::vector<int64_t> source = {10, 20, 30};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
@@ -206,7 +206,7 @@ TEST(TestDescriptorAttributeUtils, SetScalarSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetScalarQueryReturnsOneOnNullArray)
 {
-    int64_t const source = 42;
+    const int64_t source = 42;
     int64_t count = 0;
 
     ASSERT_NO_THROW(
@@ -216,7 +216,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarQueryReturnsOneOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetScalarQueryReturnsOneOnZeroRequestedCount)
 {
-    int64_t const source = 42;
+    const int64_t source = 42;
     int64_t count = 0;
     int64_t output = 0;
 
@@ -227,7 +227,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarQueryReturnsOneOnZeroRequestedCount)
 
 TEST(TestDescriptorAttributeUtils, GetScalarQueryThrowsWhenBothPointersNull)
 {
-    int64_t const source = 42;
+    const int64_t source = 42;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getScalar(source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, nullptr, nullptr, "test"),
@@ -236,7 +236,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarQueryThrowsWhenBothPointersNull)
 
 TEST(TestDescriptorAttributeUtils, GetScalarThrowsOnNullErrorPrefix)
 {
-    int64_t const source = 42;
+    const int64_t source = 42;
     int64_t count = 0;
     int64_t output = 0;
 
@@ -247,7 +247,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, GetScalarThrowsOnWrongAttributeType)
 {
-    int64_t const source = 42;
+    const int64_t source = 42;
     int64_t count = 0;
     int64_t output = 0;
 
@@ -258,7 +258,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, GetScalarSuccess)
 {
-    int64_t const source = 42;
+    const int64_t source = 42;
     int64_t count = 0;
     int64_t output = 0;
 
@@ -775,7 +775,7 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
 
     ASSERT_NO_THROW(getTensorDescriptor(
         source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, static_cast<void*>(&rawOutput), "test"));
-    std::unique_ptr<HipdnnBackendDescriptor> const output(rawOutput);
+    const std::unique_ptr<HipdnnBackendDescriptor> output(rawOutput);
     ASSERT_EQ(count, 1);
     ASSERT_NE(output, nullptr);
 }
@@ -821,7 +821,7 @@ TEST(TestDescriptorAttributeUtils, SetStringSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetStringReturnsSizeWhenBufferNull)
 {
-    std::string const source = "hello";
+    const std::string source = "hello";
     int64_t count = 0;
 
     ASSERT_NO_THROW(getString(source, HIPDNN_TYPE_CHAR, 0, &count, nullptr, "test"));
@@ -830,7 +830,7 @@ TEST(TestDescriptorAttributeUtils, GetStringReturnsSizeWhenBufferNull)
 
 TEST(TestDescriptorAttributeUtils, GetStringCopiesData)
 {
-    std::string const source = "hello";
+    const std::string source = "hello";
     std::array<char, 16> buffer = {};
     int64_t count = 0;
 
@@ -841,7 +841,7 @@ TEST(TestDescriptorAttributeUtils, GetStringCopiesData)
 
 TEST(TestDescriptorAttributeUtils, GetStringTruncatesWhenBufferSmall)
 {
-    std::string const source = "hello";
+    const std::string source = "hello";
     std::array<char, 4> buffer = {};
     int64_t count = 0;
 
@@ -852,7 +852,7 @@ TEST(TestDescriptorAttributeUtils, GetStringTruncatesWhenBufferSmall)
 
 TEST(TestDescriptorAttributeUtils, GetStringThrowsOnWrongAttributeType)
 {
-    std::string const source = "hello";
+    const std::string source = "hello";
     std::array<char, 16> buffer = {};
     int64_t count = 0;
 

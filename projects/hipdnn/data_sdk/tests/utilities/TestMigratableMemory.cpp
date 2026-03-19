@@ -31,7 +31,7 @@ void checkBuffer(const T* buffer, size_t size, T mult = 1)
 template <typename T>
 void checkBufferSynchronized(const T* buffer, size_t size, hipStream_t stream = nullptr, T mult = 1)
 {
-    hipError_t const error = hipStreamSynchronize(stream);
+    const hipError_t error = hipStreamSynchronize(stream);
     EXPECT_EQ(error, hipSuccess) << "Error synchronizing stream";
 
     for(size_t i = 0; i < size; ++i)
@@ -206,7 +206,7 @@ TEST(TestMigratableMemory, MigrateToHost)
 
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
-    hipError_t const err = hipMemcpy(
+    const hipError_t err = hipMemcpy(
         memory.deviceData(), array.data(), memory.count() * sizeof(float), hipMemcpyHostToDevice);
     EXPECT_EQ(err, hipSuccess);
     memory.markDeviceModified();
@@ -239,7 +239,7 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
-    hipError_t const err = hipMemcpyWithStream(memory.deviceData(),
+    const hipError_t err = hipMemcpyWithStream(memory.deviceData(),
                                                array.data(),
                                                memory.count() * sizeof(float),
                                                hipMemcpyHostToDevice,
@@ -278,7 +278,7 @@ TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
 
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
-    hipError_t const err = hipMemcpyWithStream(memory.deviceData(),
+    const hipError_t err = hipMemcpyWithStream(memory.deviceData(),
                                                array.data(),
                                                memory.count() * sizeof(float),
                                                hipMemcpyHostToDevice,
