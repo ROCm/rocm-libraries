@@ -52,7 +52,7 @@ protected:
 
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([](char* errorString, size_t size) {
-                std::string const fakeError = "Fake backend error";
+                const std::string fakeError = "Fake backend error";
                 hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
                     errorString, fakeError.c_str(), size - 1);
             });
@@ -67,7 +67,7 @@ protected:
 
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAbsoluteSuccess)
 {
-    std::vector<std::filesystem::path> const paths
+    const std::vector<std::filesystem::path> paths
         = {"/path/to/plugin_a", "/path/to/plugin_b", "/path/to/plugins"};
 
     // Expected strings after std::filesystem::path conversion
@@ -90,7 +90,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAbsoluteSuccess)
 
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveSuccess)
 {
-    std::vector<std::filesystem::path> const paths
+    const std::vector<std::filesystem::path> paths
         = {"/path/to/plugin_a", "/path/to/plugin_b", "/path/to/plugins"};
 
     // Expected strings after std::filesystem::path conversion
@@ -113,9 +113,9 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveSuccess)
 
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveBackendFailure)
 {
-    std::array<const char*, 2> const paths = {"/some/path1", "/some/path2"};
+    const std::array<const char*, 2> paths = {"/some/path1", "/some/path2"};
 
-    std::vector<std::string> const expectedStrings = {"/some/path1", "/some/path2"};
+    const std::vector<std::string> expectedStrings = {"/some/path1", "/some/path2"};
 
     EXPECT_CALL(*_mockBackend,
                 setEnginePluginPathsExt(paths.size(),
@@ -130,7 +130,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveBackendFailure)
 
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveEmptyPaths)
 {
-    std::vector<std::filesystem::path> const paths = {};
+    const std::vector<std::filesystem::path> paths = {};
 
     EXPECT_CALL(*_mockBackend, setEnginePluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
@@ -141,7 +141,7 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsAdditiveEmptyPaths)
 
 TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsInvalidMode)
 {
-    std::vector<std::filesystem::path> const paths = {"/path/to/plugin"};
+    const std::vector<std::filesystem::path> paths = {"/path/to/plugin"};
 
     // Cast an invalid integer to PluginLoadingMode to simulate an unrecognized value
     auto invalidMode = static_cast<PluginLoadingMode>(99);

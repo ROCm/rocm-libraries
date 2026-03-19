@@ -342,7 +342,7 @@ private:
         const std::unordered_map<std::shared_ptr<TensorAttributes>, size_t>& tensorToOriginNode)
         const
     {
-        size_t const nodeCount = _sub_nodes.size();
+        const size_t nodeCount = _sub_nodes.size();
         detail::GraphStructure structure;
         structure.adjacencyList.resize(nodeCount);
 
@@ -354,7 +354,7 @@ private:
                 auto it = tensorToOriginNode.find(input);
                 if(it != tensorToOriginNode.end())
                 {
-                    size_t const outputNodeIndex = it->second;
+                    const size_t outputNodeIndex = it->second;
                     structure.adjacencyList[outputNodeIndex].push_back(inputNodeIndex);
                 }
             }
@@ -366,7 +366,7 @@ private:
     std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOriginNodeMap() const
     {
         std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOriginNode;
-        size_t const nodeCount = _sub_nodes.size();
+        const size_t nodeCount = _sub_nodes.size();
 
         for(size_t i = 0; i < nodeCount; ++i)
         {
@@ -439,7 +439,7 @@ private:
     }
 
     static Error checkTensorUidsSetImpl(
-        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
     {
         std::vector<std::string> missingUidTensors;
 
@@ -468,7 +468,7 @@ private:
     }
 
     static Error checkNoDuplicateTensorIdsImpl(
-        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
     {
         std::unordered_set<int64_t> seenUids;
         std::unordered_set<int64_t> duplicateUids;
@@ -724,7 +724,7 @@ public:
      */
     Error topologicallySortGraph()
     {
-        size_t const nodeCount = _sub_nodes.size();
+        const size_t nodeCount = _sub_nodes.size();
 
         if(nodeCount == 0)
         {
@@ -1467,7 +1467,7 @@ public:
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
-                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK},
                 [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
