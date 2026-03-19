@@ -9,6 +9,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -117,14 +118,25 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
-        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
-        bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
-        bool dbiasValid = dscaleDbiasValidator.allClose(dbiasRefTensor, dbiasTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
-        std::cout << "  dscale: " << (dscaleValid ? "successful" : "failed") << "\n";
-        std::cout << "  dbias: " << (dbiasValid ? "successful" : "failed") << "\n";
+        bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "dx", dxValidator, dxRefTensor, dxTensor, tolerance, tolerance);
+        bool dscaleValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+            std::cout,
+            "dscale",
+            dscaleDbiasValidator,
+            dscaleRefTensor,
+            dscaleTensor,
+            static_cast<float>(tolerance),
+            static_cast<float>(tolerance));
+        bool dbiasValid = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(
+            std::cout,
+            "dbias",
+            dscaleDbiasValidator,
+            dbiasRefTensor,
+            dbiasTensor,
+            static_cast<float>(tolerance),
+            static_cast<float>(tolerance));
 
         validationPassed = dxValid && dscaleValid && dbiasValid;
     }
