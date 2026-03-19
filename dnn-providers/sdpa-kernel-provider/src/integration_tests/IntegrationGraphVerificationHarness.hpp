@@ -186,7 +186,7 @@ protected:
                            float relativeTolerance)
     {
         // Since the graph can infer properties + Ids, we defer validator registration until right before validation in verifyGraph
-        _deferredValidators.emplace_back([=]() {
+        _deferredValidators.emplace_back([&]() {
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
@@ -199,7 +199,7 @@ protected:
                               float rmsThreshold)
     {
         // Since the graph can infer properties + Ids, we defer validator registration until right before validation in verifyGraph
-        _deferredValidators.emplace_back([=]() {
+        _deferredValidators.emplace_back([&]() {
             _tensorIdToValidatorMap.insert({attr->get_uid(),
                                             hipdnn_test_sdk::utilities::createRmsValidator(
                                                 toSdkType(attr->get_data_type()), rmsThreshold)});

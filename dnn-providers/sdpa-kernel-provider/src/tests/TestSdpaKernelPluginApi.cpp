@@ -47,5 +47,5 @@ TEST(TestSdpaKernelPluginApi, HipdnnEnginePluginGetAllEngineIds)
 
     EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(numEngineIdsReturned, 1);
-    EXPECT_EQ(engineIds[0], SdpaKernelEngine{}.id());
+    EXPECT_EQ(engineIds[0], SdpaKernelEngine::staticId());
 }

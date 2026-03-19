@@ -8,6 +8,7 @@
 
 #include "SdpaKernelEngine.hpp"
 #include "SdpaKernelHandle.hpp"
+#include "SdpaKernelPlanBuilder.hpp"
 
 namespace sdpa_kernel_provider
 {
@@ -19,6 +20,11 @@ class TestSdpaKernelEngine : public ::testing::Test
 protected:
     SdpaKernelEngine _engine;
     SdpaKernelHandle _handle;
+
+    void SetUp() override
+    {
+        _engine.addPlanBuilder(std::make_unique<SdpaKernelPlanBuilder>());
+    }
 };
 
 TEST_F(TestSdpaKernelEngine, IsApplicableReturnsFalseForNonSdpaGraph)

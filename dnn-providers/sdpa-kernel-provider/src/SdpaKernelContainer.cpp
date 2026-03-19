@@ -2,7 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "SdpaKernelContainer.hpp"
-#include "SdpaKernelEngine.cpp"
+#include "SdpaKernelEngine.hpp"
+#include "SdpaKernelHelpers.hpp"
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -26,65 +27,80 @@ namespace sdpa_kernel_provider
 // Comma separated list of all engine classes
 #define ENGINE_TYPES SdpaKernelEngine
 
+using PlanBuilderList = std::vector<std::unique_ptr<IPlanBuilder>>;
+
+// Remove definition
+template <class T>
+PlanBuilderList defaultPlanBuilders()
+{
+    return {};
+}
+
+template <>
+PlanBuilderList defaultPlanBuilders<SdpaKernelPlanBuilder>()
+{
+    return makeVector<std::unique_ptr<IPlanBuilder>>(std::make_unique<SdpaKernelPlanBuilder>());
+}
+
 namespace detail
 {
 template <class... Ts>
-std::array<int64_t, sizeof...(Ts)> engineIds()
+std::array<int64_t, sizeof...(Ts)> engineIdArray()
 {
     return {Ts::staticId()...};
 }
 
 template <class... Ts>
-std::vector<std::unique_ptr<
-    hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>>
-    createEngines()
+std::vector<std::unique_ptr<IEngine>> createEngines()
 {
+    return makeVector<std::unique_ptr<IEngine>>(std::make_unique<Ts>(defaultPlanBuilders<Ts>())...);
 }
 }
 
-const auto& engineIds()
+const auto& engineIdArray()
 {
-    static auto s_engineIds = detail::engineIds<ENGINE_TYPES>();
+    static auto s_engineIds = detail::engineIdArray<ENGINE_TYPES>();
     return s_engineIds;
 }
 
-std::vector<std::unique_ptr<
-    hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>>
-    SdpaKernelContainer::getEngines()
+auto createEngines()
 {
-    return {std::unique_ptr<SdpaKernelEngine>(
-        new SdpaKernelEngine({std::make_unique<SdpaKernelPlanBuilder>()}))};
+    return detail::createEngines<ENGINE_TYPES>();
 }
 
 uint32_t SdpaKernelContainer::copyEngineIds(int64_t* engineIds,
                                             uint32_t maxEngines,
                                             uint32_t& numEngines)
 {
-    static std::vector<int64_t> s_allEngineIds = []() {
-        auto idRange = getEngines()
-                       | ranges::views::transform([](const auto& engine) { return engine->id(); });
-        return std::vector<int64_t>(idRange.begin(), idRange.end());
-    }();
+    const auto& allEngineIds = engineIdArray();
 
-    if(maxEngines == 0)
+    auto totalEngines = static_cast<uint32_t>(allEngineIds.size());
+    if(maxEngines == 0 || engineIds == nullptr)
     {
-        numEngines = s_allEnginesIds.size();
+        numEngines = totalEngines;
         return numEngines;
     }
 
-    numEngines = std::min(maxEngines, s_allEnginesIds.size());
-    std::ranges::copy_n(s_allEnginesIds, numEngines, engineIds);
+    numEngines = std::min(maxEngines, totalEngines);
+    std::copy_n(allEngineIds.data(), numEngines, engineIds);
 
-    return allEngines.size();
+    return totalEngines;
 }
 
 SdpaKernelContainer::SdpaKernelContainer()
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating SdpaKernelContainer");
 
-    _engineManager = std::make_unique<
-        hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>>(
-        getEngines());
+    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager<SdpaKernelHandle,
+                                                                       SdpaKernelSettings,
+                                                                       SdpaKernelContext>>();
+
+    auto engines = createEngines();
+
+    for(auto& engine : engines)
+    {
+        _engineManager->addEngine(std::move(engine));
+    }
 }
 
 SdpaKernelContainer::~SdpaKernelContainer()

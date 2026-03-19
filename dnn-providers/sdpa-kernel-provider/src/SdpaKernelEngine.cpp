@@ -8,12 +8,17 @@
 namespace sdpa_kernel_provider
 {
 
+void SdpaKernelEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
+{
+    _planBuilders.emplace_back(std::move(planBuilder));
+}
+
 int64_t SdpaKernelEngine::id() const
 {
     return staticId();
 }
 
-static int64_t staticId()
+int64_t SdpaKernelEngine::staticId()
 {
     static int64_t s_cachedId = hipdnn_data_sdk::utilities::engineNameToId(engineName());
     return s_cachedId;

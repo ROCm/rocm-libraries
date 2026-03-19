@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include "SdpaKernelContext.hpp"
 #include "SdpaKernelHandle.hpp"
 #include "SdpaKernelSettings.hpp"

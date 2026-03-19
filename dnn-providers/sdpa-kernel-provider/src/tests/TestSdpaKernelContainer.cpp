@@ -16,21 +16,21 @@ TEST(TestSdpaKernelContainer, ConstructsSuccessfully)
 
 TEST(TestSdpaKernelContainer, CopyEngineIdsReturnsZeroEngines)
 {
-    uint32_t numEngines = 0;
-    auto totalEngines = SdpaKernelContainer::copyEngineIds(nullptr, 0, numEngines);
+    uint32_t numEngines = 1;
+    auto totalEngines = SdpaKernelContainer::copyEngineIds(nullptr, 1, numEngines);
 
-    EXPECT_EQ(totalEngines, 0u);
-    EXPECT_EQ(numEngines, 0u);
+    EXPECT_EQ(totalEngines, 1u);
+    EXPECT_EQ(numEngines, 1u);
 }
 
-TEST(TestSdpaKernelContainer, CopyEngineIdsWithBufferReturnsZero)
+TEST(TestSdpaKernelContainer, CopyEngineIdsWithBufferReturnsOne)
 {
-    std::array<int64_t, 1> engineIds = {0};
-    uint32_t numEngines = 0;
-    auto totalEngines = SdpaKernelContainer::copyEngineIds(engineIds.data(), 1, numEngines);
+    std::array<int64_t, 2> engineIds = {0, 0};
+    uint32_t numEngines = 1;
+    auto totalEngines = SdpaKernelContainer::copyEngineIds(engineIds.data(), 2, numEngines);
 
-    EXPECT_EQ(totalEngines, 0u);
-    EXPECT_EQ(numEngines, 0u);
+    EXPECT_EQ(totalEngines, 1u);
+    EXPECT_EQ(numEngines, 1u);
 }
 
 TEST(TestSdpaKernelContainer, GetEngineManagerReturnsValidReference)

@@ -14,17 +14,21 @@
 namespace sdpa_kernel_provider
 {
 
+using IEngine = hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>;
+using IPlanBuilder
+    = hipdnn_plugin_sdk::IPlanBuilder<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>;
+
 class SdpaKernelEngine
     : public hipdnn_plugin_sdk::IEngine<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>
 {
 public:
-    using PlanBuilder
-        = hipdnn_plugin_sdk::IPlanBuilder<SdpaKernelHandle, SdpaKernelSettings, SdpaKernelContext>;
-
-    SdpaKernelEngine(std::vector<std::unique_ptr<PlanBuilder>>&& planBuilders)
+    SdpaKernelEngine(std::vector<std::unique_ptr<IPlanBuilder>>&& planBuilders)
         : _planBuilders(std::move(planBuilders))
     {
     }
+    SdpaKernelEngine() = default;
+
+    void addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder);
 
     static int64_t staticId();
 
@@ -57,7 +61,7 @@ public:
         SdpaKernelContext& executionContext) const override;
 
 protected:
-    std::vector<std::unique_ptr<PlanBuilder>> _planBuilders;
+    std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 
 }
