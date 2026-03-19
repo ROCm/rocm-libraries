@@ -29,6 +29,8 @@ namespace ck_tile {
 ///      NumBTensor describes the number of B tensors. The minimum number of tensors is 1(required).
 ///      NumDTensor describes the number of D tensors. The minimum number of tensors is 0(not
 ///      required).
+
+static constexpr testSmartBuild = 0;
 template <index_t NumATensor = 1, index_t NumBTensor = 1, index_t NumDTensor = 0>
 struct UniversalGemmHostArgs
 {
