@@ -1035,6 +1035,7 @@ int main(int argc, const char* argv[])
     ClientProblemFactory problemFactory(args);
 
     initTimingBuffer();
+    calibrateTimingOverhead();
 
     std::shared_ptr<Hardware> hardware;
     hipStream_t              stream;
@@ -1517,9 +1518,6 @@ int main(int argc, const char* argv[])
 
                     if(exitOnError && listeners.error() > 0)
                     {
-                        // Note: active ScopedTimers on the stack will push records
-                        // after this flush during stack unwinding, but those are lost.
-                        // Acceptable on an error-exit path.
                         flushTimingBuffer();
                         // error range in shell is [0-255]
                         return std::min(listeners.error(), 255);
