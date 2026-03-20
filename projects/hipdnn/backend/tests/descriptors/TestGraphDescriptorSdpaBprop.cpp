@@ -33,7 +33,16 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Helper: create a finalized SdpaBpropOperationDescriptor with all tensors
+// Helper: set a single tensor attribute on a descriptor
+inline void setTensorAttr(SdpaBpropOperationDescriptor& desc,
+                          hipdnnBackendAttributeName_t attr,
+                          HipdnnBackendDescriptor* tensor)
+{
+    desc.setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&tensor));
+}
+
+// Helper: create and finalize a SdpaBpropOperationDescriptor with required tensors.
+// Pass nullptr for any optional tensor to omit it.
 inline std::unique_ptr<HipdnnBackendDescriptor>
     createFinalizedSdpaBpropOp(HipdnnBackendDescriptor* qDesc,
                                HipdnnBackendDescriptor* kDesc,
@@ -44,160 +53,77 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                HipdnnBackendDescriptor* dqDesc,
                                HipdnnBackendDescriptor* dkDesc,
                                HipdnnBackendDescriptor* dvDesc,
-                               HipdnnBackendDescriptor* scaleDesc,
-                               HipdnnBackendDescriptor* attnMaskDesc,
-                               HipdnnBackendDescriptor* seqLenQDesc,
-                               HipdnnBackendDescriptor* seqLenKvDesc,
-                               HipdnnBackendDescriptor* seedDesc,
-                               HipdnnBackendDescriptor* offsetDesc,
-                               HipdnnBackendDescriptor* dropoutMaskDesc,
-                               HipdnnBackendDescriptor* dropoutScaleDesc,
-                               HipdnnBackendDescriptor* dropoutScaleInvDesc,
-                               HipdnnBackendDescriptor* dbiasDesc,
+                               HipdnnBackendDescriptor* scaleDesc = nullptr,
+                               HipdnnBackendDescriptor* attnMaskDesc = nullptr,
+                               HipdnnBackendDescriptor* seqLenQDesc = nullptr,
+                               HipdnnBackendDescriptor* seqLenKvDesc = nullptr,
+                               HipdnnBackendDescriptor* seedDesc = nullptr,
+                               HipdnnBackendDescriptor* offsetDesc = nullptr,
+                               HipdnnBackendDescriptor* dropoutMaskDesc = nullptr,
+                               HipdnnBackendDescriptor* dropoutScaleDesc = nullptr,
+                               HipdnnBackendDescriptor* dropoutScaleInvDesc = nullptr,
+                               HipdnnBackendDescriptor* dbiasDesc = nullptr,
                                hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<SdpaBpropOperationDescriptor>();
     auto desc = wrapper->asDescriptor<SdpaBpropOperationDescriptor>();
 
     // Required input tensors
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&qDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&kDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&vDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&oDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&doDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&statsDesc));
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT, qDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT, kDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT, vDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT, oDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT, doDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT, statsDesc);
 
     // Required output tensors
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dqDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dkDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dvDesc));
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT, dqDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT, dkDesc);
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT, dvDesc);
 
-    // Optional tensors
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&scaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&attnMaskDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&seqLenQDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&seqLenKvDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&seedDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&offsetDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dropoutMaskDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dropoutScaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dropoutScaleInvDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dbiasDesc));
-    desc->setAttribute(
-        HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    // Optional tensors — only set when provided
+    if(scaleDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT, scaleDesc);
+    }
+    if(attnMaskDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT, attnMaskDesc);
+    }
+    if(seqLenQDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT, seqLenQDesc);
+    }
+    if(seqLenKvDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT, seqLenKvDesc);
+    }
+    if(seedDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT, seedDesc);
+    }
+    if(offsetDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT, offsetDesc);
+    }
+    if(dropoutMaskDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT, dropoutMaskDesc);
+    }
+    if(dropoutScaleDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT, dropoutScaleDesc);
+    }
+    if(dropoutScaleInvDesc != nullptr)
+    {
+        setTensorAttr(
+            *desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT, dropoutScaleInvDesc);
+    }
+    if(dbiasDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT, dbiasDesc);
+    }
 
-    desc->finalize();
-    return wrapper;
-}
-
-inline std::unique_ptr<HipdnnBackendDescriptor>
-    createFinalizedSdpaBpropOpRequiredOnly(HipdnnBackendDescriptor* qDesc,
-                                           HipdnnBackendDescriptor* kDesc,
-                                           HipdnnBackendDescriptor* vDesc,
-                                           HipdnnBackendDescriptor* oDesc,
-                                           HipdnnBackendDescriptor* doDesc,
-                                           HipdnnBackendDescriptor* statsDesc,
-                                           HipdnnBackendDescriptor* dqDesc,
-                                           HipdnnBackendDescriptor* dkDesc,
-                                           HipdnnBackendDescriptor* dvDesc,
-                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
-{
-    auto wrapper = createDescriptor<SdpaBpropOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<SdpaBpropOperationDescriptor>();
-
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&qDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&kDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&vDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&oDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&doDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&statsDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dqDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dkDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dvDesc));
     desc->setAttribute(
         HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
@@ -235,6 +161,32 @@ public:
         EXPECT_EQ(tensor->virtual_, expectedVirtual);
     }
 
+    static void verifyRequiredTensorUids(const SdpaBackwardAttributesT* attrs)
+    {
+        EXPECT_EQ(attrs->q_tensor_uid, K_SDPA_BPROP_TENSOR_Q_UID);
+        EXPECT_EQ(attrs->k_tensor_uid, K_SDPA_BPROP_TENSOR_K_UID);
+        EXPECT_EQ(attrs->v_tensor_uid, K_SDPA_BPROP_TENSOR_V_UID);
+        EXPECT_EQ(attrs->o_tensor_uid, K_SDPA_BPROP_TENSOR_O_UID);
+        EXPECT_EQ(attrs->do_tensor_uid, K_SDPA_BPROP_TENSOR_DO_UID);
+        EXPECT_EQ(attrs->stats_tensor_uid, K_SDPA_BPROP_TENSOR_STATS_UID);
+        EXPECT_EQ(attrs->dq_tensor_uid, K_SDPA_BPROP_TENSOR_DQ_UID);
+        EXPECT_EQ(attrs->dk_tensor_uid, K_SDPA_BPROP_TENSOR_DK_UID);
+        EXPECT_EQ(attrs->dv_tensor_uid, K_SDPA_BPROP_TENSOR_DV_UID);
+    }
+
+    static void verifyDefaultScalarAttrs(const SdpaBackwardAttributesT* attrs)
+    {
+        EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+        EXPECT_EQ(attrs->alibi_mask, false);
+        EXPECT_EQ(attrs->padding_mask, false);
+        EXPECT_EQ(attrs->causal_mask, false);
+        EXPECT_EQ(attrs->causal_mask_bottom_right, false);
+        EXPECT_FALSE(attrs->dropout_probability.has_value());
+        EXPECT_FALSE(attrs->attn_scale_value.has_value());
+        EXPECT_FALSE(attrs->left_bound.has_value());
+        EXPECT_FALSE(attrs->right_bound.has_value());
+    }
+
     std::shared_ptr<GraphDescriptor> getDescriptor() const
     {
         return _wrapper->asDescriptor<GraphDescriptor>();
@@ -248,6 +200,71 @@ public:
                            HIPDNN_TYPE_HANDLE,
                            1,
                            static_cast<const void*>(&handle));
+    }
+
+    // Wires the op into the graph, finalizes, serializes, and unpacks. Returns the unpacked graph.
+    std::unique_ptr<GraphT>
+        finalizeGraphAndUnpack(std::unique_ptr<HipdnnBackendDescriptor>& opWrapper) const
+    {
+        auto graphDesc = getDescriptor();
+        setHandle();
+
+        auto* opDescPtr = opWrapper.get();
+        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                1,
+                                static_cast<const void*>(&opDescPtr));
+        graphDesc->finalize();
+
+        auto serialized = graphDesc->getSerializedGraph();
+        return UnPackGraph(serialized.ptr);
+    }
+
+    // Creates the 9 required tensor descriptors used across all tests.
+    struct RequiredTensors
+    {
+        std::unique_ptr<HipdnnBackendDescriptor> q;
+        std::unique_ptr<HipdnnBackendDescriptor> k;
+        std::unique_ptr<HipdnnBackendDescriptor> v;
+        std::unique_ptr<HipdnnBackendDescriptor> o;
+        std::unique_ptr<HipdnnBackendDescriptor> dO;
+        std::unique_ptr<HipdnnBackendDescriptor> stats;
+        std::unique_ptr<HipdnnBackendDescriptor> dq;
+        std::unique_ptr<HipdnnBackendDescriptor> dk;
+        std::unique_ptr<HipdnnBackendDescriptor> dv;
+    };
+
+    static RequiredTensors createRequiredTensors()
+    {
+        return {
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_K_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_V_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_O_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES)),
+            createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
+                                  toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
+                                  toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES)),
+        };
     }
 
 protected:
@@ -271,33 +288,7 @@ protected:
 
 TEST_F(TestGraphDescriptorSdpaBprop, BuildFromSingleOperation)
 {
-    auto qDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
-    auto doDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
-    auto statsDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
-    auto dqDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
-    auto dkDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
-    auto dvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    auto t = createRequiredTensors();
     auto scaleDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_SCALE_UID);
     auto attnMaskDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_ATTN_MASK_UID);
     auto seqLenQDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID);
@@ -309,15 +300,15 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromSingleOperation)
     auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID);
     auto dbiasDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DBIAS_UID);
 
-    auto opWrapper = createFinalizedSdpaBpropOp(qDesc.get(),
-                                                kDesc.get(),
-                                                vDesc.get(),
-                                                oDesc.get(),
-                                                doDesc.get(),
-                                                statsDesc.get(),
-                                                dqDesc.get(),
-                                                dkDesc.get(),
-                                                dvDesc.get(),
+    auto opWrapper = createFinalizedSdpaBpropOp(t.q.get(),
+                                                t.k.get(),
+                                                t.v.get(),
+                                                t.o.get(),
+                                                t.dO.get(),
+                                                t.stats.get(),
+                                                t.dq.get(),
+                                                t.dk.get(),
+                                                t.dv.get(),
                                                 scaleDesc.get(),
                                                 attnMaskDesc.get(),
                                                 seqLenQDesc.get(),
@@ -361,16 +352,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromSingleOperation)
     auto* attrs = node->attributes.AsSdpaBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
 
-    // Verify all 9 required tensor UIDs
-    EXPECT_EQ(attrs->q_tensor_uid, K_SDPA_BPROP_TENSOR_Q_UID);
-    EXPECT_EQ(attrs->k_tensor_uid, K_SDPA_BPROP_TENSOR_K_UID);
-    EXPECT_EQ(attrs->v_tensor_uid, K_SDPA_BPROP_TENSOR_V_UID);
-    EXPECT_EQ(attrs->o_tensor_uid, K_SDPA_BPROP_TENSOR_O_UID);
-    EXPECT_EQ(attrs->do_tensor_uid, K_SDPA_BPROP_TENSOR_DO_UID);
-    EXPECT_EQ(attrs->stats_tensor_uid, K_SDPA_BPROP_TENSOR_STATS_UID);
-    EXPECT_EQ(attrs->dq_tensor_uid, K_SDPA_BPROP_TENSOR_DQ_UID);
-    EXPECT_EQ(attrs->dk_tensor_uid, K_SDPA_BPROP_TENSOR_DK_UID);
-    EXPECT_EQ(attrs->dv_tensor_uid, K_SDPA_BPROP_TENSOR_DV_UID);
+    verifyRequiredTensorUids(attrs);
 
     // Verify all 10 optional tensor UIDs
     ASSERT_TRUE(attrs->scale_tensor_uid.has_value());
@@ -426,18 +408,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromSingleOperation)
                  toVec(K_SDPA_BPROP_TENSOR_O_STRIDES),
                  DataType::FLOAT);
 
-    // Verify default scalar/enum attributes survive serialization
-    EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::TOP_LEFT);
-    EXPECT_EQ(attrs->alibi_mask, false);
-    EXPECT_EQ(attrs->padding_mask, false);
-    EXPECT_EQ(attrs->causal_mask, false);
-    EXPECT_EQ(attrs->causal_mask_bottom_right, false);
-
-    // Optional scalars should not be set (defaults)
-    EXPECT_FALSE(attrs->dropout_probability.has_value());
-    EXPECT_FALSE(attrs->attn_scale_value.has_value());
-    EXPECT_FALSE(attrs->left_bound.has_value());
-    EXPECT_FALSE(attrs->right_bound.has_value());
+    verifyDefaultScalarAttrs(attrs);
 }
 
 // =============================================================================
@@ -446,43 +417,17 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromSingleOperation)
 
 TEST_F(TestGraphDescriptorSdpaBprop, BuildFromRequiredOnlyOperation)
 {
-    auto qDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
-    auto doDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
-    auto statsDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
-    auto dqDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
-    auto dkDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
-    auto dvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    auto t = createRequiredTensors();
 
-    auto opWrapper = createFinalizedSdpaBpropOpRequiredOnly(qDesc.get(),
-                                                            kDesc.get(),
-                                                            vDesc.get(),
-                                                            oDesc.get(),
-                                                            doDesc.get(),
-                                                            statsDesc.get(),
-                                                            dqDesc.get(),
-                                                            dkDesc.get(),
-                                                            dvDesc.get());
+    auto opWrapper = createFinalizedSdpaBpropOp(t.q.get(),
+                                                t.k.get(),
+                                                t.v.get(),
+                                                t.o.get(),
+                                                t.dO.get(),
+                                                t.stats.get(),
+                                                t.dq.get(),
+                                                t.dk.get(),
+                                                t.dv.get());
 
     auto graphDesc = getDescriptor();
     setHandle();
@@ -562,16 +507,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromRequiredOnlyOperation)
     auto* attrs = graphT->nodes[0]->attributes.AsSdpaBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
 
-    // Required tensor UIDs
-    EXPECT_EQ(attrs->q_tensor_uid, K_SDPA_BPROP_TENSOR_Q_UID);
-    EXPECT_EQ(attrs->k_tensor_uid, K_SDPA_BPROP_TENSOR_K_UID);
-    EXPECT_EQ(attrs->v_tensor_uid, K_SDPA_BPROP_TENSOR_V_UID);
-    EXPECT_EQ(attrs->o_tensor_uid, K_SDPA_BPROP_TENSOR_O_UID);
-    EXPECT_EQ(attrs->do_tensor_uid, K_SDPA_BPROP_TENSOR_DO_UID);
-    EXPECT_EQ(attrs->stats_tensor_uid, K_SDPA_BPROP_TENSOR_STATS_UID);
-    EXPECT_EQ(attrs->dq_tensor_uid, K_SDPA_BPROP_TENSOR_DQ_UID);
-    EXPECT_EQ(attrs->dk_tensor_uid, K_SDPA_BPROP_TENSOR_DK_UID);
-    EXPECT_EQ(attrs->dv_tensor_uid, K_SDPA_BPROP_TENSOR_DV_UID);
+    verifyRequiredTensorUids(attrs);
 
     // No optional tensor UIDs should be set
     EXPECT_FALSE(attrs->scale_tensor_uid.has_value());
@@ -585,18 +521,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromRequiredOnlyOperation)
     EXPECT_FALSE(attrs->dropout_scale_inv_tensor_uid.has_value());
     EXPECT_FALSE(attrs->dbias_tensor_uid.has_value());
 
-    // Verify default scalar/enum values
-    EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::TOP_LEFT);
-    EXPECT_EQ(attrs->alibi_mask, false);
-    EXPECT_EQ(attrs->padding_mask, false);
-    EXPECT_EQ(attrs->causal_mask, false);
-    EXPECT_EQ(attrs->causal_mask_bottom_right, false);
-
-    // Optional scalar fields should have default (unset) values
-    EXPECT_FALSE(attrs->dropout_probability.has_value());
-    EXPECT_FALSE(attrs->attn_scale_value.has_value());
-    EXPECT_FALSE(attrs->left_bound.has_value());
-    EXPECT_FALSE(attrs->right_bound.has_value());
+    verifyDefaultScalarAttrs(attrs);
 
     // Compute data type should be FLOAT
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
@@ -608,57 +533,30 @@ TEST_F(TestGraphDescriptorSdpaBprop, BuildFromRequiredOnlyOperation)
 
 TEST_F(TestGraphDescriptorSdpaBprop, ComputeDataTypePreserved)
 {
-    auto qDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
-    auto doDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
-    auto statsDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
-    auto dqDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
-    auto dkDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
-    auto dvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    auto t = createRequiredTensors();
 
-    auto opWrapper = createFinalizedSdpaBpropOpRequiredOnly(qDesc.get(),
-                                                            kDesc.get(),
-                                                            vDesc.get(),
-                                                            oDesc.get(),
-                                                            doDesc.get(),
-                                                            statsDesc.get(),
-                                                            dqDesc.get(),
-                                                            dkDesc.get(),
-                                                            dvDesc.get(),
-                                                            HIPDNN_DATA_HALF);
+    auto opWrapper = createFinalizedSdpaBpropOp(t.q.get(),
+                                                t.k.get(),
+                                                t.v.get(),
+                                                t.o.get(),
+                                                t.dO.get(),
+                                                t.stats.get(),
+                                                t.dq.get(),
+                                                t.dk.get(),
+                                                t.dv.get(),
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                HIPDNN_DATA_HALF);
 
-    auto graphDesc = getDescriptor();
-    setHandle();
-
-    auto* opDescPtr = opWrapper.get();
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                            1,
-                            static_cast<const void*>(&opDescPtr));
-    graphDesc->finalize();
-
-    auto serialized = graphDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    auto graphT = finalizeGraphAndUnpack(opWrapper);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -670,85 +568,20 @@ TEST_F(TestGraphDescriptorSdpaBprop, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorSdpaBprop, NonDefaultScalarsPreservedInSerialization)
 {
-    auto qDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
-    auto doDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
-    auto statsDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
-    auto dqDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
-    auto dkDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
-    auto dvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    auto t = createRequiredTensors();
 
-    // Build op with non-default scalar/enum values
     auto wrapper = createDescriptor<SdpaBpropOperationDescriptor>();
     auto desc = wrapper->asDescriptor<SdpaBpropOperationDescriptor>();
 
-    // Required tensors
-    auto* q = qDesc.get();
-    auto* k = kDesc.get();
-    auto* v = vDesc.get();
-    auto* o = oDesc.get();
-    auto* dOp = doDesc.get();
-    auto* stats = statsDesc.get();
-    auto* dq = dqDesc.get();
-    auto* dk = dkDesc.get();
-    auto* dv = dvDesc.get();
-
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&q));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&k));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&v));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&o));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dOp));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&stats));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dq));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dk));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       static_cast<const void*>(&dv));
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_Q_EXT, t.q.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_K_EXT, t.k.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_V_EXT, t.v.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_O_EXT, t.o.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DO_EXT, t.dO.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_STATS_EXT, t.stats.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DQ_EXT, t.dq.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DK_EXT, t.dk.get());
+    setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BPROP_DV_EXT, t.dv.get());
 
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
@@ -785,20 +618,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, NonDefaultScalarsPreservedInSerialization)
 
     desc->finalize();
 
-    auto graphDesc = getDescriptor();
-    setHandle();
-
-    auto* opDescPtr = wrapper.get();
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                            1,
-                            static_cast<const void*>(&opDescPtr));
-    ASSERT_NO_THROW(graphDesc->finalize());
-
-    auto serialized = graphDesc->getSerializedGraph();
-    ASSERT_NE(serialized.ptr, nullptr);
-
-    auto graphT = UnPackGraph(serialized.ptr);
+    auto graphT = finalizeGraphAndUnpack(wrapper);
     ASSERT_NE(graphT, nullptr);
     ASSERT_EQ(graphT->nodes.size(), 1u);
     ASSERT_EQ(graphT->tensors.size(), 9u); // required only
@@ -834,33 +654,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, NonDefaultScalarsPreservedInSerialization)
 
 TEST_F(TestGraphDescriptorSdpaBprop, AllOptionalTensorsPresentInSerializedTensorList)
 {
-    auto qDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
-    auto doDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
-    auto statsDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
-    auto dqDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
-    auto dkDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
-    auto dvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    auto t = createRequiredTensors();
     auto scaleDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_SCALE_UID);
     auto attnMaskDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_ATTN_MASK_UID);
     auto seqLenQDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID);
@@ -872,15 +666,15 @@ TEST_F(TestGraphDescriptorSdpaBprop, AllOptionalTensorsPresentInSerializedTensor
     auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID);
     auto dbiasDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DBIAS_UID);
 
-    auto opWrapper = createFinalizedSdpaBpropOp(qDesc.get(),
-                                                kDesc.get(),
-                                                vDesc.get(),
-                                                oDesc.get(),
-                                                doDesc.get(),
-                                                statsDesc.get(),
-                                                dqDesc.get(),
-                                                dkDesc.get(),
-                                                dvDesc.get(),
+    auto opWrapper = createFinalizedSdpaBpropOp(t.q.get(),
+                                                t.k.get(),
+                                                t.v.get(),
+                                                t.o.get(),
+                                                t.dO.get(),
+                                                t.stats.get(),
+                                                t.dq.get(),
+                                                t.dk.get(),
+                                                t.dv.get(),
                                                 scaleDesc.get(),
                                                 attnMaskDesc.get(),
                                                 seqLenQDesc.get(),
@@ -892,18 +686,7 @@ TEST_F(TestGraphDescriptorSdpaBprop, AllOptionalTensorsPresentInSerializedTensor
                                                 dropoutScaleInvDesc.get(),
                                                 dbiasDesc.get());
 
-    auto graphDesc = getDescriptor();
-    setHandle();
-
-    auto* opDescPtr = opWrapper.get();
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                            1,
-                            static_cast<const void*>(&opDescPtr));
-    graphDesc->finalize();
-
-    auto serialized = graphDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    auto graphT = finalizeGraphAndUnpack(opWrapper);
     ASSERT_NE(graphT, nullptr);
 
     // Collect all tensor UIDs from the serialized tensor list
@@ -943,56 +726,19 @@ TEST_F(TestGraphDescriptorSdpaBprop, AllOptionalTensorsPresentInSerializedTensor
 
 TEST_F(TestGraphDescriptorSdpaBprop, RequiredOnlyNoOptionalTensorsInList)
 {
-    auto qDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_Q_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
-    auto kDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_K_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
-    auto vDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_V_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
-    auto oDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_O_UID,
-                                       toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
-                                       toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
-    auto doDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DO_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
-    auto statsDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_STATS_UID,
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
-                                           toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
-    auto dqDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DQ_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES));
-    auto dkDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DK_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES));
-    auto dvDesc = createFinalizedTensor(K_SDPA_BPROP_TENSOR_DV_UID,
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
-                                        toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES));
+    auto t = createRequiredTensors();
 
-    auto opWrapper = createFinalizedSdpaBpropOpRequiredOnly(qDesc.get(),
-                                                            kDesc.get(),
-                                                            vDesc.get(),
-                                                            oDesc.get(),
-                                                            doDesc.get(),
-                                                            statsDesc.get(),
-                                                            dqDesc.get(),
-                                                            dkDesc.get(),
-                                                            dvDesc.get());
+    auto opWrapper = createFinalizedSdpaBpropOp(t.q.get(),
+                                                t.k.get(),
+                                                t.v.get(),
+                                                t.o.get(),
+                                                t.dO.get(),
+                                                t.stats.get(),
+                                                t.dq.get(),
+                                                t.dk.get(),
+                                                t.dv.get());
 
-    auto graphDesc = getDescriptor();
-    setHandle();
-
-    auto* opDescPtr = opWrapper.get();
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                            1,
-                            static_cast<const void*>(&opDescPtr));
-    graphDesc->finalize();
-
-    auto serialized = graphDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    auto graphT = finalizeGraphAndUnpack(opWrapper);
     ASSERT_NE(graphT, nullptr);
 
     // Collect all tensor UIDs
