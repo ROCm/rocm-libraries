@@ -1841,9 +1841,8 @@ public:
     /** @brief Layer normalization forward pass
      *
      * Normalizes the input across the last k feature dimensions, where k
-     * is determined by the scale tensor shape or by
-     * LayernormAttributes::set_normalized_dim_count(). By default, all
-     * dimensions except the first (batch) dimension are normalized.
+     * is inferred from the scale tensor shape. By default, all dimensions
+     * except the first (batch) dimension are normalized.
      *
      * Common configurations:
      * - **Transformer**: x=[B, S, D], scale=[D] → normalizes over D (k=1)
@@ -1865,8 +1864,7 @@ public:
      *        (e.g. [1, C, H, W]) or reduced-rank with batch dims omitted
      *        (e.g. [C, H, W])
      * @param bias Per-feature bias (beta) tensor (same shape as scale)
-     * @param attributes Configuration including epsilon, forward phase,
-     *        and optionally normalized_dim_count
+     * @param attributes Configuration including epsilon and forward phase
      * @return Array of 3 output tensors:
      *         - [0] y: Normalized output (same shape as x)
      *         - [1] mean: Computed mean (nullptr in inference mode)

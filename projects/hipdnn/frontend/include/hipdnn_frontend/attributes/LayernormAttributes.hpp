@@ -29,11 +29,10 @@ namespace hipdnn_frontend::graph
  * layer normalization normalizes across the last k feature dimensions.
  *
  * The number of normalized dimensions (k) is determined by:
- * 1. **Explicit**: Call set_normalized_dim_count(k) to normalize the last k dims.
- * 2. **From scale shape**: If not set (default 0), k is inferred from the scale
- *    tensor. Dimensions where scale != 1 are normalized (cuDNN convention).
- *    If scale has fewer dims than X, all scale dims are normalized dims.
- * 3. **Default**: If scale dims are also unset, they are inferred as
+ * 1. **From scale shape**: k is inferred from the scale tensor. Dimensions
+ *    where scale != 1 are normalized. If scale has fewer dims than X, all
+ *    scale dims are normalized dims.
+ * 2. **Default**: If scale dims are also unset, they are inferred as
  *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
  *
  * **Tensor Shapes:**
@@ -205,16 +204,7 @@ public:
         return _forwardPhase;
     }
 
-    /**
-     * @brief Set the number of dimensions to normalize (counted from the right)
-     *
-     * For input [N, C, H, W] with normalized_dim_count = 3, normalization
-     * is computed over C, H, W (the last 3 dims). Set to 0 (default) to
-     * infer from the scale tensor shape.
-     *
-     * @param value Number of trailing dimensions to normalize, or 0 to infer
-     * @return Reference to this object for method chaining
-     */
+    /// @cond INTERNAL
     // NOLINTNEXTLINE(readability-identifier-naming)
     LayernormAttributes& set_normalized_dim_count(int64_t value)
     {
@@ -222,12 +212,12 @@ public:
         return *this;
     }
 
-    /// @brief Get the number of dimensions to normalize (0 = infer from scale shape)
     // NOLINTNEXTLINE(readability-identifier-naming)
     int64_t get_normalized_dim_count() const
     {
         return _normalizedDimCount;
     }
+    /// @endcond
 
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::LayernormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
