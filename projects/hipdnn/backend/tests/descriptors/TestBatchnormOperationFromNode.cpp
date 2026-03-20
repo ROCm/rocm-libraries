@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <array>
@@ -952,4 +953,15 @@ TEST_F(TestBatchnormOperationFromNode, FailsWithPartialRunningStats)
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestBatchnormOperationFromNode, FailsWithWrongAttributeType)
+{
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    PointwiseAttributesT wrongAttrs;
+    node.attributes.Set(wrongAttrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
 }

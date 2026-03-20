@@ -96,6 +96,9 @@ public:
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
 
+    // Creates a finalized BatchnormOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to BatchnormAttributesT internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
     static std::shared_ptr<BatchnormOperationDescriptor>
         fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
                  const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);

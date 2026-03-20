@@ -211,6 +211,11 @@ protected:
     std::unique_ptr<HipdnnBackendDescriptor> _invVarianceDesc;
     std::unique_ptr<HipdnnBackendDescriptor> _peerStatsDesc0;
     std::unique_ptr<HipdnnBackendDescriptor> _peerStatsDesc1;
+    std::unique_ptr<HipdnnBackendDescriptor> _prevRunningMeanDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _prevRunningVarianceDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _momentumDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _nextRunningMeanDesc;
+    std::unique_ptr<HipdnnBackendDescriptor> _nextRunningVarianceDesc;
 
     void SetUp() override
     {
@@ -242,6 +247,25 @@ protected:
         _peerStatsDesc1 = createFinalizedTensor(K_BATCHNORM_TENSOR_PEER_STAT_1_UID,
                                                 toVec(K_BATCHNORM_TENSOR_PEER_STAT_DIMS),
                                                 toVec(K_BATCHNORM_TENSOR_PEER_STAT_STRIDES));
+        _prevRunningMeanDesc
+            = createFinalizedTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_STRIDES));
+        _prevRunningVarianceDesc
+            = createFinalizedTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_STRIDES));
+        _momentumDesc = createFinalizedTensor(K_BATCHNORM_TENSOR_MOMENTUM_UID,
+                                              toVec(K_BATCHNORM_TENSOR_MOMENTUM_DIMS),
+                                              toVec(K_BATCHNORM_TENSOR_MOMENTUM_STRIDES));
+        _nextRunningMeanDesc
+            = createFinalizedTensor(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID,
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_STRIDES));
+        _nextRunningVarianceDesc
+            = createFinalizedTensor(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID,
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_DIMS),
+                                    toVec(K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_STRIDES));
     }
 
     void TearDown() override
@@ -256,6 +280,11 @@ protected:
         _invVarianceDesc.reset();
         _peerStatsDesc0.reset();
         _peerStatsDesc1.reset();
+        _prevRunningMeanDesc.reset();
+        _prevRunningVarianceDesc.reset();
+        _momentumDesc.reset();
+        _nextRunningMeanDesc.reset();
+        _nextRunningVarianceDesc.reset();
     }
 };
 
@@ -440,6 +469,93 @@ TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
     EXPECT_EQ(attrs->bias_tensor_uid, K_BATCHNORM_TENSOR_BIAS_UID);
     EXPECT_EQ(attrs->epsilon_tensor_uid, K_BATCHNORM_TENSOR_EPSILON_UID);
     EXPECT_EQ(attrs->y_tensor_uid, K_BATCHNORM_TENSOR_Y_UID);
+}
+
+TEST_F(TestGraphDescriptorBatchnorm, AllTensorsRoundTripThroughLifting)
+{
+    const std::vector<HipdnnBackendDescriptor*> peerStatsDescs
+        = {_peerStatsDesc0.get(), _peerStatsDesc1.get()};
+    auto opDesc = makeOp(_meanDesc.get(),
+                         _invVarianceDesc.get(),
+                         _prevRunningMeanDesc.get(),
+                         _prevRunningVarianceDesc.get(),
+                         _momentumDesc.get(),
+                         _nextRunningMeanDesc.get(),
+                         _nextRunningVarianceDesc.get(),
+                         peerStatsDescs,
+                         HIPDNN_DATA_FLOAT,
+                         "bn_all_tensors");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize the graph
+    auto serialized = desc->getSerializedGraph();
+    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
+                               static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
+
+    // Deserialize into a new GraphDescriptor (lifting path)
+    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    liftedDesc->deserializeGraph(bytes.data(), bytes.size());
+
+    hipdnnHandle_t handle = &_mockHandle;
+    liftedDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                             HIPDNN_TYPE_HANDLE,
+                             1,
+                             static_cast<const void*>(&handle));
+    liftedDesc->finalize();
+
+    // Re-serialize and verify everything survived the round-trip
+    auto reSerialized = liftedDesc->getSerializedGraph();
+    auto graphT = UnPackGraph(reSerialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "bn_all_tensors");
+
+    auto* attrs = graphT->nodes[0]->attributes.AsBatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    // Required tensors
+    EXPECT_EQ(attrs->x_tensor_uid, K_BATCHNORM_TENSOR_X_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BATCHNORM_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->bias_tensor_uid, K_BATCHNORM_TENSOR_BIAS_UID);
+    EXPECT_EQ(attrs->epsilon_tensor_uid, K_BATCHNORM_TENSOR_EPSILON_UID);
+    EXPECT_EQ(attrs->y_tensor_uid, K_BATCHNORM_TENSOR_Y_UID);
+
+    // Batch statistics
+    ASSERT_TRUE(attrs->mean_tensor_uid.has_value());
+    EXPECT_EQ(attrs->mean_tensor_uid.value(), K_BATCHNORM_TENSOR_MEAN_UID);
+    ASSERT_TRUE(attrs->inv_variance_tensor_uid.has_value());
+    EXPECT_EQ(attrs->inv_variance_tensor_uid.value(), K_BATCHNORM_TENSOR_INV_VARIANCE_UID);
+
+    // Running statistics
+    ASSERT_TRUE(attrs->prev_running_mean_tensor_uid.has_value());
+    EXPECT_EQ(attrs->prev_running_mean_tensor_uid.value(),
+              K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID);
+    ASSERT_TRUE(attrs->prev_running_variance_tensor_uid.has_value());
+    EXPECT_EQ(attrs->prev_running_variance_tensor_uid.value(),
+              K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID);
+    ASSERT_TRUE(attrs->momentum_tensor_uid.has_value());
+    EXPECT_EQ(attrs->momentum_tensor_uid.value(), K_BATCHNORM_TENSOR_MOMENTUM_UID);
+    ASSERT_TRUE(attrs->next_running_mean_tensor_uid.has_value());
+    EXPECT_EQ(attrs->next_running_mean_tensor_uid.value(),
+              K_BATCHNORM_TENSOR_NEXT_RUNNING_MEAN_UID);
+    ASSERT_TRUE(attrs->next_running_variance_tensor_uid.has_value());
+    EXPECT_EQ(attrs->next_running_variance_tensor_uid.value(),
+              K_BATCHNORM_TENSOR_NEXT_RUNNING_VARIANCE_UID);
+
+    // Peer stats
+    ASSERT_EQ(attrs->peer_stats_tensor_uid.size(), 2u);
+    EXPECT_EQ(attrs->peer_stats_tensor_uid[0], K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
+    EXPECT_EQ(attrs->peer_stats_tensor_uid[1], K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
 }
 
 } // namespace
