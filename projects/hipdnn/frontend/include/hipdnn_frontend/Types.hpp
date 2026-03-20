@@ -959,6 +959,112 @@ inline hipdnn_frontend::PointwiseMode
     }
 }
 
+/// @brief Convert backend C-API hipdnnPointwiseMode_t to frontend PointwiseMode
+inline std::pair<PointwiseMode, Error> fromHipdnnPointwiseMode(hipdnnPointwiseMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_POINTWISE_ABS:
+        return {PointwiseMode::ABS, {}};
+    case HIPDNN_POINTWISE_ADD:
+        return {PointwiseMode::ADD, {}};
+    case HIPDNN_POINTWISE_ADD_SQUARE:
+        return {PointwiseMode::ADD_SQUARE, {}};
+    case HIPDNN_POINTWISE_BINARY_SELECT:
+        return {PointwiseMode::BINARY_SELECT, {}};
+    case HIPDNN_POINTWISE_CEIL:
+        return {PointwiseMode::CEIL, {}};
+    case HIPDNN_POINTWISE_CMP_EQ:
+        return {PointwiseMode::CMP_EQ, {}};
+    case HIPDNN_POINTWISE_CMP_GE:
+        return {PointwiseMode::CMP_GE, {}};
+    case HIPDNN_POINTWISE_CMP_GT:
+        return {PointwiseMode::CMP_GT, {}};
+    case HIPDNN_POINTWISE_CMP_LE:
+        return {PointwiseMode::CMP_LE, {}};
+    case HIPDNN_POINTWISE_CMP_LT:
+        return {PointwiseMode::CMP_LT, {}};
+    case HIPDNN_POINTWISE_CMP_NEQ:
+        return {PointwiseMode::CMP_NEQ, {}};
+    case HIPDNN_POINTWISE_DIV:
+        return {PointwiseMode::DIV, {}};
+    case HIPDNN_POINTWISE_ELU_BWD:
+        return {PointwiseMode::ELU_BWD, {}};
+    case HIPDNN_POINTWISE_ELU_FWD:
+        return {PointwiseMode::ELU_FWD, {}};
+    case HIPDNN_POINTWISE_ERF:
+        return {PointwiseMode::ERF, {}};
+    case HIPDNN_POINTWISE_EXP:
+        return {PointwiseMode::EXP, {}};
+    case HIPDNN_POINTWISE_FLOOR:
+        return {PointwiseMode::FLOOR, {}};
+    case HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD:
+        return {PointwiseMode::GELU_APPROX_TANH_BWD, {}};
+    case HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD:
+        return {PointwiseMode::GELU_APPROX_TANH_FWD, {}};
+    case HIPDNN_POINTWISE_GELU_BWD:
+        return {PointwiseMode::GELU_BWD, {}};
+    case HIPDNN_POINTWISE_GELU_FWD:
+        return {PointwiseMode::GELU_FWD, {}};
+    case HIPDNN_POINTWISE_GEN_INDEX:
+        return {PointwiseMode::GEN_INDEX, {}};
+    case HIPDNN_POINTWISE_IDENTITY:
+        return {PointwiseMode::IDENTITY, {}};
+    case HIPDNN_POINTWISE_LOG:
+        return {PointwiseMode::LOG, {}};
+    case HIPDNN_POINTWISE_LOGICAL_AND:
+        return {PointwiseMode::LOGICAL_AND, {}};
+    case HIPDNN_POINTWISE_LOGICAL_NOT:
+        return {PointwiseMode::LOGICAL_NOT, {}};
+    case HIPDNN_POINTWISE_LOGICAL_OR:
+        return {PointwiseMode::LOGICAL_OR, {}};
+    case HIPDNN_POINTWISE_MAX:
+        return {PointwiseMode::MAX, {}};
+    case HIPDNN_POINTWISE_MIN:
+        return {PointwiseMode::MIN, {}};
+    case HIPDNN_POINTWISE_MUL:
+        return {PointwiseMode::MUL, {}};
+    case HIPDNN_POINTWISE_NEG:
+        return {PointwiseMode::NEG, {}};
+    case HIPDNN_POINTWISE_RECIPROCAL:
+        return {PointwiseMode::RECIPROCAL, {}};
+    case HIPDNN_POINTWISE_RELU_BWD:
+        return {PointwiseMode::RELU_BWD, {}};
+    case HIPDNN_POINTWISE_RELU_FWD:
+        return {PointwiseMode::RELU_FWD, {}};
+    case HIPDNN_POINTWISE_RSQRT:
+        return {PointwiseMode::RSQRT, {}};
+    case HIPDNN_POINTWISE_SIGMOID_BWD:
+        return {PointwiseMode::SIGMOID_BWD, {}};
+    case HIPDNN_POINTWISE_SIGMOID_FWD:
+        return {PointwiseMode::SIGMOID_FWD, {}};
+    case HIPDNN_POINTWISE_SIN:
+        return {PointwiseMode::SIN, {}};
+    case HIPDNN_POINTWISE_SOFTPLUS_BWD:
+        return {PointwiseMode::SOFTPLUS_BWD, {}};
+    case HIPDNN_POINTWISE_SOFTPLUS_FWD:
+        return {PointwiseMode::SOFTPLUS_FWD, {}};
+    case HIPDNN_POINTWISE_SQRT:
+        return {PointwiseMode::SQRT, {}};
+    case HIPDNN_POINTWISE_SUB:
+        return {PointwiseMode::SUB, {}};
+    case HIPDNN_POINTWISE_SWISH_BWD:
+        return {PointwiseMode::SWISH_BWD, {}};
+    case HIPDNN_POINTWISE_SWISH_FWD:
+        return {PointwiseMode::SWISH_FWD, {}};
+    case HIPDNN_POINTWISE_TAN:
+        return {PointwiseMode::TAN, {}};
+    case HIPDNN_POINTWISE_TANH_BWD:
+        return {PointwiseMode::TANH_BWD, {}};
+    case HIPDNN_POINTWISE_TANH_FWD:
+        return {PointwiseMode::TANH_FWD, {}};
+    default:
+        return {PointwiseMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPointwiseMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
 /// @brief Convert frontend HeuristicMode to backend heuristic mode
 inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
