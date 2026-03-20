@@ -21,7 +21,7 @@
  * @endcode
  *
  * By default the handle uses the default HIP stream. To enqueue work
- * on a stream you created with `hipStreamCreate()`, pass it to
+ * on a stream you created with `hipStreamCreate()`, pass the stream to
  * createHipdnnHandle() or call setHipdnnHandleStream() afterwards.
  */
 
