@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
@@ -31,92 +8,43 @@ namespace rocRoller
 {
     namespace Expression
     {
-
-        struct DeepBitfieldExtractVisitor
-        {
-
-            DeepBitfieldExtractVisitor(uint32_t offset, uint32_t width)
-                : m_offset(offset)
-                , m_width(width)
-            {
-            }
-
-            ExpressionPtr operator()(BitfieldCombine const& expr) const
-            {
-                uint32_t combineStartBit = expr.dstOffset;
-                uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
-                uint32_t endBit          = m_offset + m_width - 1;
-                // No overlap with this dword
-                if(combineStartBit > endBit || combineEndBit < m_offset)
-                {
-                    return call(expr.rhs);
-                }
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr operator()(Concatenate const& expr) const
-            {
-                uint32_t operandStartBit = 0;
-                uint32_t operandEndBit   = 0;
-                uint32_t endBit          = m_offset + m_width - 1;
-                for(int i = 0; i < expr.operands.size(); ++i)
-                {
-                    operandStartBit = operandEndBit;
-                    operandEndBit += resultVariableType(expr.operands[i]).getElementSize() * 8;
-                    // bitField is fully contained within this operand
-                    if(operandStartBit <= m_offset && endBit <= operandEndBit)
-                    {
-                        this->m_offset -= operandStartBit;
-                        return call(expr.operands[i]);
-                    }
-                }
-
-                return std::make_shared<Expression>(expr);
-            }
-
-            template <typename Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return expr;
-
-                return std::visit(*this, *expr);
-            }
-
-            uint32_t get_offset() const
-            {
-                return m_offset;
-            }
-
-        private:
-            mutable uint32_t m_offset;
-            uint32_t         m_width;
-        };
-
         /**
-         * Returns a BitFieldExtract expression that extracts the specified bitfield from the given expression.
-         * Looks through Concatenate expressions to find the corresponding operand to extract.
-         * Looks through BitfieldCombine expressions to extract from its destination operand if the BitfieldCombine and BitFieldExtract do not overlap.
+         * Splits a BitFieldExtract that crosses dword boundaries into two separate extracts
+         * combined with OR. This is necessary because bfe code generation does not support
+         * extracting from a source that has two registers (e.g. 64-bit source) into a destination
+         * that has one register (e.g. 32-bit destination).
          */
-        ExpressionPtr
-            deepExtract(ExpressionPtr expr, DataType type, uint32_t offset, uint32_t width)
+        ExpressionPtr splitBitfieldExtract(ExpressionPtr src,
+                                           uint32_t      srcOffset,
+                                           uint32_t      width,
+                                           uint32_t      dwordSize,
+                                           DataType      dataType)
         {
-            auto visitor   = DeepBitfieldExtractVisitor(offset, width);
-            auto extracted = visitor.call(expr);
-            offset         = visitor.get_offset();
+            AssertFatal(width <= dwordSize,
+                        "Expected width to be less than or equal to dword size");
+            AssertFatal(dataType == DataType::Raw32, "Expected data type to be Raw32");
 
-            if(offset == 0 && width == resultVariableType(extracted).getElementSize() * 8)
-            {
-                return extracted;
-            }
+            uint32_t srcStartDword = srcOffset / dwordSize;
+            uint32_t srcEndDword   = (srcOffset + width - 1) / dwordSize;
 
-            ExpressionPtr extract = bfe(type, extracted, width, offset);
-            return extract;
+            // If extraction is within a single dword, just return simple bfe
+            // Even if src is 64 bits, CSE simplifies this to extracting from
+            // a single register
+            if(srcStartDword == srcEndDword)
+                return bfe(dataType, src, srcOffset, width);
+
+            // Extraction crosses dword boundary - need to split
+            uint32_t firstDwordEndBit = (srcStartDword + 1) * dwordSize - 1;
+            uint32_t lowerWidth       = firstDwordEndBit - srcOffset + 1;
+            uint32_t upperWidth       = width - lowerWidth;
+            uint32_t upperOffset      = (srcStartDword + 1) * dwordSize;
+
+            ExpressionPtr lower = bfe(dataType, src, srcOffset, lowerWidth);
+            ExpressionPtr upper = bfe(dataType, src, upperOffset, upperWidth);
+
+            // Combine
+            ExpressionPtr shiftedUpper = upper << literal(lowerWidth);
+            return lower | shiftedUpper;
         }
 
         std::vector<ExpressionPtr>
@@ -133,8 +61,7 @@ namespace rocRoller
                 uint32_t dwordEndBit   = dwordStartBit + dwordSize - 1;
 
                 // Get new destination dword
-                ExpressionPtr dstDWord
-                    = deepExtract(expr.rhs, DataType::UInt32, dwordStartBit, dwordSize);
+                ExpressionPtr dstDWord = bfe(DataType::Raw32, expr.rhs, dwordStartBit, dwordSize);
 
                 // No overlap with this dword
                 if(combineStartBit > dwordEndBit || combineEndBit < dwordStartBit)
@@ -152,7 +79,8 @@ namespace rocRoller
                     ExpressionPtr srcDWord = expr.lhs;
                     if(resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize)
                     {
-                        srcDWord  = bfe(DataType::UInt32, expr.lhs, srcOffset, overlapWidth);
+                        srcDWord = splitBitfieldExtract(
+                            expr.lhs, srcOffset, overlapWidth, dwordSize, DataType::Raw32);
                         srcOffset = 0;
                     }
 
@@ -230,18 +158,22 @@ namespace rocRoller
                 cpy.rhs = call(expr.rhs);
 
                 auto dstSize = resultVariableType(expr.rhs).getElementSize() * 8;
-                AssertFatal(expr.dstOffset + expr.width <= dstSize,
-                            "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
-                            expr.dstOffset,
-                            expr.width,
-                            dstSize);
+                AssertFatal(
+                    expr.dstOffset + expr.width <= dstSize,
+                    fmt::format(
+                        "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
+                        expr.dstOffset,
+                        expr.width,
+                        dstSize));
 
                 auto srcSize = resultVariableType(expr.lhs).getElementSize() * 8;
-                AssertFatal(expr.srcOffset + expr.width <= srcSize,
-                            "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
-                            expr.srcOffset,
-                            expr.width,
-                            srcSize);
+                AssertFatal(
+                    expr.srcOffset + expr.width <= srcSize,
+                    fmt::format(
+                        "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
+                        expr.srcOffset,
+                        expr.width,
+                        srcSize));
 
                 // No need to split if destination size is less than or equal to 32 bits
                 if(dstSize <= dwordSize && srcSize <= dwordSize)

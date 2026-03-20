@@ -1,71 +1,42 @@
-# ########################################################################
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-set(HIPSPARSE_BENCHMARK_SOURCES
-  client.cpp
-  hipsparse_arguments_config.cpp
-  hipsparse_bench.cpp
-  hipsparse_bench_app.cpp
-  hipsparse_bench_cmdlines.cpp
-  hipsparse_routine.cpp
+add_executable(hipsparse-bench)
+
+target_sources(hipsparse-bench PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_arguments_config.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_bench.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_bench_app.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_bench_cmdlines.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_routine.cpp"
 )
 
-set(HIPSPARSE_CLIENTS_COMMON
-  ../common/arg_check.cpp
-  ../common/unit.cpp
-  ../common/utility.cpp
-  ../common/hipsparse_template_specialization.cpp
+target_compile_options(hipsparse-bench PRIVATE -Wall)
+
+if(NOT HIPSPARSE_ENABLE_HOST)
+    target_include_directories(hipsparse-bench PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
+endif()
+
+target_link_libraries(hipsparse-bench PRIVATE hipsparse::clients-common)
+
+# Ensure pthread is linked on Unix platforms
+if(NOT WIN32)
+    target_link_libraries(hipsparse-bench PRIVATE pthread)
+endif()
+
+if(HIPSPARSE_ENABLE_OPENMP)
+    target_link_libraries(hipsparse-bench PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+if(HIPSPARSE_ENABLE_CUDA)
+    target_compile_definitions(hipsparse-bench PRIVATE __HIP_PLATFORM_NVIDIA__)
+    target_link_libraries(hipsparse-bench PRIVATE CUDA::cudart CUDA::cuda_driver)
+endif()
+
+# Set output directory - Jenkins expects clients/staging
+set_target_properties(hipsparse-bench PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
-
-add_executable(hipsparse-bench ${HIPSPARSE_BENCHMARK_SOURCES} ${HIPSPARSE_CLIENTS_COMMON})
-
-# Target compile options
-target_compile_options(hipsparse-bench PRIVATE -Wno-deprecated -Wno-unused-command-line-argument -Wall)
-
-# Internal common header
-target_include_directories(hipsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-
-if (BUILD_CLIENTS_ONLY)
-  target_include_directories(hipsparse-bench PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
-endif()
-
-# Target link libraries
-target_link_libraries(hipsparse-bench PRIVATE roc::hipsparse)
-
-# Add OpenMP if available
-if(OPENMP_FOUND AND THREADS_FOUND)
-  target_link_libraries(hipsparse-bench PRIVATE OpenMP::OpenMP_CXX ${OpenMP_CXX_FLAGS})
-endif()
-
-if(NOT USE_CUDA)
-  target_link_libraries(hipsparse-bench PRIVATE hip::host)
-else()
-  target_compile_definitions(hipsparse-bench PRIVATE __HIP_PLATFORM_NVIDIA__)
-  target_include_directories(hipsparse-bench PRIVATE ${HIP_INCLUDE_DIRS})
-  target_link_libraries(hipsparse-bench PRIVATE ${CUDA_LIBRARIES})
-endif()
-
-# Set benchmark output directory
-set_target_properties(hipsparse-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
 rocm_install(TARGETS hipsparse-bench COMPONENT benchmarks)

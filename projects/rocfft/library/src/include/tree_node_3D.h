@@ -168,7 +168,7 @@ protected:
         allowInplace   = false;
     }
 
-    // should be overriden by the derived class
+    // should be overridden by the derived class
     virtual size_t sbrc_3D_alignment_dimension() const
     {
         return 0;

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -214,22 +214,27 @@ CK_TILE_DEVICE fp8x8_t amd_assembly_i4_to_fp8x8(int a)
 
     uint32_t tmp_pos, tmp_neg, tmp_res_even, tmp_res_odd, final_sel;
 
+    // ---- Lower 4 int4 values (even positions) ----
+    // Extract dictionary indices: low 3 bits of each byte (values 0..7).
     uint32_t dict_sel = a & 0x07070707;
-    uint32_t sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
-
-    tmp_pos      = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
-    tmp_neg      = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // sign bit is bit[2] of each nibble after bias; shift to isolate per-byte sign.
+    uint32_t sign = a >> 1;
+    // Build final selector:
+    //   - bit 2 of each byte (0x04) selects negative vs positive table
+    //   - 0x03020100 selects byte lanes [0,1,2,3] in order
+    final_sel = (sign & 0x04040404) | 0x03020100;
+    // Lookup positive and negative fp8 codes from the small register tables.
+    tmp_pos = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
+    tmp_neg = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // Select per-lane between tmp_pos and tmp_neg using the sign-derived selector.
     tmp_res_even = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
 
+    // ---- Upper 4 int4 values (odd positions) ----
+    // Shift to bring the high-nibble int4s into place and repeat the process.
     a >>= 4;
-    dict_sel = a & 0x07070707;
-    sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
+    dict_sel  = a & 0x07070707;
+    sign      = a >> 1;
+    final_sel = (sign & 0x04040404) | 0x03020100;
 
     tmp_pos           = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
     tmp_neg           = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
@@ -306,22 +311,29 @@ CK_TILE_DEVICE bf8x8_t amd_assembly_i4_to_bf8x8(uint32_t a)
 
     uint32_t tmp_pos, tmp_neg, tmp_res_even, tmp_res_odd, final_sel;
 
+    // ---- Lower 4 int4 values (even positions) ----
+    // Extract dictionary indices: low 3 bits of each byte (values 0..7).
     uint32_t dict_sel = a & 0x07070707;
-    uint32_t sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
 
-    tmp_pos      = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
-    tmp_neg      = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // sign bit is bit[2] of each nibble after bias; shift to isolate per-byte sign.
+    uint32_t sign = a >> 1;
+    // Build final selector:
+    //   - bit 2 of each byte (0x04) selects negative vs positive table
+    //   - 0x03020100 selects byte lanes [0,1,2,3] in order
+    final_sel = (sign & 0x04040404) | 0x03020100;
+
+    // Lookup positive and negative fp8 codes from the small register tables.
+    tmp_pos = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
+    tmp_neg = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // Select per-lane between tmp_pos and tmp_neg using the sign-derived selector.
     tmp_res_even = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
 
+    // ---- Upper 4 int4 values (odd positions) ----
+    // Shift to bring the high-nibble int4s into place and repeat the process.
     a >>= 4;
-    dict_sel = a & 0x07070707;
-    sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
+    dict_sel  = a & 0x07070707;
+    sign      = a >> 1;
+    final_sel = (sign & 0x04040404) | 0x03020100;
 
     tmp_pos           = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
     tmp_neg           = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
@@ -346,6 +358,260 @@ CK_TILE_DEVICE bf8x4_t i4_to_bf8x4(int q)
                    bf8_lookup_table[(q >> 20) & 0xf]};
 }
 #endif
+
+CK_TILE_HOST_DEVICE bf16x8_t bf8x8_to_bf16x8_scale(const bf8x8_t& src, const float& scale)
+{
+    bf16x8_t y;
+#if defined(__gfx950__)
+    constexpr index_t USE_BOTTOM = 0;
+    constexpr index_t USE_TOP    = 1;
+
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            bf8_t elements[4];
+        } input;
+
+        union
+        {
+            bf16x2_t vec;
+            bf16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
+#else
+    static_for<0, 8, 1>{}([&](auto i) {
+        y[i.value] = type_convert<bf16_t>(type_convert<float>(src[i.value]) * scale);
+    });
+#endif
+    return y;
+}
+
+CK_TILE_HOST_DEVICE bf16x8_t fp8x8_to_bf16x8_scale(const fp8x8_t& src, const float& scale)
+{
+    bf16x8_t y;
+#if defined(__gfx950__)
+    constexpr index_t USE_BOTTOM = 0;
+    constexpr index_t USE_TOP    = 1;
+
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            fp8_t elements[4];
+        } input;
+
+        union
+        {
+            bf16x2_t vec;
+            bf16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
+#else
+    static_for<0, 8, 1>{}([&](auto i) {
+        y[i.value] = type_convert<bf16_t>(type_convert<float>(src[i.value]) * scale);
+    });
+#endif
+    return y;
+}
+
+CK_TILE_HOST_DEVICE fp16x8_t fp8x8_to_fp16x8_scale(const fp8x8_t& src, const float& scale)
+{
+    fp16x8_t y;
+#if defined(__gfx950__)
+    constexpr index_t USE_BOTTOM = 0;
+    constexpr index_t USE_TOP    = 1;
+
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            fp8_t elements[4];
+        } input;
+
+        union
+        {
+            fp16x2_t vec;
+            fp16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
+#else
+    static_for<0, 8, 1>{}([&](auto i) {
+        y[i.value] = type_convert<fp16_t>(type_convert<float>(src[i.value]) * scale);
+    });
+#endif
+    return y;
+}
+
+CK_TILE_HOST_DEVICE fp16x8_t bf8x8_to_fp16x8_scale(const bf8x8_t& src, const float& scale)
+{
+    fp16x8_t y;
+#if defined(__gfx950__)
+    constexpr index_t USE_BOTTOM = 0;
+    constexpr index_t USE_TOP    = 1;
+
+    auto convert_quartet = [&](index_t src_offset, index_t dst_offset) {
+        union
+        {
+            uint32_t packed;
+            bf8_t elements[4];
+        } input;
+
+        union
+        {
+            fp16x2_t vec;
+            fp16_t elements[2];
+        } output;
+
+        input.elements[0] = src[src_offset];
+        input.elements[1] = src[src_offset + 1];
+        input.elements[2] = src[src_offset + 2];
+        input.elements[3] = src[src_offset + 3];
+
+        output.vec    = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.packed, scale, USE_BOTTOM);
+        y[dst_offset] = output.elements[0];
+        y[dst_offset + 1] = output.elements[1];
+
+        output.vec        = __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(input.packed, scale, USE_TOP);
+        y[dst_offset + 2] = output.elements[0];
+        y[dst_offset + 3] = output.elements[1];
+    };
+
+    convert_quartet(0, 0);
+    convert_quartet(4, 4);
+#else
+    static_for<0, 8, 1>{}([&](auto i) {
+        y[i.value] = type_convert<fp16_t>(type_convert<float>(src[i.value]) * scale);
+    });
+#endif
+    return y;
+}
+
+CK_TILE_HOST_DEVICE bf16x8_t fp4x4_to_bf16x8_scale(const pk_fp4x4_t& src, const float& scale)
+{
+    bf16x8_t y;
+#if defined(__gfx950__)
+    union
+    {
+        uint32_t u32;
+        pk_fp4x4_t pf4;
+    } cvt;
+
+    constexpr index_t USE_BYTE_0 = 0;
+    constexpr index_t USE_BYTE_1 = 1;
+    constexpr index_t USE_BYTE_2 = 2;
+    constexpr index_t USE_BYTE_3 = 3;
+
+    cvt.pf4     = src;
+    bf16x2_t y0 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_0);
+    bf16x2_t y1 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_1);
+    bf16x2_t y2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_2);
+    bf16x2_t y3 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(cvt.u32, scale, USE_BYTE_3);
+
+    y[0] = y0[0];
+    y[1] = y0[1];
+    y[2] = y1[0];
+    y[3] = y1[1];
+    y[4] = y2[0];
+    y[5] = y2[1];
+    y[6] = y3[0];
+    y[7] = y3[1];
+#else
+    static_for<0, 4, 1>{}([&](auto i) {
+        auto yi            = pk_fp4_to_bf16x2(src[i.value], scale);
+        y[2 * i.value]     = yi[0];
+        y[2 * i.value + 1] = yi[1];
+    });
+#endif
+    return y;
+}
+
+CK_TILE_HOST_DEVICE fp16x8_t fp4x4_to_fp16x8_scale(const pk_fp4x4_t& src, const float& scale)
+{
+    fp16x8_t y;
+#if defined(__gfx950__)
+    union
+    {
+        uint32_t u32;
+        pk_fp4x4_t pf4;
+    } cvt;
+
+    constexpr index_t USE_BYTE_0 = 0;
+    constexpr index_t USE_BYTE_1 = 1;
+    constexpr index_t USE_BYTE_2 = 2;
+    constexpr index_t USE_BYTE_3 = 3;
+
+    cvt.pf4     = src;
+    fp16x2_t y0 = __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(cvt.u32, scale, USE_BYTE_0);
+    fp16x2_t y1 = __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(cvt.u32, scale, USE_BYTE_1);
+    fp16x2_t y2 = __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(cvt.u32, scale, USE_BYTE_2);
+    fp16x2_t y3 = __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(cvt.u32, scale, USE_BYTE_3);
+
+    y[0] = y0[0];
+    y[1] = y0[1];
+    y[2] = y1[0];
+    y[3] = y1[1];
+    y[4] = y2[0];
+    y[5] = y2[1];
+    y[6] = y3[0];
+    y[7] = y3[1];
+#else
+    static_for<0, 4, 1>{}([&](auto i) {
+        auto yi            = pk_fp4_to_fp16x2(src[i.value], scale);
+        y[2 * i.value]     = yi[0];
+        y[2 * i.value + 1] = yi[1];
+    });
+#endif
+    return y;
+}
 
 struct PassThroughPack8
 {
@@ -385,6 +651,29 @@ struct PassThroughPack8
         y.hi = i4_to_bf8x4(bit_cast<int>(x) >> 8);
 #endif
     }
+
+    CK_TILE_HOST_DEVICE constexpr void operator()(fp8x8_t& y, const pk_fp4x4_t& x) const
+    {
+        pk_fp4_t f0 = pk_fp4_t{x[0]};
+        pk_fp4_t f1 = pk_fp4_t{x[1]};
+        pk_fp4_t f2 = pk_fp4_t{x[2]};
+        pk_fp4_t f3 = pk_fp4_t{x[3]};
+
+        fp8x2_t x0 = f0.to_fp8x2();
+        fp8x2_t x1 = f1.to_fp8x2();
+        fp8x2_t x2 = f2.to_fp8x2();
+        fp8x2_t x3 = f3.to_fp8x2();
+
+        y[0] = x0[0];
+        y[1] = x0[1];
+        y[2] = x1[0];
+        y[3] = x1[1];
+        y[4] = x2[0];
+        y[5] = x2[1];
+        y[6] = x3[0];
+        y[7] = x3[1];
+    }
+
     constexpr const static bool is_pack8_invocable = true;
 };
 
@@ -400,6 +689,50 @@ struct DequantPack8
     {
         y.lo = i4_to_half4_scale(bit_cast<int>(x), z);
         y.hi = i4_to_half4_scale(bit_cast<int>(x) >> 8, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(bf16x8_t& y, const pk_fp4x4_t& x, const float& z) const
+    {
+        y = fp4x4_to_bf16x8_scale(x, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(fp16x8_t& y, const pk_fp4x4_t& x, const float& z) const
+    {
+        y = fp4x4_to_fp16x8_scale(x, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(bf16x8_t& y, const bf8x8_t& x, const float& z) const
+    {
+        y = bf8x8_to_bf16x8_scale(x, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(bf16x8_t& y, const fp8x8_t& x, const float& z) const
+    {
+        y = fp8x8_to_bf16x8_scale(x, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(fp16x8_t& y, const fp8x8_t& x, const float& z) const
+    {
+        y = fp8x8_to_fp16x8_scale(x, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(fp16x8_t& y, const bf8x8_t& x, const float& z) const
+    {
+        y = bf8x8_to_fp16x8_scale(x, z);
+    }
+
+    CK_TILE_HOST_DEVICE constexpr void
+    operator()(bf16x8_t& y, const bf16x8_t& x, const float& z) const
+    {
+        static_for<0, 8, 1>{}([&](auto i) {
+            y[i.value] = type_convert<bf16_t>(type_convert<float>(x[i.value]) * z);
+        });
     }
 
     constexpr const static bool is_pack8_invocable = true;
@@ -451,6 +784,12 @@ struct PassThrough
             y = ck_tile::type_convert<raw_t<Y>>(x);
         }
         /*  otherwise (r-value or const)     → do nothing  */
+    }
+
+    template <typename Y, typename X>
+    CK_TILE_HOST_DEVICE void operator()(Y& y, const X& x) const
+    {
+        y = ck_tile::type_convert<raw_t<Y>>(x);
     }
 
     template <typename E, typename C, typename... Ds>

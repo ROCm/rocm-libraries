@@ -29,7 +29,7 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/test_seed.hpp
 )
 
-function(add_relative_test test_name test_target)
+function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
         set(EXE_PATH ".")
@@ -45,6 +45,8 @@ function(add_relative_test test_name test_target)
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
+    # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
 endfunction()
 
 function(add_rocthrust_test TEST)
@@ -106,9 +108,10 @@ function(add_rocthrust_test TEST)
             )
         endforeach()
     else()
-        add_relative_test(${TEST_TARGET} ${TEST_TARGET})
+        add_relative_test(${TEST_TARGET} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
         set_tests_properties(${TEST_TARGET}
             PROPERTIES
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS "hip"
         )
     endif()
@@ -239,7 +242,10 @@ if(BUILD_TEST)
     add_rocthrust_test("reduce_by_key")
     add_rocthrust_test("reduce_large")
     add_rocthrust_test("remove")
-    add_rocthrust_test("replace")
+    # Temporarily disable this test for gfx950 when CODE_COVERAGE is ON due to a compiler issue
+    if((NOT CODE_COVERAGE) OR (NOT (("gfx950" IN_LIST GPU_TARGETS) OR (GPU_TARGETS STREQUAL "all"))))
+        add_rocthrust_test("replace")
+    endif()
     add_rocthrust_test("reproducibility")
     add_rocthrust_test("reverse")
     add_rocthrust_test("reverse_iterator")
@@ -342,4 +348,19 @@ rocm_install(
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
+)
+
+# Build the executable used for generating the resource spec file.
+add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+target_link_libraries(generate_resource_spec PRIVATE hip::host)
+
+# Install the executable using the standard install command instead of rocm_install
+# since we want to put it in a custom DESTINATION (rocm_install does not support
+# the DESTINATION option for TARGETS).
+set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+install(
+    TARGETS generate_resource_spec
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
 )

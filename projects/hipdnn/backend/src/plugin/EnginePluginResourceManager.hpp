@@ -5,36 +5,43 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "hipdnn_backend.h"
 
-namespace hipdnn_sdk
-{
-namespace data_objects
+namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-}
-}
+} // namespace hipdnn_data_sdk::data_objects
 
 namespace hipdnn_backend
 {
-
 class GraphDescriptor;
-
-namespace plugin
+}
+namespace hipdnn_backend::plugin
 {
 
 class EngineDetailsWrapper;
 class EngineExecutionContextWrapper;
 class EnginePlugin;
 class EnginePluginManager;
+
+struct EngineInfo
+{
+    std::string engineName;
+    std::string pluginName;
+    int64_t engineId;
+    std::string version;
+    std::string type;
+};
 
 class EnginePluginResourceManager
 {
@@ -48,6 +55,9 @@ public:
     static void setPluginPaths(const std::vector<std::filesystem::path>& pluginPaths,
                                hipdnnPluginLoadingMode_ext_t loadingMode);
     static std::set<std::filesystem::path> getPluginPaths();
+
+    // Set plugin unloading mode (lazy keeps plugins loaded until app exit or path change)
+    static void setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode);
 
     static std::shared_ptr<EnginePluginResourceManager> create();
 
@@ -85,8 +95,13 @@ public:
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc);
 
+    virtual size_t getEngineCount() const;
+    virtual std::vector<EngineInfo> getEngineInfos() const;
+
     virtual void
         getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
+
+    virtual std::string toString() const;
 
 private:
     // MT-unsafe instance methods
@@ -114,6 +129,7 @@ private:
     std::shared_ptr<EnginePluginManager> _pm;
     std::unordered_map<hipdnnEnginePluginHandle_t, const EnginePlugin*> _handleToPlugin;
     std::unordered_map<int64_t, hipdnnEnginePluginHandle_t> _engineIdToHandle;
+    mutable std::optional<std::vector<EngineInfo>> _cachedEngineInfos;
 
     friend class EngineDetailsWrapper;
     friend class EngineExecutionContextWrapper;
@@ -136,7 +152,7 @@ public:
     EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept;
     EngineDetailsWrapper& operator=(EngineDetailsWrapper&& other) noexcept;
 
-    const hipdnn_sdk::data_objects::EngineDetails* get() const;
+    const hipdnn_data_sdk::data_objects::EngineDetails* get() const;
 
 private:
     std::shared_ptr<EnginePluginResourceManager> _rm;
@@ -169,5 +185,4 @@ private:
     hipdnnEnginePluginExecutionContext_t _executionContext;
 };
 
-} // namespace plugin
-} // hipdnn_backend
+} // namespace hipdnn_backend::plugin

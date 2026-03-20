@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -56,6 +33,112 @@ namespace rocRoller
         {
             return stream << toString(a);
         }
+
+        /**
+         * @brief Manages candidate free blocks for the PerfectFit allocation strategy.
+         *
+         * This class encapsulates the list of candidate holes (free blocks) and provides
+         * operations to update or remove candidates after allocations.
+         */
+        class PerfectFitCandidates
+        {
+        public:
+            /// A candidate represents a contiguous free block
+            struct Candidate
+            {
+                int idx; ///< Start index of the block
+                int blockSize; ///< Size of the block
+            };
+
+            using iterator       = std::vector<Candidate>::iterator;
+            using const_iterator = std::vector<Candidate>::const_iterator;
+
+            explicit PerfectFitCandidates(size_t registerCount)
+                : m_registerCount(registerCount)
+            {
+            }
+
+            /// Add a candidate to the list
+            void addCandidate(int idx, int blockSize)
+            {
+                AssertFatal(blockSize > 0 && idx >= 0,
+                            "Invalid candidate",
+                            ShowValue(idx),
+                            ShowValue(blockSize));
+                m_candidates.push_back({idx, blockSize});
+            }
+
+            /// Check if a candidate is the end candidate (trailing space at end of register pool)
+            bool isEndCandidate(const_iterator it) const
+            {
+                return it->blockSize > 0 && it->idx >= 0
+                       && (static_cast<size_t>(it->idx) + static_cast<size_t>(it->blockSize))
+                              >= m_registerCount;
+            }
+
+            iterator begin()
+            {
+                return m_candidates.begin();
+            }
+
+            iterator end()
+            {
+                return m_candidates.end();
+            }
+
+            const_iterator begin() const
+            {
+                return m_candidates.begin();
+            }
+
+            const_iterator end() const
+            {
+                return m_candidates.end();
+            }
+
+            bool empty() const
+            {
+                return m_candidates.empty();
+            }
+
+            /// Remove a candidate, returns iterator to next element
+            iterator remove(iterator it)
+            {
+                return m_candidates.erase(it);
+            }
+
+            /**
+             * @brief Update a candidate after allocating from its start.
+             *
+             * Adjusts idx and blockSize. Removes candidate if remaining size <= 0.
+             */
+            void updateFromStart(iterator it, int width, AllocationOptions const& options)
+            {
+                int newIdx = Allocator::align(it->idx + width, options);
+                int shrink = newIdx - it->idx;
+                it->idx    = newIdx;
+                it->blockSize -= shrink;
+
+                if(it->blockSize <= 0)
+                    m_candidates.erase(it);
+            }
+
+            /**
+             * @brief Update a candidate after allocating from its end.
+             *
+             * Adjusts blockSize. Removes candidate if remaining size <= 0.
+             */
+            void updateFromEnd(iterator it, int width)
+            {
+                it->blockSize -= width;
+                if(it->blockSize <= 0)
+                    m_candidates.erase(it);
+            }
+
+        private:
+            std::vector<Candidate> m_candidates;
+            const size_t           m_registerCount;
+        };
 
         inline Allocator::Allocator(Type regType, int count, AllocatorScheme scheme)
             : m_regType(regType)
@@ -233,99 +316,111 @@ namespace rocRoller
             std::vector<int> rv;
             rv.reserve(count);
 
-            // Width of chunks
-            auto width = options.contiguousChunkWidth;
+            auto const chunkWidth = options.contiguousChunkWidth;
 
-            // Remaining number of registers left to handle
-            int currentCount = count;
-
-            // Free blocks that can be used. {start, size}
-            std::vector<std::pair<int, int>> candidates;
-
-            // Loop through register collection and pick out appropriate free blocks
-            int candidateIdx = 0;
-            while(candidateIdx >= 0 && candidateIdx < m_registers.size())
+            // Gather all candidate blocks
+            PerfectFitCandidates candidates(m_registers.size());
+            for(int searchStart = 0; static_cast<size_t>(searchStart) < m_registers.size();)
             {
-                auto candidate = findContiguousRange(candidateIdx, width, options, rv);
-                candidateIdx   = candidate.first;
-                if(candidateIdx >= 0)
-                {
-                    candidates.push_back(candidate);
-                    candidateIdx += candidate.second;
-                }
+                auto [start, blockSize] = findContiguousRange(searchStart, chunkWidth, options, {});
+                if(start < 0)
+                    break;
+
+                candidates.addCandidate(start, blockSize);
+                searchStart = start + blockSize;
             }
 
-            while(currentCount > 0)
+            if(candidates.empty())
+                return {};
+
+            // Helper to allocate a chunk starting at the given index
+            auto allocateChunk = [&rv](int startIdx, int width) {
+                std::vector<int> indices(width);
+                std::iota(indices.begin(), indices.end(), startIdx);
+                rv.insert(rv.end(), indices.begin(), indices.end());
+            };
+
+            // Check if a register is free (not in m_registers and not already planned in rv)
+            auto isEffectivelyFree = [this, &rv](int idx) {
+                if(!isFree(idx))
+                    return false;
+                return std::find(rv.begin(), rv.end(), idx) == rv.end();
+            };
+
+            int remainingCount = count;
+
+            while(remainingCount > 0)
             {
-                // Have we found a place for the current chunk?
+                // If the last chunk is smaller than chunkWidth, allocate what's left
+                int  width = std::min(chunkWidth, remainingCount);
                 bool found = false;
 
-                // If the last chunk is smaller than the given width, allocate what's left
-                width = std::min(width, currentCount);
-
-                for(auto& [idx, blockSize] : candidates)
+                // 1. Look for perfect fit (exact size match)
+                for(auto it = candidates.begin(); !found && it != candidates.end(); ++it)
                 {
-                    // Check for perfect fit
-                    if(blockSize == width)
+                    if(candidates.isEndCandidate(it) || it->blockSize != width)
+                        continue;
+
+                    allocateChunk(it->idx, width);
+                    candidates.remove(it);
+                    found = true;
+                }
+
+                // 2. Look for perfect alignment (no gap created) at start or end of a hole
+                for(auto it = candidates.begin(); !found && it != candidates.end(); ++it)
+                {
+                    if(candidates.isEndCandidate(it) || it->blockSize < width)
+                        continue;
+
+                    // Check start: no gap if hole starts at 0 or right after a used register
+                    bool startAligned = (it->idx == 0) || !isEffectivelyFree(it->idx - 1);
+                    if(startAligned)
                     {
-                        std::vector<int> indices(width);
-                        std::iota(indices.begin(), indices.end(), idx);
-                        rv.insert(rv.end(), indices.begin(), indices.end());
-
-                        // Update candidate
-                        blockSize = 0;
-
+                        allocateChunk(it->idx, width);
+                        candidates.updateFromStart(it, width, options);
                         found = true;
                         break;
                     }
-                }
 
-                // If a perfect fit was not found, use any other block
-                if(!found)
-                {
-                    for(auto& [idx, blockSize] : candidates)
+                    // Check end: no gap if allocation aligns perfectly at hole's end
+                    int  endStart   = it->idx + it->blockSize - width;
+                    bool endAligned = (align(endStart, options) == endStart);
+                    if(endAligned)
                     {
-                        if(blockSize < width)
-                        {
-                            continue;
-                        }
-
-                        std::vector<int> indices(width);
-
-                        // Try to use the end of this free block
-                        int start = align(idx + blockSize - width, options);
-
-                        // Check if chunk is outside of block, or if it runs up against the end of the total number of registers
-                        // The equal check in `start + width >= m_registers.size()`
-                        // is to avoid increasing register high-water mark by not allocating the last register
-                        if(start + width > idx + blockSize || start + width >= m_registers.size())
-                        {
-                            // Should not use end of block, revert to using beginning
-                            start = idx;
-
-                            // Update candidate
-                            idx += width;
-                        }
-
-                        std::iota(indices.begin(), indices.end(), start);
-                        rv.insert(rv.begin(), indices.begin(), indices.end());
-
-                        // Update candidate
-                        blockSize -= width;
-
+                        allocateChunk(endStart, width);
+                        candidates.updateFromEnd(it, width);
                         found = true;
-
-                        break;
                     }
                 }
 
-                if(!found)
+                // 3. Allocate at start of a candidate (creates alignment gap)
+                for(auto it = candidates.begin(); !found && it != candidates.end(); ++it)
                 {
-                    // Could not allocate this chunk, full failure
+                    if(candidates.isEndCandidate(it) || it->blockSize < width)
+                        continue;
+
+                    allocateChunk(it->idx, width);
+                    candidates.updateFromStart(it, width, options);
+                    found = true;
+                }
+
+                // 4. Last resort: allocate at the end of the register space
+                if(!found && !candidates.empty())
+                {
+                    auto it = std::prev(candidates.end());
+                    if(candidates.isEndCandidate(it) && it->blockSize >= width)
+                    {
+                        allocateChunk(it->idx, width);
+                        candidates.updateFromStart(it, width, options);
+                        found = true;
+                    }
+                }
+
+                // Could not allocate this chunk, full failure
+                if(!found)
                     return {};
-                }
 
-                currentCount -= width;
+                remainingCount -= width;
             }
 
             return rv;

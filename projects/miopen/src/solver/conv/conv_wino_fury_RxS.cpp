@@ -75,7 +75,7 @@ uint32_t GetNGroups(uint64_t cu_count)
 
 bool GpuHasReducedVGPRMem(const std::string& dev_name)
 {
-    static constexpr std::array<std::string_view, 5> kFullVgprMemDevices{
+    static constexpr std::array<std::string_view, 8> kFullVgprMemDevices{
         "gfx1100", "gfx1101", "gfx1151", "gfx1200", "gfx1201"};
     const std::string_view name{dev_name};
     return std::find(kFullVgprMemDevices.begin(), kFullVgprMemDevices.end(), name) ==
@@ -390,15 +390,6 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     if(!(StartsWith(dev_name, "gfx11") || StartsWith(dev_name, "gfx12")))
         return false;
 
-    if(StartsWith(dev_name, "gfx115"))
-    {
-        // Triggers this error on gfx1151
-        // kernel: [drm:gfx_v11_0_bad_op_irq [amdgpu]] *ERROR* Illegal opcode in command stream
-        // stderr: HSA_STATUS_ERROR_INVALID_ISA: The instruction set architecture is invalid. code:
-        // 0x100f
-        return false;
-    }
-
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;
     if(!(problem.GetDilationH() == 1 && problem.GetDilationW() == 1))
@@ -630,6 +621,7 @@ ConvWinoFuryRxS<Winodata, Winofilter>::GetSolution(const ExecutionContext& ctx,
 
 template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<2, 3>;
 // template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<3, 2>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinoFuryRxS<2, 3>;
 
 } // namespace conv
 

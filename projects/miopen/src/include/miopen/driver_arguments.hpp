@@ -79,12 +79,15 @@ std::string BnormArgsForMIOpenDriver(miopenTensorDescriptor_t xDesc,
                                      miopenTensorDescriptor_t biasDesc,
                                      miopenTensorDescriptor_t saveMeanDesc,
                                      miopenBatchNormMode_t bn_mode,
-                                     const void* resultRunningMean,
-                                     const void* resultRunningVariance,
+                                     const void* prevResultRunningMean,
+                                     const void* prevResultRunningVariance,
+                                     const void* nextResultRunningMean,
+                                     const void* nextResultRunningVariance,
                                      const void* resultSaveMean,
                                      const void* resultSaveInvVariance,
                                      const BatchNormDirection_t& dir,
                                      miopenActivationDescriptor_t activDesc,
+                                     bool useInverseVariance  = false,
                                      bool print_for_bn_driver = true);
 } // namespace debug
 } // namespace miopen

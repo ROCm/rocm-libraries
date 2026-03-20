@@ -1,7 +1,7 @@
 
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ROCMVERSION=7.0.1
+ARG ROCMVERSION=7.1.1
 ARG compiler_version=""
 ARG compiler_commit=""
 ARG CK_SCCACHE=""
@@ -13,22 +13,21 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN set -xe && \
     apt-get update && apt-get install -y --allow-unauthenticated apt-utils wget gnupg2 curl
 
-RUN wget https://repo.radeon.com/amdgpu-install/7.0.1/ubuntu/noble/amdgpu-install_7.0.1.70001-1_all.deb && \
-    apt install ./amdgpu-install_7.0.1.70001-1_all.deb -y && \
+RUN wget https://repo.radeon.com/amdgpu-install/7.1.1/ubuntu/noble/amdgpu-install_7.1.1.70101-1_all.deb && \
+    apt install ./amdgpu-install_7.1.1.70101-1_all.deb -y && \
     apt update && \
     apt install python3-setuptools python3-wheel -y && \
     apt install rocm-dev -y
-
-## Sccache binary built from source for ROCm, only install if CK_SCCACHE is defined
-ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
+    
+# Install SCCACHE
+ENV SCCACHE_VERSION="0.14.0"
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
-ENV CK_SCCACHE=$CK_SCCACHE
-RUN if [ "$CK_SCCACHE" != "" ]; then \
-        mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-        curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
-        chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
-    fi
+RUN set -x && \
+    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+    wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+    tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
+    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache
 
 # Install dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
@@ -97,7 +96,7 @@ ENV compiler_commit=$compiler_commit
 RUN sh -c "echo compiler version = '$compiler_version'" && \
     sh -c "echo compiler commit = '$compiler_commit'"
 
-RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" = "" ]; then \
+RUN if ( [ "$compiler_version" = "develop" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" = "" ]; then \
         git clone -b "$compiler_version" https://github.com/ROCm/llvm-project.git && \
         cd llvm-project && mkdir build && cd build && \
         cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_RUNTIMES="compiler-rt" ../llvm && \
@@ -105,7 +104,7 @@ RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd
     else echo "using the release compiler"; \
     fi
 
-RUN if ( [ "$compiler_version" = "amd-staging" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" != "" ]; then \
+RUN if ( [ "$compiler_version" = "develop" ] || [ "$compiler_version" = "amd-mainline" ] ) && [ "$compiler_commit" != "" ]; then \
         git clone -b "$compiler_version" https://github.com/ROCm/llvm-project.git && \
         cd llvm-project && git checkout "$compiler_commit" && echo "checking out commit $compiler_commit" && mkdir build && cd build && \
         cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_RUNTIMES="compiler-rt" ../llvm && \

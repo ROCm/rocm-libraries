@@ -16,7 +16,12 @@ Infrastructure
 
 - Doxygen and Sphinx are used to generate the project's documentation.
 - Jenkins is used to automate Continuous Integration (CI) testing, with configurations stored in the ``.jenkins`` folder.
-- hipTensor is hosted and maintained by AMD on `GitHub  <https://github.com/ROCm/hipTensor>`_.
+- hipTensor is hosted and maintained by AMD on `GitHub  <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor>`_.
+
+  .. note::
+
+    The hipTensor repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/hipTensor>`_.
+
 - The hipTensor project is organized and configured using ``CMake``, with ``CMakeLists.txt`` files in the root of each directory.
 - ``clang-format`` is used to format C++ code. ``.githooks/install`` ensures that a clang-format pass will run on each committed file.
 - ``GTest`` is used to implement test suite organization and execution.
@@ -27,7 +32,7 @@ Infrastructure
 Design concepts
 --------------------------------
 
-hipTensor is a library developed with the ``C++17`` language standard. It uses meta-programming techniques to optimize code at compile time and generate efficient GPU kernels.
+hipTensor is a library developed with the ``C++20`` language standard. It uses meta-programming techniques to optimize code at compile time and generate efficient GPU kernels.
 hipTensor employs Composable Kernel as a functional backend and is written in different layers.
 
 The outer API layer serves as a functional interface for users to define tensor data abstractions and manipulations.

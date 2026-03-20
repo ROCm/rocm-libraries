@@ -1,11 +1,14 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "utils/tensor_utils.hpp"
 #include "utils/tensor_partition.hpp"
 #include "utils/layout_utils.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 // Disable from doxygen docs generation
 /// @cond INTERNAL
@@ -187,8 +190,7 @@ __host__ __device__ constexpr auto GenerateSlicedDescriptor(const Tuple<Ts...>& 
     const auto transforms     = GenerateSliceTransforms(idx, shape);
     using TransformsTupleType = decltype(transforms);
 
-    const auto lower_dims =
-        generate_tuple([&](auto i) { return Sequence<i.value>{}; }, Number<old_shape_dims>{});
+    const auto lower_dims = generate_identity_sequences<old_shape_dims>();
     const auto upper_dims = decltype(GenerateUpperDims<0>(TransformsTupleType{})){};
     return transform_tensor_descriptor(flatten_desc, transforms, lower_dims, upper_dims);
 }
@@ -441,3 +443,4 @@ struct Tensor
 
 } // namespace wrapper
 } // namespace ck
+#pragma clang diagnostic pop

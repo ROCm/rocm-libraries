@@ -41,14 +41,15 @@
 #include <miopen/conv/problem_description.hpp>
 
 #include <algorithm>
-#include <vector>
-#include <cstdlib>
-#include <limits>
-#include <iterator>
-#include <chrono>
 #include <cassert>
+#include <chrono>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <optional>
 #include <random>
 #include <thread>
+#include <vector>
 
 namespace miopen {
 namespace solver {
@@ -426,7 +427,7 @@ auto GenericSearch(const Solver s,
                    const Context& context_,
                    const Problem& problem,
                    const AnyInvokeParams& invoke_ctx_,
-                   std::vector<SolutionPerf>* perf_sols = nullptr)
+                   std::vector<SolutionPerf>* perf_solsp = nullptr)
     -> decltype(s.GetDefaultPerformanceConfig(context_, problem))
 {
     auto context                  = context_;
@@ -434,19 +435,17 @@ auto GenericSearch(const Solver s,
 
     using PerformanceConfig = decltype(s.GetDefaultPerformanceConfig(context, problem));
     PerformanceConfig best_config;
+    PerformanceConfig last_config; // Used in cases where all kernels were intentionally skipped
     const auto default_solution =
         s.GetSolution(context, problem, s.GetDefaultPerformanceConfig(context, problem));
     const auto invoke_ctx = [invoke_ctx_]() {
         auto copy = invoke_ctx_;
         copy.SetInvokeType(InvokeType::AutoTune);
-        return copy;
+        return std::move(copy);
     }();
 
     // list of sampled solutions
-    if(perf_sols)
-    {
-        perf_sols->erase(perf_sols->begin(), perf_sols->end());
-    }
+    std::vector<SolutionPerf> perf_sols;
 
     auto& profile_h = context.GetStream();
     const AutoEnableProfiling enableProfiling{profile_h};
@@ -485,6 +484,19 @@ auto GenericSearch(const Solver s,
     float worst_time = std::numeric_limits<float>::max();
     size_t n_failed  = 0;
     size_t n_best    = 0;
+    // enable early search termination
+    bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
+    // terminate search when perf is less than cutoff
+    float cutoff_time = context.generic_search_worst_time;
+    if(cutoff_time < std::numeric_limits<float>::max())
+        cutoff_time *= env::value(MIOPEN_SEARCH_CUTOFF_MUL);
+    // skip detailed measurement for configs slower than skip_time
+    float skip_time = context.generic_search_best_time;
+    if(skip_time < std::numeric_limits<float>::max())
+        skip_time *= env::value(MIOPEN_SEARCH_SKIP_PCT) / 100.0f;
+
+    bool rec_results = perf_solsp || using_search_cutoff;
+
     HeartBeat<PerformanceConfig> heartbeat;
     heartbeat.Start();
 
@@ -512,6 +524,8 @@ auto GenericSearch(const Solver s,
         size_t last_imprv      = 0;
         auto threads_remaining = total_threads;
         std::vector<float> samples;
+        float tuning_tolerance =
+            1.0f + static_cast<float>(env::value(MIOPEN_TUNING_FOLLOWUP_TOLERANCE_PCT)) / 100.0f;
         while(true)
         {
             if(n_current >= n_runs_total)
@@ -529,6 +543,8 @@ auto GenericSearch(const Solver s,
             const auto kinder     = solution_queue.pop();
             auto current_config   = std::get<0>(kinder);
             auto current_solution = std::get<1>(kinder);
+
+            last_config = current_config;
 
             if(std::get<2>(kinder))
             {
@@ -553,17 +569,25 @@ auto GenericSearch(const Solver s,
 
             try
             {
-                invoker = profile_h.PrepareInvoker(*current_solution.invoker_factory,
-                                                   current_solution.construction_params);
+                if(current_solution.invoker_factory.has_value())
+                {
+                    invoker = profile_h.PrepareInvoker(*current_solution.invoker_factory,
+                                                       current_solution.construction_params);
 
-                // Warm-up run for every configuration to eliminate cold-start bias
-                invoker(profile_h, invoke_ctx);
-                profile_h.ResetKernelTime();
+                    // Warm-up run for every configuration to eliminate cold-start bias
+                    invoker(profile_h, invoke_ctx);
+                    profile_h.ResetKernelTime();
 
-                invoker(profile_h, invoke_ctx);
-                elapsed_time = profile_h.GetKernelTime();
-                samples.push_back(elapsed_time);
-                profile_h.ResetKernelTime();
+                    invoker(profile_h, invoke_ctx);
+                    elapsed_time = profile_h.GetKernelTime();
+                    samples.push_back(elapsed_time);
+                    profile_h.ResetKernelTime();
+                }
+                else
+                {
+                    MIOPEN_LOG_E("Error: solver returned a solution without invoker factory.");
+                    ret = 1;
+                }
             }
             catch(const std::exception& e)
             {
@@ -576,27 +600,36 @@ auto GenericSearch(const Solver s,
                 ret = 1;
             }
 
-            MIOPEN_LOG_T("##"
-                         << "(n_current, n_failed, n_runs_total):  " << n_current << '/' << n_failed
-                         << '/' << n_runs_total << " elapsed_time: " << elapsed_time
-                         << ", best_time: " << best_time << ", " << current_config);
+            MIOPEN_LOG_T("##" << "(n_current, n_failed, n_runs_total):  " << n_current << '/'
+                              << n_failed << '/' << n_runs_total
+                              << " elapsed_time: " << elapsed_time << ", best_time: " << best_time
+                              << ", " << current_config);
 
             if(ret == 0)
             {
+                // If config is worse than the cutoff time abort the search
+                if(elapsed_time > cutoff_time)
+                {
+                    MIOPEN_LOG_I2("Ending Search, measured time: "
+                                  << elapsed_time << " was greater than cutoff: " << cutoff_time);
+                    for(const auto& kernelInfo : current_solution.construction_params)
+                        profile_h.ClearProgram(kernelInfo.kernel_file, kernelInfo.comp_options);
+                    break;
+                }
+
                 // Smooth the jitter of measurements:
-                // If the 1st probe is NOT too bad (measured time <= 1.10 * worst sample of the best
-                // config), then gather 9 more samples, and remove positive z-score outliers. Use
-                // the mean value with outliers removed for calculating best config.
-                constexpr int N_RUNS = 10;
+                // If the 1st probe is NOT too bad (measured time <= tuning_tolerance * worst sample
+                // of the best config), then gather more samples, and remove positive z-score
+                // outliers. Use the mean value with outliers removed for calculating best config.
                 last_imprv++;
-                if(elapsed_time / worst_time < 1.10f)
+                if(elapsed_time < worst_time * tuning_tolerance && elapsed_time < skip_time)
                 {
                     MIOPEN_LOG_I2("Finding average for: " << elapsed_time << " / " << best_time
                                                           << " = " << (elapsed_time / best_time));
 
                     try
                     {
-                        for(int i = 1; i < N_RUNS; ++i)
+                        for(int i = 1; i < env::value(MIOPEN_TUNING_ITERATIONS); ++i)
                         {
                             invoker(profile_h, invoke_ctx);
                             samples.push_back(profile_h.GetKernelTime());
@@ -636,10 +669,8 @@ auto GenericSearch(const Solver s,
                         }
                     }
                 }
-                if(perf_sols)
-                {
-                    perf_sols->push_back({current_config.ToString(), elapsed_time});
-                }
+                if(rec_results)
+                    perf_sols.push_back({current_config.ToString(), elapsed_time});
             }
 
             // Banchmarked kernels will not be used anymore.
@@ -676,21 +707,48 @@ auto GenericSearch(const Solver s,
     MIOPEN_LOG_I("Done: " << n_runs_total << '/' << n_failed << '/' << n_runs_total << ", best #"
                           << n_best << ' ' << best_time << ' ' << best_config);
 
+    // If no errors were encountered, but we either cutoff or skipped every kernel, don't throw.
+    if(!is_passed && n_failed == 0)
+    {
+        MIOPEN_LOG_I(
+            "Search cutoff or skipped for all kernels.  Last config returned: " << last_config);
+        best_config = std::move(last_config);
+        return best_config;
+    }
+
     if(!is_passed)
         MIOPEN_THROW("Search failed");
 
-    if(perf_sols)
-        std::sort(perf_sols->begin(), perf_sols->end(), [](SolutionPerf a, SolutionPerf b) {
-            return a.time < b.time;
-        });
+    std::sort(perf_sols.begin(), perf_sols.end(), [](SolutionPerf a, SolutionPerf b) {
+        return a.time < b.time;
+    });
 
-    // Run once with the default config and show score.
-    const auto& invoker = profile_h.PrepareInvoker(*default_solution.invoker_factory,
-                                                   default_solution.construction_params);
-    invoker(profile_h, invoke_ctx);
-    const auto default_time = profile_h.GetKernelTime();
-    const auto score        = (best_time > 0.0f) ? default_time / best_time : 0.0f;
-    MIOPEN_LOG_I("...Score: " << score << " (default time " << default_time << ')');
+    // if using cutoff for search update timing
+    if(using_search_cutoff == true && best_time < context.generic_search_best_time)
+    {
+        float new_worst                    = (perf_sols.end() - 1)->time;
+        context_.generic_search_best_time  = best_time;
+        context_.generic_search_worst_time = new_worst;
+        MIOPEN_LOG_I2("Times updated, best: " << best_time << " worst: " << new_worst);
+    }
+
+    if(perf_solsp)
+        *perf_solsp = std::move(perf_sols);
+
+    if(default_solution.invoker_factory.has_value())
+    {
+        // Run once with the default config and show score.
+        const auto& invoker = profile_h.PrepareInvoker(*default_solution.invoker_factory,
+                                                       default_solution.construction_params);
+        invoker(profile_h, invoke_ctx);
+        const auto default_time = profile_h.GetKernelTime();
+        const auto score        = (best_time > 0.0f) ? default_time / best_time : 0.0f;
+        MIOPEN_LOG_I("...Score: " << score << " (default time " << default_time << ')');
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: default solution without invoker factory.");
+    }
 
     return best_config;
 }

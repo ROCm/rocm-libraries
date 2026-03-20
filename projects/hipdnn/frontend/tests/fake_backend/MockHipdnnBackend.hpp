@@ -8,10 +8,11 @@
 #define HIPDNN_BACKEND_STATIC_DEFINE
 
 #include "hipdnn_backend.h"
+#include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 
 // NOLINTBEGIN
 
-class Mock_hipdnn_backend : public hipdnn_frontend::IHipdnnBackend
+class Mock_hipdnn_backend : public hipdnn_frontend::detail::IHipdnnBackend
 {
 public:
     MOCK_METHOD(hipdnnStatus_t, create, (hipdnnHandle_t * handle), ());
@@ -53,6 +54,8 @@ public:
                 ());
     MOCK_METHOD(const char*, getErrorString, (hipdnnStatus_t status), ());
     MOCK_METHOD(void, getLastErrorString, (char* message, size_t max_size), ());
+    MOCK_METHOD(hipdnn_data_sdk::utilities::Version, version, ());
+    MOCK_METHOD(const char*, versionString, ());
     MOCK_METHOD(hipdnnStatus_t,
                 backendCreateAndDeserializeGraphExt,
                 (hipdnnBackendDescriptor_t * descriptor,
@@ -66,6 +69,11 @@ public:
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
                 ());
+    MOCK_METHOD(
+        hipdnnStatus_t,
+        getLoadedEnginePluginPathsExt,
+        (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
+        ());
 };
 
 // NOLINTEND

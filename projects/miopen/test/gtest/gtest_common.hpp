@@ -52,11 +52,11 @@ public:
         restore = ClearValue();
     }
 
-    ScopedEnvironment()                         = delete;
-    ScopedEnvironment(const ScopedEnvironment&) = delete;
-    ScopedEnvironment(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment()                                    = delete;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment(ScopedEnvironment&&)                 = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&)      = delete;
 
     ~ScopedEnvironment()
     {
@@ -189,7 +189,8 @@ struct disabled
 struct DevDescription
 {
     std::string_view name;
-    unsigned cu_cnt; // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned cu_cnt;         // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned wavefront_size; // Default wavefront size
 
     friend std::ostream& operator<<(std::ostream& os, const DevDescription& dd);
 };
@@ -203,7 +204,7 @@ public:
 
     // Add additional methods here if needed
     const std::string& Name() const override;
-    boost::optional<bool> Xnack() const override;
+    bool isXnackEnabled() const override;
 
 private:
     std::string name;
@@ -218,7 +219,9 @@ public:
     // Add additional methods here if needed
     const miopen::TargetProperties& GetTargetProperties() const override;
     std::size_t GetMaxComputeUnits() const override;
+    std::size_t GetWavefrontWidth() const override;
     std::size_t GetMaxMemoryAllocSize() const override;
+
     bool CooperativeLaunchSupported() const override;
 
 private:
@@ -322,6 +325,7 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_DIRECT)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
+MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_BUFFER_SIZE)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_ENFORCE)
 
 // TODO: GTests using test_drive<> disabled until gtest-aware version of test/driver.hpp is built

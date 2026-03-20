@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 
@@ -239,39 +216,12 @@ namespace rocRoller::KernelGraph
             return std::visit(rocRoller::overloaded{
                                   [](std::monostate const&) { return "none"; },
                                   [](JustNaryArgument const&) { return "NaryArgument"; },
-                                  [](ComputeIndex const&) { return "ComputeIndex"; },
                                   [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
                                   [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
                                   [](UnrollStride const&) { return "UnrollStride"; },
                                   [](BaseOffset const&) { return "BaseOffset"; },
                               },
                               cs);
-        }
-
-        std::string toString(ComputeIndexArgument cia)
-        {
-            switch(cia)
-            {
-            case ComputeIndexArgument::TARGET:
-                return "TARGET";
-            case ComputeIndexArgument::INCREMENT:
-                return "INCREMENT";
-            case ComputeIndexArgument::BASE:
-                return "BASE";
-            case ComputeIndexArgument::OFFSET:
-                return "OFFSET";
-            case ComputeIndexArgument::STRIDE:
-                return "STRIDE";
-            case ComputeIndexArgument::BUFFER:
-                return "BUFFER";
-            default:
-                return "Invalid";
-            }
-        }
-
-        std::ostream& operator<<(std::ostream& stream, ComputeIndexArgument const& cia)
-        {
-            return stream << toString(cia);
         }
 
         struct CSToStringVisitor
@@ -284,11 +234,6 @@ namespace rocRoller::KernelGraph
             std::string operator()(JustNaryArgument const& n) const
             {
                 return toString(n.argument);
-            }
-
-            std::string operator()(ComputeIndex const& ci) const
-            {
-                return concatenate(ci.argument, ": (", ci.index, ")");
             }
 
             std::string operator()(TypeAndSubDimension const& ci) const
@@ -321,6 +266,16 @@ namespace rocRoller::KernelGraph
         {
             return stream << toString(cs);
         }
+
+        NaryArgument getNaryArgument(Connections::ConnectionSpec const& conn)
+        {
+            auto visitor
+                = rocRoller::overloaded{[](JustNaryArgument const& arg) { return arg.argument; },
+                                        [](TypeAndNaryArgument const& arg) { return arg.argument; },
+                                        [](auto const& other) { return NaryArgument::None; }};
+
+            return std::visit(visitor, conn);
+        }
     }
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn)
@@ -330,4 +285,10 @@ namespace rocRoller::KernelGraph
                            conn.coordinate,
                            toString(conn.connection));
     }
+
+    NaryArgument getNaryArgument(ControlToCoordinateMapper::Connection const& conn)
+    {
+        return getNaryArgument(conn.connection);
+    }
+
 }

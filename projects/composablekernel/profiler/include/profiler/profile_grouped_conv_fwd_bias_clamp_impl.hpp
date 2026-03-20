@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -21,6 +21,7 @@
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_fwd.hpp"
+#include "ck/library/reference_tensor_operation/gpu/naive_conv_fwd_gpu.hpp"
 
 namespace ck {
 namespace profiler {
@@ -128,6 +129,28 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     std::cout << "output: " << host_output.mDesc << std::endl;
     std::cout << "bias: " << bias.mDesc << std::endl;
 
+    using DeviceOp =
+        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
+                                                                      InLayout,
+                                                                      WeiLayout,
+                                                                      ck::Tuple<OutLayout>,
+                                                                      OutLayout,
+                                                                      InDataType,
+                                                                      WeiDataType,
+                                                                      ck::Tuple<OutDataType>,
+                                                                      OutDataType,
+                                                                      InElementOp,
+                                                                      WeiElementOp,
+                                                                      OutElementOp,
+                                                                      AComputeType,
+                                                                      BComputeType>;
+
+    // get device op instances
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
+
     switch(init_method)
     {
     case 0: break;
@@ -156,8 +179,9 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
     bias_device_buf.ToDevice(bias.mData.data());
 
     // run reference op
-    if(do_verification)
+    if(do_verification == 1)
     {
+        // CPU reference
         auto ref_conv = ck::tensor_operation::host::ReferenceConvFwd<NDimSpatial,
                                                                      InDataType,
                                                                      WeiDataType,
@@ -190,12 +214,82 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
 
         ref_invoker.Run(ref_argument);
     }
+    else if(do_verification == 2)
+    {
+        // GPU reference
+        std::vector<ck::index_t> d_lengths_vec(NDimSpatial + 3);
+        std::vector<ck::index_t> d_strides_vec(NDimSpatial + 3);
+
+        d_lengths_vec[0] = conv_param.G_;
+        d_lengths_vec[1] = conv_param.N_;
+        d_lengths_vec[2] = conv_param.K_;
+        for(ck::index_t i = 0; i < NDimSpatial; ++i)
+        {
+            d_lengths_vec[3 + i] = static_cast<ck::index_t>(conv_param.output_spatial_lengths_[i]);
+        }
+
+        if constexpr(BiasGK)
+        {
+            // For GK bias layout: G*K, zero strides for N and spatial dimensions
+            d_strides_vec[0] = K;
+            d_strides_vec[1] = 0;
+            d_strides_vec[2] = 1;
+            for(ck::index_t i = 0; i < NDimSpatial; ++i)
+            {
+                d_strides_vec[3 + i] = 0;
+            }
+        }
+        else
+        {
+            // Full GNKHW layout - same as output
+            ck::ranges::copy(out_g_n_k_wos_desc.GetStrides(), d_strides_vec.begin());
+        }
+
+        std::array<const OutDataType*, 1> d_ptrs = {
+            reinterpret_cast<const OutDataType*>(bias_device_buf.GetDeviceBuffer())};
+        std::array<std::vector<ck::index_t>, 1> d_lengths = {d_lengths_vec};
+        std::array<std::vector<ck::index_t>, 1> d_strides = {d_strides_vec};
+
+        std::array<const InDataType*, 1> in_ptrs = {
+            reinterpret_cast<const InDataType*>(in_device_buf.GetDeviceBuffer())};
+        std::array<const WeiDataType*, 1> wei_ptrs = {
+            reinterpret_cast<const WeiDataType*>(wei_device_buf.GetDeviceBuffer())};
+
+        ck::ref::naive_conv_fwd_multi_abd<0,
+                                          0,
+                                          1,
+                                          InLayout,
+                                          WeiLayout,
+                                          OutLayout,
+                                          InDataType,
+                                          WeiDataType,
+                                          OutDataType,
+                                          InElementOp,
+                                          WeiElementOp,
+                                          OutElementOp,
+                                          OutDataType>( // Explicitly specify TD = OutDataType
+            in_ptrs,
+            wei_ptrs,
+            d_ptrs,
+            reinterpret_cast<OutDataType*>(out_device_buf.GetDeviceBuffer()),
+            conv_param,
+            d_lengths,
+            d_strides,
+            in_element_op,
+            wei_element_op,
+            out_element_op);
+
+        HIP_CHECK_ERROR(hipDeviceSynchronize());
+
+        out_device_buf.FromDevice(host_output.mData.data());
+    }
 
     std::string best_op_name;
     float best_avg_time   = 0;
     float best_tflops     = 0;
     float best_gb_per_sec = 0;
     int num_kernel        = 0;
+    int valids            = 0;
     // profile device op instances
     bool pass = true;
 
@@ -216,6 +310,8 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
             }
             // re-init output to zero before profiling next kernel
             out_device_buf.SetZero();
+
+            valids++;
 
             std::string op_name = op_ptr->GetTypeString();
 
@@ -265,28 +361,6 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
         }
     };
 
-    using DeviceOp =
-        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
-                                                                      InLayout,
-                                                                      WeiLayout,
-                                                                      ck::Tuple<OutLayout>,
-                                                                      OutLayout,
-                                                                      InDataType,
-                                                                      WeiDataType,
-                                                                      ck::Tuple<OutDataType>,
-                                                                      OutDataType,
-                                                                      InElementOp,
-                                                                      WeiElementOp,
-                                                                      OutElementOp,
-                                                                      AComputeType,
-                                                                      BComputeType>;
-
-    // get device op instances
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
-
     if constexpr(BiasGK)
     {
         constexpr ck::index_t spatial_offset = 3;
@@ -321,6 +395,8 @@ bool profile_grouped_conv_fwd_bias_clamp_impl(int do_verification,
 
         run_impl(op_ptr, argument_ptr);
     }
+
+    printf("\033[36mvalids: %d\n\033[0m", valids);
 
     std::cout << "Best configuration parameters:" << "\nname: " << best_op_name
               << "\navg_time: " << best_avg_time << "\ntflops: " << best_tflops

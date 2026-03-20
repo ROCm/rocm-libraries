@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
@@ -33,7 +34,6 @@
 #include "../level1/rocsparse_gthr.hpp"
 #include "../level2/rocsparse_csrsv.hpp"
 #include "csrsm_device.h"
-
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename I, typename J, typename T>
@@ -145,10 +145,8 @@ namespace rocsparse
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_async(reinterpret_cast<J*>(csrsm_info->get_zero_pivot()),
-                                        std::numeric_limits<J>::max(),
-                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+                1, rocsparse::get_indextype<J>(), csrsm_info->get_position(), stream));
         }
 
         // Leading dimension
@@ -161,7 +159,7 @@ namespace rocsparse
             ldimB = nrhs;
 
             RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::dense_transpose_template(handle, m, nrhs, (T)1, B, ldb, Bt, ldimB));
+                rocsparse::dense_transpose(handle, m, nrhs, (T)1, B, ldb, Bt, ldimB));
         }
 
         // Pointers to differentiate between transpose mode
@@ -233,7 +231,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -258,7 +256,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -286,7 +284,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -311,7 +309,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -339,7 +337,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -364,7 +362,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -392,7 +390,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -417,7 +415,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -445,7 +443,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -470,7 +468,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -579,7 +577,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                                handle->stream,
                                                m,
                                                B,
-                                               ldb,
+                                               b_inc,
                                                y);
         }
 

@@ -231,7 +231,7 @@ void testing_hpr2_batched(const Arguments& arg)
     size_t            size_A = hipblas_packed_matrix_size(N);
     hipblasFillMode_t uplo   = char2hipblas_fill(arg.uplo);
 
-    double hipblas_error_host, hipblas_error_device;
+    double hipblas_error_host{0}, hipblas_error_device{0};
 
     T h_alpha = arg.get_alpha<T>();
 
@@ -347,7 +347,7 @@ void testing_hpr2_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIP_ERROR(dAp.transfer_from(hAp));
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));

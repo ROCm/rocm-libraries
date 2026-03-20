@@ -177,7 +177,7 @@ void testing_dense2csx_bad_arg(FUNC& dense2csx)
 }
 
 template <hipsparseDirection_t DIRA, typename T, typename FUNC>
-hipsparseStatus_t testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
+void testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
 {
     int                  M        = argus.M;
     int                  N        = argus.N;
@@ -190,13 +190,6 @@ hipsparseStatus_t testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
-
-    if(M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     int              DIMDIR = (HIPSPARSE_DIRECTION_ROW == DIRA) ? M : N;
     std::vector<T>   h_dense_val(LD * N);
@@ -340,8 +333,6 @@ hipsparseStatus_t testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
         std::cout << "GBytes/s: " << gpu_gbyte << " time (ms): " << get_gpu_time_msec(gpu_time_used)
                   << std::endl;
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_DENSE2CSX_HPP

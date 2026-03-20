@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -72,17 +72,11 @@ inline hipError_t merge_sort_block_merge_impl(
     using value_type           = typename std::iterator_traits<ValuesIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    using config = wrapped_merge_sort_block_merge_config<Config, key_type, value_type>;
+    using selector = merge_sort_block_merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const merge_sort_block_merge_config_params params
-        = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
 
+    const auto         params                   = get_config<selector>(Config{}, current_target);
     const unsigned int merge_oddeven_block_size = params.merge_oddeven_config.block_size;
     const unsigned int merge_oddeven_items_per_thread
         = params.merge_oddeven_config.items_per_thread;
@@ -159,10 +153,10 @@ inline hipError_t merge_sort_block_merge_impl(
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto device_block_merge_mergepath_partition_kernel = [=](auto arch_config)
+                auto device_block_merge_mergepath_partition_kernel = [=](auto target_config)
                 {
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(arch_config)::params;
+                        = decltype(target_config)::params;
                     static constexpr unsigned int items_per_tile
                         = params.merge_mergepath_config.block_size
                           * params.merge_mergepath_config.items_per_thread;
@@ -211,10 +205,10 @@ inline hipError_t merge_sort_block_merge_impl(
 
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
                 ROCPRIM_RETURN_ON_ERROR(
-                    execute_launch_plan<config,
-                                        decltype(device_block_merge_mergepath_partition_kernel),
-                                        merge_mergepath_partition_config_selector>(
-                        target_arch,
+                    execute_launch_plan<Config,
+                                        selector,
+                                        merge_mergepath_partition_config_static_selector>(
+                        current_target,
                         device_block_merge_mergepath_partition_kernel,
                         dim3(merge_partition_number_of_blocks),
                         dim3(merge_partition_block_size),
@@ -229,16 +223,18 @@ inline hipError_t merge_sort_block_merge_impl(
                 {
                     start = std::chrono::steady_clock::now();
                 }
-                auto device_block_merge_mergepath_kernel = [=](auto arch_config) mutable
+                auto device_block_merge_mergepath_kernel = [=](auto target_config) mutable
                 {
+                    using TargetConfig = decltype(target_config);
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(arch_config)::params;
+                        = TargetConfig::params;
 
                     using merge_impl
                         = block_merge_impl<key_type,
                                            value_type,
                                            params.merge_mergepath_config.block_size,
-                                           params.merge_mergepath_config.items_per_thread>;
+                                           params.merge_mergepath_config.items_per_thread,
+                                           TargetConfig::wavefront>;
 
                     using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
                     ROCPRIM_SHARED_MEMORY
@@ -260,10 +256,8 @@ inline hipError_t merge_sort_block_merge_impl(
                                               storage);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
-                    execute_launch_plan<config,
-                                        decltype(device_block_merge_mergepath_kernel),
-                                        merge_mergepath_config_selector>(
-                        target_arch,
+                    execute_launch_plan<Config, selector, merge_mergepath_config_static_selector>(
+                        current_target,
                         device_block_merge_mergepath_kernel,
                         calculate_grid_dim(merge_mergepath_number_of_blocks,
                                            merge_mergepath_block_size),
@@ -284,10 +278,10 @@ inline hipError_t merge_sort_block_merge_impl(
                 // for size and block.
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
 
-                auto device_block_merge_oddeven_kernel = [=](auto arch_config)
+                auto device_block_merge_oddeven_kernel = [=](auto target_config)
                 {
                     static constexpr merge_sort_block_merge_config_params params
-                        = decltype(arch_config)::params;
+                        = decltype(target_config)::params;
                     block_merge_oddeven_kernel<params.merge_oddeven_config.block_size,
                                                params.merge_oddeven_config.items_per_thread>(
                         keys_input_,
@@ -299,10 +293,8 @@ inline hipError_t merge_sort_block_merge_impl(
                         compare_function);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
-                    execute_launch_plan<config,
-                                        decltype(device_block_merge_oddeven_kernel),
-                                        merge_oddeven_config_selector>(
-                        target_arch,
+                    execute_launch_plan<Config, selector, merge_oddeven_config_static_selector>(
+                        current_target,
                         device_block_merge_oddeven_kernel,
                         dim3(merge_oddeven_number_of_blocks),
                         dim3(merge_oddeven_block_size),
@@ -383,17 +375,11 @@ inline hipError_t merge_sort_block_merge(
     using value_type           = typename std::iterator_traits<ValuesIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    using config = wrapped_merge_sort_block_merge_config<Config, key_type, value_type>;
+    using selector = merge_sort_block_merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const merge_sort_block_merge_config_params params
-        = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
 
+    const auto         params                     = get_config<selector>(Config{}, current_target);
     const unsigned int merge_mergepath_block_size = params.merge_mergepath_config.block_size;
     const unsigned int merge_mergepath_items_per_thread
         = params.merge_mergepath_config.items_per_thread;
@@ -476,17 +462,11 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    using config = wrapped_merge_sort_block_sort_config<Config, key_type, value_type>;
+    using selector = merge_sort_block_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const merge_sort_block_sort_config_params params
-        = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
 
+    const auto params    = get_config<selector>(Config{}, current_target);
     sort_items_per_block = params.kernel_config.block_size * params.kernel_config.items_per_thread;
     const unsigned int sort_number_of_blocks = ceiling_div(size, sort_items_per_block);
 
@@ -507,9 +487,10 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
         start = std::chrono::steady_clock::now();
     }
 
-    auto block_sort_kernel = [=](auto arch_config) mutable
+    auto block_sort_kernel = [=](auto target_config) mutable
     {
-        constexpr auto params = decltype(arch_config)::params;
+        using TargetConfig    = decltype(target_config);
+        constexpr auto params = TargetConfig::params;
 
         constexpr unsigned int items_per_block
             = params.kernel_config.block_size * params.kernel_config.items_per_thread;
@@ -527,7 +508,8 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
         using sort_impl = block_sort_impl<key_type,
                                           value_type,
                                           params.kernel_config.block_size,
-                                          params.kernel_config.items_per_thread>;
+                                          params.kernel_config.items_per_thread,
+                                          TargetConfig::wavefront>;
         using VSmemHelperT = detail::vsmem_helper_impl<sort_impl>;
 
         ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
@@ -546,8 +528,8 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
                          storage);
     };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(
-        target_arch,
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, selector>(
+        current_target,
         block_sort_kernel,
         calculate_grid_dim(sort_number_of_blocks, params.kernel_config.block_size),
         params.kernel_config.block_size,
@@ -567,15 +549,20 @@ void TAssertEqualGreater()
     static_assert(A >= B, "A not greater or equal to B");
 };
 
-template<detail::target_arch Arch, class BlockSortConfig, class BlockMergeConfig>
+template<class BlockSortTarget,
+         class BlockMergeTarget,
+         class BlockSortConfig,
+         class BlockMergeConfig,
+         class BlockSortSelector,
+         class BlockMergeSelector>
 ROCPRIM_KERNEL
 void device_merge_sort_compile_time_verifier_arch()
 {
-    using BSArchConfig = typename BlockSortConfig::template architecture_config<Arch>;
-    using BMArchConfig = typename BlockMergeConfig::template architecture_config<Arch>;
+    using BSTargetConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
+    using BMTargetConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
 
-    static constexpr auto bs_params = BSArchConfig::params;
-    static constexpr auto bm_params = BMArchConfig::params;
+    static constexpr auto bs_params = BSTargetConfig::params;
+    static constexpr auto bm_params = BMTargetConfig::params;
 
     static constexpr unsigned int sort_items_per_block
         = bs_params.kernel_config.block_size * bs_params.kernel_config.items_per_thread;
@@ -602,48 +589,65 @@ void device_merge_sort_compile_time_verifier_arch()
                   "merge_mergepath_items_per_block");
 }
 
-template<class WrappedBSConfig, class WrappedBMConfig>
+template<class BSConfig, class BMConfig, class BSSelector, class BMSelector>
 inline void device_merge_sort_compile_time_verifier() noexcept
 {
-    static const bool once = []
-    {
-        for_each_arch(
-            [](auto arch_tag)
-            {
-                constexpr auto A = decltype(arch_tag)::value;
-                (void)&device_merge_sort_compile_time_verifier_arch<A,
-                                                                    WrappedBSConfig,
-                                                                    WrappedBMConfig>;
-            });
-        (void)&device_merge_sort_compile_time_verifier_arch<target_arch::unknown,
-                                                            WrappedBSConfig,
-                                                            WrappedBMConfig>;
-        return true;
-    }();
-    (void)once;
+    // BSTargets and BMTargets can be different so we do not know at compile time
+    // the combination of configs that will be chosen.
+    using BSTargets = typename BSSelector::targets;
+    using BMTargets = typename BMSelector::targets;
+
+    BSTargets::for_each(
+        [&](auto t)
+        {
+            constexpr target ct = most_common_config<BMTargets>(target{t});
+            (void)device_merge_sort_compile_time_verifier_arch<decltype(t),
+                                                               TARGET_TO_COMP_TARGET(ct),
+                                                               BSConfig,
+                                                               BMConfig,
+                                                               BSSelector,
+                                                               BMSelector>;
+        });
+
+    BMTargets::for_each(
+        [&](auto t)
+        {
+            constexpr target ct = most_common_config<BSTargets>(target{t});
+            (void)device_merge_sort_compile_time_verifier_arch<TARGET_TO_COMP_TARGET(ct),
+                                                               decltype(t),
+                                                               BSConfig,
+                                                               BMConfig,
+                                                               BSSelector,
+                                                               BMSelector>;
+        });
 }
 
-template<detail::target_arch Arch,
+template<class BlockSortTarget,
+         class BlockMergeTarget,
          class BlockSortConfig,
          class BlockMergeConfig,
-         typename Key,
-         typename Value>
-inline size_t merge_sort_vsmem_size_for_arch(size_t size)
+         class BlockSortSelector,
+         class BlockMergeSelector,
+         class Key,
+         class Value>
+inline size_t merge_sort_vsmem_size_for_target(size_t size)
 {
-    using BSArchConfig = typename BlockSortConfig::template architecture_config<Arch>;
-    using BMArchConfig = typename BlockMergeConfig::template architecture_config<Arch>;
+    using BSTargetConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
+    using BMTargetConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
 
-    static constexpr auto bs_params = BSArchConfig::params;
-    static constexpr auto bm_params = BMArchConfig::params;
+    static constexpr auto bs_params = BSTargetConfig::params;
+    static constexpr auto bm_params = BMTargetConfig::params;
 
     using bs_sort_impl = block_sort_impl<Key,
                                          Value,
                                          bs_params.kernel_config.block_size,
-                                         bs_params.kernel_config.items_per_thread>;
+                                         bs_params.kernel_config.items_per_thread,
+                                         BSTargetConfig::wavefront>;
     using bm_sort_impl = block_merge_impl<Key,
                                           Value,
                                           bm_params.merge_mergepath_config.block_size,
-                                          bm_params.merge_mergepath_config.items_per_thread>;
+                                          bm_params.merge_mergepath_config.items_per_thread,
+                                          BMTargetConfig::wavefront>;
 
     using BlockSortVSmemHelperT = detail::vsmem_helper_impl<bs_sort_impl>;
     using MergeSortVSmemHelperT = detail::vsmem_helper_impl<bm_sort_impl>;
@@ -679,35 +683,44 @@ inline size_t merge_sort_vsmem_size_for_arch(size_t size)
     return virtual_shared_memory_size;
 }
 
-template<class BlockSortConfig, class BlockMergeConfig, typename Key, typename Value>
-inline size_t get_merge_sort_vsmem_size(detail::target_arch arch, size_t size) noexcept
+template<class BlockSortConfig,
+         class BlockMergeConfig,
+         class BlockSortSelector,
+         class BlockMergeSelector,
+         class Key,
+         class Value>
+inline size_t get_merge_sort_vsmem_size(detail::target t, size_t size) noexcept
 {
-    std::optional<size_t> out;
+    using BlockSortTarget  = typename BlockSortSelector::targets;
+    using BlockMergeTarget = typename BlockMergeSelector::targets;
 
-    for_each_arch(
-        [&](auto arch_tag)
+    size_t vsmem_per_block = 0;
+
+    BlockSortTarget::for_each(
+        [&](auto BScandidate)
         {
-            if(out)
-                return;
-            constexpr auto Arch = decltype(arch_tag)::value;
-            if(Arch != arch)
-                return;
-
-            out = merge_sort_vsmem_size_for_arch<Arch,
-                                                 BlockSortConfig,
-                                                 BlockMergeConfig,
-                                                 Key,
-                                                 Value>(size);
+            if(target{BScandidate} == most_common_config<BlockSortTarget>(t))
+            {
+                BlockMergeTarget::for_each(
+                    [&](auto BMcandidate)
+                    {
+                        if(target{BMcandidate} == most_common_config<BlockMergeTarget>(t))
+                        {
+                            vsmem_per_block
+                                = merge_sort_vsmem_size_for_target<decltype(BScandidate),
+                                                                   decltype(BMcandidate),
+                                                                   BlockSortConfig,
+                                                                   BlockMergeConfig,
+                                                                   BlockSortSelector,
+                                                                   BlockMergeSelector,
+                                                                   Key,
+                                                                   Value>(size);
+                        }
+                    });
+            }
         });
-    if(!out)
-    {
-        out = merge_sort_vsmem_size_for_arch<detail::target_arch::unknown,
-                                             BlockSortConfig,
-                                             BlockMergeConfig,
-                                             Key,
-                                             Value>(size);
-    }
-    return *out;
+
+    return vsmem_per_block;
 }
 
 template<class Config,
@@ -741,24 +754,20 @@ inline hipError_t merge_sort_impl(
         conditional<with_custom_config, typename Config::block_sort_config, default_config>::type;
     using block_merge_config = typename std::
         conditional<with_custom_config, typename Config::block_merge_config, default_config>::type;
-    using wrapped_bs_config
-        = wrapped_merge_sort_block_sort_config<block_sort_config, key_type, value_type>;
-    using wrapped_bm_config
-        = wrapped_merge_sort_block_merge_config<block_merge_config, key_type, value_type>;
+    using selector_bm = merge_sort_block_merge_config_selector<key_type, value_type>;
+    using selector_bs = merge_sort_block_sort_config_selector<key_type, value_type>;
 
     // Some helpful checks during compile-time
-    device_merge_sort_compile_time_verifier<wrapped_bs_config, wrapped_bm_config>();
+    device_merge_sort_compile_time_verifier<block_sort_config,
+                                            block_merge_config,
+                                            selector_bs,
+                                            selector_bm>();
 
     unsigned int sort_items_per_block = 1; // We will get this later from the block_sort algorithm
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const merge_sort_block_merge_config_params params
-        = dispatch_target_arch<wrapped_bm_config, false>(target_arch);
+    const target current_target(stream);
+
+    const auto         params = get_config<selector_bm>(block_merge_config{}, current_target);
     const bool         use_mergepath = size > params.merge_oddeven_config.size_limit;
     const unsigned int merge_mergepath_items_per_block
         = params.merge_mergepath_config.block_size * params.merge_mergepath_config.items_per_thread;
@@ -767,10 +776,12 @@ inline hipError_t merge_sort_impl(
 
     // Virtual shared memory part
     void*  vsmem = nullptr;
-    size_t virtual_shared_memory_size
-        = get_merge_sort_vsmem_size<wrapped_bs_config, wrapped_bm_config, key_type, value_type>(
-            target_arch,
-            size);
+    size_t virtual_shared_memory_size = get_merge_sort_vsmem_size<block_sort_config,
+                                                                  block_merge_config,
+                                                                  selector_bs,
+                                                                  selector_bm,
+                                                                  key_type,
+                                                                  value_type>(current_target, size);
 
     // temporary storage needed for both block merge and block sort
     size_t*     d_merge_partitions = nullptr;

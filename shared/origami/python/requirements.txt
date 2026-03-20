@@ -1,0 +1,15 @@
+# Runtime dependencies
+nanobind>=2.0.0
+
+# Build dependencies
+scikit-build-core>=0.5
+
+# Test dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pyyaml>=6.0
+
+# Note: This package requires ROCm/HIP to be installed on your system.
+# ROCm cannot be installed via pip and must be installed separately.
+# See: https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html
+# Ensure CMAKE_PREFIX_PATH includes ROCm (default: /opt/rocm)

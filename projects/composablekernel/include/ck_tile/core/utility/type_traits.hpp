@@ -1,9 +1,11 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
+
 #include <tuple>
 #include <type_traits>
 #include <stdint.h>
@@ -110,6 +112,11 @@ CK_TILE_HOST_DEVICE PY c_style_pointer_cast(PX p_x)
 #pragma clang diagnostic pop
 }
 
+// Template ternary: if Cond == Match, use TrueType, else FalseType
+// Usage: if_select_t<T, int, float, double> evaluates to float if T==int, else double
+template <typename Cond, typename Match, typename TrueType, typename FalseType>
+using if_select_t = std::conditional_t<std::is_same_v<Cond, Match>, TrueType, FalseType>;
+
 template <typename CompareTo, typename... Rest>
 struct is_any_of : std::false_type
 {
@@ -127,6 +134,25 @@ struct is_any_of<CompareTo, FirstType, Rest...>
                                  is_any_of<CompareTo, Rest...>::value>
 {
 };
+
+/**
+ * @brief Helper to check if a value is in a list of values
+ * @tparam T The type of the search value
+ * @tparam Ts The types of the search list values
+ * @param search The value to search for
+ * @param searchList The list of values to search in
+ * @return true if the search value is in the search list, false otherwise
+ */
+template <typename T, typename... Ts>
+// TODO: c++20    requires((std::is_convertible<Ts, T>::value && ...) && (sizeof...(Ts) >= 1))
+CK_TILE_HOST_DEVICE static constexpr bool is_any_value_of(T search, Ts... searchList)
+{
+    static_assert((std::is_convertible<Ts, T>::value && ...),
+                  "All searchList values must be convertible to the type of search");
+    static_assert(sizeof...(Ts) >= 1, "searchList must contain at least one value");
+
+    return ((search == static_cast<T>(searchList)) || ...);
+}
 
 // Helper to check if a type is a specialization of a given template
 template <typename Test, template <typename...> class RefTemplate>
@@ -167,5 +193,20 @@ struct tuple_element_or_default
 template <typename Tuple_, std::size_t Idx, typename DefaultType>
 using tuple_element_or_default_t =
     typename tuple_element_or_default<Tuple_, Idx, DefaultType>::type;
+
+// Helper struct to determine if a type is packed (more than 1 element per byte)
+template <typename T>
+struct is_packed_type
+{
+    static constexpr bool value = numeric_traits<T>::PackedSize > 1;
+};
+
+template <typename T>
+static constexpr bool is_packed_type_v = is_packed_type<T>::value;
+
+// Helper definition to take the largest sizes type
+template <typename ADataType, typename BDataType>
+using largest_type_t =
+    std::conditional_t<sizeof(ADataType) >= sizeof(BDataType), ADataType, BDataType>;
 
 } // namespace ck_tile

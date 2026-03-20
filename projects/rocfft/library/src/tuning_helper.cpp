@@ -98,7 +98,7 @@ bool TuningBenchmarker::IsInitializingTuning()
     return (packet && packet->init_step);
 }
 
-// true when during tuning, guarentee a valid GetPacket()
+// true when during tuning, guarantee a valid GetPacket()
 bool TuningBenchmarker::IsProcessingTuning()
 {
     return (packet && packet->is_tuning);
@@ -392,7 +392,7 @@ void TuningBenchmarker::ExportWinnerToSolutions()
         bool isSolutionRoot = (key == rootKey);
         return binding_solution_map->add_solution(key, solution, isSolutionRoot, true, false);
     };
-    // Call funtion !!
+    // Call function !!
     RecursivelyAddSolution(rootKey, rootSolution, RecursivelyAddSolution);
 
     // Then output to a solution map file from the temp_working_map;

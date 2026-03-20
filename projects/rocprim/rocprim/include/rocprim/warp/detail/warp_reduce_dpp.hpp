@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,29 +49,44 @@ public:
     {
         output = input;
 
+// Temporary fix: issue with dpp bound_ctrl on Windows, GFX10, GFX11, GFX12 and SPIR-V
+// RDNA encounters compile issues in hipCUB and rocThrust.
+#if defined(_WIN32) || defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__) \
+    || defined(__SPIRV__)
+        bool constexpr bndCtrl = false;
+#else
+    // Temporary fix: issue with dpp bound_ctrl for debug build. Compiler will not define macros
+    // like __GFX10__ and so on.
+    #if defined(NDEBUG) || !defined(_DEBUG)
+        bool constexpr bndCtrl = true;
+    #else
+        bool constexpr bndCtrl = false;
+    #endif
+#endif
+
         if(VirtualWaveSize > 1)
         {
             // quad_perm:[1,0,3,2] -> 10110001
-            output = reduce_op(warp_move_dpp<T, 0xb1>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0xb1, 0xf, 0xf, bndCtrl>(output), output);
         }
         if(VirtualWaveSize > 2)
         {
             // quad_perm:[2,3,0,1] -> 01001110
-            output = reduce_op(warp_move_dpp<T, 0x4e>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0x4e, 0xf, 0xf, bndCtrl>(output), output);
         }
         if(VirtualWaveSize > 4)
         {
             // row_ror:4
             // Use rotation instead of shift to avoid leaving invalid values in the destination
             // registers (asume warp size of at least hardware warp-size)
-            output = reduce_op(warp_move_dpp<T, 0x124>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0x124, 0xf, 0xf, bndCtrl>(output), output);
         }
         if(VirtualWaveSize > 8)
         {
             // row_ror:8
             // Use rotation instead of shift to avoid leaving invalid values in the destination
             // registers (asume warp size of at least hardware warp-size)
-            output = reduce_op(warp_move_dpp<T, 0x128>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0x128, 0xf, 0xf, bndCtrl>(output), output);
         }
 
         // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
@@ -85,38 +100,37 @@ public:
             }
 
 #if !ROCPRIM_TARGET_SPIRV
-            static_assert(VirtualWaveSize <= 32,
-                          "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-#else
-            if constexpr(VirtualWaveSize > 32)
+            if constexpr(!ROCPRIM_IS_GENERIC())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-                return;
+                static_assert(VirtualWaveSize <= 32,
+                              "VirtualWaveSize > 32 is not supported without DPP broadcasts");
             }
+            else
 #endif
+            {
+                if constexpr(VirtualWaveSize > 32)
+                {
+                    ROCPRIM_PRINT_ERROR_ONCE(
+                        "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                    return;
+                }
+            }
         }
         else
         {
             if(VirtualWaveSize > 16)
             {
                 // row_bcast:15
-                output = reduce_op(warp_move_dpp<T, 0x142>(output), output);
+                output = reduce_op(warp_move_dpp<T, 0x142, 0xf, 0xf, bndCtrl>(output), output);
             }
             if(VirtualWaveSize > 32)
             {
                 // row_bcast:31
-                output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
+                output = reduce_op(warp_move_dpp<T, 0x143, 0xf, 0xf, bndCtrl>(output), output);
             }
 
 #if !ROCPRIM_TARGET_SPIRV
             static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
-#else
-            if constexpr(VirtualWaveSize > 64)
-            {
-                ROCPRIM_PRINT_ERROR_ONCE("VirtualWaveSize > 64 is not supported");
-                return;
-            }
 #endif
         }
         // Read the result from the last lane of the logical warp

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,25 +48,43 @@ try
     ROCSPARSE_CHECKARG_POINTER(3, position);
 
     // Stream
-    auto csritsv_info = info->csritsv_info;
-    if(csritsv_info == nullptr)
-    {
-        rocsparse::set_minus_one_async(handle->stream,
-                                       handle->pointer_mode,
-                                       rocsparse::get_indextype<rocsparse_int>(),
-                                       position);
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
-        return rocsparse_status_success;
-    }
-    auto status = csritsv_info->copy_zero_pivot_async(
-        handle->pointer_mode, rocsparse::get_indextype<rocsparse_int>(), position, handle->stream);
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    auto       csritsv_info = info->csritsv_info;
+    const auto indextype    = rocsparse::get_indextype<rocsparse_int>();
 
-    if(status == rocsparse_status_zero_pivot)
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
+        handle, 1, csritsv_info, nullptr, nullptr, handle->pointer_mode, indextype, position));
+    switch(indextype)
     {
-        return status;
+    case rocsparse_indextype_i32:
+    {
+        int32_t p;
+        RETURN_IF_HIP_ERROR(
+            hipMemcpyAsync(&p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        if(p != -1)
+        {
+            return rocsparse_status_zero_pivot;
+        }
+        break;
     }
-    RETURN_IF_ROCSPARSE_ERROR(status);
+    case rocsparse_indextype_i64:
+    {
+        int64_t p;
+        RETURN_IF_HIP_ERROR(
+            hipMemcpyAsync(&p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        if(p != -1)
+        {
+            return rocsparse_status_zero_pivot;
+        }
+        break;
+    }
+
+    case rocsparse_indextype_u16:
+    {
+        break;
+    }
+    }
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

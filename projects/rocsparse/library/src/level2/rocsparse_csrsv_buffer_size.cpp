@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,134 +22,122 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrsv.hpp"
-#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
-#include <map>
-#include <sstream>
 
-namespace rocsparse
+rocsparse_status rocsparse::csrsv_analysis_buffer_size(rocsparse_handle            handle,
+                                                       rocsparse_operation         trans,
+                                                       rocsparse_const_spmat_descr A,
+                                                       size_t*                     buffer_size)
 {
-    typedef rocsparse_status (*csrsv_buffer_size_t)(rocsparse_handle          handle,
-                                                    rocsparse_operation       trans,
-                                                    int64_t                   m,
-                                                    int64_t                   nnz,
-                                                    const rocsparse_mat_descr descr,
-                                                    const void*               csr_val,
-                                                    const void*               csr_row_ptr,
-                                                    const void*               csr_col_ind,
-                                                    rocsparse_mat_info        info,
-                                                    size_t*                   buffer_size);
+    ROCSPARSE_CHECKARG(2, A, A->descr == nullptr, rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       (A->descr->type != rocsparse_matrix_type_general
+                        && A->descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       rocsparse_status_requires_sorted_storage);
 
-    using csrsv_buffer_size_tuple
-        = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
-
-#define CSRSV_BUFFER_SIZE_CONFIG(I_, J_, T_)                                             \
-    {                                                                                    \
-        csrsv_buffer_size_tuple(I_, J_, T_),                                             \
-            csrsv_buffer_size_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                       typename rocsparse::indextype_traits<J_>::type_t, \
-                                       typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
-
-    static const std::map<csrsv_buffer_size_tuple, csrsv_buffer_size_t>
-        s_csrsv_buffer_size_dispatch{
-            {CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f32_r),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f64_r),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f32_c),
-             CSRSV_BUFFER_SIZE_CONFIG(
-                 rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f64_c)}};
-
-    static rocsparse_status csrsv_buffer_size_find(csrsv_buffer_size_t* function_,
-                                                   rocsparse_indextype  i_type_,
-                                                   rocsparse_indextype  j_type_,
-                                                   rocsparse_datatype   t_type_)
+    // Quick return if possible
+    if(A->rows == 0)
     {
-        const auto& it = rocsparse::s_csrsv_buffer_size_dispatch.find(
-            rocsparse::csrsv_buffer_size_tuple(i_type_, j_type_, t_type_));
-
-        if(it != rocsparse::s_csrsv_buffer_size_dispatch.end())
-        {
-            function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-#ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
-                      << ", j_type: " << rocsparse::enum_utils::to_string(j_type_) << std::endl
-                      << ", t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl;
-
-            std::cout << "available configuration are: " << std::endl;
-            for(const auto& p : rocsparse::s_csrsv_buffer_size_dispatch)
-            {
-                const auto& t      = p.first;
-                const auto  i_type = std::get<0>(t);
-                const auto  j_type = std::get<1>(t);
-                const auto  t_type = std::get<2>(t);
-                std::cout << std::endl
-                          << std::endl
-                          << "i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
-                          << ", j_type: " << rocsparse::enum_utils::to_string(j_type) << std::endl
-                          << ", t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl;
-            }
-#endif
-
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
-                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
-                 << ", t_type: " << rocsparse::enum_utils::to_string(t_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
+        *buffer_size = 0;
         return rocsparse_status_success;
     }
+
+    const size_t sizeof_I = rocsparse::indextype_sizeof(A->row_type);
+    const size_t sizeof_J = rocsparse::indextype_sizeof(A->col_type);
+
+    // rocsparse_int max_nnz
+    *buffer_size = 256;
+
+    // rocsparse_int done_array[m]
+    *buffer_size += ((sizeof(int32_t) * A->rows - 1) / 256 + 1) * 256;
+
+    // rocsparse_int workspace
+    *buffer_size += ((sizeof_J * A->rows - 1) / 256 + 1) * 256;
+
+    // rocsparse_int workspace2
+    *buffer_size += ((sizeof(int32_t) * A->rows - 1) / 256 + 1) * 256;
+
+    uint32_t startbit = 0;
+    uint32_t endbit   = rocsparse::clz(A->rows);
+
+    size_t rocprim_size = 0;
+
+    auto calculate_rocprim_size
+        = rocsparse::find_radix_sort_pairs_buffer_size(rocsparse_indextype_i32, A->col_type);
+
+    RETURN_IF_ROCSPARSE_ERROR(
+        (calculate_rocprim_size(handle, A->rows, startbit, endbit, &rocprim_size, true)));
+
+    // rocprim buffer
+    *buffer_size += rocprim_size;
+
+    // On transposed case, we might need more temporary storage for transposing
+    if(trans == rocsparse_operation_transpose || trans == rocsparse_operation_conjugate_transpose)
+    {
+        size_t transpose_size;
+        // Determine rocprim buffer size
+        auto calculate_size
+            = rocsparse::find_radix_sort_pairs_buffer_size(A->col_type, A->row_type);
+
+        RETURN_IF_ROCSPARSE_ERROR(
+            (calculate_size(handle, A->nnz, startbit, endbit, &transpose_size, true)));
+        // rocPRIM does not support in-place sorting, so we need an additional buffer
+        // rocsparse_int max_nnz
+        transpose_size += 256 + ((sizeof(int32_t) * A->rows - 1) / 256 + 1) * 256;
+        transpose_size += ((sizeof_J * A->nnz - 1) / 256 + 1) * 256;
+        transpose_size += ((sizeof_I * A->nnz - 1) / 256 + 1) * 256;
+        *buffer_size = rocsparse::max(*buffer_size, transpose_size);
+    }
+
+    return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::csrsv_buffer_size(rocsparse_handle          handle,
-                                              rocsparse_operation       trans,
-                                              int64_t                   m,
-                                              int64_t                   nnz,
-                                              const rocsparse_mat_descr descr,
-                                              rocsparse_datatype        csr_val_datatype,
-                                              const void*               csr_val,
-                                              rocsparse_indextype       csr_row_ptr_indextype,
-                                              const void*               csr_row_ptr,
-                                              rocsparse_indextype       csr_col_ind_indextype,
-                                              const void*               csr_col_ind,
-                                              rocsparse_mat_info        info,
-                                              size_t*                   buffer_size)
+rocsparse_status rocsparse::csrsv_solve_buffer_size(rocsparse_handle            handle,
+                                                    rocsparse_operation         op,
+                                                    rocsparse_const_spmat_descr A,
+                                                    rocsparse_const_dnvec_descr x,
+                                                    rocsparse_const_dnvec_descr y,
+                                                    size_t*                     buffer_size)
 {
-    rocsparse::csrsv_buffer_size_t f;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_find(
-        &f, csr_row_ptr_indextype, csr_col_ind_indextype, csr_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(
-        f(handle, trans, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, buffer_size));
+    ROCSPARSE_CHECKARG(2, A, A->descr == nullptr, rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       (A->descr->type != rocsparse_matrix_type_general
+                        && A->descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       rocsparse_status_requires_sorted_storage);
+
+    // Quick return if possible
+    if(A->rows == 0)
+    {
+        buffer_size[0] = 0;
+        return rocsparse_status_success;
+    }
+
+    // rocsparse_int max_nnz
+    buffer_size[0] = 256;
+    // rocsparse_int done_array[m]
+    const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
+
+    buffer_size[0] += ((sizeof(int32_t) * A->rows * batch_count - 1) / 256 + 1) * 256;
+
+    // On transposed case, we might need more temporary storage for transposing
+    if(op != rocsparse_operation_none)
+    {
+        const size_t sizeof_T       = rocsparse::datatype_sizeof(A->data_type);
+        const size_t transpose_size = ((sizeof_T * A->batch_count * A->nnz - 1) / 256 + 1) * 256;
+        buffer_size[0] += transpose_size;
+    }
     return rocsparse_status_success;
 }

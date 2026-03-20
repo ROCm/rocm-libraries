@@ -30,6 +30,7 @@ from Tensile.Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
 from Tensile.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
 from copy import deepcopy
@@ -1463,50 +1464,58 @@ def generateLogic(
     printExit("Path doesn't exist: %s" % benchmarkDataPath)
   fileNames = os.listdir(benchmarkDataPath)
   fileNames = sorted(fileNames)
-  for fileName in fileNames:
-    if os.path.splitext(fileName)[1] == ".csv":
-      fileBase = os.path.splitext( \
-          os.path.join(benchmarkDataPath, \
-          fileName))[0]
-      dataFileName = fileBase + ".csv"
-      solutionsFileName = fileBase + ".yaml"
-      selectionFileName = fileBase + ".gsp"
-      if not os.path.exists(dataFileName):
-        printExit("%s doesn't exist for %s" % (dataFileName, fileBase) )
-      if not os.path.exists(solutionsFileName):
-        printExit("%s doesn't exist for %s" % (solutionsFileName, fileBase) )
-      (problemSizes, solutions) = LibraryIO.parseSolutionsFile(
-                                      solutionsFileName,
-                                      cxxCompiler,
-                                      splitGSU,
-                                      printSolutionRejectionReason,
-                                      printIndexAssignmentInfo,
-                                      isaInfoMap
-                                  )
-      if len(solutions) == 0:
-        printExit("%s doesn't contains any solutions." % (solutionsFileName) )
-      problemType = solutions[0]["ProblemType"]
-      if problemType not in problemTypes:
-        problemTypes[problemType] = []
-      problemTypes[problemType].append( (problemSizes, \
-          dataFileName, solutionsFileName, selectionFileName, solutions) )
+  with timing_context("python_logic_parse_solutions"):
+    for fileName in fileNames:
+      if os.path.splitext(fileName)[1] == ".csv":
+        fileBase = os.path.splitext( \
+            os.path.join(benchmarkDataPath, \
+            fileName))[0]
+        dataFileName = fileBase + ".csv"
+        solutionsFileName = fileBase + ".yaml"
+        selectionFileName = fileBase + ".gsp"
+        if not os.path.exists(dataFileName):
+          printExit("%s doesn't exist for %s" % (dataFileName, fileBase) )
+        if not os.path.exists(solutionsFileName):
+          printExit("%s doesn't exist for %s" % (solutionsFileName, fileBase) )
+        (problemSizes, solutions) = LibraryIO.parseSolutionsFile(
+                                        solutionsFileName,
+                                        cxxCompiler,
+                                        splitGSU,
+                                        printSolutionRejectionReason,
+                                        printIndexAssignmentInfo,
+                                        isaInfoMap
+                                    )
+        if len(solutions) == 0:
+          printExit("%s doesn't contains any solutions." % (solutionsFileName) )
+        problemType = solutions[0]["ProblemType"]
+        if problemType not in problemTypes:
+          problemTypes[problemType] = []
+        problemTypes[problemType].append( (problemSizes, \
+            dataFileName, solutionsFileName, selectionFileName, solutions) )
 
-  for problemType in problemTypes:
-    logicTuple = analyzeProblemType(problemType, problemTypes[problemType], analysisParameters, libraryLogicPath, splitGSU)
+  with timing_context("python_logic_analyze"):
+    for problemType in problemTypes:
+      logicTuple = analyzeProblemType(problemType, problemTypes[problemType], analysisParameters, libraryLogicPath, splitGSU)
 
-    filename = os.path.join(libraryLogicPath, \
-        "{}_{}".format(analysisParameters["ScheduleName"], str(problemType)))
+      filename = os.path.join(libraryLogicPath, \
+          "{}_{}".format(analysisParameters["ScheduleName"], str(problemType)))
 
-    print2("# writing library logic YAML {}".format(filename))
-    data = LibraryIO.createLibraryLogic(analysisParameters["ScheduleName"], \
-        analysisParameters["ArchitectureName"], analysisParameters["DeviceNames"], analysisParameters["LibraryType"], logicTuple)
+      problemTypes[problemType] = (logicTuple, filename)
 
-    if globalParameters["LogicFormat"] == "yaml":
-      LibraryIO.writeYAML(filename + ".yaml", data, explicit_start=False, explicit_end=False)
-    elif globalParameters["LogicFormat"] == "json":
-      LibraryIO.write(filename, data, "json")
-    else:
-      printExit("Unrecognized LogicFormat", globalParameters["LogicFormat"])
+  with timing_context("python_logic_write"):
+    for problemType in problemTypes:
+      logicTuple, filename = problemTypes[problemType]
+
+      print2("# writing library logic YAML {}".format(filename))
+      data = LibraryIO.createLibraryLogic(analysisParameters["ScheduleName"], \
+          analysisParameters["ArchitectureName"], analysisParameters["DeviceNames"], analysisParameters["LibraryType"], logicTuple)
+
+      if globalParameters["LogicFormat"] == "yaml":
+        LibraryIO.writeYAML(filename + ".yaml", data, explicit_start=False, explicit_end=False)
+      elif globalParameters["LogicFormat"] == "json":
+        LibraryIO.write(filename, data, "json")
+      else:
+        printExit("Unrecognized LogicFormat", globalParameters["LogicFormat"])
 
   currentTime = time.time()
   elapsedTime = currentTime - startTime

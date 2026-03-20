@@ -39,7 +39,7 @@ namespace std
 #include <math.h>
 #include <vector>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -49,13 +49,14 @@ namespace std
 #endif
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/fft_enums.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/rocfft_params.h"
 #include "bench.h"
 #include "rocfft/rocfft.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 typedef HMODULE ROCFFT_LIB;
 #else
 typedef void* ROCFFT_LIB;
@@ -64,7 +65,7 @@ typedef void* ROCFFT_LIB;
 // Load the rocfft library
 ROCFFT_LIB rocfft_lib_load(const std::string& path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return LoadLibraryA(path.c_str());
 #else
     return dlopen(path.c_str(), RTLD_LAZY);
@@ -74,7 +75,7 @@ ROCFFT_LIB rocfft_lib_load(const std::string& path)
 // Return a string describing the error loading rocfft
 const char* rocfft_lib_load_error()
 {
-#ifdef WIN32
+#ifdef _WIN32
     // just return the error number
     static std::string error_str;
     error_str = std::to_string(GetLastError());
@@ -87,7 +88,7 @@ const char* rocfft_lib_load_error()
 // Get symbol from rocfft lib
 void* rocfft_lib_symbol(ROCFFT_LIB libhandle, const char* sym)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return reinterpret_cast<void*>(GetProcAddress(libhandle, sym));
 #else
     return dlsym(libhandle, sym);
@@ -96,7 +97,7 @@ void* rocfft_lib_symbol(ROCFFT_LIB libhandle, const char* sym)
 
 void rocfft_lib_close(ROCFFT_LIB libhandle)
 {
-#ifdef WIN32
+#ifdef _WIN32
     FreeLibrary(libhandle);
 #else
     dlclose(libhandle);
@@ -471,8 +472,8 @@ int main(int argc, char* argv[])
             std::copy(ingrid.begin(), ingrid.end(), input_grid.begin() + 1);
             std::copy(outgrid.begin(), outgrid.end(), output_grid.begin() + 1);
 
-            params.distribute_input(localDeviceCount, input_grid);
-            params.distribute_output(localDeviceCount, output_grid);
+            params.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
+            params.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
         }
 
         if(*opt_not_in_place)

@@ -199,7 +199,7 @@ class KernelTuningNetTest : public ::testing::TestWithParam<KernelTuningNetTestC
 protected:
     void TestParameterPredictionModel(std::string solver_nm)
     {
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING && MIOPEN_USE_COMPOSABLEKERNEL
         auto test_case = GetParam();
 
         auto&& handle = get_handle();
@@ -289,10 +289,9 @@ protected:
         ASSERT_TRUE(
             miopen::conv::IsEnoughWorkspace("GetSolutionsFallback AI", solver_id, ws, &invoke_ctx));
 
-        miopen::PerformanceDb db = {
-            miopen::DbKinds::PerfDb, fs::path{"/tmp/nodb.db.txt"}, fs::path {
-                "/tmp/nodb.udb.txt"
-            }}; // empty db, force heuristic
+        miopen::PerformanceDb db = {miopen::DbKinds::PerfDb, fs::path{"/tmp"}, fs::path {
+                                        "/tmp"
+                                    }}; // empty db, force heuristic
         miopen::solver::ConvSolution sol =
             solv.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
 

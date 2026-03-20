@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -101,7 +101,7 @@ struct DeviceScanParams
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_inclusive_scan(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_inclusive_scan<Config>(std::forward<Args>(args)...);
     }
@@ -114,7 +114,7 @@ constexpr hipError_t invoke_inclusive_scan(Args&&... args)
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_exclusive_scan(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_exclusive_scan<Config>(std::forward<Args>(args)...);
     }
@@ -305,15 +305,14 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
     const bool deterministic     = TestFixture::deterministic;
     const bool use_initial_value = TestFixture::use_initial_value;
 
-    using Config = typename TestFixture::config_helper;
-    using config = rocprim::detail::wrapped_scan_config<Config, acc_type>;
+    using Config   = typename TestFixture::config_helper;
+    using Selector = rocprim::detail::scan_config_selector<acc_type>;
 
     hipStream_t stream = hipStreamDefault;
 
-    rocprim::detail::target_arch target_arch;
-    HIP_CHECK(host_target_arch(stream, target_arch));
-    const rocprim::detail::scan_config_params params
-        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    const rocprim::detail::target current_target(stream);
+
+    const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -497,12 +496,13 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                                false,
                                                ordered_bid);
                     };
-                    return rocprim::detail::execute_launch_plan<config>(target_arch,
-                                                                        lookback_scan_kernel,
-                                                                        dim3(grid_size),
-                                                                        dim3(block_size),
-                                                                        0,
-                                                                        stream);
+                    return rocprim::detail::execute_launch_plan<Config, Selector>(
+                        current_target,
+                        lookback_scan_kernel,
+                        dim3(grid_size),
+                        dim3(block_size),
+                        0,
+                        stream);
                 });
 
             ASSERT_EQ(hipSuccess, launch_err);
@@ -553,15 +553,14 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
     const bool deterministic     = TestFixture::deterministic;
     const bool use_initial_value = TestFixture::use_initial_value;
 
-    using Config = typename TestFixture::config_helper;
-    using config = rocprim::detail::wrapped_scan_config<Config, acc_type>;
+    using Config   = typename TestFixture::config_helper;
+    using Selector = rocprim::detail::scan_config_selector<acc_type>;
 
     hipStream_t stream = hipStreamDefault;
 
-    rocprim::detail::target_arch target_arch;
-    HIP_CHECK(host_target_arch(stream, target_arch));
-    const rocprim::detail::scan_config_params params
-        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    const rocprim::detail::target current_target(stream);
+
+    const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -735,12 +734,12 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                            false,
                                            ordered_bid);
                 };
-                return rocprim::detail::execute_launch_plan<config>(target_arch,
-                                                                    lookback_scan_kernel,
-                                                                    dim3(grid_size),
-                                                                    dim3(block_size),
-                                                                    0,
-                                                                    stream);
+                return rocprim::detail::execute_launch_plan<Config, Selector>(current_target,
+                                                                              lookback_scan_kernel,
+                                                                              dim3(grid_size),
+                                                                              dim3(block_size),
+                                                                              0,
+                                                                              stream);
             });
 
         ASSERT_EQ(hipSuccess, launch_err);
@@ -1283,21 +1282,41 @@ void testLargeIndicesInclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValue)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<false, true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValueAndGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<true, true>();
 }
 
@@ -1383,11 +1402,21 @@ void testLargeIndicesExclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanWithGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScan<true>();
 }
 

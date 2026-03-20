@@ -175,7 +175,7 @@ void testing_spmm_bell_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spmm_bell()
+void testing_spmm_bell()
 {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
@@ -380,7 +380,5 @@ hipsparseStatus_t testing_spmm_bell()
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 #endif // TESTING_SPMM_BELL_HPP

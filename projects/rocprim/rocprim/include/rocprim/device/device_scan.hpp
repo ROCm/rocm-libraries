@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,12 +86,12 @@ inline auto scan_impl(void*               temporary_storage,
             scan_state_type scan_state;
             block_id_type   block_id;
 
-            using config = wrapped_scan_config<Config, AccType>;
+            using Selector = scan_config_selector<AccType>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+            const target current_target(stream);
 
-            const auto         params           = dispatch_target_arch<config, false>(target_arch);
+            const auto params = get_config<Selector>(Config{}, current_target);
+
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -194,9 +194,9 @@ inline auto scan_impl(void*               temporary_storage,
                         std::cout << "items_per_block " << items_per_block << '\n';
                     }
 
-                    auto lookback_scan_kernel = [=](auto arch_config)
+                    auto lookback_scan_kernel = [=](auto target_config)
                     {
-                        lookback_scan_kernel_impl<decltype(arch_config),
+                        lookback_scan_kernel_impl<decltype(target_config),
                                                   Determinism,
                                                   Exclusive,
                                                   UseInitialValue>(
@@ -213,12 +213,13 @@ inline auto scan_impl(void*               temporary_storage,
                             (number_of_launch > 1),
                             block_id);
                     };
-                    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                        lookback_scan_kernel,
-                                                                        dim3(grid_size),
-                                                                        dim3(block_size),
-                                                                        0,
-                                                                        stream));
+                    ROCPRIM_RETURN_ON_ERROR(
+                        execute_launch_plan<Config, Selector>(current_target,
+                                                              lookback_scan_kernel,
+                                                              dim3(grid_size),
+                                                              dim3(block_size),
+                                                              0,
+                                                              stream));
                     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
                                                                 current_size,
                                                                 start);
@@ -246,21 +247,34 @@ inline auto scan_impl(void*               temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto single_scan_kernel = [=](auto arch_config) mutable
+                auto single_scan_kernel = [=](auto target_config) mutable
                 {
-                    static constexpr scan_config_params params = decltype(arch_config)::params;
+                    using TargetConfig                         = decltype(target_config);
+                    static constexpr scan_config_params params = TargetConfig::params;
 
                     constexpr unsigned int block_size       = params.kernel_config.block_size;
                     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
 
-                    using block_load_type = ::rocprim::
-                        block_load<AccType, block_size, items_per_thread, params.block_load_method>;
+                    using block_load_type  = ::rocprim::block_load<AccType,
+                                                                   block_size,
+                                                                   items_per_thread,
+                                                                   params.block_load_method,
+                                                                   1,
+                                                                   1,
+                                                                   TargetConfig::wavefront>;
                     using block_store_type = ::rocprim::block_store<AccType,
                                                                     block_size,
                                                                     items_per_thread,
-                                                                    params.block_store_method>;
-                    using block_scan_type
-                        = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
+                                                                    params.block_store_method,
+                                                                    1,
+                                                                    1,
+                                                                    TargetConfig::wavefront>;
+                    using block_scan_type  = ::rocprim::block_scan<AccType,
+                                                                   block_size,
+                                                                   params.block_scan_method,
+                                                                   1,
+                                                                   1,
+                                                                   TargetConfig::wavefront>;
 
                     ROCPRIM_SHARED_MEMORY union
                     {
@@ -285,12 +299,12 @@ inline auto scan_impl(void*               temporary_storage,
                     // Save values into output array
                     block_store_type().store(output, values, size, storage.store);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    single_scan_kernel,
-                                                                    dim3(1),
-                                                                    dim3(block_size),
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                              single_scan_kernel,
+                                                                              dim3(1),
+                                                                              dim3(block_size),
+                                                                              0,
+                                                                              stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
             }
             return hipSuccess;

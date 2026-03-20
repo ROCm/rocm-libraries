@@ -927,6 +927,42 @@ struct perf_syrk_ex<
 // unit check override
 int8_t g_unit_check = 0;
 
+inline bool int32_api_invalid(const int64_t& val)
+{
+    return ((int32_t)val != val);
+}
+
+bool api_arg_check(Arguments& arg, bool any_stride)
+{
+    // check if 64 bit arguments were passed to 32bit APIs
+    if(arg.api & c_API_64) // bitmask
+        return true;
+
+    auto invalid = [](const char* var) {
+        rocblas_cout << "rocblas-bench INFO: argument int32 overflow: " << var
+                     << ", did you indend to use --api 1 ?" << std::endl;
+        return false;
+    };
+
+    if(int32_api_invalid(arg.batch_count))
+    {
+        return invalid("batch_count");
+    }
+    if(int32_api_invalid(arg.M))
+    {
+        return invalid("m");
+    }
+    if(int32_api_invalid(arg.N))
+    {
+        return invalid("n");
+    }
+    if(int32_api_invalid(arg.K))
+    {
+        return invalid("k");
+    }
+    return true;
+}
+
 void gemm_arg_adjust(Arguments& arg, bool any_stride)
 {
     // adjust dimension for GEMM routines
@@ -1043,14 +1079,11 @@ int run_bench_test(bool               init,
             return 0;
     }
 
-    // argument modifications
-    if(!strcmp(function, "gemm") || !strcmp(function, "gemm_batched")
-       || !strcmp(function, "gemm_strided_batched"))
-    {
-        gemm_arg_adjust(arg, any_stride);
-    }
+    if(!api_arg_check(arg, any_stride))
+        return 0;
 
-    // dispatch
+    // argument modifications and dispatch
+
     if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex"))
     {
         gemm_arg_adjust(arg, any_stride);
@@ -1065,6 +1098,12 @@ int run_bench_test(bool               init,
     }
     else
     {
+        if(!strcmp(function, "gemm") || !strcmp(function, "gemm_batched")
+           || !strcmp(function, "gemm_strided_batched"))
+        {
+            gemm_arg_adjust(arg, any_stride);
+        }
+
         if(!strcmp(function, "scal") || !strcmp(function, "scal_batched")
            || !strcmp(function, "scal_strided_batched"))
             rocblas_blas1_dispatch<perf_blas_scal>(arg);
@@ -1216,6 +1255,7 @@ try
 {
     client_omp_manager::limit_by_processor_count();
     rocblas_client_init();
+    print_asan_kernel_warning("rocblas-bench");
 
     fix_batch(argc, argv);
     Arguments   arg;
@@ -1466,7 +1506,7 @@ try
 
         ("api",
          value<int32_t>(&api)->default_value(0),
-         "Use API, supercedes fortran flag (0==C, 1==C_64, ...)")
+         "Use API, supercedes fortran flag (0==C, 1==C_64 ILP64, ...)")
 
         ("workspace",
          value<size_t>(&arg.user_allocated_workspace)->default_value(0),

@@ -107,7 +107,7 @@ void testing_rotm_batched(const Arguments& arg)
     int64_t abs_incx = incx >= 0 ? incx : -incx;
     int64_t abs_incy = incy >= 0 ? incy : -incy;
 
-    double gpu_time_used, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_device{0};
 
     host_batch_vector<T> hx(N, incx, batch_count);
     host_batch_vector<T> hy(N, incy, batch_count);

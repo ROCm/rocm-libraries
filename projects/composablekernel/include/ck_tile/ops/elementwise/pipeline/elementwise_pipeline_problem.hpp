@@ -1,9 +1,10 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/host/concat.hpp"
 
 namespace ck_tile {
 
@@ -21,6 +22,19 @@ struct ElementWisePipelineProblem
     using BlockShape           = remove_cvref_t<BlockShape_>;
     using ElementWiseOperation = remove_cvref_t<ElementWiseOperation_>;
     static constexpr bool kPad = kPad_;
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
+    {
+        // clang-format off
+        return concat('_', 
+            BlockShape::GetName(),
+            "op",
+            ElementWiseOperation::name,
+            "kPad",
+            kPad
+        );
+        // clang-format on
+    }
 };
 
 } // namespace ck_tile

@@ -37,6 +37,7 @@ The build options are:
 * ``BUILD_HIPSTDPAR_TEST``. Set this to ``ON`` to enable HIPSTDPAR tests. Default is ``OFF``.
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Default is ``OFF``.
 * ``BUILD_EXAMPLE``. Set this to ``ON`` to build the rocThrust examples. Default is ``OFF``.
+* ``BUILD_OFFLOAD_COMPRESS``. Set this to ``OFF`` to prevent the ``--offload-compress`` switch from being passed to the compiler and compressing the binary. On by default.
 * ``USE_SYSTEM_LIB``. Set this to ``ON`` to use the installed ``ROCm`` libraries when building the tests. For this option to take effect, ``BUILD_TEST`` must be set to ``ON``. Default is ``OFF``.
 * ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Default is 0.
 * ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds must be passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. ``-DPRNG_SEEDS=1`` is used by default.
@@ -44,6 +45,9 @@ The build options are:
 * ``EXTERNAL_DEPS_FORCE_DOWNLOAD``. Set this to ``ON`` to download the non-ROCm dependencies such as Google Test even if they're already installed. Default is ``OFF``.
 * ``USE_HIPCXX``. Set this to ``ON`` to build with CMake HIP language support. Setting this to ``ON`` eliminates the need to use ``CXX=hipcc``. Default is ``OFF``.
 * ``ROCPRIM_FETCH_METHOD`` and  ``ROCRAND_FETCH_METHOD``. Set these to the method to use to download the rocPRIM and rocRAND components, respectively. Can be set to ``PACKAGE``, ``DOWNLOAD``, or ``MONOREPO``. Set to ``MONOREPO`` if the component isn't already installed and you're building rocThrust from within a clone of the `rocm-libraries <https://github.com/ROCm/rocm-libraries/>`_ repository that includes the component. Set to ``DOWNLOAD`` if the component isn't installed and you aren't in a clone of the ``rocm-libraries`` repository that includes the component. ``DOWNLOAD`` will clone the repository using sparse checkout so that only the necessary files are downloaded. Set to ``PACKAGE`` if the component is already installed. If the component isn't installed, it'll be downloaded form the repository in the same way as using the ``DOWNLOAD`` option. The default method is ``PACKAGE``.
+* ``LINK_HIP_DEVICE_LIBS``. Set to ``OFF`` to prevent linking against device dependencies, including rocPRIM, and the build can only be used for host-side computation. Default is ``ON``.
+* ``THRUST_DEVICE_SYSTEM``. Sets the device backend that will be used. If unspecified, this option will be inferred from name of the device compiler. Valid values include ``HIP`` (for AMD GPU acceleration), ``CPP`` (C++, for sequential host-side compute), ``TBB`` (Thread Building Blocks, for parallel host-side compute), and ``OMP`` (OpenMP, for parallel host-side compute). Note that when this is set to a value other than ``HIP``, you must set ``LINK_HIP_DEVICE_LIBS=OFF``.
+* ``THRUST_HOST_SYSTEM``. Sets the host backend that will be used. If unspecified, this option defaults to ``CPP``. Valid values include ``CPP`` (C++), ``OMP`` (OpenMP), and ``TBB`` (Thread Building Blocks).
 
 .. note::
 

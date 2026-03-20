@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -16,6 +16,9 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/joinable_thread.hpp"
 #include "ck_tile/host/ranges.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile {
 
@@ -408,7 +411,6 @@ struct HostTensor
         return sizeof(T) * get_element_space_size();
     }
 
-    // void SetZero() { ck_tile::ranges::fill<T>(mData, 0); }
     void SetZero()
     {
         if constexpr(std::is_same_v<T, e8m0_t>)
@@ -598,6 +600,8 @@ struct HostTensor
 
     typename Data::size_type size() const { return mData.size(); }
 
+    T max() const { return *std::max_element(mData.begin(), mData.end()); }
+
     // return a slice of this tensor
     // for simplicity we just copy the data and return a new tensor
     auto slice(std::vector<size_t> s_begin, std::vector<size_t> s_end) const
@@ -662,13 +666,13 @@ struct HostTensor
             if constexpr(std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t> ||
                          std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>)
             {
-                os << type_convert<float>(mData[idx]) << " #### ";
+                os << type_convert<float>(mData[idx]);
             }
             else if constexpr(std::is_same_v<T, ck_tile::pk_int4_t>)
             {
                 auto unpacked = pk_int4_t_to_int8x2_t(mData[idx]);
                 os << "pk(" << static_cast<int>(unpacked[0]) << ", "
-                   << static_cast<int>(unpacked[1]) << ") #### ";
+                   << static_cast<int>(unpacked[1]) << ")";
             }
             else if constexpr(std::is_same_v<T, int8_t>)
             {
@@ -858,3 +862,4 @@ auto get_default_stride(std::size_t row,
         return stride;
 }
 } // namespace ck_tile
+#pragma clang diagnostic pop

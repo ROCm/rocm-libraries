@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/tensor.hpp>
 
 #include <miopen/errors.hpp>
@@ -36,16 +14,18 @@
 #include <miopen/tensorOp/solvers.hpp>
 #include <miopen/find_solution.hpp>
 #include <miopen/visit_float.hpp>
-#include <miopen/util.hpp>
-
-#include <boost/range/combine.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <numeric>
+#include <optional>
+#include <ranges>
 #include <string>
+#include <tuple>
+#include <vector>
 
 namespace miopen {
 
@@ -94,7 +74,7 @@ std::optional<miopenTensorLayout_t> GetDefaultLayout(unsigned num_dims)
     {
     case 4: return miopenTensorNCHW;
     case 5: return miopenTensorNCDHW;
-    default: return std::nullopt;
+    default: return {};
     }
 }
 
@@ -911,11 +891,14 @@ std::string TensorDescriptor::ToString() const
     std::string result;
     if(this->lens.empty())
         return result;
+
     for(auto i : this->lens)
     {
         result += std::to_string(i) + ", ";
     }
-    return result.substr(0, result.length() - 2);
+    result = result.substr(0, result.length() - 2);
+
+    return result;
 }
 
 std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t)
@@ -924,8 +907,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t)
     LogRange(stream << "{", t.strides, ", ") << "}, ";
     if(t.packed)
     {
-        stream << "packed"
-               << ", ";
+        stream << "packed" << ", ";
     }
 
     if(t.cast_type)
@@ -971,19 +953,24 @@ TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc)
     std::vector<std::size_t> flat_lengths;
     std::vector<std::size_t> flat_strides;
 
-    auto non1_length_strides = boost::combine(desc.GetLengths(), desc.GetStrides()) |
-                               boost::adaptors::filtered(f_length_is_not_1_t());
+    const auto& length_      = desc.GetLengths();
+    const auto& strides_     = desc.GetStrides();
+    auto non1_length_strides = std::views::iota(std::size_t(0), length_.size()) |
+                               std::views::transform([&](std::size_t i) {
+                                   return std::make_tuple(length_[i], strides_[i]);
+                               }) |
+                               std::views::filter([](const auto& v) { return std::get<0>(v) > 1; });
 
     auto i               = non1_length_strides.begin();
-    std::size_t flat_len = boost::get<0>(*i);
+    std::size_t flat_len = std::get<0>(*i);
     auto i_previous      = i++;
 
     // the 0-th dimension full-length doesn't matter
     for(; i != non1_length_strides.end(); ++i)
     {
-        std::size_t len             = boost::get<0>(*i);
-        std::size_t stride          = boost::get<1>(*i);
-        std::size_t previous_stride = boost::get<1>(*i_previous);
+        std::size_t len             = std::get<0>(*i);
+        std::size_t stride          = std::get<1>(*i);
+        std::size_t previous_stride = std::get<1>(*i_previous);
         std::size_t full_len        = previous_stride / stride;
 
         if(len == full_len)
@@ -999,7 +986,7 @@ TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc)
         i_previous = i;
     }
     flat_lengths.push_back(flat_len);
-    flat_strides.push_back(boost::get<1>(*i_previous));
+    flat_strides.push_back(std::get<1>(*i_previous));
 
     return {desc.GetType(), flat_lengths, flat_strides};
 }
@@ -1096,7 +1083,7 @@ void SetTensor(const Handle& handle,
     }
     else
     {
-        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cl";
+        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cpp";
 
         std::vector<std::size_t> worker_sizes = get_worker_sizes(yDesc_flat.GetLengths());
 
@@ -1107,8 +1094,11 @@ void SetTensor(const Handle& handle,
 
         std::size_t wld = 256 < wgd ? 256 : wgd;
         std::stringstream ss;
-        ss << "-DSUBTENSOR_OP_WITH_SCALAR=SUBTENSOR_OP_WITH_SCALAR_SET"
-           << GetDataTypeKernelParams(dataType);
+        // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
+        ss << "-DSUBTENSOR_OP_WITH_SCALAR=0";
+        ss << GetDataTypeKernelParams(dataType);
+        ss << " -DLOCAL_SIZE=" << std::to_string(wld);
+
         for(int i = 0; i < yDim_flat; ++i)
         {
             ss << " -DWORK_LENGTH_" << std::to_string(i) << "=" << std::to_string(worker_sizes[i]);
@@ -1259,7 +1249,7 @@ void ScaleTensor(const Handle& handle,
     }
     else
     {
-        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cl";
+        std::string program_name = "MIOpenSubTensorOpWithScalarKernel.cpp";
 
         std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1270,8 +1260,10 @@ void ScaleTensor(const Handle& handle,
 
         std::size_t wld = 256 < wgd ? 256 : wgd;
 
-        std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=SUBTENSOR_OP_WITH_SCALAR_MULTIPLY" +
-                            GetDataTypeKernelParams(dataType);
+        // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
+        std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=1" + GetDataTypeKernelParams(dataType);
+        parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+
         for(int i = 0; i < yDim_flat; ++i)
         {
             parms += " -DWORK_LENGTH_" + std::to_string(i) + "=" + std::to_string(worker_sizes[i]);
@@ -1435,7 +1427,7 @@ void CopyTensor(const Handle& handle,
         }
         else
         {
-            std::string program_name = "MIOpenSubTensorOpWithSubTensorKernel.cl";
+            std::string program_name = "MIOpenSubTensorOpWithSubTensorKernel.cpp";
 
             std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1446,8 +1438,10 @@ void CopyTensor(const Handle& handle,
 
             std::size_t wld = 256 < wgd ? 256 : wgd;
 
-            std::string parms = "-DSUBTENSOR_OP_WITH_SUBTENSOR=SUBTENSOR_OP_WITH_SUBTENSOR_COPY" +
-                                GetDataTypeKernelParams(srcDesc_flat.GetType());
+            std::string parms = GetDataTypeKernelParams(srcDesc_flat.GetType());
+
+            parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+
             for(std::size_t i = 0; i < srcDim_flat; ++i)
             {
                 parms +=
@@ -1655,7 +1649,7 @@ void CastTensor(const Handle& handle,
         }
         else
         {
-            std::string program_name = "MIOpenSubTensorOpWithCastTensorKernel.cl";
+            std::string program_name = "MIOpenSubTensorOpWithCastTensorKernel.cpp";
 
             std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1669,6 +1663,8 @@ void CastTensor(const Handle& handle,
             std::string parms =
                 GetCastTensorBuildOptionFromType(" -DMIOPEN_SRC_TYPE=", srcDesc_flat.GetType()) +
                 GetCastTensorBuildOptionFromType(" -DMIOPEN_DST_TYPE=", dstDesc_flat.GetType());
+
+            parms += " -DLOCAL_SIZE=" + std::to_string(wld);
 
             for(std::size_t i = 0; i < srcDim_flat; ++i)
             {
@@ -1882,10 +1878,9 @@ void TransformTensor(const Handle& handle,
     }
     else
     {
-        auto x_y_len          = boost::combine(x_len, y_len);
-        bool same_spatial_len = std::all_of(x_y_len.begin(), x_y_len.end(), [](auto v) {
-            return boost::get<0>(v) == boost::get<1>(v);
-        });
+        bool same_spatial_len =
+            std::ranges::all_of(std::views::iota(std::size_t(0), x_len.size()),
+                                [&](std::size_t i) { return x_len[i] == y_len[i]; });
 
         if(!same_spatial_len)
         {
@@ -1963,7 +1958,7 @@ void TransformTensor(const Handle& handle,
         }
         else
         {
-            std::string program_name = "MIOpenSubTensorOpWithTransformKernel.cl";
+            std::string program_name = "MIOpenSubTensorOpWithTransformKernel.cpp";
 
             std::vector<std::size_t> worker_sizes = get_worker_sizes(lens);
 
@@ -1975,9 +1970,10 @@ void TransformTensor(const Handle& handle,
             std::size_t wld = 256 < wgd ? 256 : wgd;
 
             std::string parms =
-                GetDataTypeKernelParams(dataTypey)                                           //
-                + " -DMIOPEN_BETA_IS_ZERO=" + std::to_string(static_cast<int>(is_beta_zero)) //
-                + " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
+                GetDataTypeKernelParams(dataTypey) +
+                " -DMIOPEN_BETA_IS_ZERO=" + std::to_string(static_cast<int>(is_beta_zero)) +
+                " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
+            parms += " -DLOCAL_SIZE=" + std::to_string(wld);
 
             for(int i = 0; i < yDim_flat; ++i)
             {

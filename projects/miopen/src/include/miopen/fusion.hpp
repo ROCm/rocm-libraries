@@ -26,20 +26,16 @@
 #ifndef MIOPEN_FUSION_HPP_
 #define MIOPEN_FUSION_HPP_
 
-#include <miopen/common.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/kernel_info.hpp>
-#include <miopen/op_kernel_args.hpp>
 #include <miopen/fusion_ops.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/activ.hpp>
 
-#include <set>
 #include <vector>
-#include <unordered_map>
 
 namespace miopen {
 
@@ -55,9 +51,9 @@ enum FusionKernelSourceType
 
 struct MIOPEN_INTERNALS_EXPORT FusionOpDescriptor : miopenFusionOpDescriptor
 {
-    virtual ~FusionOpDescriptor()                 = default;
-    FusionOpDescriptor(const FusionOpDescriptor&) = delete;
-    FusionOpDescriptor()                          = default;
+    virtual ~FusionOpDescriptor()                            = default;
+    FusionOpDescriptor(const FusionOpDescriptor&)            = delete;
+    FusionOpDescriptor()                                     = default;
     FusionOpDescriptor& operator=(const FusionOpDescriptor&) = delete;
     void SetIdx(int _id) { plan_idx = _id; };
     int GetIdx() const { return plan_idx; };
@@ -82,7 +78,7 @@ struct MIOPEN_INTERNALS_EXPORT BiasFusionOpDescriptor : FusionOpDescriptor
     TensorDescriptor base_desc;
 };
 
-struct MIOPEN_INTERNALS_EXPORT TensorScaleAddOpDescriptor : public FusionOpDescriptor
+struct TensorScaleAddOpDescriptor : public FusionOpDescriptor
 {
     TensorScaleAddOpDescriptor(const TensorDescriptor& desc) : tensor_desc(desc) {}
     miopenStatus_t GetOutputDesc(TensorDescriptor& output_desc) const override;
@@ -107,7 +103,7 @@ struct MIOPEN_INTERNALS_EXPORT ActivFwdFusionOpDescriptor : FusionOpDescriptor
     miopenActivationMode_t activMode;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ActivBwdFusionOpDescriptor : FusionOpDescriptor
+struct ActivBwdFusionOpDescriptor : FusionOpDescriptor
 {
     ActivBwdFusionOpDescriptor(miopenActivationMode_t mode) : activMode(mode) {}
     miopenStatus_t GetOutputDesc(TensorDescriptor& output_desc) const override;
@@ -267,6 +263,12 @@ solver::ConvSolution MakeFusedSolution(const struct FusionContext& ctx,
                                        const std::optional<std::string>& perf_cfg_override,
                                        const struct FusionDescription& problem,
                                        const AnyInvokeParams& invoke_params);
+
+namespace debug {
+// For unit tests.
+MIOPEN_INTERNALS_EXPORT std::vector<solver::Id>
+GetAllApplicableFusionSolutions(const FusionContext& ctx, const FusionDescription& fusion_problem);
+} // namespace debug
 
 } // namespace miopen
 MIOPEN_DEFINE_OBJECT(miopenFusionOpDescriptor, miopen::FusionOpDescriptor);

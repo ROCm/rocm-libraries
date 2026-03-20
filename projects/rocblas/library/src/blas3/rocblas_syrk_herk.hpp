@@ -52,7 +52,7 @@ inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_
                               && n < czsyrk_gfx90a_n_higher_threshold)));
 }
 
-template <typename T, bool FORCE_GEMM = false>
+template <typename T>
 inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
                                                    rocblas_int    n,
                                                    rocblas_int    k,
@@ -61,7 +61,7 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
     size_t size = 1;
 
     //Allocating workspace memory when only using gemm
-    if(FORCE_GEMM || rocblas_use_only_gemm<T>(handle, n, k))
+    if(rocblas_use_only_gemm<T>(handle, n, k))
         if(n > 0 && batch_count > 0)
             size = ((int64_t(n) * (n - 1)) / 2) * sizeof(T) * batch_count;
 

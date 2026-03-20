@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -60,6 +37,8 @@ namespace rocRoller::KernelGraph
         {
             int       control, coordinate;
             ReadWrite rw;
+
+            auto operator<=>(ReadWriteRecord const& other) const = default;
         };
 
         ControlFlowRWTracer(KernelGraph const& graph,
@@ -76,11 +55,34 @@ namespace rocRoller::KernelGraph
          */
         std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
 
+        std::vector<ReadWriteRecord> opReadWrite(int op) const;
+
+        /**
+         * @brief Build backward dependencies for all coordinates.
+         *
+         * Computes a map showing which coordinates each coordinate depends on.
+         * This is computed once and can be queried multiple times efficiently
+         * via getCoordinateDependencies().
+         *
+         * Must be called before using getCoordinateDependencies().
+         */
+        void buildDependencies();
+
+        /**
+         * @brief Get all coordinate dependencies for a given coordinate.
+         *
+         * Returns the set of coordinates that the given coordinate depends on
+         * (its provenance). Must call buildDependencies() first.
+         *
+         * @param coordinate The coordinate tag to trace dependencies for
+         * @return Set of all coordinate tags that the given coordinate depends on
+         */
+        std::set<int> getCoordinateDependencies(int coordinate) const;
+
         void operator()(ControlGraph::AssertOp const& op, int tag);
         void operator()(ControlGraph::Assign const& op, int tag);
         void operator()(ControlGraph::Barrier const& op, int tag);
         void operator()(ControlGraph::Block const& op, int tag);
-        void operator()(ControlGraph::ComputeIndex const& op, int tag);
         void operator()(ControlGraph::ConditionalOp const& op, int tag);
         void operator()(ControlGraph::Deallocate const& op, int tag);
         void operator()(ControlGraph::DoWhileOp const& op, int tag);
@@ -111,6 +113,7 @@ namespace rocRoller::KernelGraph
         void trackRegister(int control, int coordinate, ReadWrite rw);
         void trackConnections(int control, std::unordered_set<int> const& exclude, ReadWrite rw);
         void trackOffsetAndStride(int control, ReadWrite rw);
+        void trackBuffer(int control, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);
@@ -120,6 +123,10 @@ namespace rocRoller::KernelGraph
         std::set<int>                m_completedControlNodes;
         std::vector<ReadWriteRecord> m_trace;
         bool                         m_trackConnections;
+
+        // Backward dependency cache: coordinate -> set of coordinates it depends on
+        mutable std::map<int, std::set<int>> m_dependencies;
+        mutable bool                         m_dependenciesBuilt = false;
 
     private:
         /**
@@ -134,6 +141,21 @@ namespace rocRoller::KernelGraph
          */
         void trace(int start);
     };
+
+    inline constexpr ControlFlowRWTracer::ReadWrite combine(ControlFlowRWTracer::ReadWrite a,
+                                                            ControlFlowRWTracer::ReadWrite b)
+    {
+        if(a == b)
+            return a;
+
+        if(a == ControlFlowRWTracer::Count)
+            return b;
+
+        if(b == ControlFlowRWTracer::Count)
+            return a;
+
+        return ControlFlowRWTracer::READWRITE;
+    }
 
     std::string toString(ControlFlowRWTracer::ReadWrite rw);
 

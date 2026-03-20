@@ -645,7 +645,6 @@ TEST(ExternalDiscreteDistributionTests, Philox4x32_10WithUIN4OutputTest)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size * 4);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
-
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
 

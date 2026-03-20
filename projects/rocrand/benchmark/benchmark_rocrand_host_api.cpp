@@ -212,7 +212,7 @@ int main(int argc, char* argv[])
     };
 
     const std::map<rng_type_t, std::vector<rocrand_ordering>> benchmarked_orderings{
-  // clang-format off
+        // clang-format off
         {          ROCRAND_RNG_PSEUDO_MTGP32,
             {ROCRAND_ORDERING_PSEUDO_DEFAULT, ROCRAND_ORDERING_PSEUDO_DYNAMIC}},
         {         ROCRAND_RNG_PSEUDO_MT19937, {ROCRAND_ORDERING_PSEUDO_DEFAULT}},
@@ -238,7 +238,7 @@ int main(int argc, char* argv[])
         {ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32,  {ROCRAND_ORDERING_QUASI_DEFAULT}},
         {          ROCRAND_RNG_QUASI_SOBOL64,  {ROCRAND_ORDERING_QUASI_DEFAULT}},
         {ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64,  {ROCRAND_ORDERING_QUASI_DEFAULT}},
-  // clang-format on
+        // clang-format on
     };
 
     const std::string benchmark_name_prefix = "device_generate";

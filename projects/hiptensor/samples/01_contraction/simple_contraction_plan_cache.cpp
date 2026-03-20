@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,9 +37,9 @@
 int main(int argc, char* argv[])
 {
     /***************************************
-   * Check device support                 *
-   **************************************/
-    if(!isF32Supported())
+    * Check device support                 *
+    **************************************/
+    if(!isF32F32MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);
@@ -163,7 +163,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            C[i] = (BDataType)(float(i) / 100);
+            C[i] = (CDataType)(float(i) / 100);
         }
     }
 
@@ -263,14 +263,15 @@ int main(int argc, char* argv[])
                                                      modeC.data(),
                                                      typeCompute));
 
-#if 0 // TODO
     hiptensorDataType_t scalarType;
-    CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
-                desc,
-                HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-                (void*)&scalarType,
-                sizeof(scalarType)));
-#endif
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
+    assert(scalarType == HIPTENSOR_R_32F);
+
     /**************************
    * Set the algorithm to use
    ***************************/

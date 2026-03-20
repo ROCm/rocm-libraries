@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,10 @@
 #pragma once
 
 // CK includes
-#include <contraction_bilinear.hpp>
-#include <contraction_scale.hpp>
-#include <device_contraction_multiple_d.hpp>
-#include <element_wise_operation.hpp>
+#include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
+#include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
+#include <ck/tensor_operation/gpu/device/device_contraction_multiple_d.hpp>
+#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
 
 // hiptensor includes
 #include "data_types.hpp"
@@ -69,6 +69,8 @@ namespace hiptensor
                                                                  ComputeDataType>,
         std::enable_if_t<
             (std::is_same_v<CDEElementwiseOperation, ck::tensor_operation::element_wise::Bilinear>)
+            || (std::is_same_v<CDEElementwiseOperation,
+                               ck::tensor_operation::element_wise::BilinearUnary>)
             || (std::is_same_v<CDEElementwiseOperation,
                                ck::tensor_operation::element_wise::BilinearComplex>)>>
     {
@@ -146,4 +148,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

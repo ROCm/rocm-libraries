@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>
 
@@ -140,7 +140,6 @@ void add_device_conv2d_bwd_data_xdl_nhwc_kyxc_nhwk_f32_instances(
                                                   PassThrough>>>& instances)
 {
 #if CK_BUILD_DEPRECATED
-#pragma message "These instances are getting deprecated"
     add_device_operation_instances(instances,
                                    device_conv2d_bwd_data_xdl_nhwc_kyxc_nhwk_f32_instances{});
     add_device_operation_instances(
@@ -150,7 +149,6 @@ void add_device_conv2d_bwd_data_xdl_nhwc_kyxc_nhwk_f32_instances(
     add_device_operation_instances(
         instances, device_conv_dedicated_2d_bwd_data_xdl_nhwc_kyxc_nhwk_1x1_s1_p0_f32_instances{});
 #else
-#pragma message "These instances were deprecated"
     std::ignore = instances;
 #endif
 }

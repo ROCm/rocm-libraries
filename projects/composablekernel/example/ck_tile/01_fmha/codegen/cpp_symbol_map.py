@@ -1,7 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 # generate kernel instances to speed up compilation
-
 FWD_DTYPE_MAP = {
     "fp32": "FmhaFwdFp32",
     "fp16": "FmhaFwdFp16",
@@ -10,6 +9,8 @@ FWD_DTYPE_MAP = {
     "fp8fp16": "FmhaFwdFp8Fp16",
     "fp8bf16": "FmhaFwdFp8Bf16",
     "fp8fp32": "FmhaFwdFp8Fp32",
+    "mxfp8": "FmhaFwdMxFp8",
+    "mxfp4": "FmhaFwdMxFp4",
 }
 
 BWD_DTYPE_MAP = {"fp32": "FmhaBwdFp32", "fp16": "FmhaBwdFp16", "bf16": "FmhaBwdBf16"}
@@ -31,14 +32,22 @@ _MASK_MAP = {
 }
 
 
-def get_mask_map(mask: str):
-    if mask == "generic":
+def get_mask_map(mask_impl: str):
+    if mask_impl == "generic":
         return _MASK_MAP
-    elif mask == "simplified":
+    elif mask_impl == "simplified":
         return _MASK_SIMPLIFIED_MAP
     else:
         assert False
         return None
+
+
+def get_mask_impl(mask: str) -> str:
+    return "simplified" if mask.startswith("s_") else "generic"
+
+
+def get_mask_cpp_type(mask: str) -> str:
+    return get_mask_map(get_mask_impl(mask))[mask]
 
 
 _MASK_CHECK_MAP = {
@@ -62,6 +71,26 @@ def get_mask_check_map(mask: str):
         assert False
         return None
 
+
+def get_mask_cpp_check_expr(mask: str) -> str:
+    return get_mask_check_map(get_mask_impl(mask))[mask]
+
+
+QSCALE_MAP = {
+    "no": "ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE",
+    "pertensor": "ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR",
+    "blockscale": "ck_tile::BlockAttentionQuantScaleEnum::BLOCKSCALE",
+    "kv_blockscale": "ck_tile::BlockAttentionQuantScaleEnum::KV_BLOCKSCALE",
+    "mx": "ck_tile::BlockAttentionQuantScaleEnum::MX",
+}
+
+QSCALE_CHECK_MAP = {
+    "no": "quant_scale_enum::no_scale",
+    "pertensor": "quant_scale_enum::pertensor",
+    "blockscale": "quant_scale_enum::blockscale",
+    "kv_blockscale": "quant_scale_enum::kv_blockscale",
+    "mx": "quant_scale_enum::mx",
+}
 
 BIAS_MAP = {
     "no": "ck_tile::BlockAttentionBiasEnum::NO_BIAS",
@@ -113,6 +142,7 @@ PIPELINE_MAP = {
     "qr_async": "ck_tile::BlockFmhaPipelineQRKSVSAsync",
     "qs": "ck_tile::BlockFmhaPipelineQSKSVS",
     "qr_async_trload": "ck_tile::BlockFmhaPipelineQRKSVSAsyncTrload",
+    "qr_async_trload_v3": "ck_tile::BlockFmhaFwdV3Pipeline",
 }
 
 PIPELINE_ENUM_MAP = {
@@ -122,6 +152,7 @@ PIPELINE_ENUM_MAP = {
     "qs": "ck_tile::BlockFmhaPipelineEnum::QSKSVS",
     "qr_pagedkv": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
     "qr_async_trload": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD",
+    "qr_async_trload_v3": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD_V3",
 }
 
 BOOL_MAP = {

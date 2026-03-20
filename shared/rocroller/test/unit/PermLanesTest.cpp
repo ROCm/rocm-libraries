@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -34,6 +11,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include "GPUContextFixture.hpp"
@@ -49,29 +27,31 @@ namespace PermLanesTest
     {
     };
 
-    void executePermLanesBlockScale(rocRoller::ContextPtr context, const int miMN, const int miK)
+    void executePermLanesBlockScale(rocRoller::ContextPtr context,
+                                    const int             waveMN,
+                                    const int             waveK,
+                                    const int             miMN,
+                                    const int             miK)
     {
-        int  MN     = 256;
-        int  K      = 4;
+        int  MN     = waveMN * 4;
+        int  K      = waveK;
         auto unit   = Expression::literal(1);
-        auto exprMN = Expression::literal(256);
-        auto exprK  = Expression::literal(4);
+        auto exprMN = Expression::literal(MN);
+        auto exprK  = Expression::literal(K);
 
-        int macMN  = 256;
-        int macK   = 4;
-        int waveMN = 64;
-        int waveK  = 4;
-        int waveB  = 1;
-        int miB    = 1;
+        int macMN = MN;
+        int macK  = K;
+        int waveB = 1;
+        int miB   = 1;
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         auto kernel = kgraph.control.addElement(Kernel());
-        auto load   = kgraph.control.addElement(LoadTiled(DataType::UInt8));
+        auto load   = kgraph.control.addElement(LoadTiled(DataType::E8M0));
         kgraph.control.addElement(Body(), {kernel}, {load});
-        auto exchange = kgraph.control.addElement(Exchange(DataType::UInt8));
+        auto exchange = kgraph.control.addElement(Exchange(DataType::E8M0));
         kgraph.control.addElement(Sequence(), {load}, {exchange});
-        auto store = kgraph.control.addElement(StoreTiled(DataType::UInt8));
+        auto store = kgraph.control.addElement(StoreTiled(DataType::E8M0));
         kgraph.control.addElement(Sequence(), {exchange}, {store});
 
         auto user0 = kgraph.coordinates.addElement(
@@ -92,10 +72,13 @@ namespace PermLanesTest
 
         auto user1 = kgraph.coordinates.addElement(
             User("result", std::make_shared<Expression::Expression>((size_t)MN * K)));
-        auto odim0 = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
-        auto odim1 = kgraph.coordinates.addElement(SubDimension(1, exprK, unit));
-        auto mactile1
-            = kgraph.coordinates.addElement(MacroTile({macMN, macK}, MemoryType::VGPR, {1, 4}));
+        auto odim0    = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
+        auto odim1    = kgraph.coordinates.addElement(SubDimension(1, exprK, unit));
+        auto mactile1 = kgraph.coordinates.addElement(MacroTile({macMN, macK},
+                                                                LayoutType::MATRIX_A,
+                                                                {waveMN, waveMN, waveK, waveB},
+                                                                MemoryType::WAVE_SWIZZLE,
+                                                                {miMN, miMN, miK, miB}));
         kgraph.coordinates.addElement(DestructMacroTile(), {mactile1}, {odim0, odim1});
         kgraph.coordinates.addElement(Join(), {odim0, odim1}, {user1});
         kgraph.coordinates.addElement(DataFlow(), {mactile1}, {user1});
@@ -105,11 +88,6 @@ namespace PermLanesTest
         kgraph.mapper.connect<User>(store, user1);
 
         auto k = context->kernel();
-
-        k->addArgument(
-            {"a", {DataType::UInt8, PointerType::PointerGlobal}, DataDirection::ReadOnly});
-        k->addArgument(
-            {"result", {DataType::UInt8, PointerType::PointerGlobal}, DataDirection::WriteOnly});
 
         k->setKernelDimensions(2);
         auto one               = Expression::literal(1u);
@@ -124,12 +102,26 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(lowerTile);
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
-        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
-        kgraph                     = kgraph.transform(addComputeIndex);
-        kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
+
+        auto command = std::make_shared<rocRoller::Command>();
+        command->allocateArgument({DataType::E8M0, PointerType::PointerGlobal},
+                                  Operations::OperationTag(0),
+                                  ArgumentType::Value,
+                                  DataDirection::WriteOnly,
+                                  "result");
+        command->allocateArgument({DataType::E8M0, PointerType::PointerGlobal},
+                                  Operations::OperationTag(1),
+                                  ArgumentType::Value,
+                                  DataDirection::ReadOnly,
+                                  "a");
+        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(context, command);
+        kgraph                = kgraph.transform(assignIndexExprs);
+
+        kgraph = kgraph.transform(std::make_shared<LoadPacked>(context));
         if(context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
+
+        kgraph = kgraph.transform(std::make_shared<CleanArguments>(context, command));
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());
@@ -164,62 +156,109 @@ namespace PermLanesTest
                 result.data(), dResult.get(), result.size() * sizeof(uint8_t), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        int nWaves = 4;
-        int factor = waveK / miK;
-        int nLanes = 16;
+        int nWaves          = 4;
+        int nLanes          = 16;
+        int nSIMDsPerWave   = 4;
+        int nSIMDIndex      = waveMN / nLanes;
+        int nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+        int nVGPRIndex      = std::min(nSIMDIndex, miK);
+        int nVGPRBlock      = waveK / nSIMDBlock / nVGPRIndex;
+        int nSIMDIndexBlock = nVGPRIndex;
+        int nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
 
         // clang-format off
         for(int wave      = 0;      wave < nWaves; wave++)
-        for(int simdBlock = 0; simdBlock < miK;    simdBlock++)
-        for(int simdIndex = 0; simdIndex < factor; simdIndex++)
+        for(int simdIndexBlock = 0; simdIndexBlock < nSIMDIndexBlock; simdIndexBlock++)
+        for(int simdIndexIndex = 0; simdIndexIndex < nSIMDIndexIndex; simdIndexIndex++)
         for(int lane      = 0;      lane < nLanes; lane++)
-        for(int vgprBlock = 0; vgprBlock < factor; vgprBlock++)
-        for(int vgprIndex = 0; vgprIndex < miK;    vgprIndex++)
+        for(int simdBlock = 0; simdBlock < nSIMDBlock; simdBlock++)
+        for(int vgprBlock = 0; vgprBlock < nVGPRBlock; vgprBlock++)
+        for(int vgprIndex = 0; vgprIndex < nVGPRIndex;    vgprIndex++)
         {
-            auto aIdx = wave * waveK * nLanes * waveK
-                        + simdBlock * factor * nLanes * waveK
-                        + simdIndex * nLanes * waveK
-                        + lane * waveK
-                        + vgprBlock * miK
-                        + vgprIndex;
+            auto aIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRBlock * nVGPRIndex
+                        + vgprBlock * nVGPRIndex + vgprIndex;
 
-            auto resultIdx = wave * waveK * nLanes * waveK
-                             + vgprIndex * factor * nLanes * waveK
-                             + simdIndex * nLanes * waveK
-                             + lane * waveK
-                             + vgprBlock * miK
-                             + simdBlock;
+            auto resultIdx = aIdx;
+
+            if(waveMN == 64)
+            {
+                resultIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRBlock * nVGPRIndex
+                        + vgprBlock * nVGPRIndex + simdIndexBlock;
+            }
+            else if(waveMN == 32 && miMN == 16)
+            {
+                resultIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprBlock * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRIndex + simdIndexBlock;
+            }
+            else if(waveMN == 32 && miMN == 32)
+            {
+                resultIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRIndex + vgprBlock;
+            }
 
             ASSERT_EQ(a[aIdx], result[resultIdx]);
         }
         // clang-format on
 
-        std::vector<size_t> sizes = {static_cast<size_t>(miK),
-                                     static_cast<size_t>(factor),
+        std::vector<size_t> sizes = {static_cast<size_t>(nVGPRIndex),
+                                     static_cast<size_t>(nVGPRBlock),
+                                     static_cast<size_t>(nSIMDBlock),
                                      static_cast<size_t>(nLanes),
-                                     static_cast<size_t>(factor),
-                                     static_cast<size_t>(miK),
+                                     static_cast<size_t>(nSIMDIndexIndex),
+                                     static_cast<size_t>(nSIMDIndexBlock),
                                      static_cast<size_t>(nWaves)};
 
-        auto order = {4, 1, 2, 3, 0, 5};
-
-        TensorDescriptor src(DataType::E8M0, sizes);
-        auto dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});
+        TensorDescriptor src(DataType::E8M0, sizes), dst;
+        if(waveMN == 64)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {5, 1, 2, 3, 4, 0, 6});
+        if(waveMN == 32 && miMN == 16)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {5, 2, 1, 3, 4, 0, 6});
+        if(waveMN == 32 && miMN == 32)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {1, 2, 0, 3, 4, 5, 6});
 
         auto a_reordered = shuffleDims(a, dst, src);
         EXPECT_EQ(a_reordered, result);
     }
 
-    TEST_F(PermLanesTest, PermLanesBlockScale16x4GPUTest)
+    TEST_F(PermLanesTest, PermLanesBlockScale64x4MI16x4GPUTest)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes16);
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
-        executePermLanesBlockScale(m_context, 16, 4);
+        executePermLanesBlockScale(m_context, 64, 4, 16, 4);
     }
 
-    TEST_F(PermLanesTest, PermLanesBlockScale32x2GPUTest)
+    TEST_F(PermLanesTest, PermLanesBlockScale32x8MI16x4GPUTest)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes16);
+        REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
+        executePermLanesBlockScale(m_context, 32, 8, 16, 4);
+    }
+
+    TEST_F(PermLanesTest, PermLanesBlockScale64x4MI32x2GPUTest)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
-        executePermLanesBlockScale(m_context, 32, 2);
+        executePermLanesBlockScale(m_context, 64, 4, 32, 2);
+    }
+
+    TEST_F(PermLanesTest, PermLanesBlockScale32x8MI32x2GPUTest)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
+        executePermLanesBlockScale(m_context, 32, 8, 32, 2);
     }
 }

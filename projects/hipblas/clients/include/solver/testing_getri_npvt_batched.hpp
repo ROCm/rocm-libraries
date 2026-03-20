@@ -176,7 +176,7 @@ void testing_getri_npvt_batched(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dC.memcheck());
     CHECK_DEVICE_ALLOCATION(dInfo.memcheck());
 
-    double             gpu_time_used, hipblas_error;
+    double             gpu_time_used{0}, hipblas_error{0};
     hipblasLocalHandle handle(arg);
 
     // Initial hA on CPU

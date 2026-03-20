@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,21 +36,53 @@ namespace rocsparse
 
     {
         ROCSPARSE_ROUTINE_TRACE;
-        if(info == nullptr)
+
+        auto numeric_exact_position = (info) ? info->get_singularity_numeric_exact() : nullptr;
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(handle,
+                                                                            1,
+                                                                            info,
+                                                                            numeric_exact_position,
+                                                                            nullptr,
+                                                                            handle->pointer_mode,
+                                                                            indextype,
+                                                                            position));
+
+        switch(indextype)
         {
-            rocsparse::set_minus_one_async(
-                handle->stream, handle->pointer_mode, indextype, position);
+        case rocsparse_indextype_i32:
+        {
+            int32_t p;
+            RETURN_IF_HIP_ERROR(
+                hipMemcpyAsync(&p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
+            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            if(p != -1)
+            {
+                return rocsparse_status_zero_pivot;
+            }
             return rocsparse_status_success;
         }
-        auto status = info->copy_zero_pivot_async(
-            handle->pointer_mode, indextype, position, handle->stream);
-        if(status == rocsparse_status_zero_pivot)
+        case rocsparse_indextype_i64:
         {
-            return status;
+            int64_t p;
+            RETURN_IF_HIP_ERROR(
+                hipMemcpyAsync(&p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
+            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            if(p != -1)
+            {
+                return rocsparse_status_zero_pivot;
+            }
+            return rocsparse_status_success;
         }
-        RETURN_IF_ROCSPARSE_ERROR(status);
-
-        return rocsparse_status_success;
+            // LCOV_EXCL_START
+        case rocsparse_indextype_u16:
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   "rocsparse_indextype_u16 not supported");
+        }
+        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 }
 extern "C" rocsparse_status rocsparse_csrsv_zero_pivot(rocsparse_handle          handle,

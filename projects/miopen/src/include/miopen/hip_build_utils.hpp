@@ -31,7 +31,7 @@
 #include <miopen/kernel.hpp>
 #include <miopen/tmp_dir.hpp>
 #include <miopen/write_file.hpp>
-#include <boost/optional.hpp>
+
 #include <string>
 
 namespace miopen {
@@ -59,18 +59,18 @@ public:
     LcOptionTargetStrings(const TargetProperties& target)
         : device(target.Name()),
           xnack([&]() -> std::string {
-              if(target.Xnack())
-                  return std::string{":xnack"} + (*target.Xnack() ? "+" : "-");
+              if(target.xnack.isReported())
+                  return std::string{":xnack"} + (target.isXnackEnabled() ? "+" : "-");
               return {};
           }()),
           sramecc([&]() -> std::string {
-              if(target.Sramecc())
-                  return std::string{":sramecc"} + (*target.Sramecc() ? "+" : "-");
+              if(target.sramecc.isReported())
+                  return std::string{":sramecc"} + (target.sramecc.isEnabled() ? "+" : "-");
               return {};
           }()),
           sramecc_reported([&]() -> std::string {
-              if(target.SrameccReported())
-                  return std::string{":sramecc"} + (*target.SrameccReported() ? "+" : "-");
+              if(target.sramecc.isReported())
+                  return std::string{":sramecc"} + (target.sramecc.isReported() ? "+" : "-");
               return {};
           }()),
 #if MIOPEN_USE_COMGR

@@ -24,12 +24,14 @@
  *
  *******************************************************************************/
 #include <miopen/env.hpp>
+#include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/config.h>
 #include <miopen/sysinfo_utils.hpp>
 
 #include <cstdlib>
 #include <chrono>
+#include <fstream>
 #include <ios>
 #include <iomanip>
 #include <sstream>
@@ -68,7 +70,73 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_ROCTX)
 /// Disable logging quieting.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE)
 
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 0);
+
 namespace miopen {
+
+size_t GetBufferSize() { return env::value(MIOPEN_LOG_BUFFER_SIZE); }
+
+size_t& GetBufferIdx()
+{
+    static thread_local size_t log_buffer_i = 0;
+    return log_buffer_i;
+}
+
+std::vector<std::string>& GetLogBuffer()
+{
+    auto log_buffer_size = GetBufferSize();
+    static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
+    if(log_buffer_size != log_buffer.size())
+    {
+        log_buffer.resize(log_buffer_size);
+        auto& log_buffer_i = GetBufferIdx();
+        if(log_buffer_i > 0 && log_buffer_i >= log_buffer_size)
+            log_buffer_i = 0;
+    }
+    return log_buffer;
+}
+
+bool IsLogBufferOn() { return GetBufferSize() != 0; }
+
+void ClearLogBuffer()
+{
+    auto& log_buffer   = GetLogBuffer();
+    auto& log_buffer_i = GetBufferIdx();
+    log_buffer         = std::vector<std::string>(GetBufferSize(), "");
+    log_buffer_i       = 0;
+}
+
+void BufferLog(std::string line)
+{
+    auto& log_buffer         = GetLogBuffer();
+    auto& log_buffer_i       = GetBufferIdx();
+    log_buffer[log_buffer_i] = line;
+    log_buffer_i             = (log_buffer_i + 1) % GetBufferSize();
+}
+
+void OutputBufferedLogs()
+{
+    auto& log_buffer     = GetLogBuffer();
+    auto& log_buffer_i   = GetBufferIdx();
+    auto log_buffer_size = GetBufferSize();
+    auto buffer_size     = (log_buffer[log_buffer_size - 1] == "") ? log_buffer_i : log_buffer_size;
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(::getpid()) + ".log");
+    std::cerr << "Buffered " << buffer_size << " messages to file: " << sysinfo::GetSystemHostname()
+              << ":" << filename.string() << std::endl;
+    auto err_file = std::ofstream{filename, std::ofstream::app};
+    size_t i      = log_buffer_i;
+    do
+    {
+        if(log_buffer[i] != "")
+        {
+            err_file << log_buffer[i];
+        }
+        i = (i + 1) % log_buffer_size;
+    } while(i != log_buffer_i);
+    err_file << std::endl;
+    ClearLogBuffer();
+}
 
 namespace debug {
 

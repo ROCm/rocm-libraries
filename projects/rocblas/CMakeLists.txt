@@ -41,10 +41,7 @@ include(toolchain-options)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-if(NOT python)
-  find_package(Python3 REQUIRED COMPONENTS Interpreter)
-  set(python "${Python3_EXECUTABLE}")
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # ########################################################################
 # Main
@@ -71,7 +68,7 @@ get_os_id(OS_ID)
 message (STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "5.2.0" )
+set ( VERSION_STRING "5.4.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -150,7 +147,7 @@ set( AMDGPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of GPUs (gfx targets) to
 
 option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
-set( HIPBLASLT_VERSION 1.2.0 CACHE STRING "The version of HipBLASLt to be used" )
+set( HIPBLASLT_VERSION 1.2.2 CACHE STRING "The version of HipBLASLt to be used" )
 
 if( NOT BUILD_WITH_TENSILE )
   set( BUILD_WITH_HIPBLASLT OFF )
@@ -179,9 +176,13 @@ if(NOT SKIP_LIBRARY)
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
     list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
-    set( TENSILE_VERSION 4.45.0 CACHE STRING "The version of Tensile to be used")
+    set( TENSILE_VERSION 4.47.0 CACHE STRING "The version of Tensile to be used")
 
     set( Tensile_NO_ENUMERATE ON CACHE BOOL "Disable enumerating GPU targets for Tensile builds" FORCE)
+    
+    # Disable Tensile client and testing: rocBLAS provides its own client and testing infrastructure
+    set( TENSILE_ENABLE_CLIENT OFF CACHE BOOL "Disable Tensile client (rocBLAS uses its own client infrastructure)" FORCE)
+    set( TENSILE_BUILD_TESTING OFF CACHE BOOL "Disable Tensile testing (rocBLAS uses its own testing infrastructure)" FORCE)
 
     if(BUILD_WITH_PIP)
       if (WIN32)
@@ -400,7 +401,7 @@ if(BUILD_CODE_COVERAGE)
   #
   add_custom_target(coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocblas-coverage_%m.profraw" ${python} ./clients/staging/rocblas_rtest.py -t code_coverage
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocblas-coverage_%m.profraw" ${Python3_EXECUTABLE} ./clients/staging/rocblas_rtest.py -t code_coverage
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
@@ -428,6 +429,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocblas-coverage_*.profraw -o ./coverage-report/rocblas.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocblas.so -instr-profile=./coverage-report/rocblas.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocblas.so -instr-profile=./coverage-report/rocblas.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocblas.so -instr-profile=./coverage-report/rocblas.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

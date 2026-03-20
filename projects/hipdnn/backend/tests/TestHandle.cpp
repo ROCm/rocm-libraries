@@ -3,14 +3,14 @@
 
 #include "handle/Handle.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 namespace hipdnn_backend
 {
 
 TEST(TestHandle, DefaultStreamIsNull)
 {
-    hipdnnHandle handle;
+    const hipdnnHandle handle;
     EXPECT_EQ(handle.getStream(), nullptr) << "Default stream should be nullptr.";
 }
 

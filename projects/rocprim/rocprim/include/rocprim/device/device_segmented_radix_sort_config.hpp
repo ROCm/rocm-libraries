@@ -57,46 +57,33 @@ using select_warp_sort_config_t
 namespace detail
 {
 
-template<class SegmentedRadixSortConfig, typename, typename>
-struct wrapped_segmented_radix_sort_config
+template<class Key, class Value>
+struct segmented_radix_sort_config_selector
 {
-    static_assert(std::is_same<typename SegmentedRadixSortConfig::tag,
-                               detail::segmented_radix_sort_config_tag>::value,
-                  "Config must be a specialization of struct template segmented_radix_sort_config");
+    using targets    = segmented_radix_sort_targets;
+    using param_type = segmented_radix_sort_config_params;
 
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr detail::segmented_radix_sort_config_params params
-            = SegmentedRadixSortConfig{};
-    };
+    param_type params;
+
+    template<class Target>
+    constexpr segmented_radix_sort_config_selector(Target)
+        : params(segmented_radix_sort_config_picker<Target, Key, Value>())
+    {}
 };
 
-template<typename key_type, typename value_type>
-struct wrapped_segmented_radix_sort_config<default_config, key_type, value_type>
+template<typename Config, class Selector, class Target>
+struct segmented_radix_sort_warp_sort_small_config_static_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr segmented_radix_sort_config_params params
-            = detail::default_segmented_radix_sort_config<static_cast<unsigned int>(Arch),
-                                                          key_type,
-                                                          value_type>{};
-    };
+    static constexpr auto block_size
+        = target_config<Config, Selector, Target>::params.warp_sort_config.block_size_small;
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class SegmentedRadixSortConfig, class key_type, class Value>
-template<target_arch Arch>
-constexpr segmented_radix_sort_config_params
-    wrapped_segmented_radix_sort_config<SegmentedRadixSortConfig, key_type, Value>::
-        architecture_config<Arch>::params;
-template<class key_type, class Value>
-template<target_arch Arch>
-constexpr segmented_radix_sort_config_params
-    wrapped_segmented_radix_sort_config<rocprim::default_config, key_type, Value>::
-        architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+template<typename Config, class Selector, class Target>
+struct segmented_radix_sort_warp_sort_medium_config_static_selector
+{
+    static constexpr auto block_size
+        = target_config<Config, Selector, Target>::params.warp_sort_config.block_size_medium;
+};
 
 } // end namespace detail
 

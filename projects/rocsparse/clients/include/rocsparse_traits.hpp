@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,8 @@
 #define ROCSPARSE_TRAITS_HPP
 
 #include "rocsparse-complex-types.h"
+#include "rocsparse_bfloat16.h"
+#include <type_traits>
 
 template <typename T>
 struct floating_traits
@@ -48,5 +50,25 @@ struct floating_traits<rocsparse_double_complex>
 
 template <typename T>
 using floating_data_t = typename floating_traits<T>::data_t;
+
+// Helper to check if type is low-precision (bfloat16 or float16)
+// Used for testing where low-precision types may need special handling
+template <typename T>
+struct is_low_precision : std::false_type
+{
+};
+
+template <>
+struct is_low_precision<rocsparse_bfloat16> : std::true_type
+{
+};
+
+template <>
+struct is_low_precision<_Float16> : std::true_type
+{
+};
+
+template <typename T>
+constexpr bool is_low_precision_v = is_low_precision<T>::value;
 
 #endif // ROCSPARSE_TRAITS_HPP

@@ -36,7 +36,8 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
-       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16))
+       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
+       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32))
     {
         return false;
     }
@@ -223,18 +224,14 @@ inline rocblaslt_status
                                   const void*               alpha,
                                   const RocblasltContractionProblem::ScalingFormat scaleAType,
                                   const RocblasltContractionProblem::ScalingFormat scaleBType,
-                                  const uint32_t scaleABlockRowSize,
-                                  const uint32_t scaleABlockColSize,
-                                  const uint32_t scaleBBlockRowSize,
-                                  const uint32_t scaleBBlockColSize,
-                                  void*&         E,
-                                  hipDataType&   aux_type,
-                                  int64_t&       lde,
-                                  int64_t&       batch_stride_e,
-                                  void*&         bias,
-                                  hipDataType&   bias_type,
-                                  void*&         scaleAlphaVec,
-                                  bool&          gradient)
+                                  void*&                                           E,
+                                  hipDataType&                                     aux_type,
+                                  int64_t&                                         lde,
+                                  int64_t&                                         batch_stride_e,
+                                  void*&                                           bias,
+                                  hipDataType&                                     bias_type,
+                                  void*&                                           scaleAlphaVec,
+                                  bool&                                            gradient)
 {
     // Set status
     rocblaslt_status status = rocblaslt_status_continue;
@@ -274,22 +271,6 @@ inline rocblaslt_status
     {
         log_error(__func__, "Scale A and Scale B must be both scalar, vector or block.");
         status = rocblaslt_status_invalid_value;
-    }
-    if(scaleAType == RocblasltContractionProblem::ScalingFormat::Block)
-    {
-        if(scaleABlockRowSize != 32 || scaleABlockColSize != 1)
-        {
-            log_error(__func__, "ScaleA block row and column sizes currently only support 32x1");
-            status = rocblaslt_status_invalid_value;
-        }
-    }
-    if(scaleBType == RocblasltContractionProblem::ScalingFormat::Block)
-    {
-        if(scaleBBlockRowSize != 1 || scaleBBlockColSize != 32)
-        {
-            log_error(__func__, "ScaleB block row and column sizes currently only support 1x32");
-            status = rocblaslt_status_invalid_value;
-        }
     }
     return status;
 }
@@ -417,10 +398,6 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          alpha,
                                                          matmul_descr->scaleAType,
                                                          matmul_descr->scaleBType,
-                                                         matmul_descr->scaleABlockRowSize,
-                                                         matmul_descr->scaleABlockColSize,
-                                                         matmul_descr->scaleBBlockRowSize,
-                                                         matmul_descr->scaleBBlockColSize,
                                                          E,
                                                          aux_type,
                                                          lde,
