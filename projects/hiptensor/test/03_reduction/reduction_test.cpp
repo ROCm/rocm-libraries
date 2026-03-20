@@ -76,7 +76,7 @@ namespace hiptensor
     {
         reset();
         // Handle our own outputs
-        hiptensor::silenceLogger();
+        hiptensor::test::silenceLogger();
         hiptensorLoggerSetCallback(logMessage);
     }
 

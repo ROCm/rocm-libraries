@@ -41,8 +41,8 @@
 
 #include <hiptensor/hiptensor.h>
 
-// Cross-platform safe file open (definition in platform.cpp)
-HIPTENSOR_EXPORT FILE* safeFopen(const char* filename, const char* mode);
+// Cross-platform safe file open (definition in platform.cpp; not exported from DLL)
+FILE* safeFopen(const char* filename, const char* mode);
 
 // Cross-platform safe environment variable access
 inline std::optional<std::string> getEnvironmentVariable(const char* name)
@@ -62,15 +62,8 @@ inline std::optional<std::string> getEnvironmentVariable(const char* name)
 #endif
 }
 
-// Cross-platform safe localtime
-inline bool safeLocaltime(const time_t* t, struct tm* tmInfo)
-{
-#ifdef _WIN32
-    return localtime_s(tmInfo, t) == 0;
-#else
-    return localtime_r(t, tmInfo) != nullptr;
-#endif
-}
+// Cross-platform safe localtime: fills buff with a formatted timestamp, or "TIMESTAMP-ERROR" on failure
+void safeLocaltime(char* buff, size_t buffSize, const time_t* t);
 
 // Cross-platform process ID
 inline int getProcessId()

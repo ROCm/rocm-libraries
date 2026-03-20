@@ -25,8 +25,6 @@
  *******************************************************************************/
 
 #include <stdio.h>
-#include <string.h>
-#include <time.h>
 
 #include <mutex>
 
@@ -222,20 +220,9 @@ namespace hiptensor
         // Beware thread concurrency.
         static char buff[32];
 
-        time_t    t;
-        struct tm tmInfo;
-
-        // Retrieve the time information
+        time_t t;
         time(&t);
-
-        if(!safeLocaltime(&t, &tmInfo))
-        {
-            memset(&tmInfo, 0, sizeof(tmInfo));
-        }
-
-        // Format the timestamp string
-        // YYYY-MM-DD HH:MM:SS
-        strftime(buff, 32, "%F %T", &tmInfo);
+        safeLocaltime(buff, sizeof(buff), &t);
         return buff;
     }
 

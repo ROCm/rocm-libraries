@@ -119,7 +119,7 @@ int main(int argc, char* argv[])
         TmpFileWrapper()
         {
             // Use cross-platform filesystem approach for temporary file
-            tmpFilename = hiptensor::generateTempFilename("hiptensor_yaml_test_");
+            tmpFilename = hiptensor::test::generateTempFilename("hiptensor_yaml_test_");
         }
         ~TmpFileWrapper()
         {
