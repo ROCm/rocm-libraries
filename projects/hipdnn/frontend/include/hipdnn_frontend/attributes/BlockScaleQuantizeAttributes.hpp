@@ -162,15 +162,17 @@ public:
     {
         const flatbuffers::Optional<int64_t> fbAxis = axis;
 
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
+        // Throws if block_size not set; requires prior validation
         return hipdnn_data_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
             builder,
             get_x()->get_uid(),
             get_y()->get_uid(),
             get_scale()->get_uid(),
-            block_size
-                .value(), // NOLINT(bugprone-unchecked-optional-access) Throws if block_size not set; requires prior validation
+            block_size.value(),
             fbAxis,
             transpose);
+        // NOLINTEND(bugprone-unchecked-optional-access)
     }
 
     static BlockScaleQuantizeAttributes fromFlatBuffer(
