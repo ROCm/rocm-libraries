@@ -13,9 +13,37 @@ of oracle-best TFLOPS efficiency across 108 tested shapes.
 
 ## Quick Start
 
-### 1. Parse existing benchmark data
+### 1. Generate and convert benchmark data
 
-If you have a benchmark log from a CK Tile profiling run:
+**Step 1: Generate benchmark data**
+
+```bash
+python3 generate_benchmark_data.py \
+    --build_dir /path/to/build \
+    --output_dir data/fp16_original \
+    --dtype fp16 \
+    --layout rcr \
+    --num_build_jobs 4 \
+    --warmup 10 \
+    --repeat 50
+```
+
+This outputs JSON with all benchmark results.
+
+**Step 2: Convert JSON to parquet training format**
+
+```bash
+python3 convert_json_to_parquet.py \
+    --input data/fp16_original/benchmark_results_fp16_rcr.json \
+    --output data/fp16_original/fp16_training_data.parquet \
+    --arch gfx950
+```
+
+The converter automatically fixes pad flags for `_mem` kernels and validates data.
+
+**Alternative: Parse existing logs**
+
+If you have raw benchmark logs from CK Tile:
 
 ```bash
 python3 data_pipeline.py ck_tile_testrun_2.log \
@@ -84,7 +112,9 @@ Three models are trained per (op, dtype, arch):
 
 | File | Purpose |
 |---|---|
-| `data_pipeline.py` | Parse benchmark logs into canonical parquet datasets |
+| `generate_benchmark_data.py` | Build and run benchmarks across ~25 diverse problem sizes, output JSON |
+| `convert_json_to_parquet.py` | Convert benchmark JSON to parquet training format, fix `_mem` pad flags |
+| `data_pipeline.py` | Parse raw benchmark logs into canonical parquet datasets |
 | `feature_engine.py` | 55-feature extraction: problem, kernel, interaction, hardware profile |
 | `train.py` | Multi-target LGBMRegressor training with GroupKFold CV, IHEM, warm-start |
 | `predict.py` | Predictor class: predict TFLOPS/latency/bandwidth, rank kernels |
