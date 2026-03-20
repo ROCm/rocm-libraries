@@ -115,7 +115,9 @@ tile_eff_m, tile_eff_n, tile_eff_k, overall_tile_efficiency, cu_utilization`
 hw_max_clock_mhz, hw_max_waves_per_cu, hw_wavefront_size, hw_lds_capacity,
 hw_l1_cache_kb, hw_l2_cache_kb, hw_l3_cache_kb, hw_num_xcd`
 
-## Model Performance (fp8 RCR, gfx950)
+## Model Performance
+
+### fp8 RCR, gfx950
 
 | Metric | 108 shapes (original) | 168 shapes (wide coverage) |
 |---|---|---|
@@ -123,6 +125,48 @@ hw_l1_cache_kb, hw_l2_cache_kb, hw_l3_cache_kb, hw_num_xcd`
 | P10 TFLOPS Efficiency | 94.64% | 93.89% |
 | tiny_m (M=1) Efficiency | 95.57% | 96.04% |
 | R2 (TFLOPS) | 0.997 | 0.993 |
+
+### fp16 RCR, gfx950
+
+Trained on 25 shapes, 1,024 kernels, 21,920 valid benchmarks.
+
+| Metric | Value |
+|---|---|
+| Mean TFLOPS Efficiency | 99.36% |
+| P10 TFLOPS Efficiency | 98.05% |
+| P50 TFLOPS Efficiency | 100.00% |
+| Min Efficiency | 95.45% |
+| NDCG@1 | 64.00% |
+| Top-5 Hit Rate | 88.00% |
+
+**Shape Family Breakdown:**
+
+| Shape Family | Mean Eff | P10 Eff | Shapes |
+|---|---|---|---|
+| Large M (M≥1024) | 99.54% | 99.07% | 4 |
+| Medium M (128≤M<1024) | 99.62% | 98.74% | 7 |
+| Small M (8≤M<128) | 98.82% | 96.22% | 8 |
+| Tiny M (M<8) | 99.65% | 98.96% | 6 |
+
+**Pipeline Breakdown:**
+
+| Pipeline | Mean Eff | P10 Eff |
+|---|---|---|
+| compv3 | 99.75% | 99.09% |
+| compv4 | 99.40% | 98.54% |
+| mem | 99.08% | 96.59% |
+
+**Out-of-Distribution (OOD) Testing:**
+
+Tested on unseen shapes with full oracle benchmarking (all 1024 kernels):
+
+| Shape | Oracle Best | Model Picked | Efficiency | Oracle Rank |
+|---|---|---|---|---|
+| M=7, N=256, K=512 | 0.44 TFLOPS | 0.44 TFLOPS | 100% | #2 |
+| M=48, N=192, K=384 | 1.85 TFLOPS | 1.85 TFLOPS | 100% | #1 ✓ |
+
+**Mean OOD Efficiency: 100%** — Model achieved oracle-best or rank #2 on diverse
+unseen shapes including tiny M (M=7) and non-power-of-2 dimensions.
 
 Training uses `log1p(TFLOPS)` as the target by default, which normalizes the
 scale across shapes spanning 0.02 to 2230 TFLOPS. This was the key finding
