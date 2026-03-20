@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -158,6 +159,57 @@ protected:
         node.compute_data_type = computeType;
         node.attributes.Set(createStandardBatchnormAttrs());
         return node;
+    }
+
+    // Verifies that a packed tensor descriptor (retrieved via getAttribute) has the
+    // expected UID, data_type, dimensions, and strides.
+    static void verifyTensorDescriptor(hipdnnBackendDescriptor_t tensorDesc,
+                                       int64_t expectedUid,
+                                       hipdnnDataType_t expectedDataType,
+                                       const std::vector<int64_t>& expectedDims,
+                                       const std::vector<int64_t>& expectedStrides)
+    {
+        // Verify UID
+        int64_t uid = 0;
+        int64_t uidCount = 0;
+        tensorDesc->getAttribute(
+            HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidCount, &uid);
+        EXPECT_EQ(uid, expectedUid);
+
+        // Verify data type
+        hipdnnDataType_t dataType = {};
+        int64_t dtCount = 0;
+        tensorDesc->getAttribute(
+            HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &dataType);
+        EXPECT_EQ(dataType, expectedDataType);
+
+        // Verify dimensions
+        int64_t dimCount = 0;
+        tensorDesc->getAttribute(
+            HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &dimCount, nullptr);
+        ASSERT_EQ(dimCount, static_cast<int64_t>(expectedDims.size()));
+        std::vector<int64_t> dims(static_cast<size_t>(dimCount));
+        int64_t actualDimCount = 0;
+        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                                 HIPDNN_TYPE_INT64,
+                                 dimCount,
+                                 &actualDimCount,
+                                 dims.data());
+        EXPECT_EQ(dims, expectedDims);
+
+        // Verify strides
+        int64_t strideCount = 0;
+        tensorDesc->getAttribute(
+            HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 0, &strideCount, nullptr);
+        ASSERT_EQ(strideCount, static_cast<int64_t>(expectedStrides.size()));
+        std::vector<int64_t> strides(static_cast<size_t>(strideCount));
+        int64_t actualStrideCount = 0;
+        tensorDesc->getAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
+                                 HIPDNN_TYPE_INT64,
+                                 strideCount,
+                                 &actualStrideCount,
+                                 strides.data());
+        EXPECT_EQ(strides, expectedStrides);
     }
 };
 
@@ -557,11 +609,8 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(xScoped.getPtr()));
     ASSERT_EQ(xCount, 1);
     ASSERT_NE(xScoped.get(), nullptr);
-    int64_t xUid = 0;
-    int64_t xUidCount = 0;
-    xScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &xUidCount, &xUid);
-    EXPECT_EQ(xUid, 50);
+    verifyTensorDescriptor(
+        xScoped.get(), 50, HIPDNN_DATA_FLOAT, {1, 64, 32, 32}, {65536, 1024, 32, 1});
 
     // Scale tensor
     hipdnn_backend::ScopedDescriptor scaleScoped;
@@ -573,11 +622,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(scaleScoped.getPtr()));
     ASSERT_EQ(scaleCount, 1);
     ASSERT_NE(scaleScoped.get(), nullptr);
-    int64_t scaleUid = 0;
-    int64_t scaleUidCount = 0;
-    scaleScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &scaleUidCount, &scaleUid);
-    EXPECT_EQ(scaleUid, 51);
+    verifyTensorDescriptor(scaleScoped.get(), 51, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
 
     // Bias tensor
     hipdnn_backend::ScopedDescriptor biasScoped;
@@ -589,11 +634,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(biasScoped.getPtr()));
     ASSERT_EQ(biasCount, 1);
     ASSERT_NE(biasScoped.get(), nullptr);
-    int64_t biasUid = 0;
-    int64_t biasUidCount = 0;
-    biasScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &biasUidCount, &biasUid);
-    EXPECT_EQ(biasUid, 52);
+    verifyTensorDescriptor(biasScoped.get(), 52, HIPDNN_DATA_FLOAT, {1, 64, 1, 1}, {64, 1, 1, 1});
 
     // Epsilon tensor
     hipdnn_backend::ScopedDescriptor epsilonScoped;
@@ -605,11 +646,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(epsilonScoped.getPtr()));
     ASSERT_EQ(epsilonCount, 1);
     ASSERT_NE(epsilonScoped.get(), nullptr);
-    int64_t epsilonUid = 0;
-    int64_t epsilonUidCount = 0;
-    epsilonScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &epsilonUidCount, &epsilonUid);
-    EXPECT_EQ(epsilonUid, 53);
+    verifyTensorDescriptor(epsilonScoped.get(), 53, HIPDNN_DATA_FLOAT, {1, 1, 1, 1}, {1, 1, 1, 1});
 
     // Y tensor
     hipdnn_backend::ScopedDescriptor yScoped;
@@ -621,11 +658,8 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(yScoped.getPtr()));
     ASSERT_EQ(yCount, 1);
     ASSERT_NE(yScoped.get(), nullptr);
-    int64_t yUid = 0;
-    int64_t yUidCount = 0;
-    yScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &yUidCount, &yUid);
-    EXPECT_EQ(yUid, 54);
+    verifyTensorDescriptor(
+        yScoped.get(), 54, HIPDNN_DATA_FLOAT, {1, 64, 32, 32}, {65536, 1024, 32, 1});
 
     // --- Optional tensor attributes (all set in standard fixture) ---
 
@@ -639,11 +673,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(prevRunMeanScoped.getPtr()));
     ASSERT_EQ(prevRunMeanCount, 1);
     ASSERT_NE(prevRunMeanScoped.get(), nullptr);
-    int64_t prevRunMeanUid = 0;
-    int64_t prevRunMeanUidCount = 0;
-    prevRunMeanScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &prevRunMeanUidCount, &prevRunMeanUid);
-    EXPECT_EQ(prevRunMeanUid, 6);
+    verifyTensorDescriptor(prevRunMeanScoped.get(), 6, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // PrevRunningVariance tensor
     hipdnn_backend::ScopedDescriptor prevRunVarScoped;
@@ -655,11 +685,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(prevRunVarScoped.getPtr()));
     ASSERT_EQ(prevRunVarCount, 1);
     ASSERT_NE(prevRunVarScoped.get(), nullptr);
-    int64_t prevRunVarUid = 0;
-    int64_t prevRunVarUidCount = 0;
-    prevRunVarScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &prevRunVarUidCount, &prevRunVarUid);
-    EXPECT_EQ(prevRunVarUid, 7);
+    verifyTensorDescriptor(prevRunVarScoped.get(), 7, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // Momentum tensor
     hipdnn_backend::ScopedDescriptor momentumScoped;
@@ -671,11 +697,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(momentumScoped.getPtr()));
     ASSERT_EQ(momentumCount, 1);
     ASSERT_NE(momentumScoped.get(), nullptr);
-    int64_t momentumUid = 0;
-    int64_t momentumUidCount = 0;
-    momentumScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &momentumUidCount, &momentumUid);
-    EXPECT_EQ(momentumUid, 8);
+    verifyTensorDescriptor(momentumScoped.get(), 8, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // Mean tensor
     hipdnn_backend::ScopedDescriptor meanScoped;
@@ -687,11 +709,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(meanScoped.getPtr()));
     ASSERT_EQ(meanCount, 1);
     ASSERT_NE(meanScoped.get(), nullptr);
-    int64_t meanUid = 0;
-    int64_t meanUidCount = 0;
-    meanScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &meanUidCount, &meanUid);
-    EXPECT_EQ(meanUid, 9);
+    verifyTensorDescriptor(meanScoped.get(), 9, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // InvVariance tensor
     hipdnn_backend::ScopedDescriptor invVarScoped;
@@ -703,11 +721,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(invVarScoped.getPtr()));
     ASSERT_EQ(invVarCount, 1);
     ASSERT_NE(invVarScoped.get(), nullptr);
-    int64_t invVarUid = 0;
-    int64_t invVarUidCount = 0;
-    invVarScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &invVarUidCount, &invVarUid);
-    EXPECT_EQ(invVarUid, 10);
+    verifyTensorDescriptor(invVarScoped.get(), 10, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // NextRunningMean tensor
     hipdnn_backend::ScopedDescriptor nextRunMeanScoped;
@@ -719,11 +733,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(nextRunMeanScoped.getPtr()));
     ASSERT_EQ(nextRunMeanCount, 1);
     ASSERT_NE(nextRunMeanScoped.get(), nullptr);
-    int64_t nextRunMeanUid = 0;
-    int64_t nextRunMeanUidCount = 0;
-    nextRunMeanScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &nextRunMeanUidCount, &nextRunMeanUid);
-    EXPECT_EQ(nextRunMeanUid, 11);
+    verifyTensorDescriptor(nextRunMeanScoped.get(), 11, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // NextRunningVariance tensor
     hipdnn_backend::ScopedDescriptor nextRunVarScoped;
@@ -735,11 +745,7 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
                        static_cast<void*>(nextRunVarScoped.getPtr()));
     ASSERT_EQ(nextRunVarCount, 1);
     ASSERT_NE(nextRunVarScoped.get(), nullptr);
-    int64_t nextRunVarUid = 0;
-    int64_t nextRunVarUidCount = 0;
-    nextRunVarScoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &nextRunVarUidCount, &nextRunVarUid);
-    EXPECT_EQ(nextRunVarUid, 12);
+    verifyTensorDescriptor(nextRunVarScoped.get(), 12, HIPDNN_DATA_FLOAT, {1}, {1});
 
     // --- Peer stats tensor array ---
 
@@ -755,13 +761,13 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
     // Retrieve both peer_stats descriptors
     hipdnn_backend::ScopedDescriptor peerStats0Scoped;
     hipdnn_backend::ScopedDescriptor peerStats1Scoped;
-    hipdnnBackendDescriptor_t peerStatsArray[2] = {};
+    std::array<hipdnnBackendDescriptor_t, 2> peerStatsArray = {};
     int64_t peerStatsRetrievedCount = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        2,
                        &peerStatsRetrievedCount,
-                       static_cast<void*>(peerStatsArray));
+                       static_cast<void*>(peerStatsArray.data()));
     ASSERT_EQ(peerStatsRetrievedCount, 2);
     // Transfer ownership to ScopedDescriptors
     peerStats0Scoped = hipdnn_backend::ScopedDescriptor(peerStatsArray[0]);
@@ -769,17 +775,8 @@ TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(peerStats0Scoped.get(), nullptr);
     ASSERT_NE(peerStats1Scoped.get(), nullptr);
 
-    int64_t peer0Uid = 0;
-    int64_t peer0UidCount = 0;
-    peerStats0Scoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &peer0UidCount, &peer0Uid);
-    EXPECT_EQ(peer0Uid, 100);
-
-    int64_t peer1Uid = 0;
-    int64_t peer1UidCount = 0;
-    peerStats1Scoped.get()->getAttribute(
-        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &peer1UidCount, &peer1Uid);
-    EXPECT_EQ(peer1Uid, 101);
+    verifyTensorDescriptor(peerStats0Scoped.get(), 100, HIPDNN_DATA_FLOAT, {1}, {1});
+    verifyTensorDescriptor(peerStats1Scoped.get(), 101, HIPDNN_DATA_FLOAT, {1}, {1});
 }
 
 TEST_F(TestBatchnormOperationFromNode, OperationTypeAttributeReturnsCorrectValue)
@@ -825,4 +822,94 @@ TEST_F(TestBatchnormOperationFromNode, PeerStatsTensorReferencesPopulated)
     // Verify they are the same shared_ptr instances from tensorMap
     EXPECT_EQ(tensors[12], _tensorMap[100]);
     EXPECT_EQ(tensors[13], _tensorMap[101]);
+}
+
+TEST_F(TestBatchnormOperationFromNode, SetsTensorReferencesWithFullValues)
+{
+    auto node = createStandardNode();
+    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+
+    // Required: X
+    ASSERT_NE(desc->getXDesc(), nullptr);
+    EXPECT_EQ(desc->getXDesc()->getData().uid, 50);
+    EXPECT_EQ(desc->getXDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getXDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
+    EXPECT_EQ(desc->getXDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+
+    // Required: Scale
+    ASSERT_NE(desc->getScaleDesc(), nullptr);
+    EXPECT_EQ(desc->getScaleDesc()->getData().uid, 51);
+    EXPECT_EQ(desc->getScaleDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getScaleDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
+    EXPECT_EQ(desc->getScaleDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+
+    // Required: Bias
+    ASSERT_NE(desc->getBiasDesc(), nullptr);
+    EXPECT_EQ(desc->getBiasDesc()->getData().uid, 52);
+    EXPECT_EQ(desc->getBiasDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getBiasDesc()->getData().dims, (std::vector<int64_t>{1, 64, 1, 1}));
+    EXPECT_EQ(desc->getBiasDesc()->getData().strides, (std::vector<int64_t>{64, 1, 1, 1}));
+
+    // Required: Epsilon
+    ASSERT_NE(desc->getEpsilonDesc(), nullptr);
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().uid, 53);
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().dims, (std::vector<int64_t>{1, 1, 1, 1}));
+    EXPECT_EQ(desc->getEpsilonDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1, 1}));
+
+    // Required: Y
+    ASSERT_NE(desc->getYDesc(), nullptr);
+    EXPECT_EQ(desc->getYDesc()->getData().uid, 54);
+    EXPECT_EQ(desc->getYDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getYDesc()->getData().dims, (std::vector<int64_t>{1, 64, 32, 32}));
+    EXPECT_EQ(desc->getYDesc()->getData().strides, (std::vector<int64_t>{65536, 1024, 32, 1}));
+
+    // Optional: PrevRunningMean
+    ASSERT_NE(desc->getPrevRunningMeanDesc(), nullptr);
+    EXPECT_EQ(desc->getPrevRunningMeanDesc()->getData().uid, 6);
+    EXPECT_EQ(desc->getPrevRunningMeanDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getPrevRunningMeanDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getPrevRunningMeanDesc()->getData().strides, (std::vector<int64_t>{1}));
+
+    // Optional: PrevRunningVariance
+    ASSERT_NE(desc->getPrevRunningVarianceDesc(), nullptr);
+    EXPECT_EQ(desc->getPrevRunningVarianceDesc()->getData().uid, 7);
+    EXPECT_EQ(desc->getPrevRunningVarianceDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getPrevRunningVarianceDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getPrevRunningVarianceDesc()->getData().strides, (std::vector<int64_t>{1}));
+
+    // Optional: Momentum
+    ASSERT_NE(desc->getMomentumDesc(), nullptr);
+    EXPECT_EQ(desc->getMomentumDesc()->getData().uid, 8);
+    EXPECT_EQ(desc->getMomentumDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getMomentumDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getMomentumDesc()->getData().strides, (std::vector<int64_t>{1}));
+
+    // Optional: Mean
+    ASSERT_NE(desc->getMeanDesc(), nullptr);
+    EXPECT_EQ(desc->getMeanDesc()->getData().uid, 9);
+    EXPECT_EQ(desc->getMeanDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getMeanDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getMeanDesc()->getData().strides, (std::vector<int64_t>{1}));
+
+    // Optional: InvVariance
+    ASSERT_NE(desc->getInvVarianceDesc(), nullptr);
+    EXPECT_EQ(desc->getInvVarianceDesc()->getData().uid, 10);
+    EXPECT_EQ(desc->getInvVarianceDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getInvVarianceDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getInvVarianceDesc()->getData().strides, (std::vector<int64_t>{1}));
+
+    // Optional: NextRunningMean
+    ASSERT_NE(desc->getNextRunningMeanDesc(), nullptr);
+    EXPECT_EQ(desc->getNextRunningMeanDesc()->getData().uid, 11);
+    EXPECT_EQ(desc->getNextRunningMeanDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getNextRunningMeanDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getNextRunningMeanDesc()->getData().strides, (std::vector<int64_t>{1}));
+
+    // Optional: NextRunningVariance
+    ASSERT_NE(desc->getNextRunningVarianceDesc(), nullptr);
+    EXPECT_EQ(desc->getNextRunningVarianceDesc()->getData().uid, 12);
+    EXPECT_EQ(desc->getNextRunningVarianceDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getNextRunningVarianceDesc()->getData().dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(desc->getNextRunningVarianceDesc()->getData().strides, (std::vector<int64_t>{1}));
 }
