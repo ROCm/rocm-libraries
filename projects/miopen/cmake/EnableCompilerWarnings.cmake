@@ -42,7 +42,6 @@ set(__default_cxx_compile_options
     -Wundef
     -Wuninitialized
     -Wunreachable-code
-    -Wunused
     -Wno-ignored-qualifiers
     -Wno-sign-compare
 )
@@ -70,7 +69,6 @@ set(__clang_cxx_compile_options
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
-    -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
     -Wno-shadow-uncaptured-local

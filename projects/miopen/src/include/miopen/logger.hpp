@@ -174,7 +174,7 @@ std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs)
 
 #define MIOPEN_LOG_ENUM_EACH(x) std::pair<std::string, decltype(x)>(#x, x)
 #if WORKAROUND_ISSUE_PP_TRANSFORM_ARGS
-#define MIOPEN_LOG_ENUM(os, ...) os
+#define MIOPEN_LOG_ENUM(os, x, ...) os << x
 #else
 #define MIOPEN_LOG_ENUM(os, x, ...) \
     miopen::LogEnum(os, x, make_array(MIOPEN_PP_TRANSFORM_ARGS(MIOPEN_LOG_ENUM_EACH, __VA_ARGS__)))

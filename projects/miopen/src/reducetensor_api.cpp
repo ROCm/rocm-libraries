@@ -154,6 +154,7 @@ miopenGetReductionIndicesSize(miopenHandle_t handle,
 {
     MIOPEN_LOG_FUNCTION(handle, reduceTensorDesc, aDesc, cDesc);
 
+    miopen::deref(handle);
     return miopen::try_([&] {
         miopen::deref(sizeInBytes) =
             miopen::deref(reduceTensorDesc)

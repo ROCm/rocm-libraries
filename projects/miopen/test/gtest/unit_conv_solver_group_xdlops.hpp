@@ -88,7 +88,7 @@ public:
             GetConvTestForGroupXdlops<datatype>(layout, std::move(conv_numeric_data));
 
         this->RunTestImpl(
-            solver, params, direction, conv_config, miopenConvolutionAlgoImplicitGEMM);
+            solver, params, direction, conv_config /*, miopenConvolutionAlgoImplicitGEMM*/);
     }
 
 protected:
