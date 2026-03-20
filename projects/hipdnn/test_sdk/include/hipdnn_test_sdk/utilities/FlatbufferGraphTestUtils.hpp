@@ -1646,6 +1646,7 @@ inline flatbuffers::FlatBufferBuilder
 inline flatbuffers::FlatBufferBuilder
     createValidRMSNormBwdGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
                                const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                               bool hasOptionalAttributes = true,
                                hipdnn_data_sdk::data_objects::DataType inputDataType
                                = hipdnn_data_sdk::data_objects::DataType::FLOAT,
                                hipdnn_data_sdk::data_objects::DataType computeDataType
@@ -1655,8 +1656,8 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    std::vector<int64_t> const derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     // dy (gradient of output)
@@ -1689,34 +1690,39 @@ inline flatbuffers::FlatBufferBuilder
         &derivedStrides,
         &derivedDims));
 
-    // inv_rms (inverse RMS from forward pass)
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        6,
-        "inv_rms",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+    if(hasOptionalAttributes)
+    {
+        // inv_rms (inverse RMS from forward pass)
+        tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            6,
+            "inv_rms",
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
+            &derivedStrides,
+            &derivedDims));
 
-    // dbias (gradient of bias)
-    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        7,
-        "dbias",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+        // dbias (gradient of bias)
+        tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            7,
+            "dbias",
+            hipdnn_data_sdk::data_objects::DataType::FLOAT,
+            &derivedStrides,
+            &derivedDims));
+    }
 
-    auto rmsnormBwdAttributes
-        = hipdnn_data_sdk::data_objects::CreateRMSNormBackwardAttributes(builder,
-                                                                         1, // dy uid
-                                                                         2, // x uid
-                                                                         3, // scale uid
-                                                                         6, // inv_rms uid
-                                                                         4, // dx uid
-                                                                         5, // dscale uid
-                                                                         7 // dbias uid
-        );
+    auto rmsnormBwdAttributes = hipdnn_data_sdk::data_objects::CreateRMSNormBackwardAttributes(
+        builder,
+        1, // dy uid
+        2, // x uid
+        3, // scale uid
+        hasOptionalAttributes ? flatbuffers::Optional<int64_t>(6)
+                              : flatbuffers::nullopt, // inv_rms uid
+        4, // dx uid
+        5, // dscale uid
+        hasOptionalAttributes ? flatbuffers::Optional<int64_t>(7)
+                              : flatbuffers::nullopt // dbias uid
+    );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_data_sdk::data_objects::CreateNodeDirect(
