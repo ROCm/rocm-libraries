@@ -2946,7 +2946,8 @@ public:
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
             void* dropout_state_buf;
-            hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
+            [[maybe_unused]] auto err =
+                hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
