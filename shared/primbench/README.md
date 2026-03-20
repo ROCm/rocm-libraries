@@ -15,10 +15,24 @@ primbench is a single-header HIP and CUDA benchmarking library.
 
 ## Dependencies
 
-primbench has the following dependencies:
+### Required
+
 - HIP or CUDA
-- [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) or [NVML](https://developer.nvidia.com/management-library-nvml) (for querying live GPU statistics)
 - C++17 or later
+
+### Optional (recommended)
+
+For GPU temperature monitoring:
+- [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) (HIP only, not available on Windows; typically included with ROCm)
+- [NVML](https://developer.nvidia.com/management-library-nvml) (CUDA only; ships with NVIDIA drivers)
+
+These libraries allow primbench to keep the GPU within a stable temperature range, reducing benchmark noise and improving reproducibility.
+
+> [!IMPORTANT]
+> If AMD SMI (HIP) or NVML (CUDA) is not available, for example on Windows, or if you choose not to link against these libraries, you **must** disable GPU monitoring by compiling with:
+> ```
+> -DPRIMBENCH_NO_MONITORING
+> ```
 
 ## Example
 
@@ -139,7 +153,7 @@ It outputs this `results.json`:
 ```json
 {
     "context": {
-        "results_version": "3.0.0",
+        "results_version": "4.0.0",
         "general": {
             "algorithm": "copy",
             "specialization_count": 2,
@@ -157,11 +171,11 @@ It outputs this `results.json`:
                 "compiler": {
                     "name": "clang",
                     "version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
-                },
-                "monitoring": {
-                    "name": "amdsmi",
-                    "version": "25.3.0"
                 }
+            },
+            "monitoring": {
+                "name": "amdsmi",
+                "version": "25.3.0"
             },
             "temperature_type": "edge",
             "host_name": "host",
