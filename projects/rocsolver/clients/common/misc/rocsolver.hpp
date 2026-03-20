@@ -3373,6 +3373,68 @@ inline rocblas_status rocsolver_ormtr_unmtr(rocblas_handle handle,
 }
 /***************************************************************/
 
+/******************** ORMTR_UNMTR_HB2ST ********************/
+inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
+                                                  rocblas_storev storev,
+                                                  rocblas_side side,
+                                                  rocblas_int m,
+                                                  rocblas_int n,
+                                                  rocblas_int kd,
+                                                  float* V,
+                                                  rocblas_int ldv,
+                                                  float* tau,
+                                                  float* C,
+                                                  rocblas_int ldc)
+{
+    return rocsolver_sormtr_hb2st(handle, storev, side, m, n, kd, V, ldv, tau, C, ldc);
+}
+
+inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
+                                                  rocblas_storev storev,
+                                                  rocblas_side side,
+                                                  rocblas_int m,
+                                                  rocblas_int n,
+                                                  rocblas_int kd,
+                                                  double* V,
+                                                  rocblas_int ldv,
+                                                  double* tau,
+                                                  double* C,
+                                                  rocblas_int ldc)
+{
+    return rocsolver_dormtr_hb2st(handle, storev, side, m, n, kd, V, ldv, tau, C, ldc);
+}
+
+inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
+                                                  rocblas_storev storev,
+                                                  rocblas_side side,
+                                                  rocblas_int m,
+                                                  rocblas_int n,
+                                                  rocblas_int kd,
+                                                  rocblas_float_complex* V,
+                                                  rocblas_int ldv,
+                                                  rocblas_float_complex* tau,
+                                                  rocblas_float_complex* C,
+                                                  rocblas_int ldc)
+{
+    return rocsolver_cunmtr_hb2st(handle, storev, side, m, n, kd, V, ldv, tau, C, ldc);
+}
+
+inline rocblas_status rocsolver_ormtr_unmtr_hb2st(rocblas_handle handle,
+                                                  rocblas_storev storev,
+                                                  rocblas_side side,
+                                                  rocblas_int m,
+                                                  rocblas_int n,
+                                                  rocblas_int kd,
+                                                  rocblas_double_complex* V,
+                                                  rocblas_int ldv,
+                                                  rocblas_double_complex* tau,
+                                                  rocblas_double_complex* C,
+                                                  rocblas_int ldc)
+{
+    return rocsolver_zunmtr_hb2st(handle, storev, side, m, n, kd, V, ldv, tau, C, ldc);
+}
+/***************************************************************/
+
 /******************** STERF ********************/
 inline rocblas_status
     rocsolver_sterf(rocblas_handle handle, rocblas_int n, float* D, float* E, rocblas_int* info)
