@@ -35,11 +35,13 @@ struct TileDistrEncCalc
     static_assert(CTranspose == false,
                   "CTranspose not implemented yet."); // TODO: Implement CTranspose.
 
-    template <index_t Repeat, index_t NumAccess>
+    template <index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
     using ABWarpDstrEncoding = tile_distribution_encoding<
         sequence<Repeat>,
         tuple<sequence<MmaOp::kM>,
-              sequence<NumAccess, MmaOp::kK / MmaOp::kABKPerLane, MmaOp::kABKPerLane / NumAccess>>,
+              sequence<NumAccess,
+                       MmaOp::kK / MmaOp::kABKPerLane,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio>>,
         tuple<sequence<0, 2, 1>>,
         tuple<sequence<0, 1, 0>>,
         sequence<2, 2>,
@@ -77,7 +79,8 @@ struct TileDistrEncCalc
         }
     }
 
-    using AWarpDstrEncoding = ABWarpDstrEncoding<MmaOp::kARepeat, NumAccessA>;
+    using AWarpDstrEncoding =
+        ABWarpDstrEncoding<MmaOp::kARepeat, NumAccessA, MmaOp::kCompressionRatio>;
     using BWarpDstrEncoding = ABWarpDstrEncoding<MmaOp::kBRepeat, NumAccessB>;
     using CWarpDstrEncoding = decltype(get_cwarp_dstr_encoding());
 };
