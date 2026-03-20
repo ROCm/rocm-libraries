@@ -137,7 +137,7 @@
 #ifndef HIP_PLUGIN_BN_N_ELEMENTS
 #define HIP_PLUGIN_BN_N_ELEMENTS HIP_PLUGIN_BN_N
 // This is determined as such in the heuristics that select the kernels
-// (engines/plans/BatchnormCommon.hpp: DefaultConfigSpatialMultiple)
+// (engines/plans/BatchnormCommon.hpp: defaultConfigSpatialMultiple)
 #endif
 
 #ifndef HIP_PLUGIN_BN_NHW

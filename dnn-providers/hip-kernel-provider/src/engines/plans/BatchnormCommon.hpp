@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 namespace batchnorm
 {
@@ -30,46 +30,51 @@ struct KernelConfig
 
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
-inline void GetLocalConfigNHWC(size_t c,
+inline void getLocalConfigNHWC(size_t c,
                                size_t h,
                                size_t w,
                                bool isFp32,
-                               size_t min_workgroups,
+                               size_t minWorkgroups,
                                size_t vectorsize,
                                size_t& xlocalsize,
                                size_t& ylocalsize)
 {
     // Compute workgroup size
-    unsigned int xlocalsize_limit = vectorsize > 1 ? (isFp32 ? 16 : 32) : 64;
+    unsigned int xlocalsizeLimit = 64;
+    if(vectorsize > 1)
+    {
+        xlocalsizeLimit = isFp32 ? 16 : 32;
+    }
+
     // shared memory size per workgroup is fixed
-    unsigned int max_localsize = 1024 / vectorsize;
+    unsigned int maxLocalsize = 1024 / vectorsize;
 
     size_t nworkgroups = 0;
-    // decrease max_localsize until the number of workgroups is greater than 80%
+    // decrease maxLocalsize until the number of workgroups is greater than 80%
     // of the available CUs
-    while(nworkgroups < min_workgroups && max_localsize >= xlocalsize_limit && max_localsize > 64)
+    while(nworkgroups < minWorkgroups && maxLocalsize >= xlocalsizeLimit && maxLocalsize > 64)
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
         xlocalsize
             = std::min(size_t{1} << static_cast<size_t>(std::ceil(std::log2(c / vectorsize))),
-                       static_cast<size_t>(xlocalsize_limit));
-        ylocalsize = max_localsize / xlocalsize;
+                       static_cast<size_t>(xlocalsizeLimit));
+        ylocalsize = maxLocalsize / xlocalsize;
         nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize)
                       * ((h * w + ylocalsize - 1) / ylocalsize);
-        max_localsize >>= 1;
+        maxLocalsize >>= 1;
     }
 }
 
 // Provide workgroup sizes for spatial multiple configuration.
 // It returns the preferred spatial multiple configuration, which is used without tuning.
 // If tuning is enabled, this configuration is also added to the group of instances.
-inline void GetSpatialMultipleConfig(size_t c,
+inline void getSpatialMultipleConfig(size_t c,
                                      size_t h,
                                      size_t w,
                                      bool isLayoutNHWC,
                                      bool isFp32,
-                                     size_t min_workgroups,
+                                     size_t minWorkgroups,
                                      size_t vectorsize,
                                      size_t& xlocalsize,
                                      size_t& ylocalsize)
@@ -78,7 +83,7 @@ inline void GetSpatialMultipleConfig(size_t c,
     xlocalsize = 1;
     ylocalsize = 1;
 
-    size_t in_cstride = h * w;
+    size_t inCstride = h * w;
 
     if(isLayoutNHWC)
     {
@@ -87,42 +92,42 @@ inline void GetSpatialMultipleConfig(size_t c,
             // xlocalsize and ylocalsize already initialized to 1
             return;
         }
-        GetLocalConfigNHWC(c, h, w, isFp32, min_workgroups, vectorsize, xlocalsize, ylocalsize);
+        getLocalConfigNHWC(c, h, w, isFp32, minWorkgroups, vectorsize, xlocalsize, ylocalsize);
     }
     else
     {
-        if(in_cstride % vectorsize != 0)
+        if(inCstride % vectorsize != 0)
         {
             // xlocalsize and ylocalsize already initialized to 1
             return;
         }
         // xlocalsize stays at 1
         ylocalsize = 1024;
-        if(ylocalsize > in_cstride / vectorsize)
+        if(ylocalsize > inCstride / vectorsize)
         {
             // No need to use workgroups larger than the HW dimension
             ylocalsize = std::max(
                 size_t{64},
-                size_t{1} << static_cast<size_t>(std::ceil(std::log2(in_cstride / vectorsize))));
+                size_t{1} << static_cast<size_t>(std::ceil(std::log2(inCstride / vectorsize))));
         }
     }
 }
 
 // Check if spatial multiple implementation can be used for a given problem
 // and workgroup configuration.
-inline bool IsSpatialMultipleApplicable(size_t n,
+inline bool isSpatialMultipleApplicable(size_t n,
                                         size_t c,
                                         size_t h,
                                         size_t w,
                                         bool isLayoutNHWC,
                                         bool isFp32,
                                         size_t vectorsize,
-                                        unsigned int stash_values,
+                                        unsigned int stashValues,
                                         size_t ylocalsize,
                                         size_t zlocalsize,
                                         size_t nelements)
 {
-    unsigned int in_cstride = static_cast<unsigned int>(h * w);
+    auto inCstride = static_cast<unsigned int>(h * w);
 
     if(isLayoutNHWC)
     {
@@ -132,14 +137,14 @@ inline bool IsSpatialMultipleApplicable(size_t n,
             return false;
         }
 
-        stash_values *= (isFp32 ? 1 : 2);
-        unsigned int last_ylocalsize = in_cstride % ylocalsize == 0
-                                           ? static_cast<unsigned int>(ylocalsize)
-                                           : in_cstride % ylocalsize;
+        stashValues *= (isFp32 ? 1 : 2);
+        unsigned int lastYlocalsize = inCstride % ylocalsize == 0
+                                          ? static_cast<unsigned int>(ylocalsize)
+                                          : inCstride % ylocalsize;
 
-        unsigned int last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                           ? static_cast<unsigned int>(zlocalsize * nelements)
-                                           : n % static_cast<unsigned int>(zlocalsize * nelements);
+        unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
+                                         ? static_cast<unsigned int>(zlocalsize * nelements)
+                                         : n % static_cast<unsigned int>(zlocalsize * nelements);
 
         // FP32:
         //  - last block must have enough space to stash intermediate results in HW dimension
@@ -151,8 +156,8 @@ inline bool IsSpatialMultipleApplicable(size_t n,
         //    be large enough
         //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!isFp32 && (c % 2 != 0 && last_zlocalsize < stash_values))
-           || ((last_ylocalsize < stash_values) && (last_zlocalsize < stash_values)))
+        if((!isFp32 && (c % 2 != 0 && lastZocalsize < stashValues))
+           || ((lastYlocalsize < stashValues) && (lastZocalsize < stashValues)))
         {
             return false;
         }
@@ -160,24 +165,24 @@ inline bool IsSpatialMultipleApplicable(size_t n,
     else
     {
         // check if the provided vectorsize can be used
-        if(in_cstride % vectorsize != 0)
+        if(inCstride % vectorsize != 0)
         {
             return false;
         }
 
-        unsigned int last_ylocalsize = in_cstride % ylocalsize == 0
-                                           ? static_cast<unsigned int>(ylocalsize)
-                                           : in_cstride % ylocalsize;
+        unsigned int lastYlocalsize = inCstride % ylocalsize == 0
+                                          ? static_cast<unsigned int>(ylocalsize)
+                                          : inCstride % ylocalsize;
 
-        unsigned int last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                           ? static_cast<unsigned int>(zlocalsize * nelements)
-                                           : n % static_cast<unsigned int>(zlocalsize * nelements);
+        unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
+                                         ? static_cast<unsigned int>(zlocalsize * nelements)
+                                         : n % static_cast<unsigned int>(zlocalsize * nelements);
         // Restrictions:
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
-        stash_values *= (isFp32 ? 1 : 2);
-        if(last_ylocalsize < stash_values && last_zlocalsize < stash_values)
+        stashValues *= (isFp32 ? 1 : 2);
+        if(lastYlocalsize < stashValues && lastZocalsize < stashValues)
         {
             return false;
         }
@@ -185,65 +190,67 @@ inline bool IsSpatialMultipleApplicable(size_t n,
     return true;
 }
 
-inline bool UseMultiple(
+inline bool useMultiple(
     size_t n, size_t h, size_t w, bool isFp16OrBfp16Mix, bool isLayoutNHWC, Direction direction)
 {
-    unsigned int in_cstride = static_cast<unsigned int>(h * w);
-    unsigned int in_nhw = static_cast<unsigned int>(n) * in_cstride;
+    auto inCstride = static_cast<unsigned int>(h * w);
+    auto inNhw = static_cast<unsigned int>(n) * inCstride;
 
     // Check heuristics (used to choose between spatial single and multiple for performance)
+    // NOLINTBEGIN
     if(!isLayoutNHWC && direction == Direction::BACKWARD
-       && (!((in_nhw >= static_cast<unsigned int>(32 * 1024 * 1024) || in_cstride <= 1024)
-             && (in_nhw >= static_cast<unsigned int>(32 * 1024 * 1024) || in_cstride <= 512)
-             && in_cstride > 512)))
+       && (!((inNhw >= static_cast<unsigned int>(32 * 1024 * 1024) || inCstride <= 1024)
+             && (inNhw >= static_cast<unsigned int>(32 * 1024 * 1024) || inCstride <= 512)
+             && inCstride > 512)))
     {
         return false;
     }
 
     if(!isLayoutNHWC && direction == Direction::FORWARD_TRAINING
-       && (!((n >= 3 && in_cstride > 512 && (in_nhw >= 33554432 || in_cstride <= 1024)
-              && ((n < 256) || (in_cstride <= 60) || !isFp16OrBfp16Mix)
-              && (!isFp16OrBfp16Mix || in_cstride <= 512))
-             || ((n > 768) && (in_cstride > 150)))))
+       && (!((n >= 3 && inCstride > 512 && (inNhw >= 33554432 || inCstride <= 1024)
+              && ((n < 256) || (inCstride <= 60) || !isFp16OrBfp16Mix)
+              && (!isFp16OrBfp16Mix || inCstride <= 512))
+             || ((n > 768) && (inCstride > 150)))))
     {
         return false;
     }
+    // NOLINTEND
 
     return true;
 }
 
 // Provide the stash method to use for spatial multiple implementation
-inline int GetStashMethod(bool isLayoutNHWC,
+inline int getStashMethod(bool isLayoutNHWC,
                           bool isFp32,
-                          unsigned int stash_values,
+                          unsigned int stashValues,
                           size_t c,
                           size_t n,
-                          size_t in_cstride,
+                          size_t inCstride,
                           size_t ylocalsize,
                           size_t zlocalsize,
                           size_t nelements)
 {
     // See `batchnorm_functions.hpp` for stash implementation of different methods
-    int stash_method = 0;
-    stash_values *= (isFp32 ? 1 : 2);
-    unsigned int last_ylocalsize = (in_cstride) % ylocalsize == 0
-                                       ? static_cast<unsigned int>(ylocalsize)
-                                       : static_cast<unsigned int>((in_cstride) % ylocalsize);
-    unsigned int last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                       ? static_cast<unsigned int>(zlocalsize * nelements)
-                                       : n % static_cast<unsigned int>(zlocalsize * nelements);
-    if(last_ylocalsize < stash_values && last_zlocalsize >= stash_values)
+    int stashMethod = 0;
+    stashValues *= (isFp32 ? 1 : 2);
+    unsigned int lastYlocalsize = (inCstride) % ylocalsize == 0
+                                      ? static_cast<unsigned int>(ylocalsize)
+                                      : static_cast<unsigned int>((inCstride) % ylocalsize);
+    unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
+                                     ? static_cast<unsigned int>(zlocalsize * nelements)
+                                     : n % static_cast<unsigned int>(zlocalsize * nelements);
+    if(lastYlocalsize < stashValues && lastZocalsize >= stashValues)
     {
-        stash_method = 1;
+        stashMethod = 1;
     }
-    if(isLayoutNHWC && !isFp32 && (c % 2 != 0) && (last_zlocalsize >= stash_values))
+    if(isLayoutNHWC && !isFp32 && (c % 2 != 0) && (lastZocalsize >= stashValues))
     {
-        stash_method = 2;
+        stashMethod = 2;
     }
-    return stash_method;
+    return stashMethod;
 }
 
-inline void DefaultConfigSpatialSingle(size_t n,
+inline void defaultConfigSpatialSingle(size_t n,
                                        size_t h,
                                        size_t w,
                                        bool isFp16Mix,
@@ -252,8 +259,8 @@ inline void DefaultConfigSpatialSingle(size_t n,
                                        Direction direction,
                                        KernelConfig& config)
 {
-    unsigned int in_cstride = static_cast<unsigned int>(h * w);
-    unsigned int in_nhw = static_cast<unsigned int>(n * in_cstride);
+    auto inCstride = static_cast<unsigned int>(h * w);
+    auto inNhw = static_cast<unsigned int>(n * inCstride);
 
     // NCHW supports also variants 0 and 3 which can be much faster than
     // variant 1 but have more restrictions. Here we decide if we use variant
@@ -263,11 +270,12 @@ inline void DefaultConfigSpatialSingle(size_t n,
     // we add the latter for tuning to be sure and because it is cheap to run.
     // NOTE: Currently we don't have the tuning infrastructure in place, so we
     // are only selecting one variant to run based on heuristics.
+    // NOLINTBEGIN
     if(!isLayoutNHWC)
     {
         if(direction == Direction::BACKWARD)
         {
-            if((in_cstride < 200) && (in_cstride > 60) && isFp16Mix)
+            if((inCstride < 200) && (inCstride > 60) && isFp16Mix)
             {
                 config.variant = 1;
                 config.vectorsize = 1;
@@ -277,7 +285,7 @@ inline void DefaultConfigSpatialSingle(size_t n,
             // N*H*W < 32M and H*W > 1024
             // use batchnorm variant#1 implementation which parallelize
             // work groups over channels and loop through NHW.
-            if((in_nhw < (32 * 1024 * 1024) && in_cstride > 1024))
+            if((inNhw < (32 * 1024 * 1024) && inCstride > 1024))
             {
                 config.variant = 1;
                 config.vectorsize = 1;
@@ -286,7 +294,7 @@ inline void DefaultConfigSpatialSingle(size_t n,
             // N*H*W < 32M and H*W > 512
             // use batchnorm variant#1 or variant#3 implementation which
             // parallelize work groups over channels and loop through N.
-            else if(in_nhw < (32 * 1024 * 1024) && in_cstride > 512)
+            else if(inNhw < (32 * 1024 * 1024) && inCstride > 512)
             {
                 if(n >= 32)
                 {
@@ -304,9 +312,9 @@ inline void DefaultConfigSpatialSingle(size_t n,
             // H*W < 512
             // use batchnorm variant#0 or variant#3 implementation
             // based on batch size and H*W
-            else if(in_cstride <= 512)
+            else if(inCstride <= 512)
             {
-                if((n > 64) && (in_cstride > 160))
+                if((n > 64) && (inCstride > 160))
                 {
                     config.variant = 3;
                     config.vectorsize = 1;
@@ -323,22 +331,22 @@ inline void DefaultConfigSpatialSingle(size_t n,
         else
         {
             // clang-format off
-            if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
+            if(inCstride > 512 && inCstride <= 1024 && n < 32)
             {
                 config.variant = 3;
                 config.vectorsize = 1;
                 return;
             }
 
-            if( (in_nhw < 33554432 && in_cstride > 1024) ||
-            ((n >= 256) && (in_cstride > 60) && (isFp16Mix || isBfp16Mix)) ||
-            ((in_cstride > 512) && (isFp16Mix || isBfp16Mix)))
+            if( (inNhw < 33554432 && inCstride > 1024) ||
+            ((n >= 256) && (inCstride > 60) && (isFp16Mix || isBfp16Mix)) ||
+            ((inCstride > 512) && (isFp16Mix || isBfp16Mix)))
             {
                 config.variant = 1;
                 config.vectorsize = 1;
                 return;
             }
-            else if(in_cstride <= 512)
+            else if(inCstride <= 512)
             {
                 config.variant = 0;
                 config.vectorsize = 1;
@@ -354,6 +362,7 @@ inline void DefaultConfigSpatialSingle(size_t n,
         config.variant = 1;
         config.vectorsize = 1;
     }
+    // NOLINTEND
 }
 
 // Add spatial multiple instances for given problem.
@@ -365,88 +374,89 @@ inline void DefaultConfigSpatialSingle(size_t n,
 //  - for NHWC an hybrid approach is used, xlocalsize and vectorsize are set using heuristics,
 //    while ylocalsize, zlocalsize and nelements are added to the tuning with some
 //    additional restrictions based on heuristics to keep the number of instances low
-inline void DefaultConfigSpatialMultiple(size_t n,
+inline void defaultConfigSpatialMultiple(size_t n,
                                          size_t c,
                                          size_t h,
                                          size_t w,
                                          bool isLayoutNHWC,
                                          bool isFp32,
-                                         size_t min_workgroups,
-                                         unsigned int stash_values,
+                                         size_t minWorkgroups,
+                                         unsigned int stashValues,
                                          KernelConfig& config)
 {
-    size_t xlocalsize_default = 0;
-    size_t ylocalsize_default = 0;
-    size_t vectorsize_default = 4;
-    size_t zlocalsize_default = 1;
-    size_t nelements_default = n;
+    size_t xlocalsizeDefault = 0;
+    size_t ylocalsizeDefault = 0;
+    size_t vectorsizeDefault = 4;
+    size_t zlocalsizeDefault = 1;
+    size_t nelementsDefault = n;
 
+    // NOLINTBEGIN
     if(isLayoutNHWC)
     {
         // First add the default instance, which should work well for a large range of problems
         {
-            GetSpatialMultipleConfig(c,
+            getSpatialMultipleConfig(c,
                                      h,
                                      w,
                                      isLayoutNHWC,
                                      isFp32,
-                                     min_workgroups,
-                                     vectorsize_default,
-                                     xlocalsize_default,
-                                     ylocalsize_default);
+                                     minWorkgroups,
+                                     vectorsizeDefault,
+                                     xlocalsizeDefault,
+                                     ylocalsizeDefault);
 
-            if(IsSpatialMultipleApplicable(n,
+            if(isSpatialMultipleApplicable(n,
                                            c,
                                            h,
                                            w,
                                            isLayoutNHWC,
                                            isFp32,
-                                           vectorsize_default,
-                                           stash_values,
-                                           ylocalsize_default,
-                                           zlocalsize_default,
-                                           nelements_default))
+                                           vectorsizeDefault,
+                                           stashValues,
+                                           ylocalsizeDefault,
+                                           zlocalsizeDefault,
+                                           nelementsDefault))
             {
                 config.variant = 2;
-                config.vectorsize = vectorsize_default;
-                config.xlocalsize = xlocalsize_default;
-                config.ylocalsize = ylocalsize_default;
-                config.zlocalsize = zlocalsize_default;
-                config.nelements = nelements_default;
+                config.vectorsize = vectorsizeDefault;
+                config.xlocalsize = xlocalsizeDefault;
+                config.ylocalsize = ylocalsizeDefault;
+                config.zlocalsize = zlocalsizeDefault;
+                config.nelements = nelementsDefault;
             }
             else
             {
-                if(vectorsize_default > 1)
+                if(vectorsizeDefault > 1)
                 {
-                    vectorsize_default = 1;
-                    GetSpatialMultipleConfig(c,
+                    vectorsizeDefault = 1;
+                    getSpatialMultipleConfig(c,
                                              h,
                                              w,
                                              isLayoutNHWC,
                                              isFp32,
-                                             min_workgroups,
-                                             vectorsize_default,
-                                             xlocalsize_default,
-                                             ylocalsize_default);
+                                             minWorkgroups,
+                                             vectorsizeDefault,
+                                             xlocalsizeDefault,
+                                             ylocalsizeDefault);
 
-                    if(IsSpatialMultipleApplicable(n,
+                    if(isSpatialMultipleApplicable(n,
                                                    c,
                                                    h,
                                                    w,
                                                    isLayoutNHWC,
                                                    isFp32,
-                                                   vectorsize_default,
-                                                   stash_values,
-                                                   ylocalsize_default,
-                                                   zlocalsize_default,
-                                                   nelements_default))
+                                                   vectorsizeDefault,
+                                                   stashValues,
+                                                   ylocalsizeDefault,
+                                                   zlocalsizeDefault,
+                                                   nelementsDefault))
                     {
                         config.variant = 2;
-                        config.vectorsize = vectorsize_default;
-                        config.xlocalsize = xlocalsize_default;
-                        config.ylocalsize = ylocalsize_default;
-                        config.zlocalsize = zlocalsize_default;
-                        config.nelements = nelements_default;
+                        config.vectorsize = vectorsizeDefault;
+                        config.xlocalsize = xlocalsizeDefault;
+                        config.ylocalsize = ylocalsizeDefault;
+                        config.zlocalsize = zlocalsizeDefault;
+                        config.nelements = nelementsDefault;
                     }
                 }
             }
@@ -461,42 +471,43 @@ inline void DefaultConfigSpatialMultiple(size_t n,
     {
         // For NCHW we add all the supported vector sizes smaller than the default (if they are
         // applicable)
-        while(vectorsize_default > 0)
+        while(vectorsizeDefault > 0)
         {
-            GetSpatialMultipleConfig(c,
+            getSpatialMultipleConfig(c,
                                      h,
                                      w,
                                      isLayoutNHWC,
                                      isFp32,
-                                     min_workgroups,
-                                     vectorsize_default,
-                                     xlocalsize_default,
-                                     ylocalsize_default);
+                                     minWorkgroups,
+                                     vectorsizeDefault,
+                                     xlocalsizeDefault,
+                                     ylocalsizeDefault);
 
-            if(IsSpatialMultipleApplicable(n,
+            if(isSpatialMultipleApplicable(n,
                                            c,
                                            h,
                                            w,
                                            isLayoutNHWC,
                                            isFp32,
-                                           vectorsize_default,
-                                           stash_values,
-                                           ylocalsize_default,
-                                           zlocalsize_default,
-                                           nelements_default))
+                                           vectorsizeDefault,
+                                           stashValues,
+                                           ylocalsizeDefault,
+                                           zlocalsizeDefault,
+                                           nelementsDefault))
             {
                 config.variant = 2;
-                config.vectorsize = vectorsize_default;
-                config.xlocalsize = xlocalsize_default;
-                config.ylocalsize = ylocalsize_default;
-                config.zlocalsize = zlocalsize_default;
-                config.nelements = nelements_default;
+                config.vectorsize = vectorsizeDefault;
+                config.xlocalsize = xlocalsizeDefault;
+                config.ylocalsize = ylocalsizeDefault;
+                config.zlocalsize = zlocalsizeDefault;
+                config.nelements = nelementsDefault;
             }
-            vectorsize_default >>= 1;
+            vectorsizeDefault >>= 1;
         }
     }
+    // NOLINTEND
 }
 
 } // namespace batchnorm
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider

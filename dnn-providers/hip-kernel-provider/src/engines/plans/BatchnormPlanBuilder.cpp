@@ -9,6 +9,7 @@
 #include "engines/plans/BatchnormApplicabilityChecks.hpp"
 #include "engines/plans/BatchnormFwdInferencePlan.hpp"
 #include "engines/plans/BatchnormFwdInferenceWithVariancePlan.hpp"
+#include "engines/plans/BatchnormFwdTrainingPlan.hpp"
 
 namespace hip_kernel_provider
 {
@@ -181,6 +182,7 @@ bool BatchnormPlanBuilder::isApplicable(
 
         if(!opGraph.hasOnlySupportedAttributes(
                std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
+                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
                    hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
                    hipdnn_data_sdk::data_objects::NodeAttributes::
                        BatchnormInferenceAttributesVarianceExt}))
@@ -196,14 +198,26 @@ bool BatchnormPlanBuilder::isApplicable(
             switch(node.attributes_type())
             {
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+                switch(node.attributes_type())
+            {
+            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+                checkBatchnormFwdTrainingTensorConfigSupported(
+                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
+                break;
+            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
                 checkBatchnormInferenceTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+                        *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
                 checkBatchnormInferenceVarianceExtTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
                     opGraph.getTensorMap());
+                break;
+            default:
+                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                               "Unexpected node attribute type");
+            }
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -397,6 +411,23 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanFwdTrainingSingleNode(
+    [[maybe_unused]] const HipKernelHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    const IKernelCompiler& kernelCompiler,
+    const IDevicePropertyProvider& devicePropertyProvider,
+    HipKernelContext& executionContext)
+{
+    const auto& attr
+        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+
+    BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
+    plan->compile(kernelCompiler, devicePropertyProvider.getDeviceProperties());
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void BatchnormPlanBuilder::initializeExecutionSettings(
@@ -458,6 +489,15 @@ void BatchnormPlanBuilder::buildPlan(
                                                  _kernelCompiler,
                                                  _devicePropertyProvider,
                                                  executionContext);
+        break;
+    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: " << nodeName);
+        buildPlanFwdTrainingSingleNode(handle,
+                                       opGraph,
+                                       nodeWrapper,
+                                       _kernelCompiler,
+                                       _devicePropertyProvider,
+                                       executionContext);
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(

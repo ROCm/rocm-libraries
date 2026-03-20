@@ -7,12 +7,16 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "HipKernelUtils.hpp"
-#include "HipdnnHipKernelHandle.hpp"
-#include "HipdnnHipKernelSettings.hpp"
+#include "HipKernelHandle.hpp"
+#include "hip/ICompiledProgram.hpp"
+#include "hip/IRunnableKernel.hpp"
 
-namespace hip_kernel_plugin
+#include <memory>
+
+namespace hip_kernel_provider
 {
+
+class IKernelCompiler;
 
 class BatchnormFwdTrainingParams
 {
@@ -22,11 +26,11 @@ public:
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    BatchnormFwdTrainingParams(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+    // BatchnormFwdTrainingParams(
+    //     const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
+    //     const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    //     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    //         tensorMap);
 
     BatchnormFwdTrainingParams(const BatchnormFwdTrainingParams&) = delete;
     BatchnormFwdTrainingParams& operator=(const BatchnormFwdTrainingParams&) = delete;
@@ -51,8 +55,8 @@ public:
     const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningMean() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
 
-    const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* activationOut() const;
+    // const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
+    // const hipdnn_data_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
@@ -73,16 +77,15 @@ private:
     std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _nextRunningVariance;
     bool _hasRunningStats{false};
 
-    // Optional activation fusion
-    std::optional<hip_kernel_utils::ActivationParams> _optActivation;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
+    // // Optional activation fusion
+    // std::optional<hip_kernel_utils::ActivationParams> _optActivation;
+    // const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipdnnHipKernelHandle>
+class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
-    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                             const HipdnnHipKernelSettings& executionSettings);
+    explicit BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -90,16 +93,25 @@ public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingPlan&&) = default;
     BatchnormFwdTrainingPlan& operator=(BatchnormFwdTrainingPlan&&) = default;
 
-    size_t getWorkspaceSize(const HipdnnHipKernelHandle& handle) const override;
+    void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
-    void execute(const HipdnnHipKernelHandle& handle,
+    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
+
+    void execute(const HipKernelHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
-    HipdnnHipKernelSettings _executionSettings;
+
+    // Populated by compile()
+    std::unique_ptr<ICompiledProgram> _compiledProgram;
+    std::vector<std::unique_ptr<IRunnableKernel>> _runnableKernels;
+
+    // Kernel launch parameters computed during compile()
+    int _kernelVariant = -1;
+    float _invInNhw;
 };
 
 }
