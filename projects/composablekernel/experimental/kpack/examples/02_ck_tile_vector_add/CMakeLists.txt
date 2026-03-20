@@ -26,15 +26,20 @@ set(CK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../include")
 get_filename_component(CK_INCLUDE_DIR "${CK_INCLUDE_DIR}" ABSOLUTE)
 
 # Pull in the vendored kpack runtime library and shared rocm_ck headers
-add_subdirectory(../../rocm_kpack rocm_kpack_build)
-add_subdirectory(../../include rocm_ck_build)
+# Guards allow this example to work both standalone and as part of the umbrella build.
+if(NOT TARGET rocm_kpack)
+    add_subdirectory(../../rocm_kpack rocm_kpack_build)
+endif()
+if(NOT TARGET rocm_ck)
+    add_subdirectory(../../include rocm_ck_build)
+endif()
 
 # --- Compile ck_tile_add.hip into per-architecture .hsaco code objects ---
 # Uses --cuda-device-only to produce raw code objects without host stubs.
 # The -I flag makes CK Tile headers available for device compilation.
 set(HSACO_FILES "")
 foreach(arch IN LISTS GPU_TARGETS)
-    set(hsaco_output "${CMAKE_BINARY_DIR}/ck_tile_add_${arch}.hsaco")
+    set(hsaco_output "${CMAKE_CURRENT_BINARY_DIR}/ck_tile_add_${arch}.hsaco")
     add_custom_command(
         OUTPUT ${hsaco_output}
         COMMAND ${CMAKE_HIP_COMPILER}
@@ -55,16 +60,16 @@ endforeach()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/kernels.kpack
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/pack.py ${CMAKE_BINARY_DIR}
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernels.kpack
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/pack.py ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS ${HSACO_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/pack.py
     COMMENT "Creating kernels.kpack archive"
 )
-add_custom_target(kpack_archive ALL DEPENDS ${CMAKE_BINARY_DIR}/kernels.kpack)
+add_custom_target(ck_tile_vector_add_kpack_archive ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernels.kpack)
 
 # --- Build the host-side loader executable ---
 # Links against hip::host (host-only HIP runtime) and rocm_kpack (archive reader).
 # Device code is loaded at runtime via hipModuleLoadData, not compiled into this binary.
 add_executable(kpack_ck_tile_vector_add main.cpp)
 target_link_libraries(kpack_ck_tile_vector_add PRIVATE rocm_ck rocm_kpack hip::host)
-add_dependencies(kpack_ck_tile_vector_add kpack_archive)
+add_dependencies(kpack_ck_tile_vector_add ck_tile_vector_add_kpack_archive)
