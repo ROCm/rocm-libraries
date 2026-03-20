@@ -141,8 +141,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
         using Base = PipelineImplBase;
 
         template <typename ADramWindow, typename ABlockTile_>
-        CK_TILE_DEVICE static void LoadAndConvertATile(ABlockTile_& a_block_tile,
-                                                       const ADramWindow& a_dram_window)
+        CK_TILE_DEVICE static void LoadAndQuantizeATile(ABlockTile_& a_block_tile,
+                                                        const ADramWindow& a_dram_window)
         {
             constexpr index_t UnaryOpSize = 8;
             load_and_convert_tile<UnaryOpSize>(a_block_tile, a_dram_window);
@@ -285,7 +285,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
             // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
-            LoadAndConvertATile(a_block_tile, a_copy_dram_window);
+            LoadAndQuantizeATile(a_block_tile, a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
             // B tile gets converted to A datatype during loading
             LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
@@ -325,7 +325,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
             // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
-            LoadAndConvertATile(a_block_tile, a_copy_dram_window);
+            LoadAndQuantizeATile(a_block_tile, a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
             LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
@@ -375,7 +375,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                     // a_dram_tile_window_step);
                     // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window,
                     // b_dram_tile_window_step);
-                    LoadAndConvertATile(a_block_tile, a_copy_dram_window);
+                    LoadAndQuantizeATile(a_block_tile, a_copy_dram_window);
                     move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
                     LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
