@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Feature engineering for CK Tile kernel performance prediction.
 
@@ -8,15 +11,19 @@ All feature engines produce a consistent numpy array for LightGBM.
 
 import math
 from abc import ABC, abstractmethod
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 
 DTYPE_BYTES = {
-    "fp32": 4.0, "fp16": 2.0, "bf16": 2.0,
-    "fp8": 1.0, "bf8": 1.0, "int8": 1.0, "int4": 0.5,
+    "fp32": 4.0,
+    "fp16": 2.0,
+    "bf16": 2.0,
+    "fp8": 1.0,
+    "bf8": 1.0,
+    "int8": 1.0,
+    "int4": 0.5,
 }
 
 LAYOUT_MAP = {"rcr": 0, "rrr": 1, "crr": 2, "ccr": 3}
@@ -123,31 +130,82 @@ class GemmUniversalFeatureEngine(FeatureEngine):
     def get_feature_names(self) -> list[str]:
         return [
             # Problem features
-            "M", "N", "K", "split_k",
-            "log2_M", "log2_N", "log2_K", "log2_MNK",
+            "M",
+            "N",
+            "K",
+            "split_k",
+            "log2_M",
+            "log2_N",
+            "log2_K",
+            "log2_MNK",
             "arithmetic_intensity",
-            "aspect_ratio_mn", "aspect_ratio_mk", "aspect_ratio_nk",
+            "aspect_ratio_mn",
+            "aspect_ratio_mk",
+            "aspect_ratio_nk",
             "layout",
             # Kernel features
-            "tile_m", "tile_n", "tile_k",
-            "warp_m", "warp_n", "warp_k",
-            "warp_tile_m", "warp_tile_n", "warp_tile_k",
-            "pipeline", "scheduler", "epilogue",
-            "pad_m", "pad_n", "pad_k", "persistent",
-            "num_warps", "tile_volume", "tile_mn",
-            "lds_usage_estimate", "lds_usage_ratio",
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_m",
+            "warp_n",
+            "warp_k",
+            "warp_tile_m",
+            "warp_tile_n",
+            "warp_tile_k",
+            "pipeline",
+            "scheduler",
+            "epilogue",
+            "pad_m",
+            "pad_n",
+            "pad_k",
+            "persistent",
+            "num_warps",
+            "tile_volume",
+            "tile_mn",
+            "lds_usage_estimate",
+            "lds_usage_ratio",
             # Interaction features
-            "num_tiles_m", "num_tiles_n", "num_tiles_k",
+            "num_tiles_m",
+            "num_tiles_n",
+            "num_tiles_k",
             "total_output_tiles",
-            "tile_eff_m", "tile_eff_n", "tile_eff_k",
+            "tile_eff_m",
+            "tile_eff_n",
+            "tile_eff_k",
             "overall_tile_efficiency",
             "cu_utilization",
+            # P0 FIX: Problem-to-tile ratio features
+            "ratio_M_to_tile_m",
+            "ratio_N_to_tile_n",
+            "ratio_K_to_tile_k",
+            "problem_smaller_than_tile_m",
+            "problem_smaller_than_tile_n",
+            "problem_smaller_than_tile_k",
+            "any_dim_too_small",
+            # P1 FIX: Padding requirement interaction features
+            "needs_padding_m",
+            "needs_padding_n",
+            "needs_padding_k",
+            "has_padding_when_needed_m",
+            "has_padding_when_needed_n",
+            "has_padding_when_needed_k",
+            "missing_required_padding_m",
+            "missing_required_padding_n",
+            "missing_required_padding_k",
+            "missing_any_required_padding",
             # Hardware features
-            "hw_num_cus", "hw_simds_per_cu", "hw_total_simds",
-            "hw_shader_engines", "hw_max_clock_mhz",
-            "hw_max_waves_per_cu", "hw_wavefront_size",
+            "hw_num_cus",
+            "hw_simds_per_cu",
+            "hw_total_simds",
+            "hw_shader_engines",
+            "hw_max_clock_mhz",
+            "hw_max_waves_per_cu",
+            "hw_wavefront_size",
             "hw_lds_capacity",
-            "hw_l1_cache_kb", "hw_l2_cache_kb", "hw_l3_cache_kb",
+            "hw_l1_cache_kb",
+            "hw_l2_cache_kb",
+            "hw_l3_cache_kb",
             "hw_num_xcd",
         ]
 
@@ -220,32 +278,117 @@ class GemmUniversalFeatureEngine(FeatureEngine):
 
         cu_util = total_output_tiles / max(self._hw["num_cus"], 1)
 
+        # P0 FIX: Problem-to-tile ratio features (avoid oversized tiles for tiny problems)
+        ratio_M_to_tile_m = M / max(tile_m, 1)
+        ratio_N_to_tile_n = N / max(tile_n, 1)
+        ratio_K_to_tile_k = K / max(tile_k, 1)
+
+        # Binary features: is problem dimension smaller than tile?
+        problem_smaller_than_tile_m = float(M < tile_m)
+        problem_smaller_than_tile_n = float(N < tile_n)
+        problem_smaller_than_tile_k = float(K < tile_k)
+        any_dim_too_small = float((M < tile_m) or (N < tile_n) or (K < tile_k))
+
+        # P1 FIX: Padding requirement features (does this kernel have padding when needed?)
+        needs_padding_m = float(M % tile_m != 0) if tile_m > 0 else 0.0
+        needs_padding_n = float(N % tile_n != 0) if tile_n > 0 else 0.0
+        needs_padding_k = float(K % tile_k != 0) if tile_k > 0 else 0.0
+
+        # Interaction features: kernel has padding capability when problem needs it
+        has_padding_when_needed_m = float(needs_padding_m and pad_m)
+        has_padding_when_needed_n = float(needs_padding_n and pad_n)
+        has_padding_when_needed_k = float(needs_padding_k and pad_k)
+
+        # Critical feature: missing required padding (kernel will likely fail)
+        missing_required_padding_m = float(needs_padding_m and not pad_m)
+        missing_required_padding_n = float(needs_padding_n and not pad_n)
+        missing_required_padding_k = float(needs_padding_k and not pad_k)
+        missing_any_required_padding = float(
+            missing_required_padding_m
+            or missing_required_padding_n
+            or missing_required_padding_k
+        )
+
         hw = self._hw
-        return np.array([
-            M, N, K, split_k,
-            log2_M, log2_N, log2_K, log2_MNK,
-            ai,
-            ar_mn, ar_mk, ar_nk,
-            layout_code,
-            tile_m, tile_n, tile_k,
-            warp_m, warp_n, warp_k,
-            warp_tile_m, warp_tile_n, warp_tile_k,
-            pipeline_code, scheduler_code, epilogue_code,
-            pad_m, pad_n, pad_k, persistent,
-            num_warps, tile_volume, tile_mn,
-            lds_est, lds_ratio,
-            num_tiles_m, num_tiles_n, num_tiles_k,
-            total_output_tiles,
-            tile_eff_m, tile_eff_n, tile_eff_k,
-            overall_eff,
-            cu_util,
-            hw["num_cus"], hw["simds_per_cu"], hw["total_simds"],
-            hw["shader_engines"], hw["max_clock_mhz"],
-            hw["max_waves_per_cu"], hw["wavefront_size"],
-            hw["lds_capacity"],
-            hw["l1_cache_kb"], hw["l2_cache_kb"], hw["l3_cache_kb"],
-            hw["num_xcd"],
-        ], dtype=np.float64)
+        return np.array(
+            [
+                M,
+                N,
+                K,
+                split_k,
+                log2_M,
+                log2_N,
+                log2_K,
+                log2_MNK,
+                ai,
+                ar_mn,
+                ar_mk,
+                ar_nk,
+                layout_code,
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_k,
+                warp_tile_m,
+                warp_tile_n,
+                warp_tile_k,
+                pipeline_code,
+                scheduler_code,
+                epilogue_code,
+                pad_m,
+                pad_n,
+                pad_k,
+                persistent,
+                num_warps,
+                tile_volume,
+                tile_mn,
+                lds_est,
+                lds_ratio,
+                num_tiles_m,
+                num_tiles_n,
+                num_tiles_k,
+                total_output_tiles,
+                tile_eff_m,
+                tile_eff_n,
+                tile_eff_k,
+                overall_eff,
+                cu_util,
+                # P0 FIX: New ratio and binary features
+                ratio_M_to_tile_m,
+                ratio_N_to_tile_n,
+                ratio_K_to_tile_k,
+                problem_smaller_than_tile_m,
+                problem_smaller_than_tile_n,
+                problem_smaller_than_tile_k,
+                any_dim_too_small,
+                # P1 FIX: Padding requirement interaction features
+                needs_padding_m,
+                needs_padding_n,
+                needs_padding_k,
+                has_padding_when_needed_m,
+                has_padding_when_needed_n,
+                has_padding_when_needed_k,
+                missing_required_padding_m,
+                missing_required_padding_n,
+                missing_required_padding_k,
+                missing_any_required_padding,
+                hw["num_cus"],
+                hw["simds_per_cu"],
+                hw["total_simds"],
+                hw["shader_engines"],
+                hw["max_clock_mhz"],
+                hw["max_waves_per_cu"],
+                hw["wavefront_size"],
+                hw["lds_capacity"],
+                hw["l1_cache_kb"],
+                hw["l2_cache_kb"],
+                hw["l3_cache_kb"],
+                hw["num_xcd"],
+            ],
+            dtype=np.float64,
+        )
 
     def extract_batch(self, df: pd.DataFrame) -> np.ndarray:
         """Vectorized batch extraction -- much faster than row-by-row."""
@@ -337,19 +480,32 @@ class GemmUniversalFeatureEngine(FeatureEngine):
 
         result[:, 42] = (ntm * ntn) / max(self._hw["num_cus"], 1)
 
+        # P0 FIX: Problem-to-tile ratio features
+        result[:, 43] = M / np.maximum(tile_m, 1)  # ratio_M_to_tile_m
+        result[:, 44] = N / np.maximum(tile_n, 1)  # ratio_N_to_tile_n
+        result[:, 45] = K / np.maximum(tile_k, 1)  # ratio_K_to_tile_k
+
+        # Binary features: is problem smaller than tile?
+        result[:, 46] = (M < tile_m).astype(float)  # problem_smaller_than_tile_m
+        result[:, 47] = (N < tile_n).astype(float)  # problem_smaller_than_tile_n
+        result[:, 48] = (K < tile_k).astype(float)  # problem_smaller_than_tile_k
+        result[:, 49] = ((M < tile_m) | (N < tile_n) | (K < tile_k)).astype(
+            float
+        )  # any_dim_too_small
+
         hw = self._hw
-        result[:, 43] = hw["num_cus"]
-        result[:, 44] = hw["simds_per_cu"]
-        result[:, 45] = hw["total_simds"]
-        result[:, 46] = hw["shader_engines"]
-        result[:, 47] = hw["max_clock_mhz"]
-        result[:, 48] = hw["max_waves_per_cu"]
-        result[:, 49] = hw["wavefront_size"]
-        result[:, 50] = hw["lds_capacity"]
-        result[:, 51] = hw["l1_cache_kb"]
-        result[:, 52] = hw["l2_cache_kb"]
-        result[:, 53] = hw["l3_cache_kb"]
-        result[:, 54] = hw["num_xcd"]
+        result[:, 50] = hw["num_cus"]
+        result[:, 51] = hw["simds_per_cu"]
+        result[:, 52] = hw["total_simds"]
+        result[:, 53] = hw["shader_engines"]
+        result[:, 54] = hw["max_clock_mhz"]
+        result[:, 55] = hw["max_waves_per_cu"]
+        result[:, 56] = hw["wavefront_size"]
+        result[:, 57] = hw["lds_capacity"]
+        result[:, 58] = hw["l1_cache_kb"]
+        result[:, 59] = hw["l2_cache_kb"]
+        result[:, 60] = hw["l3_cache_kb"]
+        result[:, 61] = hw["num_xcd"]
 
         return result
 
@@ -382,7 +538,9 @@ class GemmUniversalFeatureEngine(FeatureEngine):
             tk = cfg.get("tile_k", 64)
             bpe = 1.0  # fp8 default
             est = (tm * tk + tn * tk) * bpe
-            cap = 32768 if str(cfg.get("pipeline", "")).startswith("compv4") else lds_cap
+            cap = (
+                32768 if str(cfg.get("pipeline", "")).startswith("compv4") else lds_cap
+            )
             return est <= cap
 
         def _warp_constraint(cfg):

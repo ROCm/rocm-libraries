@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Predictor for CK Tile kernel performance.
 
@@ -83,7 +86,8 @@ class Predictor:
         raw = float(model.predict(features.reshape(1, -1))[0])
         if target in self._log_targets:
             return float(np.expm1(raw))
-        return raw
+        # Clamp to non-negative even for non-log models
+        return float(max(0.0, raw))
 
     def predict_tflops(self, problem: dict, kernel_config: dict) -> float:
         """Predict TFLOPS for a single (problem, kernel) pair.
@@ -109,7 +113,11 @@ class Predictor:
         """
         features = self._feature_engine.extract(problem, kernel_config).reshape(1, -1)
         result = {}
-        for target, key in [("tflops", "tflops"), ("latency", "latency_ms"), ("bandwidth", "bandwidth_gb_s")]:
+        for target, key in [
+            ("tflops", "tflops"),
+            ("latency", "latency_ms"),
+            ("bandwidth", "bandwidth_gb_s"),
+        ]:
             model = self._load_model(target)
             if model is not None:
                 result[key] = float(model.predict(features)[0])
@@ -169,7 +177,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Predict kernel performance")
-    parser.add_argument("--model_dir", required=True, help="Directory with trained models")
+    parser.add_argument(
+        "--model_dir", required=True, help="Directory with trained models"
+    )
     parser.add_argument("--m", type=int, required=True)
     parser.add_argument("--n", type=int, required=True)
     parser.add_argument("--k", type=int, required=True)
@@ -178,12 +188,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     predictor = Predictor(args.model_dir)
-    problem = {"m": args.m, "n": args.n, "k": args.k, "dtype": args.dtype, "layout": args.layout, "split_k": 1}
+    problem = {
+        "m": args.m,
+        "n": args.n,
+        "k": args.k,
+        "dtype": args.dtype,
+        "layout": args.layout,
+        "split_k": 1,
+    }
 
     print(f"Loading models from {args.model_dir}...")
-    print(f"Problem: M={args.m} N={args.n} K={args.k} dtype={args.dtype} layout={args.layout}")
+    print(
+        f"Problem: M={args.m} N={args.n} K={args.k} dtype={args.dtype} layout={args.layout}"
+    )
 
-    from data_pipeline import load_parquet
     data_dir = Path(args.model_dir).parent.parent / "data"
     if data_dir.exists():
         for pq in data_dir.glob("*.parquet"):

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Wide-coverage benchmark data generator.
 
@@ -16,12 +19,9 @@ Usage:
 
 import argparse
 import json
-import os
 import subprocess
 import sys
-import time
 from pathlib import Path
-from itertools import product
 
 
 def generate_shape_list():
@@ -75,7 +75,7 @@ def generate_shape_list():
 
     # --- 6. Square shapes (powers of 2) ---
     for p in range(5, 14):  # 32 to 8192
-        d = 2 ** p
+        d = 2**p
         shapes.add((d, d, d))
 
     # --- 7. Skinny M, tall N ---
@@ -114,18 +114,36 @@ def generate_shape_list():
     # --- 12. LLM-specific shapes ---
     llm_shapes = [
         # DeepSeek MoE
-        (1, 1536, 7168), (1, 4608, 7168), (1, 7168, 2048),
-        (1, 7168, 2304), (1, 7168, 256), (1, 576, 7168),
-        (1, 512, 7168), (1, 3072, 1536),
+        (1, 1536, 7168),
+        (1, 4608, 7168),
+        (1, 7168, 2048),
+        (1, 7168, 2304),
+        (1, 7168, 256),
+        (1, 576, 7168),
+        (1, 512, 7168),
+        (1, 3072, 1536),
         # LLaMA-7B
-        (1, 4096, 4096), (32, 4096, 4096), (128, 4096, 4096),
-        (1, 4096, 11008), (32, 4096, 11008), (1, 11008, 4096), (32, 11008, 4096),
+        (1, 4096, 4096),
+        (32, 4096, 4096),
+        (128, 4096, 4096),
+        (1, 4096, 11008),
+        (32, 4096, 11008),
+        (1, 11008, 4096),
+        (32, 11008, 4096),
         # LLaMA-70B
-        (1, 8192, 8192), (32, 8192, 8192), (128, 8192, 8192),
-        (1, 8192, 28672), (32, 8192, 28672), (1, 28672, 8192),
+        (1, 8192, 8192),
+        (32, 8192, 8192),
+        (128, 8192, 8192),
+        (1, 8192, 28672),
+        (32, 8192, 28672),
+        (1, 28672, 8192),
         # GPT-style attention
-        (128, 128, 64), (128, 128, 128), (256, 256, 64),
-        (512, 512, 64), (1024, 1024, 64), (2048, 2048, 64),
+        (128, 128, 64),
+        (128, 128, 128),
+        (256, 256, 64),
+        (512, 512, 64),
+        (1024, 1024, 64),
+        (2048, 2048, 64),
     ]
     for s in llm_shapes:
         shapes.add(s)
@@ -149,18 +167,29 @@ def run_shape_batch(bin_dir, shapes, out_file, warmup=3, repeat=10):
     total_benchmarks = 0
 
     for shape_idx, (m, n, k) in enumerate(shapes):
-        out_file.write(f"\n========================================\n")
-        out_file.write(f"Shape {shape_idx + 1}: M={m} N={n} K={k} dtype=fp8 layout=rcr\n")
-        out_file.write(f"========================================\n")
+        out_file.write("\n========================================\n")
+        out_file.write(
+            f"Shape {shape_idx + 1}: M={m} N={n} K={k} dtype=fp8 layout=rcr\n"
+        )
+        out_file.write("========================================\n")
         out_file.write(f"Found {len(executables)} kernels\n")
         out_file.flush()
 
         for exe in executables:
             try:
                 result = subprocess.run(
-                    [str(exe), f"-m={m}", f"-n={n}", f"-k={k}",
-                     f"-warmup={warmup}", f"-repeat={repeat}", "-verify=0"],
-                    capture_output=True, text=True, timeout=60,
+                    [
+                        str(exe),
+                        f"-m={m}",
+                        f"-n={n}",
+                        f"-k={k}",
+                        f"-warmup={warmup}",
+                        f"-repeat={repeat}",
+                        "-verify=0",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
                 )
                 output = result.stdout
                 # Extract JSON block from output
@@ -174,28 +203,39 @@ def run_shape_batch(bin_dir, shapes, out_file, warmup=3, repeat=10):
                         total_benchmarks += 1
                     except json.JSONDecodeError:
                         pass
-            except (subprocess.TimeoutExpired, Exception) as e:
+            except (subprocess.TimeoutExpired, Exception):
                 pass
 
         out_file.flush()
         elapsed_kernels = len(executables)
-        print(f"  Shape {shape_idx + 1}/{len(shapes)}: M={m} N={n} K={k} "
-              f"({elapsed_kernels} kernels)", file=sys.stderr, flush=True)
+        print(
+            f"  Shape {shape_idx + 1}/{len(shapes)}: M={m} N={n} K={k} "
+            f"({elapsed_kernels} kernels)",
+            file=sys.stderr,
+            flush=True,
+        )
 
     return total_benchmarks
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate wide-coverage benchmark data")
-    parser.add_argument("--bin_dir", default="/workspace/ck_tile/bin",
-                        help="Directory with benchmark executables")
+    parser = argparse.ArgumentParser(
+        description="Generate wide-coverage benchmark data"
+    )
+    parser.add_argument(
+        "--bin_dir",
+        default="/workspace/ck_tile/bin",
+        help="Directory with benchmark executables",
+    )
     parser.add_argument("--out_dir", default="data", help="Output directory")
-    parser.add_argument("--batch_size", type=int, default=25,
-                        help="Shapes per output file")
+    parser.add_argument(
+        "--batch_size", type=int, default=25, help="Shapes per output file"
+    )
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--repeat", type=int, default=10)
-    parser.add_argument("--max_shapes", type=int, default=None,
-                        help="Limit total shapes (for testing)")
+    parser.add_argument(
+        "--max_shapes", type=int, default=None, help="Limit total shapes (for testing)"
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -203,7 +243,7 @@ def main():
 
     shapes = generate_shape_list()
     if args.max_shapes:
-        shapes = shapes[:args.max_shapes]
+        shapes = shapes[: args.max_shapes]
 
     print(f"Generated {len(shapes)} unique shapes", file=sys.stderr, flush=True)
     print(f"Bin dir: {args.bin_dir}", file=sys.stderr, flush=True)
@@ -213,26 +253,36 @@ def main():
     total = 0
     batch_idx = 0
     for i in range(0, len(shapes), args.batch_size):
-        batch = shapes[i:i + args.batch_size]
+        batch = shapes[i : i + args.batch_size]
         batch_idx += 1
         out_path = out_dir / f"wide_coverage_batch_{batch_idx:03d}.log"
 
-        print(f"\nBatch {batch_idx}: shapes {i+1}-{i+len(batch)} -> {out_path}",
-              file=sys.stderr, flush=True)
+        print(
+            f"\nBatch {batch_idx}: shapes {i + 1}-{i + len(batch)} -> {out_path}",
+            file=sys.stderr,
+            flush=True,
+        )
 
         with open(out_path, "w") as f:
             f.write(f"CK Tile Wide Coverage Benchmark Batch {batch_idx}\n")
-            f.write(f"GPU ID: 0\n")
-            f.write(f"Implementation: gemm_universal\n\n")
-            count = run_shape_batch(args.bin_dir, batch, f,
-                                    warmup=args.warmup, repeat=args.repeat)
+            f.write("GPU ID: 0\n")
+            f.write("Implementation: gemm_universal\n\n")
+            count = run_shape_batch(
+                args.bin_dir, batch, f, warmup=args.warmup, repeat=args.repeat
+            )
             total += count
 
-        print(f"  Batch {batch_idx} complete: {count} benchmarks",
-              file=sys.stderr, flush=True)
+        print(
+            f"  Batch {batch_idx} complete: {count} benchmarks",
+            file=sys.stderr,
+            flush=True,
+        )
 
-    print(f"\nTotal: {total} benchmarks across {len(shapes)} shapes",
-          file=sys.stderr, flush=True)
+    print(
+        f"\nTotal: {total} benchmarks across {len(shapes)} shapes",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

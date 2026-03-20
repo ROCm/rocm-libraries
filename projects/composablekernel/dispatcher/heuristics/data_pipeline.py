@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Data pipeline for CK Tile heuristics.
 
@@ -13,23 +16,42 @@ import json
 import re
 import subprocess
 import hashlib
-from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 
 CANONICAL_COLUMNS = [
-    "op_type", "dtype", "layout", "arch", "kernel_name",
-    "m", "n", "k", "split_k",
-    "measured_tflops", "latency_ms", "bandwidth_gb_s", "is_valid",
-    "tile_m", "tile_n", "tile_k",
-    "warp_m", "warp_n", "warp_k",
-    "warp_tile_m", "warp_tile_n", "warp_tile_k",
-    "pipeline", "scheduler", "epilogue",
-    "pad_m", "pad_n", "pad_k", "persistent",
+    "op_type",
+    "dtype",
+    "layout",
+    "arch",
+    "kernel_name",
+    "m",
+    "n",
+    "k",
+    "split_k",
+    "measured_tflops",
+    "latency_ms",
+    "bandwidth_gb_s",
+    "is_valid",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_k",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "scheduler",
+    "epilogue",
+    "pad_m",
+    "pad_n",
+    "pad_k",
+    "persistent",
     "run_id",
 ]
 
@@ -179,7 +201,11 @@ def parse_streaming_log(
             k = problem.get("k", current_k)
             split_k = problem.get("split_k", 1)
             dtype = problem.get("dtype_a", current_dtype)
-            layout = _layout_from_problem(problem) if problem.get("layout_a") else current_layout
+            layout = (
+                _layout_from_problem(problem)
+                if problem.get("layout_a")
+                else current_layout
+            )
 
             tflops = perf.get("tflops(TFlops)", 0.0)
             latency = perf.get("latency(ms)", 0.0)
@@ -331,7 +357,9 @@ if __name__ == "__main__":
     parser.add_argument("--arch", default="gfx950", help="GPU architecture")
     parser.add_argument("--op_type", default="gemm_universal", help="Operation type")
     parser.add_argument(
-        "--capture_hw", action="store_true", help="Capture hardware profile from rocminfo"
+        "--capture_hw",
+        action="store_true",
+        help="Capture hardware profile from rocminfo",
     )
     args = parser.parse_args()
 
@@ -343,18 +371,18 @@ if __name__ == "__main__":
     if input_path.suffix == ".parquet":
         df = load_parquet(input_path)
     else:
-        df = parse_streaming_log(
-            input_path, arch=args.arch, op_type=args.op_type
-        )
+        df = parse_streaming_log(input_path, arch=args.arch, op_type=args.op_type)
 
     elapsed = time.time() - t0
     print(f"Parsed {len(df)} rows in {elapsed:.1f}s")
-    print(f"  Unique shapes: {df.groupby(['m','n','k']).ngroups}")
+    print(f"  Unique shapes: {df.groupby(['m', 'n', 'k']).ngroups}")
     print(f"  Unique kernels: {df['kernel_name'].nunique()}")
     print(f"  Valid rows: {df['is_valid'].sum()} / {len(df)}")
 
     if df["measured_tflops"].max() > 0:
-        print(f"  TFLOPS range: {df['measured_tflops'].min():.2f} - {df['measured_tflops'].max():.2f}")
+        print(
+            f"  TFLOPS range: {df['measured_tflops'].min():.2f} - {df['measured_tflops'].max():.2f}"
+        )
 
     if args.capture_hw:
         hw = get_hardware_profile()

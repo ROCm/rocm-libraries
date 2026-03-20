@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Tests for data_pipeline.py.
 
@@ -6,7 +9,6 @@ Covers: kernel name parsing, layout derivation, streaming log parsing,
 schema validation, and corner cases (empty logs, malformed JSON, single-shape).
 """
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -14,6 +16,7 @@ import pandas as pd
 import pytest
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data_pipeline import (
@@ -29,6 +32,7 @@ from data_pipeline import (
 # ---------------------------------------------------------------------------
 # parse_kernel_name
 # ---------------------------------------------------------------------------
+
 
 class TestParseKernelName:
     def test_standard_name(self):
@@ -87,18 +91,42 @@ class TestParseKernelName:
 # _layout_from_problem
 # ---------------------------------------------------------------------------
 
+
 class TestLayoutFromProblem:
     def test_rcr(self):
-        assert _layout_from_problem({"layout_a": "RowMajor", "layout_b": "ColumnMajor", "layout_c": "RowMajor"}) == "rcr"
+        assert (
+            _layout_from_problem(
+                {
+                    "layout_a": "RowMajor",
+                    "layout_b": "ColumnMajor",
+                    "layout_c": "RowMajor",
+                }
+            )
+            == "rcr"
+        )
 
     def test_rrr(self):
-        assert _layout_from_problem({"layout_a": "RowMajor", "layout_b": "RowMajor", "layout_c": "RowMajor"}) == "rrr"
+        assert (
+            _layout_from_problem(
+                {"layout_a": "RowMajor", "layout_b": "RowMajor", "layout_c": "RowMajor"}
+            )
+            == "rrr"
+        )
 
     def test_empty(self):
         assert _layout_from_problem({}) == "???"
 
     def test_case_insensitive(self):
-        assert _layout_from_problem({"layout_a": "rowmajor", "layout_b": "COLUMNMAJOR", "layout_c": "RowMajor"}) == "rcr"
+        assert (
+            _layout_from_problem(
+                {
+                    "layout_a": "rowmajor",
+                    "layout_b": "COLUMNMAJOR",
+                    "layout_c": "RowMajor",
+                }
+            )
+            == "rcr"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +340,17 @@ Shape 1: M=16 N=16 K=16 dtype=fp8 layout=rcr
 # Parquet round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestParquetIO:
     def test_round_trip(self, tmp_path):
-        df = pd.DataFrame({
-            "m": [16, 32], "n": [1536, 1536], "k": [7168, 7168],
-            "measured_tflops": [8.81, 15.0],
-        })
+        df = pd.DataFrame(
+            {
+                "m": [16, 32],
+                "n": [1536, 1536],
+                "k": [7168, 7168],
+                "measured_tflops": [8.81, 15.0],
+            }
+        )
         path = tmp_path / "test.parquet"
         save_parquet(df, path)
         loaded = load_parquet(path)

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Training script for CK Tile kernel performance prediction.
 
@@ -28,7 +31,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold
 
-from data_pipeline import load_parquet, build_training_dataset
+from data_pipeline import build_training_dataset
 from feature_engine import GemmUniversalFeatureEngine
 
 
@@ -140,17 +143,24 @@ def compute_tflops_efficiency(
         pred_best_idx = group[pred_col].idxmax()
         selected_tflops = group.loc[pred_best_idx, "measured_tflops"]
         efficiency = selected_tflops / oracle_best
-        results.append({
-            "m": m, "n": n, "k": k,
-            "oracle_best_tflops": oracle_best,
-            "selected_tflops": selected_tflops,
-            "efficiency": efficiency,
-        })
+        results.append(
+            {
+                "m": m,
+                "n": n,
+                "k": k,
+                "oracle_best_tflops": oracle_best,
+                "selected_tflops": selected_tflops,
+                "efficiency": efficiency,
+            }
+        )
     return pd.DataFrame(results)
 
 
 def train_single_target(
-    X_train, y_train, X_val, y_val,
+    X_train,
+    y_train,
+    X_val,
+    y_val,
     params: dict,
     categorical_features: list[str],
     feature_names: list[str],
@@ -166,11 +176,14 @@ def train_single_target(
         LGBMModel instance. The new model adds n_estimators trees on top
         of the existing ones.
     """
-    cat_indices = [feature_names.index(c) for c in categorical_features if c in feature_names]
+    cat_indices = [
+        feature_names.index(c) for c in categorical_features if c in feature_names
+    ]
 
     model = lgb.LGBMRegressor(**params)
     model.fit(
-        X_train, y_train,
+        X_train,
+        y_train,
         eval_set=[(X_val, y_val)],
         eval_metric=["rmse"],
         callbacks=[
@@ -207,8 +220,10 @@ def run_cv(
 
     apply_log = use_log and target in LOG_TARGETS
 
-    print(f"  Training on {len(df_valid)} valid rows for target={target}"
-          f"{' (log-space)' if apply_log else ''}")
+    print(
+        f"  Training on {len(df_valid)} valid rows for target={target}"
+        f"{' (log-space)' if apply_log else ''}"
+    )
 
     X = feature_engine.extract_batch(df_valid)
     y_raw = df_valid[target_col].values
@@ -231,12 +246,16 @@ def run_cv(
         X_tr, X_val = X[train_idx], X[val_idx]
         y_tr, y_val = y[train_idx], y[val_idx]
 
-        model = train_single_target(X_tr, y_tr, X_val, y_val, params, cat_features, feature_names)
+        model = train_single_target(
+            X_tr, y_tr, X_val, y_val, params, cat_features, feature_names
+        )
         preds = model.predict(X_val)
         oof_preds[val_idx] = preds
 
         rmse = np.sqrt(np.mean((preds - y_val) ** 2))
-        r2 = 1 - np.sum((preds - y_val) ** 2) / max(np.sum((y_val - y_val.mean()) ** 2), 1e-10)
+        r2 = 1 - np.sum((preds - y_val) ** 2) / max(
+            np.sum((y_val - y_val.mean()) ** 2), 1e-10
+        )
 
         if target == "tflops":
             val_df = df_valid.iloc[val_idx].copy()
@@ -248,18 +267,22 @@ def run_cv(
         else:
             mean_eff, p10_eff = None, None
 
-        fold_metrics.append({
-            "fold": fold_idx,
-            "rmse": rmse,
-            "r2": r2,
-            "mean_efficiency": mean_eff,
-            "p10_efficiency": p10_eff,
-            "train_size": len(train_idx),
-            "val_size": len(val_idx),
-            "val_groups": len(np.unique(groups[val_idx])),
-        })
+        fold_metrics.append(
+            {
+                "fold": fold_idx,
+                "rmse": rmse,
+                "r2": r2,
+                "mean_efficiency": mean_eff,
+                "p10_efficiency": p10_eff,
+                "train_size": len(train_idx),
+                "val_size": len(val_idx),
+                "val_groups": len(np.unique(groups[val_idx])),
+            }
+        )
 
-        eff_str = f", eff={mean_eff:.4f}, p10={p10_eff:.4f}" if mean_eff is not None else ""
+        eff_str = (
+            f", eff={mean_eff:.4f}, p10={p10_eff:.4f}" if mean_eff is not None else ""
+        )
         print(f"    Fold {fold_idx}: RMSE={rmse:.4f}, R2={r2:.4f}{eff_str}")
 
     df_valid[f"oof_pred_{target}"] = oof_preds
@@ -306,7 +329,8 @@ def train_final_model(
 
     model = lgb.LGBMRegressor(**params)
     model.fit(
-        X, y,
+        X,
+        y,
         categorical_feature=cat_indices if cat_indices else "auto",
         init_model=init_model,
     )
@@ -314,30 +338,42 @@ def train_final_model(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train CK Tile kernel performance models")
-    parser.add_argument("--data_dir", required=True, help="Directory with parquet files")
+    parser = argparse.ArgumentParser(
+        description="Train CK Tile kernel performance models"
+    )
+    parser.add_argument(
+        "--data_dir", required=True, help="Directory with parquet files"
+    )
     parser.add_argument("--out_dir", required=True, help="Output directory for models")
     parser.add_argument("--op", default="gemm_universal", help="Operation type")
     parser.add_argument("--dtype", default="fp8", help="Data type filter")
     parser.add_argument("--arch", default="gfx950", help="Architecture")
-    parser.add_argument("--targets", default="tflops,latency,bandwidth", help="Comma-separated targets")
+    parser.add_argument(
+        "--targets", default="tflops,latency,bandwidth", help="Comma-separated targets"
+    )
     parser.add_argument("--n_splits", type=int, default=5, help="Number of CV folds")
-    parser.add_argument("--tune", action="store_true", help="Run Optuna hyperparameter tuning")
     parser.add_argument(
-        "--no_log_transform", action="store_true",
+        "--tune", action="store_true", help="Run Optuna hyperparameter tuning"
+    )
+    parser.add_argument(
+        "--no_log_transform",
+        action="store_true",
         help="Disable log1p transform on targets. By default, TFLOPS and bandwidth "
-             "are trained in log-space for scale-invariant accuracy across shape sizes.",
+        "are trained in log-space for scale-invariant accuracy across shape sizes.",
     )
     parser.add_argument(
-        "--warm_start", default=None,
+        "--warm_start",
+        default=None,
         help="Path to previous model directory to continue training from. "
-             "Uses LightGBM's init_model to add new trees on top of the "
-             "existing model. Feature schemas must match exactly.",
+        "Uses LightGBM's init_model to add new trees on top of the "
+        "existing model. Feature schemas must match exactly.",
     )
     parser.add_argument(
-        "--warm_start_n_estimators", type=int, default=WARM_START_N_ESTIMATORS,
+        "--warm_start_n_estimators",
+        type=int,
+        default=WARM_START_N_ESTIMATORS,
         help=f"Number of new trees to add when warm-starting (default: {WARM_START_N_ESTIMATORS}). "
-             "Lower than a full train since we're refining, not starting from scratch.",
+        "Lower than a full train since we're refining, not starting from scratch.",
     )
     args = parser.parse_args()
 
@@ -348,7 +384,7 @@ def main():
     print(f"Loading data from {args.data_dir}...")
     df = build_training_dataset(args.data_dir, op_type=args.op, dtype=args.dtype)
     print(f"  Total rows: {len(df)}")
-    print(f"  Unique shapes: {df.groupby(['m','n','k']).ngroups}")
+    print(f"  Unique shapes: {df.groupby(['m', 'n', 'k']).ngroups}")
     print(f"  Unique kernels: {df['kernel_name'].nunique()}")
 
     hw_cols = [c for c in df.columns if c.startswith("hw_")]
@@ -387,7 +423,7 @@ def main():
             raise FileNotFoundError(f"Warm-start directory not found: {prev_model_dir}")
         print(f"  Warm-starting from {prev_model_dir}")
         check_feature_compatibility(prev_model_dir, fe)
-        print(f"  Feature compatibility: OK")
+        print("  Feature compatibility: OK")
         params["n_estimators"] = args.warm_start_n_estimators
         print(f"  New trees to add: {args.warm_start_n_estimators}")
 
@@ -402,9 +438,9 @@ def main():
             print(f"  Skipping unknown target: {target}")
             continue
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Training {target} model")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         init_model_path = None
         if prev_model_dir is not None:
@@ -415,7 +451,9 @@ def main():
                 print(f"  No previous {target} model found, training from scratch")
 
         t0 = time.time()
-        cv_result = run_cv(df, fe, target, params, n_splits=args.n_splits, use_log=use_log)
+        cv_result = run_cv(
+            df, fe, target, params, n_splits=args.n_splits, use_log=use_log
+        )
         cv_time = time.time() - t0
 
         if cv_result and cv_result["fold_metrics"]:
@@ -431,7 +469,7 @@ def main():
 
                 eff_df = compute_tflops_efficiency(oof_df, "oof_pred_tflops")
                 if len(eff_df) > 0:
-                    print(f"\n  OOF TFLOPS Efficiency:")
+                    print("\n  OOF TFLOPS Efficiency:")
                     print(f"    Mean: {eff_df['efficiency'].mean():.4f}")
                     print(f"    P10:  {eff_df['efficiency'].quantile(0.1):.4f}")
                     print(f"    P50:  {eff_df['efficiency'].quantile(0.5):.4f}")
@@ -439,17 +477,21 @@ def main():
 
         print(f"\n  Training final {target} model on all data...")
         t0 = time.time()
-        model = train_final_model(df, fe, target, params, init_model=init_model_path, use_log=use_log)
+        model = train_final_model(
+            df, fe, target, params, init_model=init_model_path, use_log=use_log
+        )
         train_time = time.time() - t0
 
         model_path = out_dir / f"model_{target}.lgbm"
         model.booster_.save_model(str(model_path))
         print(f"  Saved {model_path} ({train_time:.1f}s)")
 
-        importances = dict(zip(
-            fe.get_feature_names(),
-            model.feature_importances_.tolist(),
-        ))
+        importances = dict(
+            zip(
+                fe.get_feature_names(),
+                model.feature_importances_.tolist(),
+            )
+        )
         imp_path = out_dir / f"feature_importances_{target}.json"
         with open(imp_path, "w") as f:
             json.dump(importances, f, indent=2)
@@ -470,7 +512,11 @@ def main():
 
     manifest = {
         "warm_start_from": str(prev_model_dir) if prev_model_dir else None,
-        "prev_n_estimators": prev_manifest.get("total_n_estimators", params.get("n_estimators")) if prev_model_dir else 0,
+        "prev_n_estimators": prev_manifest.get(
+            "total_n_estimators", params.get("n_estimators")
+        )
+        if prev_model_dir
+        else 0,
         "new_n_estimators": params["n_estimators"],
         "total_n_estimators": (
             prev_manifest.get("total_n_estimators", 0) + params["n_estimators"]

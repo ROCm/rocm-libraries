@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Supplementary edge-case benchmark generator for N=1 and K=1 dimensions.
 
@@ -9,7 +12,6 @@ and other degenerate GEMM cases that stress tile efficiency and padding logic.
 import json
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
@@ -66,18 +68,27 @@ def run_shapes(bin_dir, shapes, out_file, warmup=3, repeat=10):
 
     total = 0
     for idx, (m, n, k) in enumerate(shapes):
-        out_file.write(f"\n========================================\n")
+        out_file.write("\n========================================\n")
         out_file.write(f"Shape {idx + 1}: M={m} N={n} K={k} dtype=fp8 layout=rcr\n")
-        out_file.write(f"========================================\n")
+        out_file.write("========================================\n")
         out_file.write(f"Found {len(executables)} kernels\n")
         out_file.flush()
 
         for exe in executables:
             try:
                 result = subprocess.run(
-                    [str(exe), f"-m={m}", f"-n={n}", f"-k={k}",
-                     f"-warmup={warmup}", f"-repeat={repeat}", "-verify=0"],
-                    capture_output=True, text=True, timeout=60,
+                    [
+                        str(exe),
+                        f"-m={m}",
+                        f"-n={n}",
+                        f"-k={k}",
+                        f"-warmup={warmup}",
+                        f"-repeat={repeat}",
+                        "-verify=0",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
                 )
                 output = result.stdout
                 json_start = output.find("{")
@@ -94,7 +105,11 @@ def run_shapes(bin_dir, shapes, out_file, warmup=3, repeat=10):
                 pass
 
         out_file.flush()
-        print(f"  Shape {idx+1}/{len(shapes)}: M={m} N={n} K={k}", file=sys.stderr, flush=True)
+        print(
+            f"  Shape {idx + 1}/{len(shapes)}: M={m} N={n} K={k}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     return total
 
@@ -112,25 +127,40 @@ if __name__ == "__main__":
     both1 = sum(1 for m, n, k in shapes if n == 1 and k == 1)
     small_n = sum(1 for m, n, k in shapes if 2 <= n <= 16)
     small_k = sum(1 for m, n, k in shapes if 2 <= k <= 16)
-    print(f"  N=1: {n1_count}, K=1: {k1_count}, both=1: {both1}", file=sys.stderr, flush=True)
-    print(f"  Small N(2-16): {small_n}, Small K(2-16): {small_k}", file=sys.stderr, flush=True)
+    print(
+        f"  N=1: {n1_count}, K=1: {k1_count}, both=1: {both1}",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(
+        f"  Small N(2-16): {small_n}, Small K(2-16): {small_k}",
+        file=sys.stderr,
+        flush=True,
+    )
 
     batch_size = 25
     total = 0
     batch_idx = 0
     for i in range(0, len(shapes), batch_size):
-        batch = shapes[i:i + batch_size]
+        batch = shapes[i : i + batch_size]
         batch_idx += 1
         out_path = out_dir / f"edge_dims_batch_{batch_idx:03d}.log"
-        print(f"\nBatch {batch_idx}: shapes {i+1}-{i+len(batch)} -> {out_path}",
-              file=sys.stderr, flush=True)
+        print(
+            f"\nBatch {batch_idx}: shapes {i + 1}-{i + len(batch)} -> {out_path}",
+            file=sys.stderr,
+            flush=True,
+        )
 
         with open(out_path, "w") as f:
             f.write(f"CK Tile Edge Dims Benchmark Batch {batch_idx}\n")
-            f.write(f"GPU ID: 0\nImplementation: gemm_universal\n\n")
+            f.write("GPU ID: 0\nImplementation: gemm_universal\n\n")
             count = run_shapes(bin_dir, batch, f, warmup=3, repeat=10)
             total += count
 
         print(f"  Batch {batch_idx} done: {count} results", file=sys.stderr, flush=True)
 
-    print(f"\nTotal: {total} benchmarks across {len(shapes)} shapes", file=sys.stderr, flush=True)
+    print(
+        f"\nTotal: {total} benchmarks across {len(shapes)} shapes",
+        file=sys.stderr,
+        flush=True,
+    )

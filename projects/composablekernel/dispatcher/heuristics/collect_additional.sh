@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Generate additional benchmark data for shapes NOT in the original log.
 # Runs in background; outputs streaming JSON that can be parsed by data_pipeline.py.
 
