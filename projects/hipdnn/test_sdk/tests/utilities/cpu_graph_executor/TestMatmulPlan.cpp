@@ -11,9 +11,9 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 
 using namespace hipdnn_sdk_test_utils;
@@ -66,8 +66,11 @@ TEST_F(TestMatmulPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(matmul::getTolerance<float>(),
-                                                                 matmul::getTolerance<float>());
+    auto tolerance
+        = hipdnn_test_sdk::utilities::matmul::calculateMatmulTolerance<float, float, float>(
+            planTensorBundle.aTensor, planTensorBundle.bTensor);
+
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.cTensor, planTensorBundle.cTensor));
 }
