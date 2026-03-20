@@ -566,7 +566,7 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
             std::vector<hipblasOperation_t> ops = {HIPBLAS_OP_N, HIPBLAS_OP_T, HIPBLAS_OP_C};
             hipblaslt_ext::GemmType         gemmType
                 = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                    : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
             for(auto op1 : ops)
             {
                 for(auto op2 : ops)
@@ -626,7 +626,7 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         {
             hipblaslt_ext::GemmType gemmType
                 = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                    : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             auto                                          fetch = hipblaslt_ext::getAllAlgos(handle,
                                                     gemmType,
