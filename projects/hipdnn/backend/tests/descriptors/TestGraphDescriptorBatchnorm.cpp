@@ -20,8 +20,10 @@
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -48,7 +50,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                                HipdnnBackendDescriptor* nextRunningMeanDesc = nullptr,
                                HipdnnBackendDescriptor* nextRunningVarianceDesc = nullptr,
                                std::vector<HipdnnBackendDescriptor*> peerStatsDescs = {},
-                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                               const std::string& name = "")
 {
     auto wrapper = createDescriptor<BatchnormOperationDescriptor>();
     auto desc = wrapper->asDescriptor<BatchnormOperationDescriptor>();
@@ -134,6 +137,14 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                            static_cast<const void*>(peerStatsDescs.data()));
     }
 
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.c_str());
+    }
+
     desc->finalize();
     return wrapper;
 }
@@ -166,7 +177,8 @@ public:
                HipdnnBackendDescriptor* nextRunningMeanDesc = nullptr,
                HipdnnBackendDescriptor* nextRunningVarianceDesc = nullptr,
                std::vector<HipdnnBackendDescriptor*> peerStatsDescs = {},
-               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT) const
+               hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+               const std::string& name = "") const
     {
         return createFinalizedBatchnormOp(_xDesc.get(),
                                           _scaleDesc.get(),
@@ -181,7 +193,8 @@ public:
                                           nextRunningMeanDesc,
                                           nextRunningVarianceDesc,
                                           std::move(peerStatsDescs),
-                                          computeType);
+                                          computeType,
+                                          name);
     }
 
 protected:
@@ -340,6 +353,93 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
     ASSERT_EQ(attrs->peer_stats_tensor_uid.size(), 2u);
     EXPECT_EQ(attrs->peer_stats_tensor_uid[0], K_BATCHNORM_TENSOR_PEER_STAT_0_UID);
     EXPECT_EQ(attrs->peer_stats_tensor_uid[1], K_BATCHNORM_TENSOR_PEER_STAT_1_UID);
+}
+
+TEST_F(TestGraphDescriptorBatchnorm, OperationNamePreservedInSerialization)
+{
+    auto opDesc = makeOp(nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         {},
+                         HIPDNN_DATA_FLOAT,
+                         "batchnorm_training_0");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "batchnorm_training_0");
+}
+
+TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
+{
+    auto opDesc = makeOp(_meanDesc.get(),
+                         _invVarianceDesc.get(),
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         {},
+                         HIPDNN_DATA_FLOAT,
+                         "bn_fwd_train");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize the graph
+    auto serialized = desc->getSerializedGraph();
+    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
+                               static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
+
+    // Deserialize into a new GraphDescriptor (lifting path)
+    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    liftedDesc->deserializeGraph(bytes.data(), bytes.size());
+
+    hipdnnHandle_t handle = &_mockHandle;
+    liftedDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                             HIPDNN_TYPE_HANDLE,
+                             1,
+                             static_cast<const void*>(&handle));
+    liftedDesc->finalize();
+
+    // Re-serialize and verify name survived the round-trip
+    auto reSerialized = liftedDesc->getSerializedGraph();
+    auto graphT = UnPackGraph(reSerialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "bn_fwd_train");
+
+    // Also verify all tensor UIDs survived
+    auto* attrs = graphT->nodes[0]->attributes.AsBatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_EQ(attrs->x_tensor_uid, K_BATCHNORM_TENSOR_X_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_BATCHNORM_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->bias_tensor_uid, K_BATCHNORM_TENSOR_BIAS_UID);
+    EXPECT_EQ(attrs->epsilon_tensor_uid, K_BATCHNORM_TENSOR_EPSILON_UID);
+    EXPECT_EQ(attrs->y_tensor_uid, K_BATCHNORM_TENSOR_Y_UID);
 }
 
 } // namespace
