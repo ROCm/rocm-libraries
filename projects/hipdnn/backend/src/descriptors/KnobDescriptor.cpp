@@ -119,6 +119,74 @@ void KnobDescriptor::finalize()
     HipdnnBackendDescriptorImpl<KnobDescriptor>::finalize();
 }
 
+namespace
+{
+
+void setBoundValue(std::optional<int64_t>& intVal,
+                   std::optional<double>& doubleVal,
+                   const char* label,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t elementCount,
+                   const void* arrayOfElements)
+{
+    if(attributeType == HIPDNN_TYPE_INT64)
+    {
+        setOptionalScalar<HIPDNN_TYPE_INT64>(
+            intVal, attributeType, elementCount, arrayOfElements, "KnobDescriptor::setAttribute()");
+    }
+    else if(attributeType == HIPDNN_TYPE_DOUBLE)
+    {
+        setOptionalScalar<HIPDNN_TYPE_DOUBLE>(doubleVal,
+                                              attributeType,
+                                              elementCount,
+                                              arrayOfElements,
+                                              "KnobDescriptor::setAttribute()");
+    }
+    else
+    {
+        throw HipdnnException(
+            HIPDNN_STATUS_BAD_PARAM,
+            std::string("KnobDescriptor::setAttribute(): unsupported attribute type for ") + label
+                + ": " + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+    }
+}
+
+void getBoundValue(const std::optional<int64_t>& intVal,
+                   const std::optional<double>& doubleVal,
+                   const char* label,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements)
+{
+    switch(attributeType)
+    {
+    case HIPDNN_TYPE_INT64:
+        getOptionalScalar<HIPDNN_TYPE_INT64>(intVal,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "KnobDescriptor::getAttribute()");
+        break;
+    case HIPDNN_TYPE_DOUBLE:
+        getOptionalScalar<HIPDNN_TYPE_DOUBLE>(doubleVal,
+                                              attributeType,
+                                              requestedElementCount,
+                                              elementCount,
+                                              arrayOfElements,
+                                              "KnobDescriptor::getAttribute()");
+        break;
+    default:
+        throw HipdnnException(
+            HIPDNN_STATUS_BAD_PARAM,
+            std::string("KnobDescriptor::getAttribute(): unsupported attribute type for ") + label
+                + ": " + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+    }
+}
+
+} // anonymous namespace
+
 // ============================================================================
 // setAttribute
 // ============================================================================
@@ -144,56 +212,20 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                          1);
         break;
     case HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT:
-        if(attributeType == HIPDNN_TYPE_INT64)
-        {
-            setOptionalScalar<HIPDNN_TYPE_INT64>(_maxValueInt,
-                                                 attributeType,
-                                                 elementCount,
-                                                 arrayOfElements,
-                                                 "KnobDescriptor::setAttribute()");
-        }
-        else if(attributeType == HIPDNN_TYPE_DOUBLE)
-        {
-            setOptionalScalar<HIPDNN_TYPE_DOUBLE>(_maxValueDouble,
-                                                  attributeType,
-                                                  elementCount,
-                                                  arrayOfElements,
-                                                  "KnobDescriptor::setAttribute()");
-        }
-        else
-        {
-            throw HipdnnException(
-                HIPDNN_STATUS_BAD_PARAM,
-                std::string("KnobDescriptor::setAttribute(): "
-                            "unsupported attribute type for MAXIMUM_VALUE: ")
-                    + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
-        }
+        setBoundValue(_maxValueInt,
+                      _maxValueDouble,
+                      "MAXIMUM_VALUE",
+                      attributeType,
+                      elementCount,
+                      arrayOfElements);
         break;
     case HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT:
-        if(attributeType == HIPDNN_TYPE_INT64)
-        {
-            setOptionalScalar<HIPDNN_TYPE_INT64>(_minValueInt,
-                                                 attributeType,
-                                                 elementCount,
-                                                 arrayOfElements,
-                                                 "KnobDescriptor::setAttribute()");
-        }
-        else if(attributeType == HIPDNN_TYPE_DOUBLE)
-        {
-            setOptionalScalar<HIPDNN_TYPE_DOUBLE>(_minValueDouble,
-                                                  attributeType,
-                                                  elementCount,
-                                                  arrayOfElements,
-                                                  "KnobDescriptor::setAttribute()");
-        }
-        else
-        {
-            throw HipdnnException(
-                HIPDNN_STATUS_BAD_PARAM,
-                std::string("KnobDescriptor::setAttribute(): "
-                            "unsupported attribute type for MINIMUM_VALUE: ")
-                    + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
-        }
+        setBoundValue(_minValueInt,
+                      _minValueDouble,
+                      "MINIMUM_VALUE",
+                      attributeType,
+                      elementCount,
+                      arrayOfElements);
         break;
     case HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT:
         setOptionalScalar<HIPDNN_TYPE_INT64>(_stride,
@@ -214,7 +246,12 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                          MAX_DESCRIPTION_LENGTH);
         break;
     case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT:
-        setDefaultValue(attributeType, elementCount, arrayOfElements);
+        setKnobValueUnion(_defaultValue,
+                          attributeType,
+                          elementCount,
+                          arrayOfElements,
+                          "KnobDescriptor::setAttribute()",
+                          MAX_STRING_VALUE_LENGTH);
         break;
     case HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT:
         setScalar(_deprecated,
@@ -254,56 +291,6 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
             HIPDNN_STATUS_NOT_SUPPORTED,
             std::string("KnobDescriptor::setAttribute() is not supported for attribute ")
                 + hipdnn_backend::hipdnnGetAttributeNameString(attributeName) + ".");
-    }
-}
-
-void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
-                                     int64_t elementCount,
-                                     const void* arrayOfElements)
-{
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-    {
-        hipdnn_data_sdk::data_objects::IntValueT intVal;
-        setScalar(intVal.value,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "KnobDescriptor::setAttribute()");
-        _defaultValue.Set(intVal);
-        break;
-    }
-    case HIPDNN_TYPE_DOUBLE:
-    {
-        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
-        setScalar(floatVal.value,
-                  HIPDNN_TYPE_DOUBLE,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "KnobDescriptor::setAttribute()");
-        _defaultValue.Set(floatVal);
-        break;
-    }
-    case HIPDNN_TYPE_CHAR:
-    {
-        hipdnn_data_sdk::data_objects::StringValueT strVal;
-        setBoundedString(strVal.value,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "KnobDescriptor::setAttribute()",
-                         MAX_STRING_VALUE_LENGTH);
-        _defaultValue.Set(std::move(strVal));
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              std::string("KnobDescriptor::setAttribute(): "
-                                          "unsupported attribute type for DEFAULT_VALUE: ")
-                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
     }
 }
 
@@ -348,45 +335,6 @@ void KnobDescriptor::setValidValuesString(hipdnnBackendAttributeType_t attribute
         data = strEnd + 1;
     }
 }
-
-namespace
-{
-
-void getBoundValue(const std::optional<int64_t>& intVal,
-                   const std::optional<double>& doubleVal,
-                   const char* label,
-                   hipdnnBackendAttributeType_t attributeType,
-                   int64_t requestedElementCount,
-                   int64_t* elementCount,
-                   void* arrayOfElements)
-{
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-        getOptionalScalar<HIPDNN_TYPE_INT64>(intVal,
-                                             attributeType,
-                                             requestedElementCount,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "KnobDescriptor::getAttribute()");
-        break;
-    case HIPDNN_TYPE_DOUBLE:
-        getOptionalScalar<HIPDNN_TYPE_DOUBLE>(doubleVal,
-                                              attributeType,
-                                              requestedElementCount,
-                                              elementCount,
-                                              arrayOfElements,
-                                              "KnobDescriptor::getAttribute()");
-        break;
-    default:
-        throw HipdnnException(
-            HIPDNN_STATUS_BAD_PARAM,
-            std::string("KnobDescriptor::getAttribute(): unsupported attribute type for ") + label
-                + ": " + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
-    }
-}
-
-} // anonymous namespace
 
 // ============================================================================
 // getAttribute
@@ -447,7 +395,12 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "KnobDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT:
-        getDefaultValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        getKnobValueUnion(_defaultValue,
+                          attributeType,
+                          requestedElementCount,
+                          elementCount,
+                          arrayOfElements,
+                          "KnobDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT:
         getScalar(_deprecated,
@@ -486,47 +439,6 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
             HIPDNN_STATUS_NOT_SUPPORTED,
             std::string("KnobDescriptor::getAttribute() is not supported for attribute ")
                 + hipdnn_backend::hipdnnGetAttributeNameString(attributeName) + ".");
-    }
-}
-
-void KnobDescriptor::getDefaultValue(hipdnnBackendAttributeType_t attributeType,
-                                     int64_t requestedElementCount,
-                                     int64_t* elementCount,
-                                     void* arrayOfElements) const
-{
-    switch(_defaultValue.type)
-    {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-        getScalar(_defaultValue.AsIntValue()->value,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "KnobDescriptor::getAttribute()");
-        break;
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-        getScalar(_defaultValue.AsFloatValue()->value,
-                  HIPDNN_TYPE_DOUBLE,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "KnobDescriptor::getAttribute()");
-        break;
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-        getString(_defaultValue.AsStringValue()->value,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "KnobDescriptor::getAttribute()");
-        break;
-
-    default:
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "KnobDescriptor::getAttribute(): unknown default value type ("
-                                  + std::to_string(static_cast<int>(_defaultValue.type)) + ")");
     }
 }
 

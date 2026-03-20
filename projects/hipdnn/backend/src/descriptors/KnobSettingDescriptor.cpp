@@ -6,7 +6,6 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
 {
@@ -21,9 +20,9 @@ void KnobSettingDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "KnobSettingDescriptor::finalize() failed: Knob ID is not set.");
 
-    THROW_IF_FALSE(_valueSet,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "KnobSettingDescriptor::finalize() failed: Value is not set.");
+    THROW_IF_TRUE(_value.type == hipdnn_data_sdk::data_objects::KnobValue::NONE,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "KnobSettingDescriptor::finalize() failed: Value is not set.");
 
     HipdnnBackendDescriptorImpl<KnobSettingDescriptor>::finalize();
 }
@@ -53,80 +52,18 @@ void KnobSettingDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeN
                          1);
         break;
     case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT:
-        setKnobValue(attributeType, elementCount, arrayOfElements);
+        setKnobValueUnion(_value,
+                          attributeType,
+                          elementCount,
+                          arrayOfElements,
+                          "KnobSettingDescriptor::setAttribute()",
+                          MAX_KNOB_STRING_VALUE_LENGTH);
         break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
             std::string("KnobSettingDescriptor::setAttribute() is not supported for attribute ")
                 + hipdnn_backend::hipdnnGetAttributeNameString(attributeName) + ".");
-    }
-}
-
-void KnobSettingDescriptor::setKnobValue(hipdnnBackendAttributeType_t attributeType,
-                                         int64_t elementCount,
-                                         const void* arrayOfElements)
-{
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "KnobSettingDescriptor::setAttribute(): arrayOfElements is null");
-
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-    {
-        THROW_IF_NE(
-            elementCount,
-            1,
-            HIPDNN_STATUS_BAD_PARAM,
-            "KnobSettingDescriptor::setAttribute(): elementCount must be 1 for int64 value");
-        hipdnn_data_sdk::data_objects::IntValueT intVal;
-        int64_t tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(int64_t));
-        intVal.value = tmp;
-        _value.Set(intVal);
-        _valueSet = true;
-        break;
-    }
-    case HIPDNN_TYPE_DOUBLE:
-    {
-        THROW_IF_NE(
-            elementCount,
-            1,
-            HIPDNN_STATUS_BAD_PARAM,
-            "KnobSettingDescriptor::setAttribute(): elementCount must be 1 for double value");
-        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
-        double tmp;
-        std::memcpy(&tmp, arrayOfElements, sizeof(double));
-        floatVal.value = tmp;
-        _value.Set(floatVal);
-        _valueSet = true;
-        break;
-    }
-    case HIPDNN_TYPE_CHAR:
-    {
-        THROW_IF_LT(
-            elementCount,
-            static_cast<int64_t>(0),
-            HIPDNN_STATUS_BAD_PARAM,
-            "KnobSettingDescriptor::setAttribute(): elementCount is negative for string value");
-        THROW_IF_TRUE(elementCount > MAX_KNOB_STRING_VALUE_LENGTH,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "KnobSettingDescriptor::setAttribute(): "
-                      "elementCount exceeds MAX_KNOB_STRING_VALUE_LENGTH ("
-                          + std::to_string(MAX_KNOB_STRING_VALUE_LENGTH) + ")");
-        hipdnn_data_sdk::data_objects::StringValueT strVal;
-        strVal.value = std::string(static_cast<const char*>(arrayOfElements),
-                                   static_cast<size_t>(elementCount));
-        _value.Set(std::move(strVal));
-        _valueSet = true;
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              std::string("KnobSettingDescriptor::setAttribute(): "
-                                          "unsupported attribute type for KNOB_CHOICE_KNOB_VALUE: ")
-                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
     }
 }
 
@@ -155,97 +92,18 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
                   "KnobSettingDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT:
-        getKnobValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        getKnobValueUnion(_value,
+                          attributeType,
+                          requestedElementCount,
+                          elementCount,
+                          arrayOfElements,
+                          "KnobSettingDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
             std::string("KnobSettingDescriptor::getAttribute() is not supported for attribute ")
                 + hipdnn_backend::hipdnnGetAttributeNameString(attributeName) + ".");
-    }
-}
-
-void KnobSettingDescriptor::getKnobValue(hipdnnBackendAttributeType_t attributeType,
-                                         int64_t requestedElementCount,
-                                         int64_t* elementCount,
-                                         void* arrayOfElements) const
-{
-    switch(_value.type)
-    {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-        THROW_IF_NE(attributeType,
-                    HIPDNN_TYPE_INT64,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::getAttribute(): type mismatch, value is IntValue");
-        THROW_IF_NULL(arrayOfElements,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "KnobSettingDescriptor::getAttribute(): arrayOfElements is null");
-        THROW_IF_NE(requestedElementCount,
-                    1,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::getAttribute(): requestedElementCount must be 1");
-        *static_cast<int64_t*>(arrayOfElements) = _value.AsIntValue()->value;
-        if(elementCount != nullptr)
-        {
-            *elementCount = 1;
-        }
-        break;
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-        THROW_IF_NE(attributeType,
-                    HIPDNN_TYPE_DOUBLE,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::getAttribute(): type mismatch, value is FloatValue");
-        THROW_IF_NULL(arrayOfElements,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "KnobSettingDescriptor::getAttribute(): arrayOfElements is null");
-        THROW_IF_NE(requestedElementCount,
-                    1,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::getAttribute(): requestedElementCount must be 1");
-        *static_cast<double*>(arrayOfElements) = _value.AsFloatValue()->value;
-        if(elementCount != nullptr)
-        {
-            *elementCount = 1;
-        }
-        break;
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-    {
-        THROW_IF_NE(attributeType,
-                    HIPDNN_TYPE_CHAR,
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::getAttribute(): type mismatch, value is StringValue");
-
-        THROW_IF_LT(requestedElementCount,
-                    static_cast<int64_t>(0),
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::getAttribute(): requestedElementCount is negative");
-
-        const auto& str = _value.AsStringValue()->value;
-
-        // Support the two-call pattern: first call with nullptr/0 returns required size.
-        if(arrayOfElements == nullptr || requestedElementCount == 0)
-        {
-            THROW_IF_NULL(elementCount,
-                          HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                          "KnobSettingDescriptor::getAttribute(): elementCount is null");
-            *elementCount = static_cast<int64_t>(str.size() + 1);
-            return;
-        }
-
-        auto maxSize = static_cast<size_t>(requestedElementCount);
-        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-            static_cast<char*>(arrayOfElements), str.c_str(), maxSize);
-
-        if(elementCount != nullptr)
-        {
-            *elementCount = static_cast<int64_t>(std::min(str.size() + 1, maxSize));
-        }
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "KnobSettingDescriptor::getAttribute(): unknown value type ("
-                                  + std::to_string(static_cast<int>(_value.type)) + ")");
     }
 }
 

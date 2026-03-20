@@ -264,10 +264,10 @@ typedef enum
     /** @brief Explicit list of valid integer values (INT64 array) */
     HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT = 907,
 
-    /** @brief Explicit list of valid string values (CHAR, multi-call append) */
+    /** @brief Explicit list of valid string values (CHAR, flat null-separated buffer) */
     HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT = 908,
 
-    /** @brief Maximum string length for string knobs (INT64) */
+    /** @brief Maximum string length for string knobs (INT32) */
     HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT = 909,
 
     /**

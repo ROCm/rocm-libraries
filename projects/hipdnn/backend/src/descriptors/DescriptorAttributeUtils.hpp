@@ -383,4 +383,22 @@ void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src
                         hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
                         const char* errorPrefix);
 
+/// Set a KnobValueUnion from C-API setAttribute parameters.
+/// Switches on attributeType to store an int64, double, or bounded string.
+void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements,
+                       const char* errorPrefix,
+                       int64_t maxStringLength);
+
+/// Get a KnobValueUnion into C-API getAttribute output parameters.
+/// Switches on source.type to retrieve an int64, double, or string.
+void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& source,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t requestedElementCount,
+                       int64_t* elementCount,
+                       void* arrayOfElements,
+                       const char* errorPrefix);
+
 } // namespace hipdnn_backend

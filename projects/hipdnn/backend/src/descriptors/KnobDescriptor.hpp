@@ -82,18 +82,9 @@ private:
     std::optional<int32_t> _stringMaxLength;
 
     // Private helpers — complex logic that can't be inlined into the switch
-    void setDefaultValue(hipdnnBackendAttributeType_t attributeType,
-                         int64_t elementCount,
-                         const void* arrayOfElements);
-
     void setValidValuesString(hipdnnBackendAttributeType_t attributeType,
                               int64_t elementCount,
                               const void* arrayOfElements);
-
-    void getDefaultValue(hipdnnBackendAttributeType_t attributeType,
-                         int64_t requestedElementCount,
-                         int64_t* elementCount,
-                         void* arrayOfElements) const;
 
     void getValidValuesString(hipdnnBackendAttributeType_t attributeType,
                               int64_t requestedElementCount,

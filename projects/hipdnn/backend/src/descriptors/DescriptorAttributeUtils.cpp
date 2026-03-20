@@ -3,6 +3,7 @@
 
 #include "DescriptorAttributeUtils.hpp"
 #include "BackendDescriptor.hpp"
+#include "BackendEnumStringUtils.hpp"
 #include "DataTypeConversion.hpp"
 
 #include <algorithm>
@@ -649,6 +650,101 @@ void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
                               std::string(errorPrefix) + ": unknown value type ("
                                   + std::to_string(static_cast<int>(src.type)) + ")");
+    }
+}
+
+void setKnobValueUnion(hipdnn_data_sdk::data_objects::KnobValueUnion& target,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements,
+                       const char* errorPrefix,
+                       int64_t maxStringLength)
+{
+    switch(attributeType)
+    {
+    case HIPDNN_TYPE_INT64:
+    {
+        hipdnn_data_sdk::data_objects::IntValueT intVal;
+        setScalar(intVal.value,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        target.Set(intVal);
+        break;
+    }
+    case HIPDNN_TYPE_DOUBLE:
+    {
+        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
+        setScalar(floatVal.value,
+                  HIPDNN_TYPE_DOUBLE,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        target.Set(floatVal);
+        break;
+    }
+    case HIPDNN_TYPE_CHAR:
+    {
+        hipdnn_data_sdk::data_objects::StringValueT strVal;
+        setBoundedString(strVal.value,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         errorPrefix,
+                         maxStringLength);
+        target.Set(std::move(strVal));
+        break;
+    }
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              std::string(errorPrefix)
+                                  + ": unsupported attribute type for knob value: "
+                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+    }
+}
+
+void getKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& source,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t requestedElementCount,
+                       int64_t* elementCount,
+                       void* arrayOfElements,
+                       const char* errorPrefix)
+{
+    switch(source.type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+        getScalar(source.AsIntValue()->value,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+        getScalar(source.AsFloatValue()->value,
+                  HIPDNN_TYPE_DOUBLE,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        break;
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+        getString(source.AsStringValue()->value,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              std::string(errorPrefix) + ": unknown value type ("
+                                  + std::to_string(static_cast<int>(source.type)) + ")");
     }
 }
 
