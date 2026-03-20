@@ -20,7 +20,7 @@ std::shared_ptr<TensorAttributes> makeTensor(int64_t uid)
 
 TEST(TestSdpaBackwardAttributes, DefaultValues)
 {
-    SdpaBackwardAttributes const attrs;
+    const SdpaBackwardAttributes attrs;
 
     // Required I/O tensors should be null
     EXPECT_EQ(attrs.get_q(), nullptr);

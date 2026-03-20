@@ -200,15 +200,6 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
                       || (opC != HIPTENSOR_OP_IDENTITY);
 
-    //TODO: Before fixing CK conversion problem from bhalf_t to float, disable bhalf_t support for contraction with unary op
-    if(hasUnaryOp
-       && (descCompute == HIPTENSOR_COMPUTE_DESC_16BF || descA->mType == HIPTENSOR_R_16BF
-           || descB->mType == HIPTENSOR_R_16BF
-           || (descC != nullptr && descC->mType == HIPTENSOR_R_16BF)))
-    {
-        return HIPTENSOR_STATUS_NOT_SUPPORTED;
-    }
-
     auto contractionOp = descC ? (descCompute == HIPTENSOR_COMPUTE_DESC_C32F
                                           || descCompute == HIPTENSOR_COMPUTE_DESC_C64F
                                       ? hiptensor::ContractionOpId_t::BILINEAR_COMPLEX

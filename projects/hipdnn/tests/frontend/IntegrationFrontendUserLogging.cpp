@@ -136,7 +136,7 @@ TEST_F(IntegrationFrontendUserLogging, UnregisterWithSevOffStopsCallbacks)
     HIPDNN_FE_LOG_INFO("Log before unregistering callback");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t const logsWithCallback = recorder.getRecordedLogCount();
+    const size_t logsWithCallback = recorder.getRecordedLogCount();
     EXPECT_GT(logsWithCallback, 0);
 
     // Unregister callback with SEV_OFF
@@ -145,7 +145,7 @@ TEST_F(IntegrationFrontendUserLogging, UnregisterWithSevOffStopsCallbacks)
     HIPDNN_FE_LOG_INFO("Log after unregistering callback");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t const logsAfterUnregister = recorder.getRecordedLogCount();
+    const size_t logsAfterUnregister = recorder.getRecordedLogCount();
 
     // No new logs should be provided via callback
     EXPECT_EQ(logsAfterUnregister, logsWithCallback);
@@ -226,7 +226,7 @@ TEST_F(IntegrationFrontendUserLogging, UpdateCallbackLevel)
     HIPDNN_FE_LOG_INFO("Message at INFO level");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t const infoLogs = recorder.getRecordedLogCount();
+    const size_t infoLogs = recorder.getRecordedLogCount();
     EXPECT_GT(infoLogs, 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
@@ -255,7 +255,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
     HIPDNN_FE_LOG_INFO("Sync mode message");
 
     // Sync: logs immediately available
-    size_t const syncLogs = recorder.getRecordedLogCount();
+    const size_t syncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(syncLogs, 0);
 
     // Switch to ASYNC mode (same callback, same handle, different mode)
@@ -266,7 +266,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
     // Async: need delay
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t const asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, syncLogs);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Async mode message"));
 }
@@ -285,7 +285,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
 
     // Async: need delay
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t const asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, 0);
 
     // Switch to SYNC mode (same callback, same handle, different mode)
@@ -294,7 +294,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
     HIPDNN_FE_LOG_INFO("Sync mode message");
 
     // Sync: logs immediately available
-    size_t const afterSwitch = recorder.getRecordedLogCount();
+    const size_t afterSwitch = recorder.getRecordedLogCount();
     EXPECT_GT(afterSwitch, asyncLogs);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Sync mode message"));
 }
@@ -354,7 +354,7 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     // Take snapshot AFTER unregister to avoid race with async queue processing
-    int const countAfterUnregister = s_callbackCount.load();
+    const int countAfterUnregister = s_callbackCount.load();
 
     // After unregister returns, callback should NOT be active
     EXPECT_FALSE(s_callbackActive.load()) << "Callback should not be active after unregister";
@@ -421,10 +421,10 @@ TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
     setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::SYNC, &syncCount2);
 
     // Capture counts after unregistering
-    int const async1After = asyncCount1.load();
-    int const async2After = asyncCount2.load();
-    int const sync1After = syncCount1.load();
-    int const sync2After = syncCount2.load();
+    const int async1After = asyncCount1.load();
+    const int async2After = asyncCount2.load();
+    const int sync1After = syncCount1.load();
+    const int sync2After = syncCount2.load();
 
     // Trigger more logging — none of the callbacks should be invoked
     HIPDNN_FE_LOG_INFO("Message after all callbacks unregistered");

@@ -36,7 +36,7 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
-                                            std::vector<HeuristicMode> const& modes)
+                                            const std::vector<HeuristicMode>& modes)
 {
     engineHeuristicDesc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
 
