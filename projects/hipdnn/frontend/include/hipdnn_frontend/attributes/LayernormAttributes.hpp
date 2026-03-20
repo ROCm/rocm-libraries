@@ -56,6 +56,8 @@ namespace hipdnn_frontend::graph
 class LayernormAttributes : public Attributes<LayernormAttributes>
 {
 public:
+    LayernormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,

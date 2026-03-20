@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -130,7 +131,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvFpropNode)
 
     // Verify via the serialized buffer that the node is preserved
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -165,7 +166,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
 
     // Verify via the serialized buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 2);
     ASSERT_EQ(graphT->tensors.size(), 6);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -195,7 +196,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
 
     // Verify tensor data via the serialized buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->tensors.size(), 3);
 
     // Find the X tensor by UID and verify its attributes
@@ -302,7 +303,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesNodeTensorUids)
 
     // Verify node and tensor data via the serialized graph buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
 
@@ -383,7 +384,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
 
     // Verify convolution parameters via the serialized graph buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
@@ -457,7 +458,7 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionModeConvolutio
 
     // Verify convolution mode via the serialized graph buffer
     auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
@@ -503,7 +504,7 @@ TEST_F(TestGraphDescriptorLifting, DoubleRoundTrip)
     EXPECT_EQ(engineId, 77);
 
     // Verify the serialized graph still has 1 node
-    auto graphT = GetGraph(serialized2.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized2.ptr);
     EXPECT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -621,7 +622,7 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     EXPECT_EQ(originalBytes, newBytes);
 
     // Verify the serialized graph content
-    auto graphT = GetGraph(serialized.ptr)->UnPack();
+    auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -630,72 +631,6 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     auto* xTensor = findTensorByUid(*graphT, K_TENSOR_X_UID);
     ASSERT_NE(xTensor, nullptr);
     EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
-}
-
-// =============================================================================
-// Error/Edge Case Tests
-// =============================================================================
-
-TEST_F(TestGraphDescriptorLifting, DeserializeUnsupportedNodeTypeThrows)
-{
-    // Build a FlatBuffer GraphT manually with a node that has PointwiseAttributes type
-    // (not ConvolutionFwdAttributes), which is not yet supported by NodeFactory
-    flatbuffers::FlatBufferBuilder builder;
-
-    // Create a minimal tensor for the pointwise node
-    TensorAttributesT tensorT;
-    tensorT.uid = 1;
-    tensorT.dims = {1, 64, 32, 32};
-    tensorT.strides = {65536, 1024, 32, 1};
-    tensorT.data_type = DataType::FLOAT;
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensorOffsets;
-    tensorOffsets.push_back(TensorAttributes::Pack(builder, &tensorT));
-
-    // Create a node with PointwiseAttributes
-    NodeT nodeT;
-    nodeT.compute_data_type = DataType::FLOAT;
-    PointwiseAttributesT pointwiseAttrs;
-    pointwiseAttrs.operation = PointwiseMode::RELU_FWD;
-    pointwiseAttrs.in_0_tensor_uid = 1;
-    pointwiseAttrs.out_0_tensor_uid = 1;
-    nodeT.attributes.Set(pointwiseAttrs);
-
-    std::vector<flatbuffers::Offset<Node>> nodeOffsets;
-    nodeOffsets.push_back(Node::Pack(builder, &nodeT));
-
-    // Build and serialize the graph
-    auto graphOffset = CreateGraphDirect(builder,
-                                         nullptr,
-                                         DataType::UNSET,
-                                         DataType::UNSET,
-                                         DataType::UNSET,
-                                         &tensorOffsets,
-                                         &nodeOffsets);
-    builder.Finish(graphOffset);
-    auto buffer = builder.Release();
-
-    // Deserialize into a GraphDescriptor
-    auto graphWrapper = createDescriptor<GraphDescriptor>();
-    auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
-    graphDesc->deserializeGraph(buffer.data(), buffer.size());
-
-    hipdnnHandle_t handle = &_mockHandle;
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                            HIPDNN_TYPE_HANDLE,
-                            1,
-                            static_cast<const void*>(&handle));
-    graphDesc->finalize();
-
-    // Lazy unpack: NodeFactory throws NOT_SUPPORTED for the unsupported Pointwise node type
-    int64_t elementCount = 0;
-    std::array<HipdnnBackendDescriptor*, 1> returnedOps = {nullptr};
-    ASSERT_THROW_HIPDNN_STATUS(graphDesc->getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
-                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                       1,
-                                                       &elementCount,
-                                                       returnedOps.data()),
-                               HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
 TEST_F(TestGraphDescriptorLifting, GetAttributeWrongTypeForOpsOnCApiFlow)
@@ -881,6 +816,6 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphName)
 
     // Also verify via the serialized FlatBuffer
     auto reSerializedData = liftedGraph->getSerializedGraph();
-    auto graphT = GetGraph(reSerializedData.ptr)->UnPack();
+    auto graphT = UnPackGraph(reSerializedData.ptr);
     EXPECT_EQ(graphT->name, graphName);
 }
