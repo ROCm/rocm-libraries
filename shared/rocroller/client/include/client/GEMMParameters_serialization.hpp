@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -40,6 +17,24 @@ namespace rocRoller::Serialization
     {
         MappingTraits<T, IO, EmptyContext>::mapping(io, object);
     }
+
+    template <typename IO>
+    struct MappingTraits<Client::GEMMClient::XYTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::XYTuple& x)
+        {
+            iot::mapRequired(io, "x", x.x);
+            iot::mapRequired(io, "y", x.y);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::XYTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
 
     template <typename IO>
     struct MappingTraits<Client::GEMMClient::MNKTuple, IO, EmptyContext>
@@ -130,6 +125,9 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "scalePreTileA", params.scalePretileA);
             iot::mapRequired(io, "scalePreTileB", params.scalePretileB);
+
+            iot::mapRequired(io, "pretileA", params.pretileA);
+            iot::mapRequired(io, "pretileB", params.pretileB);
         }
 
         static void mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)
@@ -168,6 +166,38 @@ namespace rocRoller::Serialization
     };
 
     template <typename IO>
+    struct MappingTraits<Client::BenchmarkResults, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::BenchmarkResults& result)
+        {
+            iot::mapRequired(io, "device", result.benchmarkParams.device);
+            iot::mapRequired(io, "workgroupMappingValue", result.runParams.workgroupMappingValue);
+            iot::mapRequired(io, "numWGs", result.runParams.numWGs);
+            iot::mapRequired(io, "numWarmUp", result.benchmarkParams.numWarmUp);
+            iot::mapRequired(io, "numOuter", result.benchmarkParams.numOuter);
+            iot::mapRequired(io, "numInner", result.benchmarkParams.numInner);
+            iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
+            iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
+            iot::mapRequired(io, "kernelExecute", result.kernelExecute);
+            iot::mapRequired(io, "checked", result.checked);
+            iot::mapRequired(io, "correct", result.correct);
+            iot::mapRequired(io, "rnorm", result.rnorm);
+            iot::mapRequired(io, "sgprCount", result.sgprCount);
+            iot::mapRequired(io, "vgprCount", result.vgprCount);
+            iot::mapRequired(io, "agprCount", result.agprCount);
+            iot::mapRequired(io, "ldsBytes", result.ldsBytes);
+        }
+
+        static void mapping(IO& io, Client::BenchmarkResults& result, EmptyContext& ctx)
+        {
+            mapping(io, result);
+        }
+    };
+
+    template <typename IO>
     struct MappingTraits<Client::GEMMClient::Result, IO, EmptyContext>
     {
         static const bool flow = false;
@@ -176,30 +206,9 @@ namespace rocRoller::Serialization
         static void mapping(IO& io, Client::GEMMClient::Result& result)
         {
             iot::mapRequired(io, "resultType", result.benchmarkResults.resultType);
-            iot::mapRequired(io, "device", result.benchmarkResults.benchmarkParams.device);
-
-            flatMap(io, result.problemParams);
-            flatMap(io, result.solutionParams);
-
-            iot::mapRequired(io, "numWGs", result.benchmarkResults.runParams.numWGs);
-
-            iot::mapRequired(io, "numWarmUp", result.benchmarkResults.benchmarkParams.numWarmUp);
-            iot::mapRequired(io, "numOuter", result.benchmarkResults.benchmarkParams.numOuter);
-            iot::mapRequired(io, "numInner", result.benchmarkResults.benchmarkParams.numInner);
-
-            iot::mapRequired(io, "kernelGenerate", result.benchmarkResults.kernelGenerate);
-            iot::mapRequired(io, "kernelAssemble", result.benchmarkResults.kernelAssemble);
-            iot::mapRequired(io, "kernelExecute", result.benchmarkResults.kernelExecute);
-
-            iot::mapRequired(io, "checked", result.benchmarkResults.checked);
-            iot::mapRequired(io, "correct", result.benchmarkResults.correct);
-            iot::mapRequired(io, "rnorm", result.benchmarkResults.rnorm);
-
-            iot::mapRequired(io, "sgprCount", result.benchmarkResults.sgprCount);
-            iot::mapRequired(io, "vgprCount", result.benchmarkResults.vgprCount);
-            iot::mapRequired(io, "agprCount", result.benchmarkResults.agprCount);
-
-            iot::mapRequired(io, "ldsBytes", result.benchmarkResults.ldsBytes);
+            iot::mapRequired(io, "problem", result.problemParams);
+            iot::mapRequired(io, "solution", result.solutionParams);
+            iot::mapRequired(io, "benchmark", result.benchmarkResults);
         }
 
         static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)
@@ -248,11 +257,11 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
             iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
-            iot::mapRequired(io, "unroll_x", params.unrollX);
-            iot::mapRequired(io, "unroll_y", params.unrollY);
             iot::mapRequired(io, "load_A", params.loadPathA);
             iot::mapRequired(io, "load_B", params.loadPathB);
-            iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
+            iot::mapRequired(io, "padLDS_A", params.padLDSA);
+            iot::mapRequired(io, "padLDS_B", params.padLDSB);
+            iot::mapRequired(io, "store", params.storePath);
             iot::mapRequired(io, "prefetch", params.prefetch);
             iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
             iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
@@ -260,7 +269,8 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "betaInFma", params.betaInFma);
             iot::mapRequired(io, "scheduler", params.scheduler);
             iot::mapRequired(io, "schedulerCost", params.schedulerCost);
-            iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
+
+            iot::mapRequired(io, "tailLoops", params.tailLoops);
 
             iot::mapRequired(io, "types", params.types);
 
@@ -271,8 +281,6 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
             iot::mapRequired(io, "streamK", params.streamK);
-            iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
-            iot::mapRequired(io, "streamKTwoTileDPFirst", params.streamKTwoTileDPFirst);
 
             iot::mapOptional(io, "version", params.version);
         }

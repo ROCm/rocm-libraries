@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -199,14 +199,6 @@ void testing_csrilu02(Arguments argus)
     // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    if(m == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse only accepts m > 1
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures
@@ -216,11 +208,8 @@ void testing_csrilu02(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, m, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     std::vector<T> hcsr_val_orig(hcsr_val);
 
@@ -298,14 +287,14 @@ void testing_csrilu02(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(result2.data(), dval2, sizeof(T) * nnz, hipMemcpyDeviceToHost));
 
         // Host csrilu02
-        int position_gold = csrilu0(m,
-                                    hcsr_row_ptr.data(),
-                                    hcsr_col_ind.data(),
-                                    hcsr_val.data(),
-                                    idx_base,
-                                    boost,
-                                    boost_tol,
-                                    boost_val);
+        int position_gold = host_csrilu0(m,
+                                         hcsr_row_ptr.data(),
+                                         hcsr_col_ind.data(),
+                                         hcsr_val.data(),
+                                         idx_base,
+                                         boost,
+                                         boost_tol,
+                                         boost_val);
 
         unit_check_general(1, 1, 1, &position_gold, &hposition_1);
         unit_check_general(1, 1, 1, &position_gold, &hposition_2);

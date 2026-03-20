@@ -89,8 +89,9 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         if(node.isPartialPassEnabled())
         {
-            pp_params.off_dim     = node.ppOffDim;
-            pp_params.current_dim = node.ppCurrDim;
+            pp_params.off_dim                  = node.ppOffDim;
+            pp_params.current_dim              = node.ppCurrDim;
+            pp_params.pp_threads_per_transform = kernel->pp_params.pp_tpt;
             pp_params.pp_factors_curr.assign(kernel->pp_params.pp_factors_curr.begin(),
                                              kernel->pp_params.pp_factors_curr.end());
             pp_params.pp_factors_other.assign(kernel->pp_params.pp_factors_other.begin(),
@@ -228,10 +229,12 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.storeOps);
     };
 
-    generator.construct_rtckernel
-        = [](const std::string& kernel_name, const std::vector<char>& code, dim3, dim3) {
-              return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, code));
-          };
+    generator.construct_rtckernel = [](const std::string&                       kernel_name,
+                                       std::shared_future<hipModule_wrapper_t>& module,
+                                       dim3,
+                                       dim3) {
+        return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, module));
+    };
     return generator;
 }
 
@@ -242,7 +245,10 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
+    {
         kargs.append_ptr(data.node->twiddles_pp);
+        kargs.append_ptr(data.node->twiddles_off_dim);
+    }
     kargs.append_ptr(data.node->twiddles);
     // large 1D twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC

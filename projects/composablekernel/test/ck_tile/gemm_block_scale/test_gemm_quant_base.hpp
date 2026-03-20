@@ -75,10 +75,15 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     static constexpr ck_tile::index_t M_Warp_Tile = GemmConfig::M_Warp_Tile;
     static constexpr ck_tile::index_t N_Warp_Tile = GemmConfig::N_Warp_Tile;
     static constexpr ck_tile::index_t K_Warp_Tile = GemmConfig::K_Warp_Tile;
-    static constexpr bool PreshuffleQuant         = GemmConfig::PreshuffleQuant;
+    static constexpr bool APreshuffleQuant        = GemmConfig::APreshuffleQuant;
+    static constexpr bool BPreshuffleQuant        = GemmConfig::BPreshuffleQuant;
     static constexpr bool PreshuffleB             = GemmConfig::PreshuffleB;
     static constexpr bool TiledMMAPermuteN        = GemmConfig::TiledMMAPermuteN;
     static constexpr bool DoubleSmemBuffer        = GemmConfig::DoubleSmemBuffer;
+
+    static constexpr bool kPadM = GemmConfig::kPadM;
+    static constexpr bool kPadN = GemmConfig::kPadN;
+    static constexpr bool kPadK = GemmConfig::kPadK;
 
     public:
     void SetUp() override { static_cast<Derived*>(this)->SetUpQuantTypeSpecific(); }
@@ -88,9 +93,6 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     // Common test execution logic
     void invoke_quant_gemm(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& s)
     {
-        constexpr bool kPadM = false;
-        constexpr bool kPadN = false;
-        constexpr bool kPadK = false;
         // WP pipeline requires per-thread tile size aligned to Problem::VectorLoadSize.
         // static_assert((WG::kM * WG::kK * sizeof(ADataType) * MIterPerWarp / WaveSize) %
         // VectorLoadSize == 0). gfx9 cards match the requirements but it fails on gfx12. so we only
@@ -110,7 +112,8 @@ class TestCkTileGemmQuantBase : public ::testing::Test
         using CodegenGemmTraits = ck_tile::TileGemmQuantTraits<kPadM,
                                                                kPadN,
                                                                kPadK,
-                                                               PreshuffleQuant,
+                                                               APreshuffleQuant,
+                                                               BPreshuffleQuant,
                                                                PreshuffleB,
                                                                ALayout,
                                                                BLayout,
@@ -150,7 +153,7 @@ class TestCkTileGemmQuantBase : public ::testing::Test
                              const float max_accumulated_value)
     {
         using ComputeType = std::conditional_t<
-            std::is_same_v<BDataType_, ck_tile::pk_fp4_raw_t>,
+            std::is_same_v<BDataType_, ck_tile::pk_fp4_t>,
             ADataType_,
             std::conditional_t<sizeof(ADataType_) < sizeof(BDataType_), ADataType_, BDataType_>>;
         // Calculate thresholds
@@ -206,7 +209,7 @@ template <>
 struct QuantTypeTraits<ck_tile::QuantType::ABQuantGrouped>
 {
     template <typename ADataType, typename BDataType>
-    using ComputeDataType = BDataType; // For AQuant, compute type is BDataType
+    using ComputeDataType = void; // Use automatically determined compute type
 
     static constexpr const char* name = "abquant";
 };

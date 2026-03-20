@@ -191,8 +191,8 @@ install_packages( )
     local library_dependencies_sles=( "make" "cmake" "gcc-c++" "gcc-fortran" "libcxxtools9" "rpm-build" )
 
     local client_dependencies_ubuntu=( "libfftw3-dev")
-    local client_dependencies_centos=( "fftw-devel" "boost-devel" )
-    local client_dependencies_fedora=( "fftw-devel" "boost-devel" )
+    local client_dependencies_centos=( "fftw-devel" )
+    local client_dependencies_fedora=( "fftw-devel" )
     local client_dependencies_sles=( "fftw3-devel" "pkg-config" "dpkg")
 
     case "${ID}" in
@@ -408,8 +408,8 @@ if [[ "${install_dependencies}" == true ]]; then
     pushd .
     printf "\033[32mBuilding \033[33mgoogletest\033[32m from source"
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} -DBUILD_BOOST=OFF ../../deps
-    # ${cmake_executable} -DCMAKE_INSTALL_PREFIX=deps-install -DBUILD_BOOST=OFF ../../deps
+    ${cmake_executable} ../../deps
+    # ${cmake_executable} -DCMAKE_INSTALL_PREFIX=deps-install ../../deps
     make -j$(nproc)
     elevate_if_not_root make install
     popd

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  * Test suite utilites.
@@ -44,6 +21,7 @@
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -101,6 +79,11 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
     using T = std::remove_cvref_t<decltype(init.front())>;
     return make_shared_device<T, T>(init, padding);
 }
+
+/**
+ * Return a new device array that contains the value stored in `arg`.
+ */
+std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>
 double normL2(std::vector<T> a)

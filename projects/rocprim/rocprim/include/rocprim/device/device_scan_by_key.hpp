@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -171,12 +171,11 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            using config = wrapped_scan_by_key_config<Config, key_type, AccType>;
+            using Selector = scan_by_key_config_selector<key_type, AccType>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            const scan_by_key_config_params params
-                = dispatch_target_arch<config, false>(target_arch);
+            const target current_target(stream);
+
+            const auto   params = get_config<Selector>(Config{}, current_target);
 
             using wrapped_type     = ::rocprim::tuple<AccType, bool>;
             using scan_state_type  = detail::lookback_scan_state<wrapped_type, use_sleepy_scan>;
@@ -318,9 +317,9 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                 {
                     start = std::chrono::steady_clock::now();
                 }
-                auto device_scan_by_key_kernel = [=](auto arch_config)
+                auto device_scan_by_key_kernel = [=](auto target_config)
                 {
-                    device_scan_by_key_kernel_impl<decltype(arch_config), Determinism, Exclusive>(
+                    device_scan_by_key_kernel_impl<decltype(target_config), Determinism, Exclusive>(
                         keys + offset,
                         input + offset,
                         output + offset,
@@ -336,12 +335,13 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                         last_keys_of_each_block,
                         ordered_bid);
                 };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
-                                                                    device_scan_by_key_kernel,
-                                                                    dim3(scan_blocks),
-                                                                    dim3(block_size),
-                                                                    0,
-                                                                    stream));
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<Config, Selector>(current_target,
+                                                          device_scan_by_key_kernel,
+                                                          dim3(scan_blocks),
+                                                          dim3(block_size),
+                                                          0,
+                                                          stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
                                                             current_size,
                                                             start);

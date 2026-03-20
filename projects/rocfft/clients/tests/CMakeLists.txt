@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@ endif()
 
 project( rocfft-clients-tests LANGUAGES CXX )
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -107,10 +107,6 @@ if (NOT WIN32)
   target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
   target_link_options( rocfft-test PRIVATE -fgpu-rdc )
 endif()
-
-find_package( Boost REQUIRED )
-set( Boost_DEBUG ON )
-set( Boost_DETAILED_FAILURE_MSG ON )
 
 option( BUILD_FFTW "Download and build FFTW" OFF )
 
@@ -238,7 +234,6 @@ else()
 endif()
 
 set( rocfft-test_include_dirs
-  $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   ${ROCM_CLANG_ROOT}/include
@@ -410,7 +405,7 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
+    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp)
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES

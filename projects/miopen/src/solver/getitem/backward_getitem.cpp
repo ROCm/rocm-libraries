@@ -207,7 +207,7 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
                     reset_profiling_state = true;
                     start                 = miopen::make_hip_event();
                     stop                  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
                 build_index_kernel(params.indexs[i],
@@ -227,7 +227,7 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
                 reset_profiling_state = true;
                 start                 = miopen::make_hip_event();
                 stop                  = miopen::make_hip_event();
-                hipEventRecord(start.get(), handle_.GetStream());
+                (void)hipEventRecord(start.get(), handle_.GetStream());
             }
 
             decltype(auto) kernel = handle_.Run(kernels[indexCount]);
@@ -244,14 +244,14 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
 
             if(reset_profiling_state)
             {
-                hipEventRecord(stop.get(), handle_.GetStream());
-                hipEventSynchronize(stop.get());
-                hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                (void)hipEventRecord(stop.get(), handle_.GetStream());
+                (void)hipEventSynchronize(stop.get());
+                (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                 handle_.ResetKernelTime();
                 handle_.AccumKernelTime(elapsed);
 
-                hipEventDestroy(start.get());
-                hipEventDestroy(stop.get());
+                (void)hipEventDestroy(start.get());
+                (void)hipEventDestroy(stop.get());
                 handle_.EnableProfiling(true);
             };
         };

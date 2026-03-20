@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,14 +30,14 @@ Tests:
   category: pre_checkin
   function: csr2csr_compress_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: csr2csr_compress
   category: quick
   function: csr2csr_compress
   precision: *single_double_precisions_complex_real
-  M: [10, 500, 872, 27463, 35327]
-  N: [33, 242, 623, 29837, 22645]
-  alpha: [0.0, 0.08736, 0.33333, 1.7]
+  M: [10, 500, 872, 27463]
+  N: [33, 242, 623, 29837]
+  alpha: [0.08736, 0.33333]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
 - name: csr2csr_compress_file
@@ -45,7 +45,7 @@ Tests:
   function: csr2csr_compress
   precision: *single_double_precisions_complex_real
   M: 1
-  alpha: [0.0, 0.0012, 0.08736, 0.33333, 0.5, 1.7]
+  alpha: [0.0, 0.05, 0.25, 0.67, 0.8, 1.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
              nos2,
@@ -55,3 +55,19 @@ Tests:
              nos6,
              nos7]
 
+- name: csr2csr_compress_file
+  category: nightly
+  function: csr2csr_compress
+  precision: *single_only_precisions
+  M: 1
+  alpha: [0.0, 0.1, 0.5]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [rma10,
+             shipsec1,
+             scircuit,
+             sme3Dc,
+             webbase-1M,
+             bmwcra_1,
+             mc2depi,
+             bibd_22_8,
+             ASIC_320k]

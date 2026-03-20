@@ -21,28 +21,27 @@
 ################################################################################
 
 
-from Tensile.Components.CustomSchedule import ScheduleInfo
 from Tensile.Components.CMSValidator import verify_ascending_order
+from cms_validation_base import CMSValidationTestBase
 
-class TestValidateDescendingOrder:
-    def test_non_descending_order(self):
+class TestValidateDescendingOrder(CMSValidationTestBase):
+    needs_timeline = False
+
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
+        return verify_ascending_order(sched, kernel_dict, codePathIdx)
+
+    def test_non_descending_order_failure(self):
         """
-        Test of the rule that instructions in each category
-        appear in non-descending order
+        Test that validation fails when instructions appear in descending order.
         """
-
-        sched = ScheduleInfo(
-            None, None, {"P": [[3, 2, 1]]}, None, None, None, None
-        )
-        status, message = verify_ascending_order(sched)
-
+        optSchedule = {"P": [[3, 2, 1]]}
         expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
-        assert status == False
-        assert message == expected
+        self.validate(optSchedule, [], 1, None, None, 0, expected)
 
-        sched = ScheduleInfo(
-            None, None, {"P": [[1, 1, 2]]}, None, None, None, None
-        )
-        status, message = verify_ascending_order(sched)
-        assert status == True
+    def test_non_descending_order_success(self):
+        """
+        Test that validation passes when instructions appear in non-descending order.
+        """
+        optSchedule = {"P": [[1, 1, 2]]}
+        self.validate(optSchedule, [], 1, None, None, 0, None)
 

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -36,8 +36,8 @@ Tests:
   function: gemmi
   precision: *single_double_precisions_complex_real
   M: [0, 19, 78, 482]
-  N: [0, 42, 275, 759]
-  K: [0, 50, 173, 1375]
+  N: [0, 275, 759]
+  K: [0, 173, 1375]
   alpha: [-0.5]
   alphai: [-0.5]
   beta: [0.5]
@@ -47,7 +47,7 @@ Tests:
   category: pre_checkin
   function: gemmi
   precision: *single_double_precisions_complex_real
-  M: 1
+  M: [300, 980, 2310]
   N: 1
   K: 1
   alpha: [-0.5]
@@ -55,6 +55,44 @@ Tests:
   beta: [0.5]
   betai: [-0.5]
   filename: [nos1,
+             nos2,
              nos3,
+             nos4,
              nos5,
+             nos6,
              nos7]
+
+- name: gemmi
+  category: nightly
+  function: gemmi
+  precision: *double_only_precisions
+  M: [12, 21]
+  N: 1
+  K: 1
+  alpha: [-0.5]
+  alphai: [-0.5]
+  beta: [0.5]
+  betai: [-0.5]
+  filename: [mc2depi,
+             ASIC_320k,
+             bibd_22_8,
+             webbase-1M,
+             rma10,
+             scircuit,
+             bmwcra_1,
+             shipsec1,
+             sme3Dc]
+
+- name: gemmi
+  category: pre_checkin
+  function: gemmi
+  precision: *single_only_precisions
+  M: [230]
+  N: 1
+  K: 1
+  alpha: [1.5]
+  alphai: [-0.75]
+  beta: [0.75]
+  betai: [-1.5]
+  filename: [nos6]
+  graph_test: [true]

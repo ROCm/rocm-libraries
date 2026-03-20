@@ -35,10 +35,10 @@ endif()
 message(STATUS "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE )
 
-if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-  set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories" FORCE )
+if(NOT DEFINED CMAKE_INSTALL_PREFIX)
+  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 endif()
-if( NOT CPACK_PACKAGING_INSTALL_PREFIX )
+if( NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE PATH "Install path prefix for packages.")
   set(CPACK_SET_DESTDIR OFF)
 endif()
@@ -132,7 +132,7 @@ endif()
 
 # Variable GPU_TARGET must be a cached variable and must be specified before calling find_package(hip)
 # This is because hip-config.cmake sets --offload-arch via GPU_TARGET cached variable __after__ setting
-# default cached variable GPU_TARGET to "gfx900;gfx906;gfx908;gfx1100;gfx1101;gfx1102", where not all archs are compatible with MFMA instructions
+# default cached variable GPU_TARGET to "gfx900;gfx906;gfx908", where not all archs are compatible with MFMA instructions
 #
 # By rule, once cached variable is set, it cannot be overridden unless we use the FORCE option
 if(GPU_TARGETS)

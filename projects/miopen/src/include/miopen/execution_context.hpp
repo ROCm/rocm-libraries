@@ -77,7 +77,7 @@ MIOPEN_EXPORT extern bool
 
 } // namespace debug
 
-struct MIOPEN_INTERNALS_EXPORT ExecutionContext
+struct ExecutionContext
 {
     // Solution-specific
     std::string general_compile_options;
@@ -106,11 +106,11 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
     ExecutionContext() { DetectRocm(); }
     ExecutionContext(const Handle* stream_) : stream(stream_) { DetectRocm(); }
 
-    virtual ~ExecutionContext()               = default;
-    ExecutionContext(const ExecutionContext&) = default;
-    ExecutionContext(ExecutionContext&&)      = default;
+    virtual ~ExecutionContext()                          = default;
+    ExecutionContext(const ExecutionContext&)            = default;
+    ExecutionContext(ExecutionContext&&)                 = default;
     ExecutionContext& operator=(const ExecutionContext&) = default;
-    ExecutionContext& operator=(ExecutionContext&&) = default;
+    ExecutionContext& operator=(ExecutionContext&&)      = default;
 
 #if MIOPEN_EMBED_DB
     fs::path GetPerfDbPathEmbed(std::string_view prefix = "") const
@@ -297,7 +297,7 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
 private:
     const Handle* stream = nullptr;
 
-    void DetectRocm();
+    MIOPEN_INTERNALS_EXPORT void DetectRocm();
 };
 
 struct [[deprecated]] ConvolutionContext : ExecutionContext

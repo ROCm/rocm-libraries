@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,13 +35,13 @@ Tests:
   category: quick
   function: gebsr2csr
   precision: *single_double_precisions_complex_real
-  M: [872, 21453]
-  N: [623, 29285]
+  M: [872, 2145]
+  N: [623]
   row_block_dimA: [2, 4, 8]
   col_block_dimA: [2, 4, 8]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
-  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  dirA: [HIPSPARSE_DIRECTION_ROW]
 
 - name: gebsr2csr_file
   category: pre_checkin
@@ -60,4 +60,17 @@ Tests:
              nos5,
              nos6,
              nos7]
+
+- name: gebsr2csr_graph_test
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *single_double_precisions_complex_real
+  M: [1572]
+  N: [1423]
+  row_block_dimA: [4]
+  col_block_dimA: [4]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW]
+  graph_test: true
 

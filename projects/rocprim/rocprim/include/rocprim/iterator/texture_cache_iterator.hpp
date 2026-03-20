@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 
 #include <iterator>
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 
 #include "../config.hpp"
@@ -122,8 +123,8 @@ struct match_texture_type
 /// * Can only be constructed within host functions, and can only be dereferenced within
 /// device functions.
 /// * Accepts any data type from memory, and loads through texture cache.
-/// * This iterator is not functional on gfx94x architectures, as native texture fetch functions 
-/// are not supported in gfx94x.
+/// * This iterator is not functional on gfx94x, gfx120x or gfx95x architectures,
+/// as native texture fetch functions are not supported in these architectures.
 ///
 /// \tparam T type of value that can be obtained by dereferencing the iterator.
 /// \tparam Difference a type used for identify distance between iterators.
@@ -220,8 +221,7 @@ public:
         texture_type words[multiple];
 
         #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__) || defined(__GFX12__)
-        #pragma message "Texture cache iterator is not supported on gfx94x, gfx120x or gfx95x as the texture fetch functions in HIP are not available."
-        ROCPRIM_PRINT_ERROR_ONCE("WARNING: Usage of texture_cache_iterator on gfx94x, gfx120x or gfx95x devices is not supported and will not produce valid results.")
+        __builtin_trap();
         #else
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < multiple; i++)

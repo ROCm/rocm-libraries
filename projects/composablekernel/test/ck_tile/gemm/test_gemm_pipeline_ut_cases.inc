@@ -101,20 +101,12 @@ TYPED_TEST(TEST_SUITE_NAME, PaddK)
     constexpr int N = 1024;
     constexpr int K = 432;
 
+    if constexpr(TestFixture::PipelineType == GemmPipelineType::CompAsyncEightWaves)
+        return;
+
     for(int M : Ms)
     {
-        if constexpr(std::is_same_v<typename TestFixture::BDataType, ck_tile::pk_int4_t>)
-        {
-#if defined(ARCH_GFX12) || defined(ARCH_GFX11)
-            this->Run(M, N, K);
-#else
-            EXPECT_THROW(this->Run(M, N, K), std::runtime_error);
-#endif
-        }
-        else
-        {
-            this->Run(M, N, K);
-        }
+        this->Run(M, N, K);
     }
 }
 

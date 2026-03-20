@@ -125,8 +125,9 @@ void run_benchmark(benchmark::State& state,
 #define CREATE_BENCHMARK(T, Elements, EntropyReduction, InputSizeRatio)                                               \
   benchmark::RegisterBenchmark(                                                                                       \
     bench_utils::bench_naming::format_name(                                                                           \
-      "{algo:" + algo_name + ",subalgo:basic" + ",input_type:" #T + ",elements:" #Elements + ",entropy:"              \
-      + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction)) + ",input_size_ratio:" #InputSizeRatio) \
+      "{algo:" + algo_name + ",subalgo:basic" + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements) \
+      + ",entropy:" + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction))                           \
+      + ",input_size_ratio:" #InputSizeRatio)                                                                         \
       .c_str(),                                                                                                       \
     run_benchmark<T, OpT>,                                                                                            \
     Elements,                                                                                                         \
@@ -134,13 +135,17 @@ void run_benchmark(benchmark::State& state,
     EntropyReduction,                                                                                                 \
     InputSizeRatio)
 
-#define BENCHMARK_ELEMENTS(type, elements, entropy)                                             \
-  CREATE_BENCHMARK(type, elements, entropy, 25), CREATE_BENCHMARK(type, elements, entropy, 50), \
-    CREATE_BENCHMARK(type, elements, entropy, 75)
+#define BENCHMARK_ELEMENTS(type, elements, entropy)            \
+  bs.push_back(CREATE_BENCHMARK(type, elements, entropy, 25)); \
+  bs.push_back(CREATE_BENCHMARK(type, elements, entropy, 50)); \
+  bs.push_back(CREATE_BENCHMARK(type, elements, entropy, 75));
 
-#define BENCHMARK_TYPE_ENTROPY(type, entropy)                                             \
-  BENCHMARK_ELEMENTS(type, 1 << 16, entropy), BENCHMARK_ELEMENTS(type, 1 << 20, entropy), \
-    BENCHMARK_ELEMENTS(type, 1 << 24, entropy), BENCHMARK_ELEMENTS(type, 1 << 28, entropy)
+#define BENCHMARK_TYPE_ENTROPY(type, entropy)                              \
+  for (size_t size : bench_utils::sizes)                                   \
+  {                                                                        \
+    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
+      BENCHMARK_ELEMENTS(type, size, entropy)                              \
+  }
 
 template <class OpT>
 void add_benchmarks(
@@ -150,11 +155,11 @@ void add_benchmarks(
 
   for (int entropy_reduction : entropy_reductions)
   {
-    std::vector<benchmark::internal::Benchmark*> bs = {
-      BENCHMARK_TYPE_ENTROPY(int8_t, entropy_reduction),
-      BENCHMARK_TYPE_ENTROPY(int16_t, entropy_reduction),
-      BENCHMARK_TYPE_ENTROPY(int32_t, entropy_reduction),
-      BENCHMARK_TYPE_ENTROPY(int64_t, entropy_reduction)};
+    std::vector<benchmark::internal::Benchmark*> bs;
+    BENCHMARK_TYPE_ENTROPY(int8_t, entropy_reduction)
+    BENCHMARK_TYPE_ENTROPY(int16_t, entropy_reduction)
+    BENCHMARK_TYPE_ENTROPY(int32_t, entropy_reduction)
+    BENCHMARK_TYPE_ENTROPY(int64_t, entropy_reduction)
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
   }

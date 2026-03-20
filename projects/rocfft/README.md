@@ -77,7 +77,7 @@ You can install rocFFT using pre-built packages or building from source.
     To install client dependencies on Ubuntu, run:
 
     ```bash
-    sudo apt install libgtest-dev libfftw3-dev libboost-dev
+    sudo apt install libgtest-dev libfftw3-dev
     ```
 
     rocFFT uses version 1.11 of GoogleTest.

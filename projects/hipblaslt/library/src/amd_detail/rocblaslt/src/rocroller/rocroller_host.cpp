@@ -1,38 +1,16 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*********************************************************
  * The implementation of the rocblaslt<->rocRoller interface layer. *
  *********************************************************/
 
+#include "rocroller_host.hpp"
+#include "custom_kernels.hpp"
 #include "gemm.hpp"
 #include "kernel_type.hpp"
-#include "rocroller_host.hpp"
-#include "runtime_args_selection.hpp"
 #include "parameter_selection.hpp"
+#include "runtime_args_selection.hpp"
 #include "solution_cache.hpp"
 #include "solution_selection.hpp"
 
@@ -62,7 +40,14 @@ struct RocRollerHandle
  */
 void rocroller_create_handle(void** handle)
 {
-    *handle = new RocRollerHandle();
+    auto rr_handle = new RocRollerHandle();
+    *handle        = rr_handle;
+
+    if(getenv("HIPBLASLT_ROCROLLER_NO_CUSTOM_KERNEL") == nullptr)
+    {
+        // If these kernels are loaded, they are used instead of RocRoller kernels
+        preloadCustomKernels(rr_handle->cache);
+    }
 }
 
 /**
@@ -85,8 +70,10 @@ inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat sc
         return "1";
     case RocblasltContractionProblem::ScalingFormat::Vector:
         return "2";
-    case RocblasltContractionProblem::ScalingFormat::Block:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         return "3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return "1001";
     default:
         return "";
     }
@@ -379,6 +366,11 @@ rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_t
     }
 }
 
+rocRoller::DataType getScaleDataType(RocblasltContractionProblem::ScalingFormat s)
+{
+    return rocRoller::DataType::E8M0;
+}
+
 /**
  * @brief Generate a KernelType from a RocblasltContractionProblem
  *
@@ -390,27 +382,38 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 {
     KernelType kernelType;
 
-    kernelType.typeA      = hipDataType_to_rocRoller_type(prob.a_type);
-    kernelType.typeB      = hipDataType_to_rocRoller_type(prob.b_type);
-    kernelType.typeC      = hipDataType_to_rocRoller_type(prob.c_type);
-    kernelType.typeD      = hipDataType_to_rocRoller_type(prob.d_type);
-    kernelType.typeAcc    = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
-    kernelType.transA     = prob.trans_a == HIPBLAS_OP_T;
-    kernelType.transB     = prob.trans_b == HIPBLAS_OP_T;
-    kernelType.scaleTypeA.mode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
-                                ? rocRoller::Operations::ScaleMode::Separate
-                                : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleTypeB.mode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
-                                ? rocRoller::Operations::ScaleMode::Separate
-                                : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleTypeA.blockRowSize = prob.scaleABlockRowSize;
-    kernelType.scaleTypeA.blockColSize = prob.scaleABlockColSize;
-    kernelType.scaleTypeB.blockRowSize = prob.scaleBBlockRowSize;
-    kernelType.scaleTypeB.blockColSize = prob.scaleBBlockColSize;
+    kernelType.typeA    = hipDataType_to_rocRoller_type(prob.a_type);
+    kernelType.typeB    = hipDataType_to_rocRoller_type(prob.b_type);
+    kernelType.typeC    = hipDataType_to_rocRoller_type(prob.c_type);
+    kernelType.typeD    = hipDataType_to_rocRoller_type(prob.d_type);
+    kernelType.typeAcc  = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
+    kernelType.transA   = prob.trans_a == HIPBLAS_OP_T;
+    kernelType.transB   = prob.trans_b == HIPBLAS_OP_T;
+    kernelType.swizzleA = prob.swizzleA;
+    kernelType.swizzleB = prob.swizzleB;
+
+    if(isBlockScaling(prob.scaleAType))
+    {
+        kernelType.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeA.blockRowSize   = blockSize(prob.scaleAType);
+        kernelType.scaleTypeA.blockColSize   = 1;
+        kernelType.scaleTypeA.type           = getScaleDataType(prob.scaleAType);
+        kernelType.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(prob.scaleAType);
+        kernelType.scaleTypeA.preTile        = preTileSizeForScaleA(prob.scaleAType);
+    }
+
+    if(isBlockScaling(prob.scaleBType))
+    {
+        kernelType.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeB.blockRowSize   = 1;
+        kernelType.scaleTypeB.blockColSize   = blockSize(prob.scaleBType);
+        kernelType.scaleTypeB.type           = getScaleDataType(prob.scaleBType);
+        kernelType.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(prob.scaleBType);
+        kernelType.scaleTypeB.preTile        = preTileSizeForScaleB(prob.scaleBType);
+    }
 
     return kernelType;
 }
-
 
 /**
  * Generate a kernel from a given SolutionIndexParameters value.
@@ -422,6 +425,10 @@ rocblaslt_status
                                          int                          solutionIndex,
                                          std::shared_ptr<GemmKernel>& kernel)
 {
+    // TODO: Remove once rocRoller supports swizzleA and swizzleB
+    if (kernelType.swizzleA || kernelType.swizzleB)
+        return rocblaslt_status_not_implemented;
+
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
     try
     {
@@ -430,9 +437,11 @@ rocblaslt_status
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Error building the following kernel:" << std::endl;
-        std::cerr << params->toString() << std::endl;
-        std::cerr << e.what() << std::endl;
+        std::stringstream msg;
+        msg << "Error building the following kernel:" << std::endl;
+        msg << params->toString() << std::endl;
+        msg << e.what() << std::endl;
+        log_info(__func__, msg.str());
         return rocblaslt_status_not_implemented;
     }
 
@@ -485,8 +494,8 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    if(auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-       scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+    auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
+    if(scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
     {
         std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
         return rocblaslt_status_invalid_value;
@@ -509,12 +518,27 @@ rocblaslt_status
             break;
 
         index = parametersToIndex(solutionIndexParameter);
-        auto existingSolution = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
+        
+        // Validate problem dimensions match kernel tile requirements before generating kernel
+        // to avoid ocRoller expression evaluation with invalid dimensions
+        if(solutionIndexParameter.workgroupTile.m > 0 && solutionIndexParameter.workgroupTile.n > 0
+           && solutionIndexParameter.workgroupTile.k > 0)
+        {
+            if(prob.m % solutionIndexParameter.workgroupTile.m != 0
+               || prob.n % solutionIndexParameter.workgroupTile.n != 0
+               || prob.k % solutionIndexParameter.workgroupTile.k != 0)
+            {
+                continue;  // Skip this solution entirely
+            }
+        }
+
+        auto existingSolution
+            = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
         if(!existingSolution)
         {
-            auto                        status = genKernelFromSolutionIndexParameters(
+            auto status = genKernelFromSolutionIndexParameters(
                 rocroller_handle, kernelType, solutionIndexParameter, index, kernel);
             if(status != rocblaslt_status_success)
                 continue;
@@ -556,8 +580,8 @@ rocblaslt_status
 {
     heuristicResults.resize(maxNumberSolutions());
     int  returnAlgoCount;
-    auto result
-        = getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), maxWorkSpaceBytes, &returnAlgoCount);
+    auto result = getRocRollerBestSolutions(
+        handle, prob, -1, heuristicResults.data(), maxWorkSpaceBytes, &returnAlgoCount);
     heuristicResults.resize(returnAlgoCount);
     return result;
 }
@@ -582,7 +606,6 @@ void getRocRollerSolutionsFromIndex(
     result.workspaceSize            = 0;
     heuristicResults.push_back(result);
 }
-
 
 /**
  * @brief Get a kernel based on the provided problem and algo.
@@ -631,15 +654,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    auto workSpaceRequired = workspaceRequired(kernel, prob);
-
-    if(workSpaceRequired > prob.workspaceSize)
-        return rocblaslt_status_invalid_value;
-
-    auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
-    auto runtimeArgs = commandArgs.runtimeArguments();
-
-    if(!kernel->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
+    if(!isSupportedProblem(kernel, prob))
     {
         return rocblaslt_status_invalid_value;
     }
@@ -669,8 +684,8 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
     if(algo == nullptr)
     {
         int  returnAlgoCount;
-        auto status
-            = getRocRollerBestSolutions(handle, prob, 1, &heuristicResult, prob.workspaceSize, &returnAlgoCount);
+        auto status = getRocRollerBestSolutions(
+            handle, prob, 1, &heuristicResult, prob.workspaceSize, &returnAlgoCount);
         if(status != rocblaslt_status_success)
             return status;
         if(returnAlgoCount == 0)
@@ -716,6 +731,9 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            coldIterations,
                            hotIterations);
     }
+
+    if(kernel->isCustomKernel())
+        return runCustomKernel(kernel, prob);
 
     return runGemmKernel(kernel, prob);
 }

@@ -55,9 +55,10 @@ struct FillUniformDistribution
         const auto total_bytes    = total * sizeof(T_iter);
 
         // max 80 threads; at least 2MB per thread
-        const size_t available_cpu_cores = get_available_cpu_cores();
-        const size_t num_thread =
-            min(80UL, available_cpu_cores, integer_divide_ceil(total_bytes, 0x200000UL));
+        const size_t available_cpu_cores    = get_available_cpu_cores();
+        constexpr uint64_t MAX_THREAD_COUNT = 80;
+        const size_t num_thread             = min(
+            MAX_THREAD_COUNT, available_cpu_cores, integer_divide_ceil(total_bytes, 0x200000UL));
         constexpr size_t BLOCK_BYTES   = 64;
         constexpr size_t BLOCK_SIZE    = BLOCK_BYTES / sizeof(T_iter);
         const size_t num_blocks        = integer_divide_ceil(total_bytes, BLOCK_BYTES);
@@ -157,6 +158,41 @@ struct FillUniformDistribution<ck_tile::pk_int4_t>
             ++first;
         }
     }
+    template <typename ForwardRange>
+    auto operator()(ForwardRange&& range) const
+        -> std::void_t<decltype(std::declval<const FillUniformDistribution&>()(
+            std::begin(std::forward<ForwardRange>(range)),
+            std::end(std::forward<ForwardRange>(range))))>
+    {
+        (*this)(std::begin(std::forward<ForwardRange>(range)),
+                std::end(std::forward<ForwardRange>(range)));
+    }
+};
+
+template <>
+struct FillUniformDistribution<ck_tile::pk_fp6x16_t>
+{
+    float a_{-2.f};
+    float b_{2.f};
+    std::optional<uint32_t> seed_{11939};
+
+    template <typename ForwardIter>
+    void operator()(ForwardIter first, ForwardIter last) const
+    {
+        std::mt19937 gen(seed_.has_value() ? *seed_ : std::random_device{}());
+        std::uniform_real_distribution<float> dis(a_, b_);
+        while(first != last)
+        {
+            ck_tile::pk_fp6x16_t pk{};
+            for(ck_tile::index_t i = 0; i < ck_tile::pk_fp6x16_t::packed_size; ++i)
+            {
+                pk.pack(ck_tile::pk_fp6x16_t::float_to_fp6_e2m3(dis(gen)), i);
+            }
+            *first = pk;
+            ++first;
+        }
+    }
+
     template <typename ForwardRange>
     auto operator()(ForwardRange&& range) const
         -> std::void_t<decltype(std::declval<const FillUniformDistribution&>()(

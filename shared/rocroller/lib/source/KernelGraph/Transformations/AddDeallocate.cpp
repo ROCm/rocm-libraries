@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <variant>
 #include <vector>
@@ -45,46 +22,6 @@ namespace rocRoller::KernelGraph
 
     namespace AddDeallocateDetail
     {
-        void addDownstreamBarrierInLoop(std::set<int>&       dependencies,
-                                        int                  coordinate,
-                                        std::set<int> const& lastRWOps,
-                                        KernelGraph const&   original)
-        {
-            auto               compare = TopologicalCompare(original);
-            std::optional<int> maybeForLoop;
-            for(auto control : lastRWOps)
-            {
-                maybeForLoop = findContainingOperation<ForLoopOp>(control, original);
-                if(maybeForLoop)
-                    break;
-            }
-            if(not maybeForLoop)
-                return;
-
-            auto lastDependency = std::ranges::max(lastRWOps, compare);
-
-            auto isBarrierInSameLoopPredicate = [&](int barrier) {
-                auto isBarrier = original.control.get<Barrier>(barrier).has_value();
-                if(!isBarrier)
-                    return false;
-                auto maybeBarrierForLoop = findContainingOperation<ForLoopOp>(barrier, original);
-                // We know maybeForLoop has a value, so...
-                return maybeBarrierForLoop && (maybeBarrierForLoop.value() == maybeForLoop.value());
-            };
-
-            auto downstreamBarriers = filter(isBarrierInSameLoopPredicate,
-                                             original.control.depthFirstVisit(lastDependency))
-                                          .to<std::vector>();
-
-            if(downstreamBarriers.empty())
-            {
-                dependencies = {*maybeForLoop};
-                return;
-            }
-
-            dependencies.insert(std::ranges::min(downstreamBarriers, compare));
-        }
-
         std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
         {
             std::set<int> rv;
@@ -126,11 +63,10 @@ namespace rocRoller::KernelGraph
                     else if(rel == NodeOrdering::LeftInBodyOfRight
                             || rel == NodeOrdering::RightInBodyOfLeft)
                     {
-                        AssertFatal(false,
-                                    "Unexpected body relationship between",
-                                    ShowValue(*iterA),
-                                    ShowValue(*iterB),
-                                    ShowValue(rel));
+                        Throw<FatalError>("Unexpected body relationship between",
+                                          ShowValue(*iterA),
+                                          ShowValue(*iterB),
+                                          ShowValue(rel));
                     }
                     else
                     {
@@ -245,19 +181,16 @@ namespace rocRoller::KernelGraph
             }
 
             auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
-                                      return !neverReferencedArguments.contains(arg.name);
+                                      return !neverReferencedArguments.contains(arg.getName());
                                   });
 
             for(auto& arg : referencedArgs)
             {
-                kernel->addArgument({std::move(arg.name),
-                                     arg.variableType,
-                                     arg.dataDirection,
-                                     std::move(arg.expression)});
+                kernel->addArgument({std::move(arg.getName()),
+                                     arg.getVariableType(),
+                                     arg.getDataDirection(),
+                                     arg.getExpression()});
             }
-
-            // Store launch-time-only args so ArgumentLoader can elide the load
-            kernel->setLaunchTimeOnlyArguments(argTracer.launchTimeOnlyArguments());
         }
     }
 
@@ -276,12 +209,6 @@ namespace rocRoller::KernelGraph
         {
             auto dependencies = controls;
 
-            auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
-            if(maybeLDS)
-            {
-                addDownstreamBarrierInLoop(dependencies, coordinate, controls, graph);
-            }
-
             simplifyDependencies(graph, dependencies);
 
             deallocateNodesToAdd[dependencies].push_back(coordinate);
@@ -296,20 +223,20 @@ namespace rocRoller::KernelGraph
         for(auto const& [controls, coords] : deallocateNodesToAdd)
         {
             {
+                // Create a Deallocate operation
+                auto deallocate = graph.control.addElement(Deallocate());
+                deallocateNodes.push_back(deallocate);
+
                 if(logger->should_log(LogLevel::Debug))
                 {
                     std::ostringstream msg;
                     msg << "After {";
                     streamJoin(msg, controls, ", ");
-                    msg << "}, Deallocate {";
+                    msg << "}, Deallocate(" << deallocate << ") {";
                     streamJoin(msg, coords, ", ");
                     msg << "}";
                     Log::debug(msg.str());
                 }
-
-                // Create a Deallocate operation
-                auto deallocate = graph.control.addElement(Deallocate());
-                deallocateNodes.push_back(deallocate);
 
                 int idx = 0;
                 for(int coordinate : coords)
@@ -321,6 +248,16 @@ namespace rocRoller::KernelGraph
                 // are all of them are within the same body-parent.
                 for(auto src : controls)
                     graph.control.addElement(Sequence(), {src}, {deallocate});
+
+                // Add a barrier before deallocating LDS to avoid write-after-read races
+                // when different LDS allocation alias to the same LDS offset/address.
+                if(std::any_of(coords.begin(), coords.end(), [&](int coordinate) {
+                       return graph.coordinates.get<LDS>(coordinate).has_value();
+                   }))
+                {
+                    auto barrierTag = graph.control.addElement(Barrier());
+                    insertBefore(graph, barrierTag, deallocate, deallocate);
+                }
             }
         }
 

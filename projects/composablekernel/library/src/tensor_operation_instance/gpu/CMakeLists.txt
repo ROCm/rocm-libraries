@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+include(CheckCXXCompilerFlag)
+
+# We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+
 function(add_instance_library INSTANCE_NAME)
     message(DEBUG "adding instance ${INSTANCE_NAME}")
     set(result 1)
@@ -99,7 +104,7 @@ function(add_instance_library INSTANCE_NAME)
             list(REMOVE_ITEM ARGN "${source}")
         endif()
         # Do not build WMMA grouped conv 3d fwd fp8 / bf8 for any targets except gfx12+
-        if(NOT INST_TARGETS MATCHES "gfx12" AND source_name MATCHES "grouped_conv3d_fwd_wmma" AND (source_name MATCHES "_fp8_" OR source_name MATCHES "_bf8_"))
+        if(NOT INST_TARGETS MATCHES "gfx12" AND source_name MATCHES "grouped_conv3d_fwd_wmma" AND source_name MATCHES "_(f8|fp8|bf8)_")
             message(DEBUG "removing grouped_conv3d_fwd_wmma fp8/bf8 instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
@@ -192,8 +197,9 @@ function(add_instance_library INSTANCE_NAME)
         if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(${INSTANCE_NAME} PRIVATE -gsplit-dwarf)
         endif()
+
         # flags to compress the library
-        if(NOT DISABLE_OFFLOAD_COMPRESS AND NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
+        if(NOT DISABLE_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
             message(DEBUG "Adding --offload-compress flag for ${INSTANCE_NAME}")
             target_compile_options(${INSTANCE_NAME} PRIVATE --offload-compress)
         endif()
@@ -329,11 +335,23 @@ FOREACH(subdir_path ${dir_list})
             endif()
         endif()
 
+        # Build the required pattern based on library settings
+        set(required_pattern "")
+        set(pattern_parts "")
         if(MIOPEN_REQ_LIBS_ONLY)
             message(STATUS "Removing all sources that are not required for MIOpen")
-            if(NOT "${cmake_instance}" MATCHES "conv")
-                set(add_inst 0)
-            endif()
+            list(APPEND pattern_parts "conv")
+        endif()
+        if(HIPTENSOR_REQ_LIBS_ONLY)
+            message(STATUS "Removing all sources that are not required for HipTensor")
+            list(APPEND pattern_parts "contract" "reduce" "element")
+        endif()
+        if(pattern_parts)
+            string(JOIN "|" required_pattern ${pattern_parts})
+        endif()
+        # Apply the pattern if one was set
+        if(required_pattern AND NOT "${cmake_instance}" MATCHES "${required_pattern}")
+            set(add_inst 0)
         endif()
 
         if((add_inst EQUAL 1))
@@ -399,7 +417,7 @@ if(CK_DEVICE_OTHER_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
         )
 endif()
-if(CK_DEVICE_GEMM_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY)
+if(CK_DEVICE_GEMM_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
         add_library(device_gemm_operations ${CK_DEVICE_GEMM_INSTANCES})
         add_library(composablekernels::device_gemm_operations ALIAS device_gemm_operations)
         target_compile_features(device_gemm_operations PUBLIC)
@@ -420,7 +438,7 @@ if(CK_DEVICE_GEMM_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
         )
 endif()
-if(CK_DEVICE_CONV_INSTANCES)
+if(CK_DEVICE_CONV_INSTANCES AND (NOT HIPTENSOR_REQ_LIBS_ONLY OR MIOPEN_REQ_LIBS_ONLY))
         add_library(device_conv_operations ${CK_DEVICE_CONV_INSTANCES})
         add_library(composablekernels::device_conv_operations ALIAS device_conv_operations)
         target_compile_features(device_conv_operations PUBLIC)
@@ -445,7 +463,7 @@ if(CK_DEVICE_CONV_INSTANCES)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
         )
 endif()
-if(CK_DEVICE_MHA_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY AND BUILD_MHA_LIB)
+if(CK_DEVICE_MHA_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY AND BUILD_MHA_LIB)
         set(gpu_list ${INST_TARGETS})
         if(gpu_list MATCHES "gfx94" OR gpu_list MATCHES "gfx90a" OR gpu_list MATCHES "gfx95")
             add_library(device_mha_operations ${CK_DEVICE_MHA_INSTANCES})
@@ -511,7 +529,7 @@ if(CK_DEVICE_REDUCTION_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY)
         )
 endif()
 
-if(NOT MIOPEN_REQ_LIBS_ONLY)
+if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
     add_library(device_operations INTERFACE)
     target_link_libraries(device_operations INTERFACE
         device_contraction_operations

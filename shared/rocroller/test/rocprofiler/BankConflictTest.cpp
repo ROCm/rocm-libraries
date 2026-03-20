@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -31,20 +8,28 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
-#include <rocRoller/Scheduling/LDSBankModel.hpp>
+#include <rocRoller/Scheduling/LDSModel.hpp>
+#include <rocRoller/Scheduling/Observers/FunctionalUnit/MEMObserver.hpp>
+#include <rocRoller/Scheduling/RoundRobinScheduler.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
+
+#include <common/Scheduling.hpp>
 
 #include "../catch/TestContext.hpp"
 #include "../catch/TestKernels.hpp"
 #include "Agent.hpp"
+#include "Utils.hpp"
 
 #include <catch2/catch_all.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -53,285 +38,236 @@
 
 using namespace rocRoller;
 
-namespace rocRollerTest
+class LDSBankConflictTestKernel : public AssemblyTestKernel
 {
-    const int NUM_RUNS = 5; // Should be odd, as median is used
-
-    template <typename T>
-    T median_of_odd_elements(std::vector<T> values)
+public:
+    LDSBankConflictTestKernel(ContextPtr context,
+                              uint32_t   workgroupSize,
+                              size_t     instrDwords,
+                              size_t     strideMultiplier,
+                              bool       write)
+        : AssemblyTestKernel(context)
+        , m_workgroupSize(workgroupSize)
+        , m_instrDwords(instrDwords)
+        , m_strideMultiplier(strideMultiplier)
+        , m_write(write)
     {
-        AssertFatal(!values.empty(), "median_of_odd_elements: vector must not be empty");
-        AssertFatal(values.size() % 2 == 1, "median_of_odd_elements: vector size must be odd");
+        auto k = m_context->kernel();
+        k->setKernelDimensions(1);
 
-        std::sort(values.begin(), values.end());
+        const auto one  = std::make_shared<Expression::Expression>(1u);
+        const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        return values[values.size() / 2];
+        auto workitemCount = Expression::literal(m_workgroupSize * 256 * 32);
+        k->setWorkgroupSize({m_workgroupSize, 1, 1});
+        k->setWorkitemCount({workitemCount, one, one});
+        k->setDynamicSharedMemBytes(zero);
     }
 
-    std::vector<size_t>
-        generateLDSAddresses(size_t workgroupSize, size_t strideMultiplier, size_t instrDwords)
+    void operator()()
     {
-        std::vector<size_t> addresses;
-        for(size_t workitemId = 0; workitemId < workgroupSize; ++workitemId)
-        {
-            size_t address = workitemId * (4 * strideMultiplier * instrDwords);
-            addresses.push_back(address);
-        }
-        return addresses;
+        KernelInvocation invocation{{m_workgroupSize * 256 * 32, 1, 1}, {m_workgroupSize, 1, 1}, 0};
+        AssemblyTestKernel::operator()(invocation);
     }
 
-    class LDSBankConflictTestKernel : public AssemblyTestKernel
+protected:
+    void generate() override
     {
-    public:
-        LDSBankConflictTestKernel(ContextPtr context,
-                                  uint32_t   workgroupSize,
-                                  size_t     instrDwords,
-                                  size_t     strideMultiplier,
-                                  bool       write)
-            : AssemblyTestKernel(context)
-            , m_workgroupSize(workgroupSize)
-            , m_instrDwords(instrDwords)
-            , m_strideMultiplier(strideMultiplier)
-            , m_write(write)
-        {
-            auto k = m_context->kernel();
-            k->setKernelDimensions(1);
+        auto k = m_context->kernel();
 
-            const auto one  = std::make_shared<Expression::Expression>(1u);
-            const auto zero = std::make_shared<Expression::Expression>(0u);
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
 
-            auto workitemCount = Expression::literal(m_workgroupSize * 256 * 32);
-            k->setWorkgroupSize({m_workgroupSize, 1, 1});
-            k->setWorkitemCount({workitemCount, one, one});
-            k->setDynamicSharedMemBytes(zero);
-        }
+        auto kb = [&]() -> Generator<Instruction> {
+            const auto alignment = static_cast<int>(m_instrDwords);
+            const auto regCount  = 256 - 8; // leave a few
 
-        void operator()()
-        {
-            KernelInvocation invocation{
-                {m_workgroupSize * 256 * 32, 1, 1}, {m_workgroupSize, 1, 1}, 0};
-            AssemblyTestKernel::operator()(invocation);
-        }
+            auto dst = Register::Value::Placeholder(
+                m_context,
+                Register::Type::Vector,
+                DataType::Raw32,
+                regCount,
+                Register::AllocationOptions{
+                    .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
+                    .alignment            = alignment,
+                });
+            co_yield dst->allocate();
 
-    protected:
-        void generate() override
-        {
-            auto k = m_context->kernel();
+            auto lds = Register::Value::AllocateLDS(
+                m_context,
+                DataType::Raw32,
+                m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) / 4);
+            auto ldsWithOffset = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::UInt32, 1);
+            auto workitemIndex = m_context->kernel()->workitemIndex()[0];
+            co_yield Expression::generate(
+                ldsWithOffset,
+                Expression::literal(lds->getLDSAllocation()->offset())
+                    + workitemIndex->expression()
+                          * Expression::literal((4 * m_strideMultiplier * alignment)
+                                                    % lds->getLDSAllocation()->size(),
+                                                resultType(workitemIndex->expression()).varType),
+                m_context);
 
-            m_context->schedule(k->preamble());
-            m_context->schedule(k->prolog());
+            co_yield m_context->mem()->barrier({});
 
-            auto kb = [&]() -> Generator<Instruction> {
-                const auto alignment = static_cast<int>(m_instrDwords);
-                const auto regCount  = 256 - 8; // leave a few
-
-                auto dst = Register::Value::Placeholder(
-                    m_context,
-                    Register::Type::Vector,
-                    DataType::Raw32,
-                    regCount,
-                    Register::AllocationOptions{
-                        .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
-                        .alignment            = alignment,
-                    });
-                co_yield dst->allocate();
-
-                auto lds = Register::Value::AllocateLDS(
-                    m_context,
-                    DataType::Raw32,
-                    m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) / 4);
-                auto ldsWithOffset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::UInt32, 1);
-                auto workitemIndex = m_context->kernel()->workitemIndex()[0];
-                co_yield Expression::generate(
-                    ldsWithOffset,
-                    Expression::literal(lds->getLDSAllocation()->offset())
-                        + workitemIndex->expression()
-                              * Expression::literal(
-                                  (4 * m_strideMultiplier * alignment)
-                                      % lds->getLDSAllocation()->size(),
-                                  resultType(workitemIndex->expression()).varType),
-                    m_context);
-
-                auto getSubset = [](size_t n, size_t m, size_t i) -> std::pair<size_t, size_t> {
-                    // If run out of registers, wrap around
-                    size_t num_complete_chunks = n / m;
-                    if(num_complete_chunks == 0)
-                    {
-                        return {0, 0};
-                    }
-                    size_t chunk_index = i % num_complete_chunks;
-                    size_t start       = chunk_index * m;
-                    return {start, start + m};
-                };
-
-                co_yield m_context->mem()->barrier({});
-
-                for(int i = 0; i < ITERS; ++i)
-                {
-                    const auto [start, end] = getSubset(regCount, m_instrDwords, i);
-                    const auto numBytes     = m_instrDwords * 4;
-
-                    if(m_write)
-                    {
-                        co_yield m_context->mem()->storeLocal(
-                            ldsWithOffset, dst->subset(Generated(iota(start, end))), 0, numBytes);
-                    }
-                    else
-                    {
-                        co_yield m_context->mem()->loadLocal(
-                            dst->subset(Generated(iota(start, end))), ldsWithOffset, 0, numBytes);
-                    }
-                }
-                co_yield Instruction::Wait(WaitCount::DSCnt(m_context->targetArchitecture(), 1));
-                co_yield Instruction::Wait(WaitCount::DSCnt(m_context->targetArchitecture(), 0));
-            };
-
-            m_context->schedule(kb());
-
-            m_context->schedule(k->postamble());
-            m_context->schedule(k->amdgpu_metadata());
-        }
-
-    private:
-        static constexpr int ITERS = 16;
-
-        uint32_t m_workgroupSize;
-        size_t   m_instrDwords;
-        size_t   m_strideMultiplier;
-        bool     m_write;
-    };
-
-    TEST_CASE("LDS bank model with bank conflicts", "[rocprofiler][gpu]")
-    {
-        using namespace Scheduling::LDSBankModel;
-
-        constexpr auto workgroupSize = 64u;
-
-        const std::vector<int>  instrSizes      = {1, 2, 4}; // b32, b64, b128
-        const std::vector<int>  strides         = {1, 2, 4, 8, 16, 32, 64, 128}; // between threads
-        const std::vector<bool> writeOperations = {false, true};
-
-        for(auto instrDwords : instrSizes)
-        {
-            for(auto strideMultiplier : strides)
+            for(int i = 0; i < ITERS; ++i)
             {
-                for(auto write : writeOperations)
+                const auto [start, end] = getAlignedSubset(regCount, m_instrDwords, i);
+                const auto numBytes     = m_instrDwords * 4;
+
+                if(m_write)
                 {
-                    const auto name = "lds_microkernel_" + std::to_string(instrDwords * 32)
-                                      + "b_stride" + std::to_string(strideMultiplier) + "_"
-                                      + (write ? "write" : "read");
+                    co_yield m_context->mem()->storeLocal(
+                        ldsWithOffset, dst->subset(Generated(iota(start, end))), 0, numBytes);
+                }
+                else
+                {
+                    co_yield m_context->mem()->loadLocal(
+                        dst->subset(Generated(iota(start, end))), ldsWithOffset, 0, numBytes);
+                }
+            }
+            co_yield Instruction::Wait(WaitCount::DSCnt(m_context->targetArchitecture(), 1));
+            co_yield Instruction::Wait(WaitCount::DSCnt(m_context->targetArchitecture(), 0));
+        };
 
-                    DYNAMIC_SECTION(name)
+        m_context->schedule(kb());
+
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+    }
+
+private:
+    static constexpr int ITERS = 16;
+
+    uint32_t m_workgroupSize;
+    size_t   m_instrDwords;
+    size_t   m_strideMultiplier;
+    bool     m_write;
+};
+
+TEST_CASE("LDS bank model with bank conflicts", "[rocprofiler][gpu][lds-model]")
+{
+    using namespace Scheduling::LDSModel;
+
+    constexpr auto workgroupSize = 64u;
+
+    const std::vector<int>  instrSizes      = {1, 2, 4}; // b32, b64, b128
+    const std::vector<int>  strides         = {1, 2, 4, 8, 16, 32, 64, 128}; // between threads
+    const std::vector<bool> writeOperations = {false, true};
+
+    for(auto instrDwords : instrSizes)
+    {
+        for(auto strideMultiplier : strides)
+        {
+            for(auto write : writeOperations)
+            {
+                const auto name = "lds_microkernel_" + std::to_string(instrDwords * 32) + "b_stride"
+                                  + std::to_string(strideMultiplier) + "_"
+                                  + (write ? "write" : "read");
+
+                DYNAMIC_SECTION(name)
+                {
+                    rocRoller::profiler::reset();
+
+                    auto context = TestContext::ForTestDevice({}, name);
+
+                    if(not context->targetArchitecture().target().isCDNA4GPU())
                     {
-                        rocRoller::profiler::reset();
-
-                        auto context = TestContext::ForTestDevice({}, name);
-
-                        if(not context->targetArchitecture().target().isCDNA35GPU())
-                        {
-                            SKIP("LDS Bank Model only implemented for CDNA 3.5 GPUs");
-                        }
-
-                        LDSBankConflictTestKernel kernel(
-                            context.get(), workgroupSize, instrDwords, strideMultiplier, write);
-
-                        std::vector<std::vector<rocRoller::profiler::InstructionProfile>>
-                            allLatencies;
-
-                        for(int run = 0; run < NUM_RUNS; ++run)
-                        {
-                            const auto latencies
-                                = rocRoller::profiler::loopUntilDispatchData([&]() { kernel(); });
-                            allLatencies.push_back(latencies);
-
-                            INFO("Run " << (run + 1) << ": " << toString(latencies));
-                            Log::debug("Run " + std::to_string(run + 1) + ": "
-                                       + toString(latencies));
-
-                            REQUIRE(latencies.size() == 21);
-                        }
-
-                        GPUArchitectureGFX gfx = context->targetArchitecture().target().gfx;
-
-                        auto baseAddresses
-                            = generateLDSAddresses(workgroupSize, strideMultiplier, instrDwords);
-
-                        RuntimeLDSInstruction ldsinstr;
-                        ldsinstr.memoryOp.direction
-                            = write ? LdsDirection::Write : LdsDirection::Read;
-                        ldsinstr.dwords        = instrDwords;
-                        ldsinstr.baseAddresses = baseAddresses;
-
-                        uint predictedCycles = getInstructionCycles(ldsinstr, gfx);
-
-                        uint issueCycles
-                            = getInstructionIssueCycles(ldsinstr.memoryOp, ldsinstr.dwords);
-                        uint dataCycles = getInstructionDataCycles(ldsinstr, gfx);
-
-                        std::stringstream info;
-
-                        info << fmt::format("dwords {}, stride {}, {}\n",
-                                            instrDwords,
-                                            strideMultiplier,
-                                            write ? "write" : "read");
-
-                        std::vector<uint64_t> ldsInstrCyclesPerRun;
-                        std::vector<uint64_t> sWaitcntCyclesPerRun;
-
-                        for(int run = 0; run < NUM_RUNS; ++run)
-                        {
-                            uint64_t maxLdsInstrCycles  = 0;
-                            uint64_t lastSWaitcntCycles = 0;
-
-                            for(const auto& data : allLatencies[run])
-                            {
-                                if((write && data.instruction.find("ds_write") != std::string::npos)
-                                   || (!write
-                                       && data.instruction.find("ds_read") != std::string::npos))
-                                {
-                                    maxLdsInstrCycles
-                                        = std::max(maxLdsInstrCycles, data.meanLatency());
-                                }
-                                else if(data.instruction.find("s_waitcnt") != std::string::npos)
-                                {
-                                    lastSWaitcntCycles = data.meanLatency();
-                                }
-                            }
-
-                            ldsInstrCyclesPerRun.push_back(maxLdsInstrCycles);
-                            sWaitcntCyclesPerRun.push_back(lastSWaitcntCycles);
-
-                            info << fmt::format("  Run {}: LDS Cycles: {}, s_waitcnt Cycles: {}\n",
-                                                run + 1,
-                                                maxLdsInstrCycles,
-                                                lastSWaitcntCycles);
-                        }
-
-                        uint64_t actualMaxLdsInstrCycles
-                            = median_of_odd_elements(ldsInstrCyclesPerRun);
-                        uint64_t actualLastSWaitcntCycles
-                            = median_of_odd_elements(sWaitcntCyclesPerRun);
-                        info << fmt::format("  Median s_waitcnt Cycles: {}\n",
-                                            actualLastSWaitcntCycles);
-                        info << fmt::format("  Median LDS Instruction Cycles: {}\n",
-                                            actualMaxLdsInstrCycles);
-                        info << fmt::format("  Model Predicted Cycles: {}\n", predictedCycles);
-                        info << fmt::format("    Issue Cycles: {}\n", issueCycles);
-                        info << fmt::format("    Data Cycles: {}\n", dataCycles);
-
-                        INFO(info.str());
-                        Log::debug(info.str());
-
-                        CHECK(actualLastSWaitcntCycles == predictedCycles);
-                        if(write && instrDwords == 4)
-                            // ds_write_b128 requires LDS instruction queue status information to properly predict
-                            CHECK_THAT(actualMaxLdsInstrCycles,
-                                       Catch::Matchers::WithinAbs(predictedCycles, 12ul));
-                        else
-                            CHECK_THAT(actualMaxLdsInstrCycles,
-                                       Catch::Matchers::WithinAbs(predictedCycles, 4ul));
+                        SKIP("LDS Bank Model only implemented for CDNA 4 GPUs");
                     }
+
+                    LDSBankConflictTestKernel kernel(
+                        context.get(), workgroupSize, instrDwords, strideMultiplier, write);
+
+                    std::vector<std::vector<rocRoller::profiler::InstructionProfile>> allLatencies;
+
+                    for(int run = 0; run < NUM_RUNS; ++run)
+                    {
+                        const auto latencies
+                            = rocRoller::profiler::loopUntilDispatchData([&]() { kernel(); });
+                        allLatencies.push_back(latencies);
+
+                        INFO("Run " << (run + 1) << ": " << toString(latencies));
+                        Log::debug("Run " + std::to_string(run + 1) + ": " + toString(latencies));
+
+                        REQUIRE(latencies.size() == 21);
+                    }
+
+                    GPUArchitectureGFX gfx = context->targetArchitecture().target().gfx;
+
+                    auto baseAddresses = generateLDSAddresses(64, strideMultiplier, instrDwords);
+
+                    RuntimeLDSInstruction ldsinstr;
+                    ldsinstr.memoryOp.direction = write ? LdsDirection::Write : LdsDirection::Read;
+                    ldsinstr.dwords             = instrDwords;
+                    ldsinstr.baseAddresses      = baseAddresses;
+
+                    uint predictedCycles = getInstructionCycles(ldsinstr, gfx);
+
+                    uint issueCycles
+                        = getInstructionIssueCycles(ldsinstr.memoryOp, ldsinstr.dwords);
+                    uint dataCycles = getInstructionDataCycles(ldsinstr, gfx);
+
+                    std::stringstream info;
+
+                    info << fmt::format("dwords {}, stride {}, {}\n",
+                                        instrDwords,
+                                        strideMultiplier,
+                                        write ? "write" : "read");
+
+                    std::vector<uint64_t> ldsInstrCyclesPerRun;
+                    std::vector<uint64_t> sWaitcntCyclesPerRun;
+
+                    for(int run = 0; run < NUM_RUNS; ++run)
+                    {
+                        uint64_t maxLdsInstrCycles  = 0;
+                        uint64_t lastSWaitcntCycles = 0;
+
+                        for(const auto& data : allLatencies[run])
+                        {
+                            if((write && data.instruction.find("ds_write") != std::string::npos)
+                               || (!write && data.instruction.find("ds_read") != std::string::npos))
+                            {
+                                maxLdsInstrCycles = std::max(maxLdsInstrCycles, data.meanLatency());
+                            }
+                            else if(data.instruction.find("s_waitcnt") != std::string::npos)
+                            {
+                                lastSWaitcntCycles = data.meanLatency();
+                            }
+                        }
+
+                        ldsInstrCyclesPerRun.push_back(maxLdsInstrCycles);
+                        sWaitcntCyclesPerRun.push_back(lastSWaitcntCycles);
+
+                        info << fmt::format("  Run {}: LDS Cycles: {}, s_waitcnt Cycles: {}\n",
+                                            run + 1,
+                                            maxLdsInstrCycles,
+                                            lastSWaitcntCycles);
+                    }
+
+                    uint64_t actualMaxLdsInstrCycles  = MedianOfOddElements(ldsInstrCyclesPerRun);
+                    uint64_t actualLastSWaitcntCycles = MedianOfOddElements(sWaitcntCyclesPerRun);
+                    info << fmt::format("  Median s_waitcnt Cycles: {}\n",
+                                        actualLastSWaitcntCycles);
+                    info << fmt::format("  Median LDS Instruction Cycles: {}\n",
+                                        actualMaxLdsInstrCycles);
+                    info << fmt::format("  Model Predicted Cycles: {}\n", predictedCycles);
+                    info << fmt::format("    Issue Cycles: {}\n", issueCycles);
+                    info << fmt::format("    Data Cycles: {}\n", dataCycles);
+
+                    INFO(info.str());
+                    Log::debug(info.str());
+
+                    CHECK_THAT(actualLastSWaitcntCycles,
+                               Catch::Matchers::WithinAbs(predictedCycles, 1ul));
+                    if(write && instrDwords == 4)
+                        // ds_write_b128 requires queue info
+                        CHECK_THAT(actualMaxLdsInstrCycles,
+                                   Catch::Matchers::WithinAbs(predictedCycles, 12ul));
+                    else
+                        CHECK_THAT(actualMaxLdsInstrCycles,
+                                   Catch::Matchers::WithinAbs(predictedCycles, 4ul));
                 }
             }
         }

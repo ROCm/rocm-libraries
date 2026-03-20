@@ -1,30 +1,7 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
-
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """
 Use a genetic algorithm to optimize scheduler weights for rocRoller.
@@ -50,11 +27,10 @@ import itertools
 import math
 import multiprocessing
 import os
-import pathlib
 import random
 import subprocess
 from dataclasses import asdict, dataclass, field, fields
-from typing import List, Tuple
+from pathlib import Path
 
 import numpy as np
 import rrperf
@@ -66,7 +42,7 @@ gpus = {}
 mp_pool = None
 
 
-def instantiate_gpus(idxs: List[int]):
+def instantiate_gpus(idxs: list[int]):
     global gpus, mp_pool  # noqa: disable=F824
     for idx in idxs:
         gpus[idx] = multiprocessing.Lock()
@@ -75,7 +51,7 @@ def instantiate_gpus(idxs: List[int]):
         mp_pool = None
 
 
-def acquire_lock() -> Tuple[int, multiprocessing.Lock]:
+def acquire_lock() -> tuple[int, multiprocessing.Lock]:
     global gpus  # noqa: disable=unused-variable
     for i in range(100):
         for id, lock in gpus.items():
@@ -281,9 +257,7 @@ def bench_star(arg):
     return bench(*arg)
 
 
-def bench(
-    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weights
-) -> Result:
+def bench(thedir: Path, problem: rrperf.problems.GEMMRun, weights: Weights) -> Result:
     device, lock = acquire_lock()
 
     try:
@@ -322,9 +296,10 @@ def bench(
         if process_result.returncode == 0:
             with result_path.open() as f:
                 result_data = yaml.safe_load(f)
-            if result_data["correct"]:
-                result.time = float(np.median(result_data["kernelExecute"]))
-            result.rnorm = result_data["rnorm"]
+            benchmark_data = result_data.get("benchmark", {})
+            if benchmark_data.get("correct", False):
+                result.time = float(np.median(benchmark_data["kernelExecute"]))
+            result.rnorm = float(benchmark_data.get("rnorm", math.inf))
 
         print(result.summary)
 
@@ -340,7 +315,7 @@ def bench(
         lock.release()
 
 
-def sanity_check(results: List[Result]):
+def sanity_check(results: list[Result]):
     rnorms = {r.rnorm for r in results if r.passed}
     print(f"RNorms: {rnorms}")
     if len(rnorms) != 1:
@@ -351,7 +326,7 @@ def sanity_check(results: List[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
+def split_old_new_results(weights) -> tuple[list[Weights], list[Weights]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
@@ -366,8 +341,8 @@ def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
 
 
 def generation(
-    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
-) -> List[Result]:
+    output_dir: Path, problem: rrperf.problems.GEMMRun, weights: list[Weights]
+) -> list[Result]:
     global prev_results  # noqa: disable=F824
 
     already_ran, to_run = split_old_new_results(weights)
@@ -393,7 +368,7 @@ def generation(
 
 
 def read_gen_results(resfile: str):
-    resfile = pathlib.Path(resfile)
+    resfile = Path(resfile)
     with resfile.open() as f:
         data = yaml.safe_load(f)
 
@@ -403,7 +378,7 @@ def read_gen_results(resfile: str):
         return list(map(res, data))
 
 
-def write_generation(thedir: pathlib.Path, name, results: List[Result]):
+def write_generation(thedir: Path, name, results: list[Result]):
     data = list([val.dict for val in results])
     datafile = thedir / f"results_{name}.yaml"
     with datafile.open("w") as f:
@@ -412,7 +387,7 @@ def write_generation(thedir: pathlib.Path, name, results: List[Result]):
 
 
 def new_inputs(
-    all_results: List[Result], population, num_parents, num_random, mutation
+    all_results: list[Result], population, num_parents, num_random, mutation
 ):
     if len(all_results) == 0:
         rv = set()
@@ -496,7 +471,7 @@ def genetic(args):
         close_pool()
 
 
-def find_most_different_outputs(results: List[Result], n: int = 5):
+def find_most_different_outputs(results: list[Result], n: int = 5):
     n = min(n, len(results))
     if n <= 0:
         return
@@ -570,7 +545,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--output",
         "-o",
         dest="output_dir",
-        type=pathlib.Path,
+        type=Path,
         required=True,
         help="Directory to store results.",
     )

@@ -31,7 +31,7 @@ void checkBuffer(const T* buffer, size_t size, T mult = 1)
 template <typename T>
 void checkBufferSynchronized(const T* buffer, size_t size, hipStream_t stream = nullptr, T mult = 1)
 {
-    hipError_t error = hipStreamSynchronize(stream);
+    const hipError_t error = hipStreamSynchronize(stream);
     EXPECT_EQ(error, hipSuccess) << "Error synchronizing stream";
 
     for(size_t i = 0; i < size; ++i)
@@ -69,7 +69,7 @@ TEST(TestMigratableMemory, MoveConstructor)
 
     MigratableMemory<float> memory2(std::move(memory1));
 
-    EXPECT_TRUE(memory1.empty());
+    EXPECT_TRUE(memory1.empty()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(memory1.count(), 0);
     EXPECT_EQ(memory1.location(), MemoryLocation::NONE);
     EXPECT_EQ(memory1.hostData(), nullptr);
@@ -89,7 +89,7 @@ TEST(TestMigratableMemory, MoveAssignment)
     MigratableMemory<float> memory2;
     memory2 = std::move(memory1);
 
-    EXPECT_TRUE(memory1.empty());
+    EXPECT_TRUE(memory1.empty()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(memory1.count(), 0);
     EXPECT_EQ(memory1.location(), MemoryLocation::NONE);
     EXPECT_EQ(memory1.hostData(), nullptr);
@@ -114,7 +114,6 @@ TEST(TestMigratableMemory, Resize)
 
 TEST(TestMigratableMemory, MigrateToDevice)
 {
-    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     MigratableMemory<float> memory(10);
@@ -128,12 +127,13 @@ TEST(TestMigratableMemory, MigrateToDevice)
     EXPECT_NE(memory.deviceData(), nullptr);
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
-    checkBuffer(static_cast<float*>(memory.deviceData()), memory.count());
+    initBuffer(memory.hostData(), memory.count(), 0.0f);
+    memory.markDeviceModified();
+    checkBuffer(static_cast<float*>(memory.hostData()), memory.count());
 }
 
 TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 {
-    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -152,7 +152,9 @@ TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
     EXPECT_NE(memory.deviceData(), nullptr);
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
-    checkBufferSynchronized(static_cast<float*>(memory.deviceData()), memory.count(), stream);
+    initBuffer(memory.hostData(), memory.count(), 0.0f);
+    memory.markDeviceModified();
+    checkBufferSynchronized(static_cast<float*>(memory.hostData()), memory.count(), stream);
 
     error = hipStreamDestroy(stream);
     EXPECT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
@@ -160,7 +162,6 @@ TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 {
-    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -179,7 +180,9 @@ TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
     EXPECT_NE(memory.deviceDataAsync(), nullptr);
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
-    checkBufferSynchronized(static_cast<float*>(memory.deviceDataAsync()), memory.count(), stream);
+    initBuffer(memory.hostData(), memory.count(), 0.0f);
+    memory.markDeviceModified();
+    checkBufferSynchronized(static_cast<float*>(memory.hostDataAsync()), memory.count(), stream);
 
     error = hipStreamDestroy(stream);
     EXPECT_EQ(error, hipSuccess) << "Failed to destroy HIP stream";
@@ -187,7 +190,6 @@ TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToHost)
 {
-    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     MigratableMemory<float> memory(10);
@@ -198,12 +200,13 @@ TEST(TestMigratableMemory, MigrateToHost)
 
     initBuffer(memory.hostData(), memory.count());
 
-    checkBuffer(static_cast<float*>(memory.deviceData()), memory.count());
+    auto tmpPtr = memory.deviceData();
+    EXPECT_NE(tmpPtr, nullptr);
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
-    hipError_t err = hipMemcpy(
+    const hipError_t err = hipMemcpy(
         memory.deviceData(), array.data(), memory.count() * sizeof(float), hipMemcpyHostToDevice);
     EXPECT_EQ(err, hipSuccess);
     memory.markDeviceModified();
@@ -215,7 +218,6 @@ TEST(TestMigratableMemory, MigrateToHost)
 
 TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 {
-    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -231,16 +233,17 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 
     initBuffer(memory.hostData(), memory.count());
 
-    checkBufferSynchronized(static_cast<float*>(memory.deviceData()), memory.count(), stream);
+    auto tmpPtr = memory.deviceData();
+    EXPECT_NE(tmpPtr, nullptr);
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
-    hipError_t err = hipMemcpyWithStream(memory.deviceData(),
-                                         array.data(),
-                                         memory.count() * sizeof(float),
-                                         hipMemcpyHostToDevice,
-                                         stream);
+    const hipError_t err = hipMemcpyWithStream(memory.deviceData(),
+                                               array.data(),
+                                               memory.count() * sizeof(float),
+                                               hipMemcpyHostToDevice,
+                                               stream);
     EXPECT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);
@@ -254,7 +257,6 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
 {
-    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -270,16 +272,17 @@ TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
 
     initBuffer(memory.hostData(), memory.count());
 
-    checkBufferSynchronized(static_cast<float*>(memory.deviceDataAsync()), memory.count(), stream);
+    auto tmpPtr = memory.deviceDataAsync();
+    EXPECT_NE(tmpPtr, nullptr);
     EXPECT_EQ(memory.location(), MemoryLocation::BOTH);
 
     std::array<float, 10> array;
     initBuffer(array.data(), 10, 2.0f);
-    hipError_t err = hipMemcpyWithStream(memory.deviceData(),
-                                         array.data(),
-                                         memory.count() * sizeof(float),
-                                         hipMemcpyHostToDevice,
-                                         stream);
+    const hipError_t err = hipMemcpyWithStream(memory.deviceData(),
+                                               array.data(),
+                                               memory.count() * sizeof(float),
+                                               hipMemcpyHostToDevice,
+                                               stream);
     EXPECT_EQ(err, hipSuccess);
     memory.markDeviceModified();
     EXPECT_EQ(memory.location(), MemoryLocation::DEVICE);

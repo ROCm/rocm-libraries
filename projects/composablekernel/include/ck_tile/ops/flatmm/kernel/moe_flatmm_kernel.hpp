@@ -132,6 +132,7 @@ enum class MoeFlatmmKind
     kFFN_gemm1_gate_only,
     kFFN_gemm1_gate_up,
     kFFN_gemm2,
+    kFFN_gemm1_split_k,
 };
 
 namespace moe {
@@ -222,8 +223,10 @@ struct MoeFlatmmKernel
     static_assert(DsLayout::size() == DsDataType::size(),
                   "The size of DsLayout and DsDataType should be the same");
 
-    static constexpr bool IsInputGemm = kind != MoeFlatmmKind::kFFN_gemm2;
-    static constexpr bool IsGateUp    = kind == MoeFlatmmKind::kFFN_gemm1_gate_up;
+    static constexpr bool IsInputGemm   = kind != MoeFlatmmKind::kFFN_gemm2;
+    static constexpr bool IsGateUp      = kind == MoeFlatmmKind::kFFN_gemm1_gate_up;
+    static constexpr bool IsGemm1SplitK = kind == MoeFlatmmKind::kFFN_gemm1_split_k;
+    static constexpr bool IsBShuffled   = true;
 
     // static constexpr index_t kBlockSize     = EpiloguePipeline::kBlockSize;
     static constexpr index_t kMPerBlock     = EpiloguePipeline::kMPerBlock;
@@ -323,7 +326,7 @@ struct MoeFlatmmKernel
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         return concat(
-            '_', "moe_flatmm", gemm_prec_str<ADataType, BDataType>, FlatmmPipeline::GetName());
+            '_', "moe_flatmm", gemm_prec_str<ADataType, BDataType>(), FlatmmPipeline::GetName());
     }
 
     static constexpr auto BlockSize() -> dim3 { return dim3(kBlockSize); }
@@ -395,15 +398,6 @@ struct MoeFlatmmKernel
                 a_k_split_offset = k_id * KRead * kargs.stride_A;
             }
 
-            if constexpr(std::is_same_v<tensor_layout::gemm::RowMajor, BLayout>)
-            {
-                b_k_split_offset = k_id * KRead * kargs.stride_B;
-            }
-            else if constexpr(std::is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
-            {
-                b_k_split_offset = k_id * KRead;
-            }
-
             if(k_id < static_cast<uint32_t>(kargs.k_batch - 1))
             {
                 splitted_k = KRead;
@@ -411,6 +405,22 @@ struct MoeFlatmmKernel
             else
             {
                 splitted_k = kargs.K - KRead * (kargs.k_batch - 1);
+            }
+
+            if constexpr(IsBShuffled)
+            {
+                b_k_split_offset = k_id * splitted_k * NPerXdl;
+            }
+            else
+            {
+                if constexpr(std::is_same_v<tensor_layout::gemm::RowMajor, BLayout>)
+                {
+                    b_k_split_offset = k_id * KRead * kargs.stride_B;
+                }
+                else if constexpr(std::is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
+                {
+                    b_k_split_offset = k_id * KRead;
+                }
             }
         }
 
@@ -573,15 +583,16 @@ struct MoeFlatmmKernel
         return DTesnorIsValid;
     }
 
-    template <memory_operation_enum DstInMemOp = IsInputGemm ? memory_operation_enum::set
-                                                             : memory_operation_enum::atomic_add,
+    template <memory_operation_enum DstInMemOp = (IsInputGemm && !IsGemm1SplitK)
+                                                     ? memory_operation_enum::set
+                                                     : memory_operation_enum::atomic_add,
               typename KernelArgs>
     CK_TILE_DEVICE static auto
     MakeGemmTensorViews(const ADataType* a_ptr,
                         const BDataType* b_flat_ptr,
                         EDataType* e_ptr,
                         [[maybe_unused]] const AccDataType* exp_weight_ptr,
-                        const int expert_id,
+                        [[maybe_unused]] const int expert_id,
                         const KernelArgs& kargs,
                         const SplitKBatchOffset& splitk_batch_offset)
     {
@@ -742,13 +753,13 @@ struct MoeFlatmmKernel
             {
                 index_t scale_k =
                     BGranularityK == 0 ? 1 : (kargs.K + BGranularityK - 1) / BGranularityK;
+                const auto scale_k_offset =
+                    (splitk_batch_offset.b_k_split_offset / BGranularityK) * K_Pack;
                 index_t FlatScaleK = scale_k * N_Pack * BlockGemmShape::WarpTile::at(I1);
                 index_t FlatScaleN = kargs.N / N_Pack / BlockGemmShape::WarpTile::at(I1);
 
-                using ScaleType = e8m0_t;
-
                 return make_naive_tensor_view<address_space_enum::global>(
-                    reinterpret_cast<const ScaleType*>(scale_n.ptr) + expert_id * kargs.N * scale_k,
+                    scale_n.ptr + expert_id * kargs.N * scale_k + scale_k_offset,
                     make_tuple(FlatScaleN - kargs.n_padded_zeros / NPerXdl / N_Pack, FlatScaleK),
                     make_tuple(FlatScaleK, 1),
                     number<8>{},
@@ -890,16 +901,25 @@ struct MoeFlatmmKernel
     template <class MoeFlatmmKernelArgs>
     CK_TILE_DEVICE void operator()(MoeFlatmmKernelArgs kargs) const
     {
-        int partition_idx       = blockIdx.x;
-        int total_work_tile_cnt = TilePartitioner::GridSize(kargs.M, kargs.N);
+        // total number of tokens: sorted tokens + delimiter tokens + trailing padding tokens
+        // we launch the grid based on the total number of tokens which needs to be static
+        int partition_idx        = blockIdx.x;
+        auto max_token_id        = kargs.p_max_token_id[0]; // sorted tokens + delimiter tokens
+        int total_valid_tile_cnt = TilePartitioner::GridSize(max_token_id, kargs.N);
+        auto tilePartitioner     = TilePartitioner{max_token_id, kargs.N};
         do
         {
+            if(partition_idx >= total_valid_tile_cnt)
+            {
+                return; // early exit for trailing padding tokens
+            }
+            partition_idx = tilePartitioner.RemapXCD(partition_idx, total_valid_tile_cnt);
             const auto [block_offset_m, block_offset_n] =
-                TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(partition_idx);
+                tilePartitioner.GetOutputTileIndex(partition_idx);
 
             this->operator()(kargs, block_offset_m, block_offset_n);
             partition_idx += gridDim.x;
-        } while(UsePersistentKernel && partition_idx < total_work_tile_cnt);
+        } while(UsePersistentKernel && partition_idx < total_valid_tile_cnt);
     }
 
     template <class MoeFlatmmKernelArgs>
@@ -909,7 +929,6 @@ struct MoeFlatmmKernel
         // const auto [iM, iN]   = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockIdx.x);
         const index_t coord_m = __builtin_amdgcn_readfirstlane(iM * TilePartitioner::MPerBlock);
         const index_t coord_n = __builtin_amdgcn_readfirstlane(iN * TilePartitioner::NPerBlock);
-        const index_t max_token_id = kargs.p_max_token_id[0];
         // allocate LDS
         __shared__ char smem_ptr_ping[GetSmemPingSize()];
         __shared__ char smem_ptr_pong[GetSmemPongSize()];
@@ -937,8 +956,6 @@ struct MoeFlatmmKernel
             return gather_token_id;
         };
 
-        if(coord_m >= max_token_id)
-            return;
         static_for<0, DramMRepeat, 1>{}([&](auto m0) {
             const auto row_idx =
                 coord_m + m0 * (TilePartitioner::MPerBlock / DramMRepeat) + a_coord[I0];
@@ -1386,11 +1403,16 @@ struct MoeFlatmmKernel
                         if constexpr(!BMXFP4_Pipeline)
                             lds_tile[lds_stage].get_thread_buffer()[idx] *=
                                 epi_scale_m[idx] * epi_scale_n[idx];
-                        if constexpr(EnableBias)
-                            lds_tile[lds_stage].get_thread_buffer()[idx] += epi_exp_bias[idx];
-                        if constexpr(!IsInputGemm)
-                            lds_tile[lds_stage].get_thread_buffer()[idx] *= epi_exp_weight[idx];
-                        else // for mlp1 gate-only
+                        if(kind !=
+                           MoeFlatmmKind::kFFN_gemm1_split_k) // disable weight and bias for split-k
+                        {
+                            if constexpr(EnableBias)
+                                lds_tile[lds_stage].get_thread_buffer()[idx] += epi_exp_bias[idx];
+                            if constexpr(!IsInputGemm)
+                                lds_tile[lds_stage].get_thread_buffer()[idx] *= epi_exp_weight[idx];
+                        }
+                        if constexpr(kind ==
+                                     MoeFlatmmKind::kFFN_gemm1_gate_only) // for mlp1 gate-only
                             lds_tile[lds_stage].get_thread_buffer()[idx] =
                                 ActivationOp{}(lds_tile[lds_stage].get_thread_buffer()[idx]);
                     });
@@ -1460,7 +1482,8 @@ struct MoeFlatmmKernel
                                              c_scatter_valids[mIter]);
 
                 if constexpr(!IsInputGemm ||
-                             EpiloguePipeline::MemoryOperation == memory_operation_enum::atomic_add)
+                             decltype(c_block_window.get_bottom_tensor_view())::DstInMemOp ==
+                                 memory_operation_enum::atomic_add)
                     c_scatter_tile_window.update(c_out_tensor);
                 else
                     c_scatter_tile_window.store(c_out_tensor);

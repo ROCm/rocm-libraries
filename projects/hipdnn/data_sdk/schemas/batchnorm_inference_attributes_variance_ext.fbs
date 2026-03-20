@@ -15,4 +15,5 @@ table BatchnormInferenceAttributesVarianceExt {
     scale_tensor_uid: long;
     bias_tensor_uid: long;
     y_tensor_uid: long;
+    epsilon_tensor_uid: long;
 }

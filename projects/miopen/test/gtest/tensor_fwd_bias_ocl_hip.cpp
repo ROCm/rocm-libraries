@@ -86,7 +86,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-    size_t maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName()) / sizeof(T);
+    size_t maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
 
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available

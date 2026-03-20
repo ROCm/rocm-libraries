@@ -266,7 +266,7 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
             return this->stride < other.stride;
         }
 
-        bool operator==(const iodim& other)
+        bool operator==(const iodim& other) const
         {
             return this->length == other.length && this->stride == other.stride;
         }
@@ -962,7 +962,7 @@ static void PadStride(std::vector<size_t>&       stride,
     // to give us a number that doesn't make sense in that case.  but
     // if so, assume it's contiguous so that all the math works out.
     if(batch == 1)
-        dist = compute_ptrdiff(length, stride, 1, 1);
+        dist = compute_ptrdiff(length, stride);
 
     // sort lengths, treat batch dimension as another dim
     std::vector<LengthStrideSort<size_t>> cur;

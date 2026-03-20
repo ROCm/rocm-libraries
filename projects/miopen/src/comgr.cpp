@@ -525,17 +525,26 @@ static std::string GetLog(const Dataset& dataset, const bool comgr_error_handlin
         /// \todo Clarify API and update implementation.
         const auto count = dataset.GetDataCount(AMD_COMGR_DATA_KIND_LOG);
         if(count < 1)
-            return {comgr_error_handling ? "comgr warning: error log not found" : ""};
+        {
+            text = comgr_error_handling ? "comgr warning: error log not found" : "";
+            return text;
+        }
 
         const auto data = dataset.GetData(AMD_COMGR_DATA_KIND_LOG, 0);
         text            = data.GetString();
         if(text.empty())
-            return {comgr_error_handling ? "comgr info: error log empty" : ""};
+        {
+            text = comgr_error_handling ? "comgr info: error log empty" : "";
+            return text;
+        }
     }
     catch(ComgrError&)
     {
         if(comgr_error_handling)
-            return {"comgr error: failed to get error log"};
+        {
+            text = "comgr error: failed to get error log";
+            return text;
+        }
         // deepcode ignore EmptyThrowOutsideCatch: false positive
         throw;
         /// \anchor catch_and_rethrow_in_getlog
@@ -929,7 +938,7 @@ void BuildHip(const std::string& name,
 #endif
         opts.push_back("-D__HIP_PLATFORM_AMD__=1"); // Workaround?
         opts.push_back("-DHIP_PACKAGE_VERSION_FLAT=" + std::to_string(HIP_PACKAGE_VERSION_FLAT));
-        opts.push_back("-DMIOPEN_DONT_USE_HIP_RUNTIME_HEADERS");
+        opts.push_back("-DMIOPEN_HIP_RUNTIME_COMPILE");
 #if HIP_PACKAGE_VERSION_FLAT < 6001024000ULL && !defined(_WIN32)
         opts.push_back("-DWORKAROUND_DONT_USE_CUSTOM_LIMITS=1");
 #endif

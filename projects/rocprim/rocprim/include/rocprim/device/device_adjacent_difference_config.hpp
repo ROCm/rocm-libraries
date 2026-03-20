@@ -43,62 +43,33 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Specialization for user provided configuration
-template<typename AdjacentDifferenceConfig, bool InPlace, typename>
-struct wrapped_adjacent_difference_config
+template<bool InPlace, class Value>
+struct adjacent_difference_config_selector
 {
-    static_assert(
-        std::is_same<typename AdjacentDifferenceConfig::tag, adjacent_difference_config_tag>::value,
-        "Config must be a specialization of struct template adjacent_difference_config");
+    using targets = std::
+        conditional_t<InPlace, adjacent_difference_inplace_targets, adjacent_difference_targets>;
+    using param_type = adjacent_difference_config_params;
 
-    template<target_arch Arch>
-    struct architecture_config
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
     {
-        static constexpr adjacent_difference_config_params params = AdjacentDifferenceConfig{};
-    };
-};
+        // Different configs if it is inplace.
+        if constexpr(InPlace)
+        {
+            return adjacent_difference_inplace_config_picker<Target, Value>();
+        }
+        else
+        {
+            return adjacent_difference_config_picker<Target, Value>();
+        }
+    }
 
-// Specialization for selecting the default configuration for in place
-template<typename Value>
-struct wrapped_adjacent_difference_config<default_config, true, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr adjacent_difference_config_params params
-            = default_adjacent_difference_inplace_config<static_cast<unsigned int>(Arch), Value>{};
-    };
+    template<class Target>
+    constexpr adjacent_difference_config_selector(Target) : params(picker_helper<Target>())
+    {}
 };
-
-// Specialization for selecting the default configuration for out of place
-template<typename Value>
-struct wrapped_adjacent_difference_config<default_config, false, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr adjacent_difference_config_params params
-            = default_adjacent_difference_config<static_cast<unsigned int>(Arch), Value>{};
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class AdjacentDifferenceConfig, bool InPlace, class Value>
-template<target_arch Arch>
-constexpr adjacent_difference_config_params
-    wrapped_adjacent_difference_config<AdjacentDifferenceConfig, InPlace, Value>::
-        architecture_config<Arch>::params;
-template<class Value>
-template<target_arch Arch>
-constexpr adjacent_difference_config_params
-    wrapped_adjacent_difference_config<rocprim::default_config, true, Value>::architecture_config<
-        Arch>::params;
-template<class Value>
-template<target_arch Arch>
-constexpr adjacent_difference_config_params
-    wrapped_adjacent_difference_config<rocprim::default_config, false, Value>::architecture_config<
-        Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // namespace detail
 

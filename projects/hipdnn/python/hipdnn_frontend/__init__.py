@@ -40,11 +40,16 @@ __all__ = [
     "BatchnormForwardInferenceAttributes",
     "BatchnormBackwardAttributes",
     "PoolingForwardAttributes",
+    "MatmulAttributes",
     "DataType",
     "TensorLayout",
     "ConvolutionMode",
     "ActivationMode",
     "PoolingMode",
     "BatchnormMode",
-    # Add other exported symbols as needed
+    "Handle",
+    "create_handle",
+    "destroy_handle",
+    "set_stream",
+    "get_stream",
 ]

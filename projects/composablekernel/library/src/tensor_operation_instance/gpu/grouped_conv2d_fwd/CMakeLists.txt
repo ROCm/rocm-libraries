@@ -5,6 +5,8 @@
 set(GROUPED_CONV2D_FWD
    #xdl
    # GNHWC, GKYXC, GNHWK
+   xdl/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_nongroup_ported_f16_instance.cpp
+   xdl/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_nongroup_ported_bf16_instance.cpp
    xdl/device_grouped_conv2d_fwd_xdl_gnhwc_gkyxc_gnhwk_bf16_instance.cpp
    xdl/device_grouped_conv2d_fwd_xdl_gnhwc_gkyxc_gnhwk_f16_instance.cpp
    xdl/device_grouped_conv2d_fwd_xdl_gnhwc_gkyxc_gnhwk_f32_instance.cpp
@@ -125,6 +127,8 @@ set(GROUPED_CONV2D_FWD
   wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_f16_instance_part4.cpp
   wmma/large_tensor/device_grouped_conv2d_fwd_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
   wmma/large_tensor/device_grouped_conv2d_fwd_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_f16_instance.cpp
+  wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_wave_transfer_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
+  wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_wave_transfer_nhwgc_gkyxc_nhwgk_f16_instance.cpp
 )
 # Add generated files for sharded instantiations.
 include(ShardInstantiation)

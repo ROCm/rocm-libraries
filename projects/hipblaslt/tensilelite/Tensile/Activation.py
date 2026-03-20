@@ -173,6 +173,9 @@ class ActivationType:
                           ('dgelu', { \
                             'instance': ActivationTypeRegister('dgelu', True, 0,       False,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
+                          ('drelu', { \
+                            'instance': ActivationTypeRegister('drelu', True, 0,       False,  True, False,   False, False, False, False), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('geluscaling', { \
                             'instance': ActivationTypeRegister('geluscaling', False, 1, True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE}), \
@@ -371,6 +374,8 @@ class ActivationModule:
             module = self.getTanhModule(cDataType, vgprIn, vgprOut, "activationAlpha", "activationBeta")
         elif (activationType == 'dgelu'):
             module = self.getDGeluModule(cDataType, vgprIn, vgprOut)
+        elif (activationType == 'drelu'):
+            module = self.getDReluModule(cDataType, vgprIn, vgprOut)    
         elif (activationType == 'silu'):
             module = self.getSiluModule(cDataType, vgprIn, vgprOut)
         elif (activationType == 'swish'):
@@ -843,6 +848,17 @@ class ActivationModule:
             module.add(VMulF32(dst=self.vgprPrefix(vgprOut), src0=hex(coef.u), src1=self.vgprPrefix(vgprOut), comment="out = 4 * out"))
             module.add(VFmaF32(dst=self.vgprPrefix(vgprOut), src0=self.vgprPrefix(vgprOut), src1=vgpr(Holder(idx=vgprTemp2)), src2=vgpr(Holder(idx=vgprTemp1)), comment="out = out * tmp2 + tmp1"))
             module.add(VAddF32(dst=self.vgprPrefix(vgprOut), src0=0.5, src1=self.vgprPrefix(vgprOut), comment="out = out + 0.5"))
+        else:
+            raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
+        return module
+    
+    def getDReluModule(self, cDataType, vgprIn, vgprOut):
+        ti = rocIsa.getInstance()
+        self.needCombine = True
+        module = Module("Gradient Relu")
+        if cDataType.isSingle():
+            module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0.0, comment=" VCC = (x > 0) ? 1 : 0" ))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0.0, src1=1.0, src2=VCC(), comment=" y = VCC ? 1.0 : 0.0" ))
         else:
             raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
         return module
@@ -1393,6 +1409,11 @@ class ActivationInline:
       kStr += addSpace(asm, ": \"+v\"(value) : \n")
       needExec = True if self.enableGuard else False
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter, needExec=needExec)
+    elif (activationType == 'drelu'):
+      if (self.dataType.isSingle()):
+        kStr += (padSpacesStr + "value = (value > 0.0f) ? 1.0f : 0.0f;\n")
+      else:
+        raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'silu'):
       kStr += (asm + " // Silu\n")
       module = activation.getSiluModule(self.dataType, 0, 0)

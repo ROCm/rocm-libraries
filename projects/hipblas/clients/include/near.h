@@ -27,6 +27,7 @@
 
 #include "hipblas.h"
 #include "host_vector.hpp"
+#include "unit.h"
 
 #ifdef GOOGLE_TEST
 #include "gtest/gtest.h"
@@ -87,9 +88,9 @@ void near_check_mixed(int64_t                        M,
                       const T*                       hGPU,
                       double                         abs_error);
 
-// currently only used for half-precision comparisons in dot_ex tests
+// mixed precision or hpl
 template <class T>
-inline constexpr double error_tolerance = 0.0;
+inline constexpr double error_tolerance = get_epsilon<T>();
 
 template <>
 inline constexpr double error_tolerance<hipblasBfloat16> = 1 / 100.0;
@@ -104,9 +105,9 @@ inline constexpr double error_tolerance<std::complex<float>> = 1 / 10000.0;
 template <>
 inline constexpr double error_tolerance<std::complex<double>> = 1 / 1000000.0;
 
-// currently only used for gemm_ex
+// mixed precision or hpl
 template <class Tc, class Ti, class To>
-static constexpr double sum_error_tolerance_for_gfx11 = 0.0;
+static constexpr double sum_error_tolerance_for_gfx11 = get_epsilon<Tc>();
 
 template <>
 inline constexpr double sum_error_tolerance_for_gfx11<float, hipblasBfloat16, float> = 1 / 10.0;

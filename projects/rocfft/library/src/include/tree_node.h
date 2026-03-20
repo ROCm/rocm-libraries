@@ -27,12 +27,13 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
+#include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
-#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "callback_map.h"
@@ -97,6 +98,10 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx1100",
                                                        "gfx1101",
                                                        "gfx1102",
+                                                       "gfx1150",
+                                                       "gfx1151",
+                                                       "gfx1152",
+                                                       "gfx1153",
                                                        "gfx1200",
                                                        "gfx1201"};
 
@@ -159,11 +164,11 @@ struct SchemeTree
 
 using SchemeTreeVec = std::vector<std::unique_ptr<SchemeTree>>;
 
-static SchemeTreeVec EmptySchemeTreeVec = {};
+extern SchemeTreeVec EmptySchemeTreeVec;
 
 using SchemeVec = std::vector<ComputeScheme>;
 
-static SchemeVec EmptySchemeVec = {};
+extern SchemeVec EmptySchemeVec;
 
 class TreeNode;
 class LeafNode;
@@ -389,14 +394,16 @@ public:
 
     // Device pointers:
     // twiddle memory is owned by the repo
-    void*            twiddles            = nullptr;
-    size_t           twiddles_size       = 0;
-    void*            twiddles_large      = nullptr;
-    size_t           twiddles_large_size = 0;
-    void*            twiddles_pp         = nullptr;
-    size_t           twiddles_pp_size    = 0;
-    void*            chirp               = nullptr;
-    size_t           chirp_size          = 0;
+    void*            twiddles              = nullptr;
+    size_t           twiddles_size         = 0;
+    void*            twiddles_off_dim      = nullptr;
+    size_t           twiddles_off_dim_size = 0;
+    void*            twiddles_large        = nullptr;
+    size_t           twiddles_large_size   = 0;
+    void*            twiddles_pp           = nullptr;
+    size_t           twiddles_pp_size      = 0;
+    void*            chirp                 = nullptr;
+    size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
     // callback parameters
@@ -832,6 +839,15 @@ struct rocfft_location_t
     bool operator==(const rocfft_location_t& other) const
     {
         return comm_rank == other.comm_rank && device == other.device;
+    }
+
+    std::string str() const
+    {
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
     }
 
     int comm_rank = 0;

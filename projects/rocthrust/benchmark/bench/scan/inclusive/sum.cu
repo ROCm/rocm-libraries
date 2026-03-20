@@ -93,34 +93,37 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
   state.counters["gpu_noise"] = gpu_cv;
 }
 
-#define CREATE_BENCHMARK(T, Elements)                                                      \
-  benchmark::RegisterBenchmark(                                                            \
-    bench_utils::bench_naming::format_name(                                                \
-      "{algo:inclusive_scan,subalgo:" + name + ",input_type:" #T + ",elements:" #Elements) \
-      .c_str(),                                                                            \
-    run_benchmark<Benchmark, T>,                                                           \
-    Elements,                                                                              \
+#define CREATE_BENCHMARK(T, Elements)                                                                                 \
+  benchmark::RegisterBenchmark(                                                                                       \
+    bench_utils::bench_naming::format_name(                                                                           \
+      "{algo:inclusive_scan,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements)) \
+      .c_str(),                                                                                                       \
+    run_benchmark<Benchmark, T>,                                                                                      \
+    Elements,                                                                                                         \
     seed_type)
 
-#define BENCHMARK_TYPE(type)                                                                         \
-  CREATE_BENCHMARK(type, 1 << 16), CREATE_BENCHMARK(type, 1 << 20), CREATE_BENCHMARK(type, 1 << 24), \
-    CREATE_BENCHMARK(type, 1 << 28)
+#define BENCHMARK_TYPE(type)                                               \
+  for (size_t size : bench_utils::sizes)                                   \
+  {                                                                        \
+    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
+      bs.push_back(CREATE_BENCHMARK(type, size));                          \
+  }
 
 template <class Benchmark>
 void add_benchmarks(
   const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs = {
-    BENCHMARK_TYPE(int8_t),
-    BENCHMARK_TYPE(int16_t),
-    BENCHMARK_TYPE(int32_t),
-    BENCHMARK_TYPE(int64_t),
+  std::vector<benchmark::internal::Benchmark*> bs;
+  BENCHMARK_TYPE(int8_t)
+  BENCHMARK_TYPE(int16_t)
+  BENCHMARK_TYPE(int32_t)
+  BENCHMARK_TYPE(int64_t)
 #if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-    BENCHMARK_TYPE(int128_t),
+  BENCHMARK_TYPE(int128_t)
 #endif
-    BENCHMARK_TYPE(float32_t),
-    BENCHMARK_TYPE(float64_t)
-  };
+  BENCHMARK_TYPE(float32_t)
+  BENCHMARK_TYPE(float64_t)
+
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
