@@ -269,6 +269,35 @@ public:
             }
         }
 
+        // Infer normalized dimension count if not available
+        if(attributes.get_normalized_dim_count() <= 0)
+        {
+            if(attributes.get_x()->get_dim().size()
+               == attributes.get_scale()
+                      ->get_dim()
+                      .size()) // Dimensions not used by scale have been set to 1
+            {
+                int64_t normalizedDimCount = 1;
+                for(int64_t i = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - 1;
+                    i >= 0;
+                    --i)
+                {
+                    if(attributes.get_scale()->get_dim()[static_cast<size_t>(i)] == 1)
+                    {
+                        break;
+                    }
+                    normalizedDimCount
+                        = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - i;
+                }
+                attributes.set_normalized_dim_count(normalizedDimCount);
+            }
+            else // Dimensions not used by scale have been omitted
+            {
+                attributes.set_normalized_dim_count(
+                    static_cast<int64_t>(attributes.get_scale()->get_dim().size()));
+            }
+        }
+
         return {};
     }
 

@@ -18,45 +18,45 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestConvolutionWrwSignatureKey, EqualityOperator)
 {
-    ConvolutionWrwSignatureKey const key1{
+    const ConvolutionWrwSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const key2{
+    const ConvolutionWrwSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    ConvolutionWrwSignatureKey const key3{
+    const ConvolutionWrwSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const key4{
+    const ConvolutionWrwSignatureKey key4{
         DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    ConvolutionWrwSignatureKey const key5{
+    const ConvolutionWrwSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const key6{
+    const ConvolutionWrwSignatureKey key6{
         DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    ConvolutionWrwSignatureKey const key7{
+    const ConvolutionWrwSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const key8{
+    const ConvolutionWrwSignatureKey key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 }
 
 TEST(TestConvolutionWrwSignatureKey, HashFunction)
 {
-    ConvolutionWrwSignatureKey const key1{
+    const ConvolutionWrwSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const key2{
+    const ConvolutionWrwSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    ConvolutionWrwSignatureKey const key3{
+    const ConvolutionWrwSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    ConvolutionWrwSignatureKey const key4{
+    const ConvolutionWrwSignatureKey key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const key5{
+    const ConvolutionWrwSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
     auto hash3 = key3.hashSelf();
@@ -68,9 +68,9 @@ TEST(TestConvolutionWrwSignatureKey, HashFunction)
 
 TEST(TestConvolutionWrwSignatureKey, Copy)
 {
-    ConvolutionWrwSignatureKey const original{
+    const ConvolutionWrwSignatureKey original{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    ConvolutionWrwSignatureKey const copied{original};
+    const ConvolutionWrwSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
@@ -81,11 +81,11 @@ TEST(TestConvolutionWrwSignatureKey, Copy)
 
 TEST(TestConvolutionWrwSignatureKey, CreateFromNodeAndTensorMap)
 {
-    ConvolutionWrwSignatureKey const expectedKey{
+    const ConvolutionWrwSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> const xDims = {1, 1, 2, 2};
-    std::vector<int64_t> const dwDims = {1, 1, 1, 1};
-    std::vector<int64_t> const dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dwDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
     ConvolutionWrwTensorBundle<float> tensorBundle(xDims, dwDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -97,7 +97,7 @@ TEST(TestConvolutionWrwSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    ConvolutionWrwSignatureKey const keyFromNode(
+    const ConvolutionWrwSignatureKey keyFromNode(
         graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 
     EXPECT_TRUE(keyFromNode == expectedKey);
