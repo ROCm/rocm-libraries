@@ -24,10 +24,8 @@
  *
  *******************************************************************************/
 
-#include <set>
-
 #include "contraction_solution.hpp"
-#include "util.hpp"
+#include "hiptensor_options.hpp"
 
 namespace hiptensor
 {

@@ -10,6 +10,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -102,7 +103,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
+        // Use dynamic tolerance calculation instead of static tolerance
+        auto tolerance = hipdnn_test_sdk::utilities::conv::
+            calculateConvFpropTolerance<InputType, InputType, float>(
+                0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
 
         auto yValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);

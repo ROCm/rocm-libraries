@@ -73,9 +73,11 @@ struct BatchnormBwdSignatureKey
         if(nodeAttributes->mean_tensor_uid().has_value()
            && nodeAttributes->inv_variance_tensor_uid().has_value())
         {
+            // NOLINTBEGIN(bugprone-unchecked-optional-access)
             auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
             auto invVarianceTensorAttr
                 = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
+            // NOLINTEND(bugprone-unchecked-optional-access)
 
             if(meanTensorAttr->data_type() != invVarianceTensorAttr->data_type())
             {

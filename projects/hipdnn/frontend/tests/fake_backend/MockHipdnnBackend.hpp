@@ -69,6 +69,11 @@ public:
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
                 ());
+    MOCK_METHOD(
+        hipdnnStatus_t,
+        getLoadedEnginePluginPathsExt,
+        (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
+        ());
 };
 
 // NOLINTEND

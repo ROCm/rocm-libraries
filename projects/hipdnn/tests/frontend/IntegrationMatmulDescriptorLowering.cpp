@@ -192,7 +192,7 @@ TEST_F(IntegrationMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip
     b->set_name("B").set_data_type(DataType::FLOAT);
     b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
-    MatmulAttributes matmulAttrs;
+    const MatmulAttributes matmulAttrs;
 
     auto c = graph->matmul(a, b, matmulAttrs);
     c->set_output(true);
@@ -241,7 +241,7 @@ TEST_F(IntegrationMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip
         << "C tensor UID " << matmul->c_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {matmul->a_tensor_uid, matmul->b_tensor_uid, matmul->c_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Matmul node tensor UIDs are not distinct";
 }

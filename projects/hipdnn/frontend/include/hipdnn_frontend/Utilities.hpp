@@ -43,7 +43,7 @@ namespace hipdnn_frontend
             std::array<char, 1024> backend_err_msg{};                                             \
             hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),  \
                                                                          backend_err_msg.size()); \
-            std::string full_error_msg                                                            \
+            const std::string full_error_msg                                                      \
                 = std::string(error_message) + " Backend error: " + backend_err_msg.data();       \
             return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                        \
         }                                                                                         \
@@ -117,6 +117,21 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
                                              const std::vector<int64_t>& strides)
 {
     return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
+}
+
+/**
+ * @brief Create TensorAttributes from a single constant value
+ *
+ * The data type will be set from the type of the value. Useful for tensors that contain single constants, for example an epsilon.
+ *
+ * @param name Human-readable name for debugging and serialization
+ * @param value Constant value to be inserted into the tensor
+ * @return Configured TensorAttributes ready to pass to Graph operations
+ */
+template <typename T>
+inline TensorAttributes makeTensorAttributes(const std::string& name, const T value)
+{
+    return TensorAttributes().set_name(name).set_value(value);
 }
 
 /**

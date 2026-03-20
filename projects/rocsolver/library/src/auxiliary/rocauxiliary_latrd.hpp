@@ -34,10 +34,13 @@
 
 #include "../auxiliary/rocauxiliary_lacgv.hpp"
 #include "../auxiliary/rocauxiliary_larfg.hpp"
+#include "asan_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
+
+static constexpr int LATRD_DOT_THREADS = ROCSOLVER_ASAN_VALUE(256, 1024);
 
 template <int MAX_THDS, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n,
@@ -303,9 +306,9 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
             rocblasCall_scal<T>(handle, n - j - 1, (tau + j), strideP, W,
                                 shiftW + idx2D(j + 1, j, ldw), 1, strideW, batch_count);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
-                                    dim3(1024, 1, 1), 0, stream, n - 1 - j, A,
-                                    shiftA + idx2D(j + 1, j, lda), strideA, W,
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<LATRD_DOT_THREADS, T>),
+                                    dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0,
+                                    stream, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
                                     shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
         }
     }
@@ -385,10 +388,10 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
             rocblasCall_scal<T>(handle, j, (tau + j - 1), strideP, W, shiftW + idx2D(0, jw, ldw), 1,
                                 strideW, batch_count);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
-                                    dim3(1024, 1, 1), 0, stream, j, A, shiftA + idx2D(0, j, lda),
-                                    strideA, W, shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1,
-                                    strideP);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<LATRD_DOT_THREADS, T>),
+                                    dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0,
+                                    stream, j, A, shiftA + idx2D(0, j, lda), strideA, W,
+                                    shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP);
         }
     }
 
