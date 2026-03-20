@@ -30,7 +30,7 @@ namespace hipdnn_integration_tests {
 // which uses default tolerance for all graphs besides batch norm backwards
 // operating on bfloat16 where it returns a wider tolerance.
 enum class ToleranceMode {
-    Default,
+    DEFAULT,
 };
 
 // Singleton class for reading test configuration from JSON file.
@@ -38,8 +38,8 @@ class TestConfig {
    public:
     // Get singleton instance
     static TestConfig& get() {
-        static TestConfig instance;
-        return instance;
+        static TestConfig s_instance;
+        return s_instance;
     }
 
     TestConfig(const TestConfig&) = delete;
@@ -59,13 +59,13 @@ class TestConfig {
         if (auto it = _engineTolerances.find(engineName); it != _engineTolerances.end()) {
             return it->second;
         }
-        return ToleranceMode::Default;
+        return ToleranceMode::DEFAULT;
     }
 
     // Check if a full GTest test name is in the expected failures list.
     // Test name format: "TestSuite/Prefix.TestName/ParamName"
     bool isExpectedFailure(const std::string& testName) {
-        return _expectedFailures.count(testName) > 0;
+        return _expectedFailures.contains(testName);
     }
 
     // Get expected plugin names from config (e.g., {"fusilli_plugin",
@@ -83,7 +83,7 @@ class TestConfig {
         }
 
         // Parse config
-        std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
+        const std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
         std::ifstream configFile(configPath);
         if (!configFile.is_open()) {
             throw std::runtime_error("Failed to open config file: " + configPath.string());
@@ -113,7 +113,7 @@ class TestConfig {
                     if (engineConfig.contains("tolerance")) {
                         auto val = engineConfig["tolerance"].get<std::string>();
                         if (val == "default") {
-                            _engineTolerances[engineName] = ToleranceMode::Default;
+                            _engineTolerances[engineName] = ToleranceMode::DEFAULT;
                         } else {
                             throw std::runtime_error("Unknown tolerance mode: " + val);
                         }

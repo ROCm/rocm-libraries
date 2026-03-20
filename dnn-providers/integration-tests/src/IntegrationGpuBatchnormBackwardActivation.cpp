@@ -49,7 +49,7 @@ class BatchnormBackwardActivation
                                                             const BnBwdActivTestCase& tc) {
         const auto& [layout, bnTestCase, activTestCase] = tc;
         auto dims = bnTestCase.dims;
-        std::vector<int64_t> channelDims = getDerivedShape(dims);
+        const std::vector<int64_t> channelDims = getDerivedShape(dims);
 
         graph::Graph graphObj;
         graphObj.set_name("BatchnormBackwardActivationTest");
@@ -91,7 +91,7 @@ class BatchnormBackwardActivation
             std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
 
         // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
-        graph::BatchnormInferenceAttributes bnInfAttrs;
+        const graph::BatchnormInferenceAttributes bnInfAttrs;
 
         auto bnY = graphObj.batchnorm_inference(xTensorAttr, meanTensorAttr, invVarianceTensorAttr,
                                                 scaleTensorAttr, biasTensorAttr, bnInfAttrs);
@@ -215,21 +215,21 @@ TEST_P(IntegrationGpuBatchnormBackwardActivation2dFp32, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke, IntegrationGpuBatchnormBackwardActivation2dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp32,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp32,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
         testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 INSTANTIATE_TEST_SUITE_P(
     Full, IntegrationGpuBatchnormBackwardActivation2dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp32,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp32,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
         testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 // 2D tests - Bfp16
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation2dBfp16);
@@ -239,21 +239,21 @@ TEST_P(IntegrationGpuBatchnormBackwardActivation2dBfp16, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke, IntegrationGpuBatchnormBackwardActivation2dBfp16,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dBfp16,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dBfp16,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
         testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 INSTANTIATE_TEST_SUITE_P(
     Full, IntegrationGpuBatchnormBackwardActivation2dBfp16,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dBfp16,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dBfp16,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
         testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 // 2D tests - Fp16
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation2dFp16);
@@ -263,21 +263,21 @@ TEST_P(IntegrationGpuBatchnormBackwardActivation2dFp16, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke, IntegrationGpuBatchnormBackwardActivation2dFp16,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp16,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp16,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
         testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 INSTANTIATE_TEST_SUITE_P(
     Full, IntegrationGpuBatchnormBackwardActivation2dFp16,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp16,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation2dFp16,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
         testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 // 3D tests - Fp32
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation3dFp32);
@@ -287,12 +287,12 @@ TEST_P(IntegrationGpuBatchnormBackwardActivation3dFp32, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke, IntegrationGpuBatchnormBackwardActivation3dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation3dFp32,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation3dFp32,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
         testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 // 3D tests - Bfp16
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation3dBfp16);
@@ -302,12 +302,12 @@ TEST_P(IntegrationGpuBatchnormBackwardActivation3dBfp16, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke, IntegrationGpuBatchnormBackwardActivation3dBfp16,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation3dBfp16,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation3dBfp16,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
         testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);
 
 // 3D tests - Fp16
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation3dFp16);
@@ -317,9 +317,9 @@ TEST_P(IntegrationGpuBatchnormBackwardActivation3dFp16, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke, IntegrationGpuBatchnormBackwardActivation3dFp16,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation3dFp16,
+    testing::ValuesIn(buildEngineTestMatrix<IntegrationGpuBatchnormBackwardActivation3dFp16,
                                             BnBwdActivTestCase>(testing::Combine(
         testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
         testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
         testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())))),
-    EngineTestNameGenerator<BnBwdActivTestCase>);
+    engineTestNameGenerator<BnBwdActivTestCase>);

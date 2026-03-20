@@ -65,7 +65,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
                        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output) {
         ToleranceMode mode = TestConfig::get().getToleranceMode(engineId);
 
-        if (mode == ToleranceMode::Default) {
+        if (mode == ToleranceMode::DEFAULT) {
             // We determine the tolerance based on the last non-PointwiseNode
             // (the root op). This will be gradually updated to use dynamic
             // calculation as possible; eventually, the tolerance will be

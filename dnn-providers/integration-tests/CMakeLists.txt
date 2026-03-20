@@ -7,6 +7,22 @@ project(hipdnn-integration-tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+
+if(WIN32)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+    if(ENABLE_CLANG_TIDY)
+        message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
+    endif()
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+    if(NOT ENABLE_CLANG_TIDY)
+        message(WARNING "Clang-Tidy checks are disabled. CI requires passing clang-tidy checks.")
+    endif()
+endif()
+
+include(ClangTidy)
+
 find_package(hip REQUIRED)
 find_package(hipdnn_test_sdk REQUIRED)
 find_package(hipdnn_plugin_sdk REQUIRED)
@@ -43,6 +59,8 @@ target_link_libraries(hipdnn_integration_tests
         nlohmann_json::nlohmann_json
 )
 
+clang_tidy_check(hipdnn_integration_tests)
+
 include(GNUInstallDirs)
 install(TARGETS hipdnn_integration_tests
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -63,3 +81,5 @@ install(
     DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_test_infra"
     RENAME CTestTestfile.cmake
 )
+
+add_clang_tidy_custom_target()

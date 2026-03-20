@@ -14,7 +14,7 @@ using namespace hipdnn_frontend::graph;
 
 namespace {
 
-constexpr int kIterations = 1000;
+constexpr int K_ITERATIONS = 1000;
 
 class IntegrationIsSupportedExtPerformance : public ::testing::Test {
    protected:
@@ -40,28 +40,28 @@ class IntegrationIsSupportedExtPerformance : public ::testing::Test {
         return graph;
     }
 
-    hipdnnHandle_t handle_ = hipdnn_integration_tests::getSharedHandle();
+    hipdnnHandle_t _handle = hipdnn_integration_tests::getSharedHandle();
 };
 
 TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold) {
     auto const start = std::chrono::steady_clock::now();
 
-    for (int i = 0; i < kIterations; ++i) {
+    for (int i = 0; i < K_ITERATIONS; ++i) {
         Graph graph = createSimplePointwiseGraph();
-        auto result = graph.is_supported_ext(handle_);
+        auto result = graph.is_supported_ext(_handle);
         ASSERT_TRUE(result.is_good()) << "Iteration " << i << ": " << result.get_message();
     }
 
     auto const end = std::chrono::steady_clock::now();
     auto const elapsed = std::chrono::duration<double>(end - start);
     auto const avgUs =
-        std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / kIterations;
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / K_ITERATIONS;
 
     std::cout << "[  PERF   ] Cold is_supported_ext: " << elapsed.count() << "s total, " << avgUs
-              << "us avg per call (" << kIterations << " iterations)" << std::endl;
+              << "us avg per call (" << K_ITERATIONS << " iterations)" << '\n';
 
     EXPECT_LT(elapsed.count(), 10.0) << "Cold is_supported_ext took " << elapsed.count() << "s for "
-                                     << kIterations << " iterations (threshold: 10s)";
+                                     << K_ITERATIONS << " iterations (threshold: 10s)";
 }
 
 TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold) {
@@ -70,26 +70,26 @@ TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold) {
     auto result = graph.validate();
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
-    result = graph.build_operation_graph(handle_);
+    result = graph.build_operation_graph(_handle);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto const start = std::chrono::steady_clock::now();
 
-    for (int i = 0; i < kIterations; ++i) {
-        result = graph.is_supported_ext(handle_);
+    for (int i = 0; i < K_ITERATIONS; ++i) {
+        result = graph.is_supported_ext(_handle);
         ASSERT_TRUE(result.is_good()) << "Iteration " << i << ": " << result.get_message();
     }
 
     auto const end = std::chrono::steady_clock::now();
     auto const elapsed = std::chrono::duration<double>(end - start);
     auto const avgNs =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / kIterations;
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / K_ITERATIONS;
 
     std::cout << "[  PERF   ] Hot is_supported_ext: " << elapsed.count() << "s total, " << avgNs
-              << "ns avg per call (" << kIterations << " iterations)" << std::endl;
+              << "ns avg per call (" << K_ITERATIONS << " iterations)" << '\n';
 
     EXPECT_LT(elapsed.count(), 1.0) << "Hot is_supported_ext took " << elapsed.count() << "s for "
-                                    << kIterations << " iterations (threshold: 1s)";
+                                    << K_ITERATIONS << " iterations (threshold: 1s)";
 }
 
 }  // namespace

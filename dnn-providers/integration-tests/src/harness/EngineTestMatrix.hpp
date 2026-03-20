@@ -28,7 +28,7 @@ struct EngineTestCase {
 // Produces names like "Fusilli_0", "MIOpen_1", etc.
 // Falls back to numeric ID if engine name isn't registered.
 template <typename TestCase>
-std::string EngineTestNameGenerator(const testing::TestParamInfo<EngineTestCase<TestCase>>& info) {
+std::string engineTestNameGenerator(const testing::TestParamInfo<EngineTestCase<TestCase>>& info) {
     std::string engineName;
     try {
         engineName = std::string(utilities::getEngineNameFromId(info.param.engineId));
@@ -45,19 +45,19 @@ std::string EngineTestNameGenerator(const testing::TestParamInfo<EngineTestCase<
 //
 // Usage:
 //   INSTANTIATE_TEST_SUITE_P(Smoke, MyFixture,
-//       testing::ValuesIn(BuildEngineTestMatrix<MyFixture, TestCaseType>(
+//       testing::ValuesIn(buildEngineTestMatrix<MyFixture, TestCaseType>(
 //           testing::Combine(
 //               testing::Values(TensorLayout::NCHW),
 //               testing::ValuesIn(getTestCases())))),
-//       EngineTestNameGenerator<TestCaseType>);
+//       engineTestNameGenerator<TestCaseType>);
 //
 // Requirements:
 //   FixtureClass must provide:
 //     static std::pair<graph::Graph, GraphOutputs> buildGraph(
 //         hipdnnHandle_t handle, const TestCase& tc);
 template <typename FixtureClass, typename TestCase>
-std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
-    testing::internal::ParamGenerator<TestCase> testCaseGen) {
+std::vector<EngineTestCase<TestCase>> buildEngineTestMatrix(
+    const testing::internal::ParamGenerator<TestCase>& testCaseGen) {
     std::vector<EngineTestCase<TestCase>> result;
     hipdnnHandle_t handle = getSharedHandle();
 
@@ -78,7 +78,7 @@ std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
             continue;
         }
 
-        for (int64_t engineId : engineIds) {
+        for (const int64_t engineId : engineIds) {
             result.push_back(EngineTestCase<TestCase>{engineId, testCase});
         }
     }

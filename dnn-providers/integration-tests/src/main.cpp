@@ -25,7 +25,10 @@ std::set<std::string> getLoadedPluginNames(hipdnnHandle_t handle) {
     std::set<std::string> pluginNames;
     for (size_t i = 0; i < numEngines; ++i) {
         // Two-call pattern: query required buffer sizes
-        size_t engineNameLen = 0, pluginNameLen = 0, versionLen = 0, typeLen = 0;
+        size_t engineNameLen = 0;
+        size_t pluginNameLen = 0;
+        size_t versionLen = 0;
+        size_t typeLen = 0;
         int64_t engineId = 0;
         hipdnnGetEngineInfo_ext(handle, i, &engineId, nullptr, &engineNameLen, nullptr,
                                 &pluginNameLen, nullptr, &versionLen, nullptr, &typeLen);
@@ -65,48 +68,53 @@ std::string formatPluginSet(const std::set<std::string>& plugins) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
+int main(int argc, char** argv) noexcept {
+    try {
+        ::testing::InitGoogleTest(&argc, argv);
 
-    // Initialize test logging infrastructure to forward logs to std::cerr based
-    // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
-    auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
+        // Initialize test logging infrastructure to forward logs to std::cerr based
+        // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
+        auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
 
-    // Initialize plugin logger with test recording callback so that plugin logs
-    // are routed to the log recorder for capture.
-    hipdnn_plugin_sdk::logging::initializeCallbackLogging("hipdnn_integration_tests",
-                                                          recordingCallback);
+        // Initialize plugin logger with test recording callback so that plugin logs
+        // are routed to the log recorder for capture.
+        hipdnn_plugin_sdk::logging::initializeCallbackLogging("hipdnn_integration_tests",
+                                                              recordingCallback);
 
-    // Register HipErrorHandler to check and clear HIP errors after each test
-    testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
-    listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
+        // Register HipErrorHandler to check and clear HIP errors after each test
+        testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
+        listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
-    // Set stream on shared handle
-    auto handle = hipdnn_integration_tests::getSharedHandle();
-    hipStream_t stream;
-    if (hipStreamCreate(&stream) != hipSuccess) {
-        std::cerr << "Failed to create HIP stream" << std::endl;
+        // Set stream on shared handle
+        auto handle = hipdnn_integration_tests::getSharedHandle();
+        hipStream_t stream;
+        if (hipStreamCreate(&stream) != hipSuccess) {
+            std::cerr << "Failed to create HIP stream\n";
+            return 1;
+        }
+        if (hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS) {
+            std::cerr << "Failed to set stream on shared handle\n";
+            return 1;
+        }
+
+        // Verify loaded plugins match expected plugins
+        auto expectedPlugins = hipdnn_integration_tests::TestConfig::get().getExpectedPluginNames();
+        auto loadedPlugins = getLoadedPluginNames(handle);
+        if (expectedPlugins != loadedPlugins) {
+            std::cerr << "Plugin mismatch!\n"
+                      << "  Expected: " << formatPluginSet(expectedPlugins) << "\n"
+                      << "  Loaded:   " << formatPluginSet(loadedPlugins) << '\n';
+            return 1;
+        }
+
+        const int result = RUN_ALL_TESTS();
+
+        // Clean up shared handle and stream
+        hipStreamDestroy(stream);
+        hipdnnDestroy(handle);
+        return result;
+    } catch (const std::exception& e) {
+        std::cerr << "Fatal error: " << e.what() << '\n';
         return 1;
     }
-    if (hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS) {
-        std::cerr << "Failed to set stream on shared handle" << std::endl;
-        return 1;
-    }
-
-    // Verify loaded plugins match expected plugins
-    auto expectedPlugins = hipdnn_integration_tests::TestConfig::get().getExpectedPluginNames();
-    auto loadedPlugins = getLoadedPluginNames(handle);
-    if (expectedPlugins != loadedPlugins) {
-        std::cerr << "Plugin mismatch!\n"
-                  << "  Expected: " << formatPluginSet(expectedPlugins) << "\n"
-                  << "  Loaded:   " << formatPluginSet(loadedPlugins) << std::endl;
-        return 1;
-    }
-
-    int result = RUN_ALL_TESTS();
-
-    // Clean up shared handle and stream
-    hipStreamDestroy(stream);
-    hipdnnDestroy(handle);
-    return result;
 }
