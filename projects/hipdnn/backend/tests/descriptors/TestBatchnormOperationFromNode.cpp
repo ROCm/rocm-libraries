@@ -913,3 +913,43 @@ TEST_F(TestBatchnormOperationFromNode, SetsTensorReferencesWithFullValues)
     EXPECT_EQ(desc->getNextRunningVarianceDesc()->getData().dims, (std::vector<int64_t>{1}));
     EXPECT_EQ(desc->getNextRunningVarianceDesc()->getData().strides, (std::vector<int64_t>{1}));
 }
+
+TEST_F(TestBatchnormOperationFromNode, FailsWhenPeerStatsUidSetButTensorMissing)
+{
+    _tensorMap.erase(100);
+    auto node = createStandardNode();
+
+    ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
+TEST_F(TestBatchnormOperationFromNode, FailsWithMeanWithoutInvVariance)
+{
+    auto attrs = createStandardBatchnormAttrs();
+    attrs.mean_tensor_uid = 9;
+    attrs.inv_variance_tensor_uid = flatbuffers::nullopt;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestBatchnormOperationFromNode, FailsWithPartialRunningStats)
+{
+    auto attrs = createStandardBatchnormAttrs();
+    attrs.prev_running_mean_tensor_uid = 6;
+    attrs.prev_running_variance_tensor_uid = flatbuffers::nullopt;
+    attrs.momentum_tensor_uid = flatbuffers::nullopt;
+    attrs.next_running_mean_tensor_uid = flatbuffers::nullopt;
+    attrs.next_running_variance_tensor_uid = flatbuffers::nullopt;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
