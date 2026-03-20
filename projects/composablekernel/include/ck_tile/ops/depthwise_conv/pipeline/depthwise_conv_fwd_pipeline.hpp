@@ -171,7 +171,7 @@ struct DepthwiseConvFwdPipeline
                                    index_t out_w_stride,
                                    index_t out_n_stride) const
     {
-        const index_t lane_id = __lane_id();
+        const index_t lane_id = static_cast<index_t>(threadIdx.x);
 
         const index_t num_h_tiles     = integer_divide_ceil(Ho, TileOutH);
         const index_t num_w_tiles     = integer_divide_ceil(Wo, TileOutW);
@@ -379,6 +379,8 @@ struct DepthwiseConvFwdPipeline
 
                     WriteDataToLds(p_lds_write, read_w, global_load_buf);
 
+                    block_sync_lds();
+
                     ClearLdsBoundaryPadding(p_lds_tile, read_h, read_w, lds_h_start, lds_w_start);
                 }
             });
@@ -463,6 +465,8 @@ struct DepthwiseConvFwdPipeline
                            out_w_stride,
                            effective_h,
                            effective_w);
+
+            block_sync_lds();
         }
     }
 

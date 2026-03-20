@@ -37,9 +37,7 @@ struct DepthwiseConvFwdTraits
     static constexpr index_t NDimSpatial = 2;
 
     static constexpr index_t BlockSize = BlockSize_;
-    // TODO: hardcoded wave64; wave32 support requires adjusting TilePerWave/ThreadPerTile
-    // derivation
-    static constexpr index_t WaveSize = 64;
+    static constexpr index_t WaveSize  = BlockSize;
 
     static constexpr index_t TileOutH = TileH_;
     static constexpr index_t TileOutW = TileW_;
