@@ -110,7 +110,7 @@ int main(int argc, char** argv) noexcept {
         const int result = RUN_ALL_TESTS();
 
         // Clean up shared handle and stream
-        hipStreamDestroy(stream);
+        static_cast<void>(hipStreamDestroy(stream));
         hipdnnDestroy(handle);
         return result;
     } catch (const std::exception& e) {

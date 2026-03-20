@@ -149,7 +149,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
                            float absoluteTolerance, float relativeTolerance) {
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph
-        _deferredValidators.emplace_back([=]() {
+        _deferredValidators.emplace_back([this, attr, absoluteTolerance, relativeTolerance]() {
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
@@ -162,7 +162,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
                               float rmsThreshold) {
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph
-        _deferredValidators.emplace_back([=]() {
+        _deferredValidators.emplace_back([this, attr, rmsThreshold]() {
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(), hipdnn_test_sdk::utilities::createRmsValidator(
                                       toSdkType(attr->get_data_type()), rmsThreshold)});

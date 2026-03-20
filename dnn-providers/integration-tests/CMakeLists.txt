@@ -23,6 +23,35 @@ endif()
 
 include(ClangTidy)
 
+list(
+    PREPEND
+    INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS
+    -Werror # Treat all warnings as errors
+    -Wall # Enable most common warnings
+    -Wextra # Enable additional warnings not covered by -Wall
+    -Wpedantic # Enforce strict ISO C++ compliance
+    -Wshadow # Warn about variable shadowing
+    -Wnon-virtual-dtor # Warn if a class with virtual functions has a non-virtual destructor
+    -Wold-style-cast # Warn about C-style casts
+    -Wcast-align # Warn about potential performance issues with misaligned casts
+    -Woverloaded-virtual # Warn if a base class function is hidden by a derived class function with
+                         # the same name
+    -Wconversion # Warn about implicit type conversions that may alter a value
+    -Wsign-conversion # Warn about implicit conversions between signed and unsigned types
+    -Wnull-dereference # Warn about dereferencing null pointers
+    -Wdouble-promotion # Warn when a float is implicitly promoted to a double
+    -Wformat=2 # Enable stricter format string checks
+    -Winit-self # Warn about variables initialized with itself
+    -Wunreachable-code # Warn about unreachable code
+    -Wswitch-default # Warn if a switch statement does not have a default case
+)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    list(APPEND INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS
+        -Wno-error=unused-command-line-argument # Clang-specific: disable error for unused CLI args
+    )
+endif()
+
 find_package(hip REQUIRED)
 find_package(hipdnn_test_sdk REQUIRED)
 find_package(hipdnn_plugin_sdk REQUIRED)
@@ -58,6 +87,8 @@ target_link_libraries(hipdnn_integration_tests
         Threads::Threads
         nlohmann_json::nlohmann_json
 )
+
+target_compile_options(hipdnn_integration_tests PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
 
 clang_tidy_check(hipdnn_integration_tests)
 
