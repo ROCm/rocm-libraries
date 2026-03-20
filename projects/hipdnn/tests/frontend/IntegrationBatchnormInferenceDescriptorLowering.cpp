@@ -261,7 +261,7 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreserve
     bias->set_name("Bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_AUTO_CHANNEL_DIMS)).set_stride(toVec(K_AUTO_CHANNEL_STRIDES));
 
-    BatchnormInferenceAttributes const bnAttrs;
+    const BatchnormInferenceAttributes bnAttrs;
 
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
     y->set_output(true);
@@ -317,7 +317,7 @@ TEST_F(IntegrationBatchnormInferenceDescriptorLowering, AutoAssignedUidsPreserve
         << "Y tensor UID " << bnInf->y_tensor_uid << " not found in graph tensors";
 
     // All six tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> const nodeUids = {bnInf->x_tensor_uid,
+    const std::unordered_set<int64_t> nodeUids = {bnInf->x_tensor_uid,
                                                   bnInf->mean_tensor_uid,
                                                   bnInf->inv_variance_tensor_uid,
                                                   bnInf->scale_tensor_uid,
