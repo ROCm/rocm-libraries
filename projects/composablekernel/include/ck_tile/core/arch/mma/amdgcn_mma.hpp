@@ -162,6 +162,9 @@ struct amdgcn_mma_base
     static constexpr index_t kCMPerLane   = kCMPerLane_;   // M2 * M0
     static constexpr index_t kCMNumAccess = kCMNumAccess_; // M2
 
+    // K-dimension compression ratio for A matrix, always 2 for sparse intrinsics.
+    static constexpr index_t kCompressionRatio = (OpFamily == MmaOpFamily::SPARSE) ? 2 : 1;
+
     // Layout checks
     static_assert(kK % kABKPerLane == 0);
     static_assert(kABKPerLane % kAKNumAccess == 0);
@@ -170,11 +173,11 @@ struct amdgcn_mma_base
 
     // Register types (derived)
     static constexpr index_t WaveSize = WaveSize_;
-    static_assert((kM * kK * kARepeat) % WaveSize == 0);
+    static_assert((kM * kK * kARepeat) % (WaveSize * kCompressionRatio) == 0);
     static_assert((kN * kK * kBRepeat) % WaveSize == 0);
     static_assert((kM * kN) % WaveSize == 0);
 
-    using AVecType = ext_vector_t<ADataType, kM * kK * kARepeat / WaveSize>;
+    using AVecType = ext_vector_t<ADataType, kM * kK * kARepeat / WaveSize / kCompressionRatio>;
     using BVecType = ext_vector_t<BDataType, kN * kK * kBRepeat / WaveSize>;
     using CVecType = ext_vector_t<CDataType, kM * kN / WaveSize>;
 
