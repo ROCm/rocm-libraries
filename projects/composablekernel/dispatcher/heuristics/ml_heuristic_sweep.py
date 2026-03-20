@@ -412,7 +412,6 @@ def main():
             first_dtype = args.dtypes[0]
             heuristics_dir = Path(__file__).parent
             model_candidates = [
-                heuristics_dir / "models" / f"gemm_universal_{first_dtype}_{args.arch}_p1",
                 heuristics_dir / "models" / f"gemm_universal_{first_dtype}_{args.arch}",
             ]
             for model_dir in model_candidates:

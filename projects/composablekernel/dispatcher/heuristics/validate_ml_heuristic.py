@@ -12,7 +12,7 @@ This script validates ML-based kernel selection by:
 3. Comparing ML selection with oracle-best to compute efficiency
 
 Usage:
-    python validate_ml_heuristic.py --dtype fp16 --model_dir models/gemm_universal_fp16_gfx950_p1
+    python validate_ml_heuristic.py --dtype fp16 --model_dir models/gemm_universal_fp16_gfx950
     python validate_ml_heuristic.py --dtype fp8 --layout rcr
 """
 
@@ -236,9 +236,8 @@ def main():
     if args.model_dir is None:
         heuristics_dir = Path(__file__).parent
         model_candidates = [
-            heuristics_dir / "models" / f"gemm_universal_{args.dtype}_gfx950_p1",
-            heuristics_dir / "models" / f"gemm_universal_{args.dtype}_gfx942",
             heuristics_dir / "models" / f"gemm_universal_{args.dtype}_gfx950",
+            heuristics_dir / "models" / f"gemm_universal_{args.dtype}_gfx942",
         ]
         for candidate in model_candidates:
             if candidate.exists():

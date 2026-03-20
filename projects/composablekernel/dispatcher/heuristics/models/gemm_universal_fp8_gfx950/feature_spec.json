@@ -2,7 +2,6 @@
   "op_type": "gemm_universal",
   "dtype": "fp8",
   "arch": "gfx950",
-  "log_targets": ["tflops"],
   "feature_names": [
     "M",
     "N",
@@ -88,21 +87,25 @@
     "latency",
     "bandwidth"
   ],
+  "log_targets": [
+    "bandwidth",
+    "tflops"
+  ],
   "params": {
     "objective": "regression",
     "metric": [
       "rmse",
       "mae"
     ],
-    "num_leaves": 127,
-    "max_depth": 12,
-    "n_estimators": 500,
-    "learning_rate": 0.05,
-    "min_child_samples": 20,
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
-    "reg_alpha": 0.1,
-    "reg_lambda": 1.0,
+    "num_leaves": 255,
+    "max_depth": 15,
+    "n_estimators": 2000,
+    "learning_rate": 0.02,
+    "min_child_samples": 10,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "reg_alpha": 0.05,
+    "reg_lambda": 0.5,
     "verbose": -1,
     "n_jobs": 8,
     "seed": 42
