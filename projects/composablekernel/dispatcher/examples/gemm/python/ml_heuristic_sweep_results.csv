@@ -1,2 +1,0 @@
-dtype,M,N,K,selected_kernel,predicted_tflops,selection_time_ms,actual_time_ms,actual_tflops,status,error
-fp16,64,64,64,s_64x64_k64_mem,-1.2338297283878357,97.47743606567383,0.003379999892786145,0.15511479781966137,SUCCESS,
