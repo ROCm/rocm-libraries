@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <half/half.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/tensor_layout.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 // network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1
@@ -43,6 +44,8 @@ struct PoolingTestCase
     miopenIndexType_t index_type;
     miopenPoolingMode_t mode;
     int wsidx;
+    std::string in_layout{"NCHW"};  // NCHW for 2D, NCDHW for 3D; use NHWC/NDHWC for channel-last
+    std::string out_layout{"NCHW"}; // same as in_layout typically
 
     friend std::ostream& operator<<(std::ostream& os, const PoolingTestCase& tc)
     {
@@ -54,6 +57,7 @@ struct PoolingTestCase
         miopen::LogRange(os << "[", tc.pads, ",") << "] ";
         os << "strides: ";
         miopen::LogRange(os << "[", tc.strides, ",") << "] ";
+        os << "in_layout: " << tc.in_layout << " ";
         return os << "index_type: " << tc.index_type << ", mode: " << tc.mode
                   << ", wsidx: " << tc.wsidx;
     }
@@ -295,11 +299,11 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                  int& num_uint64_case_imgidx,
                                  bool skip_wide_check         = false,
                                  bool apply_index_type_limits = true,
-                                 bool is_wide_dataset         = false)
+                                 bool is_wide_dataset         = false,
+                                 const std::string& in_layout  = "NCHW",
+                                 const std::string& out_layout = "NCHW")
 {
     // Match ctest order exactly: index_type -> mode -> lens -> strides -> pads -> wsidx
-    // This matches the order parameters are added in pooling_harness (base class adds index_type,
-    // mode first, then derived class adds lens, strides, pads, wsidx)
     for(const auto& index_type : index_types)
     {
         for(const auto& mode : modes)
@@ -313,7 +317,8 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                         for(int wsidx : wsidx_values)
                         {
                             PoolingTestCase test_case = {
-                                input_dims, lens, pads, strides, index_type, mode, wsidx};
+                                input_dims, lens, pads, strides, index_type, mode, wsidx,
+                                in_layout, out_layout};
 
                             if(ShouldIncludeTestCase(test_case,
                                                      num_uint16_case,
@@ -341,7 +346,21 @@ void RunPooling2dTestWithIndexType(const PoolingTestCase& test_case)
     // Create input tensor for 2D pooling
     // input_dims should be [N, C, H, W] for 2D
     tensor<T> input{test_case.input_dims};
-    input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+    input.generate(tensor_elem_gen_integer{
+        (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
+
+    // Apply NHWC layout if requested
+    if(test_case.in_layout != "NCHW")
+    {
+        const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
+        std::vector<std::size_t> dim_strides;
+        miopen::tensor_layout_to_strides(
+            dim_lens,
+            miopen::tensor_layout_get_default(input.desc.GetNumDims()),
+            test_case.in_layout,
+            dim_strides);
+        input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
+    }
 
     // Setup pooling descriptor
     miopen::PoolingDescriptor filter{

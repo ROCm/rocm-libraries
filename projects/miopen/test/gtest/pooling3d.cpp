@@ -12,6 +12,7 @@
 #include <half/half.hpp>
 
 #include <miopen/logger.hpp>
+#include <miopen/tensor_layout.hpp>
 
 #include "pooling_gtest_common.hpp"
 #include "pooling2d_common.hpp"
@@ -74,7 +75,10 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
                                               num_uint64_case,
                                               num_uint64_case_imgidx,
                                               false,
-                                              true);
+                                              true,
+                                              false,
+                                              "NCDHW",
+                                              "NCDHW");
     }
 
     // Cache the results
@@ -89,7 +93,21 @@ void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
 {
     // Create input tensor
     tensor<T> input{test_case.input_dims};
-    input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+    input.generate(tensor_elem_gen_integer{
+        (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
+
+    // Apply NDHWC layout if requested
+    if(test_case.in_layout != "NCDHW")
+    {
+        const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
+        std::vector<std::size_t> dim_strides;
+        miopen::tensor_layout_to_strides(
+            dim_lens,
+            miopen::tensor_layout_get_default(input.desc.GetNumDims()),
+            test_case.in_layout,
+            dim_strides);
+        input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
+    }
 
     // Setup pooling descriptor
     miopen::PoolingDescriptor filter{

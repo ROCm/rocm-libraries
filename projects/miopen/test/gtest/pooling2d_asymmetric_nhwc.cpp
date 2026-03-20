@@ -1,146 +1,94 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <vector>
 #include <gtest/gtest.h>
-#include <miopen/env.hpp>
-#include "gtest_common.hpp"
-#include "pooling2d_harness_gtest.hpp"
+#include <half/half.hpp>
+#include "pooling2d_common.hpp"
 
-MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)
+namespace {
 
-namespace env = miopen::env;
-
-namespace pooling2d_asymmetric_nhwc {
-
-class GPU_AsymPooling2d_NHWC_FP32 : public testing::TestWithParam<std::vector<std::string>>
+std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricNHWCTestCases()
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
+    static std::vector<pooling2d_gtest::PoolingTestCase> cached_test_cases;
+    static bool cached = false;
 
-class GPU_AsymPooling2d_NHWC_FP16 : public testing::TestWithParam<std::vector<std::string>>
-{
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
-
-class GPU_AsymPooling2d_NHWC_BFP16 : public testing::TestWithParam<std::vector<std::string>>
-{
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
-
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
-{
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
-
-void Run2dHarness(miopenDataType_t prec)
-{
-
-    std::vector<std::string> params;
-    switch(prec)
+    if(cached)
     {
-    case miopenFloat: params = GPU_AsymPooling2d_NHWC_FP32::GetParam(); break;
-    case miopenHalf: params = GPU_AsymPooling2d_NHWC_FP16::GetParam(); break;
-    case miopenBFloat16: params = GPU_AsymPooling2d_NHWC_BFP16::GetParam(); break;
-    case miopenInt8:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt32:
-    case miopenInt64:
-    case miopenDouble:
-        FAIL() << "miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
-                  "miopenBFloat8_fnuz "
-                  "data type not supported by "
-                  "pooling2d_asymmetric_nhwc test";
-
-    default: params = GPU_AsymPooling2d_NHWC_FP32::GetParam();
+        return cached_test_cases;
     }
 
-    for(const auto& test_value : params)
+    std::vector<pooling2d_gtest::PoolingTestCase> test_cases;
+
+    std::vector<std::vector<int>> dataset1_inputs = {{1, 4, 4, 4}};
+    std::vector<std::vector<int>> dataset1_lens    = {{2, 2}, {1, 2}, {2, 1}};
+    std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
+#if WORKAROUND_ISSUE_1670
+    std::vector<std::vector<int>> dataset1_pads = {{0, 0}};
+#else
+    std::vector<std::vector<int>> dataset1_pads = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+#endif
+
+    std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint32};
+    std::vector<miopenPoolingMode_t> modes = {
+        miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+    std::vector<int> wsidx_values = {0, 1};
+
+    int num_uint16_case = 0, num_uint32_case = 0, num_uint32_case_imgidx = 0;
+    int num_uint64_case = 0, num_uint64_case_imgidx = 0;
+
+    for(const auto& input_dims : dataset1_inputs)
     {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
-
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-
-        testing::internal::CaptureStderr();
-        test_drive<pooling2d_harness>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cerr << capture;
+        pooling2d_gtest::AddTestCasesForInput(input_dims,
+                                              dataset1_lens,
+                                              dataset1_strides,
+                                              dataset1_pads,
+                                              dataset1_index_types,
+                                              modes,
+                                              wsidx_values,
+                                              test_cases,
+                                              num_uint16_case,
+                                              num_uint32_case,
+                                              num_uint32_case_imgidx,
+                                              num_uint64_case,
+                                              num_uint64_case_imgidx,
+                                              true,
+                                              false,
+                                              false,
+                                              "NHWC",
+                                              "NHWC");
     }
-};
 
-bool IsTestSupportedForDevice() { return true; }
-
-std::vector<std::string> GetTestCases(const std::string& precision)
-{
-    const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
-
-    const std::vector<std::string> test_cases = {
-        // clang-format off
-        // Forward pooling with NHWC layout (batched transpose)
-        {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 --in_layout NHWC --out_layout NHWC " + flag_arg},
-        // Backward pooling with NHWC layout (batched transpose)
-        {"test_pooling2d " + precision + " --forw 0 --in_layout NHWC --out_layout NHWC " + flag_arg}
-        // clang-format on
-    };
-
+    cached_test_cases = test_cases;
+    cached            = true;
     return test_cases;
 }
 
-} // namespace pooling2d_asymmetric_nhwc
-using namespace pooling2d_asymmetric_nhwc;
+} // anonymous namespace
 
-TEST_P(GPU_AsymPooling2d_NHWC_FP32, FloatTest_pooling2d_asymmetric_nhwc)
+class GPU_AsymPooling2d_NHWC_FP32 : public pooling2d_gtest::Pooling2dCommon<float>
 {
-    if(IsTestSupportedForDevice())
-    {
-        Run2dHarness(miopenFloat);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
+};
+class GPU_AsymPooling2d_NHWC_FP16 : public pooling2d_gtest::Pooling2dCommon<half_float::half>
+{
+};
+class GPU_AsymPooling2d_NHWC_BFP16 : public pooling2d_gtest::Pooling2dCommon<bfloat16>
+{
 };
 
-TEST_P(GPU_AsymPooling2d_NHWC_FP16, HalfTest_pooling2d_asymmetric_nhwc)
-{
-    if(IsTestSupportedForDevice())
-    {
-        Run2dHarness(miopenHalf);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
-};
-
-TEST_P(GPU_AsymPooling2d_NHWC_BFP16, BFloat16Test_pooling2d_asymmetric_nhwc)
-{
-    if(IsTestSupportedForDevice())
-    {
-        Run2dHarness(miopenBFloat16);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
-};
+TEST_P(GPU_AsymPooling2d_NHWC_FP32, FloatTest_pooling2d_asymmetric_nhwc) { this->RunTest(); }
+TEST_P(GPU_AsymPooling2d_NHWC_FP16, HalfTest_pooling2d_asymmetric_nhwc) { this->RunTest(); }
+TEST_P(GPU_AsymPooling2d_NHWC_BFP16, BFloat16Test_pooling2d_asymmetric_nhwc) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_NHWC_FP32,
-                         testing::Values(GetTestCases("--float")));
-
+                         testing::ValuesIn(GetPooling2dAsymmetricNHWCTestCases()),
+                         pooling2d_gtest::GetPoolingTestCaseName);
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_NHWC_FP16,
-                         testing::Values(GetTestCases("--half")));
-
+                         testing::ValuesIn(GetPooling2dAsymmetricNHWCTestCases()),
+                         pooling2d_gtest::GetPoolingTestCaseName);
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_NHWC_BFP16,
-                         testing::Values(GetTestCases("--bfloat16")));
+                         testing::ValuesIn(GetPooling2dAsymmetricNHWCTestCases()),
+                         pooling2d_gtest::GetPoolingTestCaseName);
