@@ -13,54 +13,54 @@ namespace hipdnn_tests::constants
 // Represents: batch=2, num_heads=4, seq_len=128, head_dim=64
 
 // Required input tensors
-constexpr int64_t K_SDPA_BPROP_TENSOR_Q_UID = 50;
+constexpr int64_t K_SDPA_BPROP_TENSOR_Q_UID = 90;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_Q_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_Q_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_K_UID = 51;
+constexpr int64_t K_SDPA_BPROP_TENSOR_K_UID = 91;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_K_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_K_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_V_UID = 52;
+constexpr int64_t K_SDPA_BPROP_TENSOR_V_UID = 92;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_V_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_V_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_O_UID = 53;
+constexpr int64_t K_SDPA_BPROP_TENSOR_O_UID = 93;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_O_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_O_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_DO_UID = 54;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DO_UID = 94;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DO_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DO_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_STATS_UID = 55;
+constexpr int64_t K_SDPA_BPROP_TENSOR_STATS_UID = 95;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_STATS_DIMS = {2, 4, 128, 1};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_STATS_STRIDES = {512, 128, 1, 1};
 
 // Required output tensors
-constexpr int64_t K_SDPA_BPROP_TENSOR_DQ_UID = 56;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DQ_UID = 96;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DQ_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DQ_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_DK_UID = 57;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DK_UID = 97;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DK_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DK_STRIDES = {32768, 8192, 64, 1};
 
-constexpr int64_t K_SDPA_BPROP_TENSOR_DV_UID = 58;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DV_UID = 98;
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DV_DIMS = {2, 4, 128, 64};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DV_STRIDES = {32768, 8192, 64, 1};
 
 // Optional tensors
-constexpr int64_t K_SDPA_BPROP_TENSOR_SCALE_UID = 60;
-constexpr int64_t K_SDPA_BPROP_TENSOR_ATTN_MASK_UID = 61;
-constexpr int64_t K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID = 62;
-constexpr int64_t K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID = 63;
-constexpr int64_t K_SDPA_BPROP_TENSOR_SEED_UID = 64;
-constexpr int64_t K_SDPA_BPROP_TENSOR_OFFSET_UID = 65;
-constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID = 66;
-constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID = 67;
-constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID = 68;
-constexpr int64_t K_SDPA_BPROP_TENSOR_DBIAS_UID = 69;
+constexpr int64_t K_SDPA_BPROP_TENSOR_SCALE_UID = 100;
+constexpr int64_t K_SDPA_BPROP_TENSOR_ATTN_MASK_UID = 101;
+constexpr int64_t K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID = 102;
+constexpr int64_t K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID = 103;
+constexpr int64_t K_SDPA_BPROP_TENSOR_SEED_UID = 104;
+constexpr int64_t K_SDPA_BPROP_TENSOR_OFFSET_UID = 105;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID = 106;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID = 107;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID = 108;
+constexpr int64_t K_SDPA_BPROP_TENSOR_DBIAS_UID = 109;
 
 // Scalar tensor (volume == 1) for scale/seed/offset
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_SCALAR_DIMS = {1, 1, 1, 1};

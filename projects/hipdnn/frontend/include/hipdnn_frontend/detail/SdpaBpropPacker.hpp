@@ -209,6 +209,14 @@ inline Error createSdpaBpropOperation(
                                                  attributes.compute_data_type,
                                                  "SDPA bprop compute data type"));
 
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
+    }
+
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "SDPA bprop operation descriptor"));
 
