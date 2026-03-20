@@ -6,13 +6,19 @@
 """
 ML Heuristic Sweep: Comprehensive GEMM Performance Evaluation
 
-Sweeps across ~1024 problem shapes with multiple dtypes (fp16, bf16, fp8)
-using ML-based kernel selection heuristics to measure TFLOPS performance.
+Sweeps across diverse problem shapes with ML-based kernel selection to measure
+TFLOPS performance. Supports multiple dtypes (fp16, bf16, fp8) and validates
+ML model predictions by executing kernels on GPU.
+
+Shape Constraints (fp16/bf16 on gfx950):
+- M >= 1 (any M is valid)
+- N % 8 == 0 AND N >= 64
+- K % 2 == 0 AND K >= 32
 
 Usage:
-    python ml_heuristic_sweep.py --model model_tflops_log_big --output sweep_results.csv
-    python ml_heuristic_sweep.py --dtypes fp16 bf16 --num_shapes 512 --dry_run
-    python ml_heuristic_sweep.py --dtypes fp16 bf16 fp8 --output results.csv
+    python ml_heuristic_sweep.py --dtype fp16 --num_shapes 256
+    python ml_heuristic_sweep.py --dtypes fp16 bf16 --output sweep_results.csv
+    python ml_heuristic_sweep.py --dtype fp16 --dry_run  # Prediction only, no GPU execution
 """
 
 import sys
@@ -23,10 +29,9 @@ import json
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import List, Tuple
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "heuristics"))
+# Add parent directories to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 import numpy as np
 
@@ -65,21 +70,17 @@ class KernelSpec:
 # Comprehensive kernel pool covering diverse tile sizes and configurations
 KERNEL_POOL = [
     # Small tiles (64x64)
-    KernelSpec("s_64x64_k16_v3", 64, 64, 16, "compv3", "intrawave", 2, 2, 1, 16, 16, 16),
     KernelSpec("s_64x64_k32_v3", 64, 64, 32, "compv3", "intrawave", 2, 2, 1, 16, 16, 16),
     KernelSpec("s_64x64_k64_v3", 64, 64, 64, "compv3", "intrawave", 2, 2, 1, 16, 16, 16),
     KernelSpec("s_64x64_k128_v3", 64, 64, 128, "compv3", "intrawave", 2, 2, 1, 16, 16, 16),
-    KernelSpec("s_64x64_k32_v4", 64, 64, 32, "compv4", "intrawave", 2, 2, 1, 16, 16, 16),
     KernelSpec("s_64x64_k64_v4", 64, 64, 64, "compv4", "intrawave", 2, 2, 1, 16, 16, 16),
     KernelSpec("s_64x64_k64_mem", 64, 64, 64, "mem", "intrawave", 2, 2, 1, 16, 16, 16),
     KernelSpec("s_64x64_k128_mem", 64, 64, 128, "mem", "intrawave", 2, 2, 1, 16, 16, 16),
 
     # Medium tiles (128x128)
-    KernelSpec("m_128x128_k16_v3", 128, 128, 16, "compv3", "intrawave"),
     KernelSpec("m_128x128_k32_v3", 128, 128, 32, "compv3", "intrawave"),
     KernelSpec("m_128x128_k64_v3", 128, 128, 64, "compv3", "intrawave"),
     KernelSpec("m_128x128_k128_v3", 128, 128, 128, "compv3", "intrawave"),
-    KernelSpec("m_128x128_k32_v4", 128, 128, 32, "compv4", "intrawave"),
     KernelSpec("m_128x128_k64_v4", 128, 128, 64, "compv4", "intrawave"),
     KernelSpec("m_128x128_k128_v4", 128, 128, 128, "compv4", "intrawave"),
     KernelSpec("m_128x128_k64_mem", 128, 128, 64, "mem", "intrawave"),
@@ -96,10 +97,8 @@ KERNEL_POOL = [
     # Large tiles (256x256)
     KernelSpec("l_256x128_k32_v3", 256, 128, 32, "compv3", "intrawave"),
     KernelSpec("l_128x256_k32_v3", 128, 256, 32, "compv3", "intrawave"),
-    KernelSpec("l_256x256_k16_v3", 256, 256, 16, "compv3", "intrawave"),
     KernelSpec("l_256x256_k32_v3", 256, 256, 32, "compv3", "intrawave"),
     KernelSpec("l_256x256_k64_v3", 256, 256, 64, "compv3", "intrawave"),
-    KernelSpec("l_256x256_k32_v4", 256, 256, 32, "compv4", "intrawave"),
     KernelSpec("l_256x256_k64_v4", 256, 256, 64, "compv4", "intrawave"),
 
     # Interwave variants
@@ -111,12 +110,16 @@ KERNEL_POOL = [
 
 def generate_problem_shapes(num_shapes: int = 1024) -> List[Tuple[int, int, int]]:
     """
-    Generate ~1024 diverse problem shapes covering:
-    - Powers of 2 (square)
-    - ML workloads (LLM attention, MLP)
-    - Rectangular matrices
-    - ODD DIMENSIONS (extensive coverage of non-power-of-2)
-    - Edge cases (very small, very large, extreme aspect ratios)
+    Generate diverse problem shapes with hardware constraints:
+    - M >= 1 (any M is valid, including tiny M for inference)
+    - N % 8 == 0 AND N >= 64 (hardware alignment requirement)
+    - K % 2 == 0 AND K >= 32 (fp16 requirement)
+
+    Covers:
+    - Powers of 2 (square and rectangular)
+    - ML workloads (LLM attention, MLP, batch inference)
+    - Non-power-of-2 dimensions (aligned to constraints)
+    - Edge cases (tiny M, very large matrices, extreme aspect ratios)
     """
     shapes = []
 
@@ -125,95 +128,13 @@ def generate_problem_shapes(num_shapes: int = 1024) -> List[Tuple[int, int, int]
         dim = 2 ** p
         shapes.append((dim, dim, dim))
         if dim >= 128:
+            # K variations (must be even and >= 32)
             shapes.append((dim, dim, dim // 2))
             shapes.append((dim, dim, dim * 2))
-            shapes.append((dim, dim, dim // 4))
+            shapes.append((dim, dim, max(32, dim // 4)))
 
-    # 2. ODD DIMENSIONS - Comprehensive coverage
-    # Small odd numbers (primes and common odd values)
-    small_odds = [3, 5, 7, 9, 11, 13, 15, 17, 19, 23, 27, 31, 33, 37, 41, 43, 47, 51,
-                  59, 61, 63, 67, 71, 73, 77, 79, 83, 89, 91, 97, 99, 101, 103, 107,
-                  109, 111, 113, 117, 119, 121, 123, 127]
-
-    # Medium odd numbers
-    medium_odds = [131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193,
-                   197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269,
-                   271, 277, 281, 283, 293, 299, 307, 311, 313, 317, 331, 337, 347,
-                   349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409, 419, 421,
-                   431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499]
-
-    # Large odd numbers
-    large_odds = [501, 503, 509, 521, 523, 541, 547, 557, 563, 569, 571, 577, 587,
-                  593, 599, 601, 607, 613, 617, 619, 631, 641, 643, 647, 653, 659,
-                  661, 673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743, 751,
-                  757, 761, 769, 773, 787, 797, 809, 811, 821, 823, 827, 829, 839,
-                  853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 937,
-                  941, 947, 953, 967, 971, 977, 983, 991, 997, 1009, 1013, 1019,
-                  1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069, 1087, 1091,
-                  1093, 1097, 1103, 1109, 1117, 1123, 1129]
-
-    # Very large odd numbers
-    xlarge_odds = [1151, 1163, 1171, 1181, 1187, 1193, 1201, 1213, 1217, 1223, 1229,
-                   1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291, 1297, 1301,
-                   1303, 1307, 1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409,
-                   1423, 1427, 1429, 1433, 1439, 1447, 1451, 1453, 1459, 1471, 1481,
-                   1483, 1487, 1489, 1493, 1499, 1511, 1523, 1531, 1543, 1549, 1553,
-                   1559, 1567, 1571, 1579, 1583, 1597, 1601, 1607, 1609, 1613, 1619,
-                   1621, 1627, 1637, 1657, 1663, 1667, 1669, 1693, 1697, 1699, 1709,
-                   1721, 1723, 1733, 1741, 1747, 1753, 1759, 1777, 1783, 1787, 1789,
-                   1801, 1811, 1823, 1831, 1847, 1861, 1867, 1871, 1873, 1877, 1879,
-                   1889, 1901, 1907, 1913, 1931, 1933, 1949, 1951, 1973, 1979, 1987,
-                   1993, 1997, 1999, 2003, 2011, 2017, 2027, 2029, 2039, 2053, 2063,
-                   2069, 2081, 2083, 2087, 2089, 2099, 2111, 2113, 2129, 2131, 2137]
-
-    # Extreme odd numbers (for stress testing)
-    extreme_odds = [2143, 2153, 2161, 2179, 2203, 2207, 2213, 2221, 2237, 2239, 2243,
-                    2251, 2267, 2269, 2273, 2281, 2287, 2293, 2297, 2309, 2311, 2333,
-                    2339, 2341, 2347, 2351, 2357, 2371, 2377, 2381, 2383, 2389, 2393,
-                    2399, 2411, 2417, 2423, 2437, 2441, 2447, 2459, 2467, 2473, 2477,
-                    2503, 2521, 2531, 2539, 2543, 2549, 2551, 2557, 2579, 2591, 2593,
-                    2609, 2617, 2621, 2633, 2647, 2657, 2659, 2663, 2671, 2677, 2683,
-                    2687, 2689, 2693, 2699, 2707, 2711, 2713, 2719, 2729, 2731, 2741,
-                    2749, 2767, 2777, 2789, 2791, 2797, 2801, 2803, 2819, 2833, 2843,
-                    2851, 2857, 2861, 2879, 2887, 2897, 2903, 2909, 2917, 2927, 2939,
-                    2953, 2957, 2963, 2969, 2971, 2999, 3001, 3011, 3019, 3023, 3037,
-                    3041, 3049, 3061, 3067, 3079, 3083, 3089, 3109, 3119, 3121, 3137,
-                    3163, 3167, 3169, 3181, 3187, 3191, 3203, 3209, 3217, 3221, 3229,
-                    3251, 3253, 3257, 3259, 3271, 3299, 3301, 3307, 3313, 3319, 3323,
-                    3329, 3331, 3343, 3347, 3359, 3361, 3371, 3373, 3389, 3391, 3407,
-                    3413, 3433, 3449, 3457, 3461, 3463, 3467, 3469, 3491, 3499, 3511,
-                    3517, 3527, 3529, 3533, 3539, 3541, 3547, 3557, 3559, 3571, 3581,
-                    3583, 3593, 3607, 3613, 3617, 3623, 3631, 3637, 3643, 3659, 3671]
-
-    all_odds = small_odds + medium_odds + large_odds + xlarge_odds + extreme_odds
-
-    # Square odd matrices
-    for odd in all_odds[:150]:  # Use first 150 odd numbers
-        shapes.append((odd, odd, odd))
-
-    # Rectangular odd matrices (odd x odd with different K)
-    for i, m in enumerate(all_odds[:80]):
-        for j, n in enumerate(all_odds[:80]):
-            if i % 5 == j % 5:  # Stratified sampling
-                for k in [128, 256, 512, 1024]:
-                    shapes.append((m, n, k))
-
-    # Odd M/N with power-of-2 K
-    for odd in all_odds[:100]:
-        for pow2 in [64, 128, 256, 512, 1024, 2048]:
-            shapes.append((odd, odd, pow2))
-            shapes.append((odd, pow2, odd))
-            shapes.append((pow2, odd, odd))
-
-    # Mixed odd and even
-    for odd in [99, 101, 127, 199, 201, 255, 257, 299, 333, 399, 501, 511, 513,
-                777, 999, 1023, 1025, 1111, 1333, 1501, 1777, 1999, 2001, 2047,
-                2049, 2222, 2345, 2999, 3001, 3333, 3579, 3999]:
-        shapes.append((odd, odd, odd))
-        shapes.append((odd, odd * 2, odd))
-        shapes.append((odd * 2, odd, odd))
-
-    # 3. Small batch inference (1-256 batch, common hidden dims)
+    # 2. Small batch inference (1-256 batch, common hidden dims)
+    # N must be multiple of 8 and >= 64
     hidden_dims = [768, 1024, 2048, 3072, 4096, 5120, 8192, 11008, 12288, 16384]
     batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 
@@ -221,11 +142,16 @@ def generate_problem_shapes(num_shapes: int = 1024) -> List[Tuple[int, int, int]
         for batch in batch_sizes[:8]:
             shapes.append((batch, hidden, hidden))
             if hidden >= 4096:
-                # LLM MLP projections
-                shapes.append((batch, hidden, hidden * 3 // 4))
-                shapes.append((batch, hidden * 3 // 4, hidden))
+                # LLM MLP projections (ensure K is even)
+                k_mlp = (hidden * 3 // 4)
+                if k_mlp % 2 == 1:
+                    k_mlp += 1  # Make even
+                if k_mlp >= 32:
+                    shapes.append((batch, hidden, k_mlp))
+                    shapes.append((batch, k_mlp, hidden))
 
-    # 4. Attention patterns (seq_len x head_dim)
+    # 3. Attention patterns (seq_len x head_dim)
+    # seq_len can be any value >= 1, total_dim must be multiple of 8
     seq_lens = [128, 256, 512, 1024, 2048, 4096, 8192]
     head_dims = [64, 80, 96, 128, 256]
     num_heads = [8, 12, 16, 32, 40, 64]
@@ -234,37 +160,84 @@ def generate_problem_shapes(num_shapes: int = 1024) -> List[Tuple[int, int, int]
         for head_dim in head_dims:
             for nh in num_heads[:4]:
                 total_dim = nh * head_dim
-                shapes.append((seq, total_dim, head_dim))
-                shapes.append((seq, head_dim, total_dim))
+                # total_dim should be multiple of 8 (naturally satisfied for most cases)
+                if total_dim % 8 == 0 and total_dim >= 64:
+                    # head_dim must be even for K
+                    if head_dim % 2 == 0 and head_dim >= 32:
+                        shapes.append((seq, total_dim, head_dim))
+                        shapes.append((seq, head_dim, total_dim))
 
-    # 5. Rectangular matrices (extreme aspect ratios)
-    for m in [64, 128, 256, 512, 1024, 2048]:
-        for n in [64, 128, 256, 512, 1024, 2048]:
-            if m != n:
-                for k in [128, 512, 2048, 8192]:
+    # 4. Rectangular matrices (extreme aspect ratios)
+    # All dims must satisfy constraints
+    dims_m = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+    dims_n = [64, 128, 256, 512, 1024, 2048, 4096, 8192]  # N >= 64, N % 8 == 0
+    dims_k = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]  # K >= 32, K % 2 == 0
+
+    # Sample to avoid explosion
+    for i, m in enumerate(dims_m):
+        for j, n in enumerate(dims_n):
+            for l, k in enumerate(dims_k):
+                if (i + j + l) % 3 == 0:  # Stratified sampling
                     shapes.append((m, n, k))
 
-    # 6. Very tall K (memory-bound)
-    for mn in [128, 256, 512, 1024]:
+    # 5. Non-power-of-2 dimensions (aligned to constraints)
+    # N values: multiples of 8, >= 64
+    non_pow2_n = [
+        72, 80, 88, 96, 104, 112, 120, 136, 144, 152, 160, 176, 184, 192, 200,
+        224, 240, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 448, 480,
+        544, 576, 640, 672, 704, 736, 768, 800, 832, 896, 960, 1088, 1152,
+        1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920,
+        2176, 2304, 2432, 2560, 2688, 2816, 2944, 3072, 3200, 3328, 3456,
+        3584, 3712, 3840, 3968, 4224, 4352, 4480, 4608, 4736, 4864, 4992
+    ]
+
+    # K values: even numbers >= 32
+    non_pow2_k = [
+        34, 36, 38, 40, 42, 44, 48, 50, 52, 56, 60, 66, 68, 72, 76, 80, 88,
+        96, 100, 112, 120, 136, 144, 160, 176, 192, 224, 240, 272, 288, 320,
+        352, 384, 416, 448, 480, 544, 576, 640, 672, 704, 768, 800, 832, 896,
+        960, 1088, 1152, 1280, 1344, 1408, 1536, 1600, 1664, 1792, 1920
+    ]
+
+    # M values: any value >= 1
+    non_pow2_m = [
+        1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 23, 27, 31, 33, 37, 41, 47, 51,
+        57, 63, 65, 71, 79, 87, 95, 97, 111, 119, 127, 129, 143, 159, 175,
+        191, 193, 223, 239, 255, 257, 287, 319, 351, 383, 385, 447, 479,
+        511, 513, 575, 639, 703, 767, 769, 895, 959, 1023, 1025
+    ]
+
+    # Sample non-power-of-2 shapes
+    for i, m in enumerate(non_pow2_m[:30]):
+        for j, n in enumerate(non_pow2_n[:20]):
+            for l, k in enumerate(non_pow2_k[:15]):
+                if (i + j + l) % 4 == 0:  # Stratified sampling
+                    shapes.append((m, n, k))
+
+    # 6. Very tall K (memory-bound) - ensure N % 8 == 0, K % 2 == 0
+    for mn in [64, 128, 256, 512, 1024]:
         for k in [4096, 8192, 16384]:
             shapes.append((mn, mn, k))
 
-    # 7. Very short K (compute-bound)
+    # 7. Very short K (compute-bound) - ensure K >= 32, K % 2 == 0
     for mn in [512, 1024, 2048, 4096]:
-        for k in [16, 32, 64, 128]:
+        for k in [32, 64, 128]:
             shapes.append((mn, mn, k))
 
-    # 8. Very small (edge cases)
+    # 8. Tiny M (edge cases for batch-1 inference)
     for m in [1, 2, 4, 8, 16, 32]:
-        for n in [1, 2, 4, 8, 16, 32, 64, 128, 256]:
-            for k in [16, 32, 64, 128, 256]:
+        for n in [64, 128, 256, 512, 1024, 2048]:  # N >= 64, N % 8 == 0
+            for k in [32, 64, 128, 256, 512]:  # K >= 32, K % 2 == 0
                 shapes.append((m, n, k))
 
-    # 9. Stress test sizes
+    # 9. Stress test sizes (aligned to constraints)
     stress_sizes = [
-        (10000, 1000, 1000), (1000, 10000, 1000), (1000, 1000, 10000),
-        (5555, 5555, 5555), (7777, 7777, 7777), (9999, 9999, 9999),
-        (10001, 10001, 10001),
+        (10000, 10000, 10000),
+        (1000, 10000, 1000),
+        (1000, 1000, 10000),
+        (5000, 5000, 5000),
+        (7168, 7168, 7168),  # Common LLM hidden dim
+        (8192, 11008, 8192),  # LLaMA MLP dimensions
     ]
     shapes.extend(stress_sizes)
 
@@ -276,13 +249,19 @@ def generate_problem_shapes(num_shapes: int = 1024) -> List[Tuple[int, int, int]
             seen.add(s)
             unique_shapes.append(s)
 
-    # Sample down to target number if we have too many
-    if len(unique_shapes) > num_shapes:
-        # Stratified sampling to preserve diversity
-        step = len(unique_shapes) / num_shapes
-        unique_shapes = [unique_shapes[int(i * step)] for i in range(num_shapes)]
+    # Filter to ensure all shapes meet constraints
+    valid_shapes = []
+    for m, n, k in unique_shapes:
+        if m >= 1 and n >= 64 and n % 8 == 0 and k >= 32 and k % 2 == 0:
+            valid_shapes.append((m, n, k))
 
-    return unique_shapes
+    # Sample down to target number if we have too many
+    if len(valid_shapes) > num_shapes:
+        # Stratified sampling to preserve diversity
+        step = len(valid_shapes) / num_shapes
+        valid_shapes = [valid_shapes[int(i * step)] for i in range(num_shapes)]
+
+    return valid_shapes
 
 
 def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
@@ -410,20 +389,18 @@ def main():
     parser = argparse.ArgumentParser(
         description="ML Heuristic Sweep: Test GEMM across many shapes and dtypes"
     )
-    parser.add_argument('--dtypes', nargs='+', default=['fp16', 'bf16', 'fp8'],
+    parser.add_argument('--dtypes', nargs='+', default=['fp16'],
                         choices=['fp16', 'bf16', 'fp8'],
-                        help='Data types to test')
-    parser.add_argument('--arch', default='gfx942', help='GPU architecture')
-    parser.add_argument('--model', default='model_tflops_log_big',
-                        help='Model name or path (default: model_tflops_log_big)')
+                        help='Data types to test (default: fp16)')
+    parser.add_argument('--arch', default='gfx950', help='GPU architecture (default: gfx950)')
     parser.add_argument('--model_dir', default=None,
                         help='Path to model directory (auto-detect if not specified)')
-    parser.add_argument('--num_shapes', type=int, default=1024,
-                        help='Number of problem shapes to test (default: 1024)')
+    parser.add_argument('--num_shapes', type=int, default=256,
+                        help='Number of problem shapes to test (default: 256)')
     parser.add_argument('--output', default='ml_heuristic_sweep_results.csv',
                         help='Output CSV file path')
     parser.add_argument('--dry_run', action='store_true',
-                        help='Only predict, do not run kernels')
+                        help='Only predict, do not run kernels (fast validation)')
 
     args = parser.parse_args()
 
@@ -431,14 +408,14 @@ def main():
     predictor = None
     if HAS_ML:
         if args.model_dir is None:
-            # Auto-detect model directory
-            model_dirs = [
-                Path(__file__).parent.parent.parent.parent / "heuristics" / "models" / args.model,
-                Path(__file__).parent.parent.parent.parent / "heuristics" / "models" / "gemm_universal_fp8_gfx950",
-                Path(__file__).parent.parent.parent.parent / "heuristics" / "models" / "gemm_universal_fp16_gfx942",
-                Path(__file__).parent.parent.parent.parent / "heuristics" / "models",
+            # Auto-detect model directory based on first dtype
+            first_dtype = args.dtypes[0]
+            heuristics_dir = Path(__file__).parent
+            model_candidates = [
+                heuristics_dir / "models" / f"gemm_universal_{first_dtype}_{args.arch}_p1",
+                heuristics_dir / "models" / f"gemm_universal_{first_dtype}_{args.arch}",
             ]
-            for model_dir in model_dirs:
+            for model_dir in model_candidates:
                 if model_dir.exists():
                     args.model_dir = str(model_dir)
                     break
@@ -457,24 +434,26 @@ def main():
     # Generate problem shapes
     print(f"\nGenerating {args.num_shapes} problem shapes...")
     shapes = generate_problem_shapes(args.num_shapes)
-    print(f"✓ Generated {len(shapes)} unique shapes")
+    print(f"✓ Generated {len(shapes)} valid shapes (M>=1, N%8==0, N>=64, K%2==0, K>=32)")
 
-    # Count odd dimension shapes
-    odd_count = sum(1 for m, n, k in shapes if m % 2 == 1 or n % 2 == 1 or k % 2 == 1)
-    print(f"  - Shapes with odd dimensions: {odd_count} ({100*odd_count/len(shapes):.1f}%)")
+    # Validate all shapes meet constraints
+    invalid = [(m, n, k) for m, n, k in shapes if not (m >= 1 and n >= 64 and n % 8 == 0 and k >= 32 and k % 2 == 0)]
+    if invalid:
+        print(f"⚠ WARNING: {len(invalid)} shapes violate constraints!")
+        print(f"  First few: {invalid[:5]}")
 
     # Print configuration
     print("\n" + "=" * 80)
     print("  ML Heuristic Sweep Configuration")
     print("=" * 80)
-    print(f"  Model:         {args.model}")
-    print(f"  Data types:    {', '.join(args.dtypes)}")
-    print(f"  Architecture:  {args.arch}")
-    print(f"  Kernel pool:   {len(KERNEL_POOL)} kernels")
+    print(f"  Model:          {args.model_dir if args.model_dir else 'first-fit (no ML)'}")
+    print(f"  Data types:     {', '.join(args.dtypes)}")
+    print(f"  Architecture:   {args.arch}")
+    print(f"  Kernel pool:    {len(KERNEL_POOL)} kernels")
     print(f"  Problem shapes: {len(shapes)}")
-    print(f"  Total tests:   {len(shapes) * len(args.dtypes)}")
-    print(f"  Mode:          {'DRY RUN (prediction only)' if args.dry_run else 'FULL RUN (execute kernels)'}")
-    print(f"  Output:        {args.output}")
+    print(f"  Total tests:    {len(shapes) * len(args.dtypes)}")
+    print(f"  Mode:           {'DRY RUN (prediction only)' if args.dry_run else 'FULL RUN (execute kernels)'}")
+    print(f"  Output:         {args.output}")
     print("=" * 80)
 
     # Open output CSV
