@@ -88,73 +88,6 @@ bool verify_gpu_result(const OutDataType* p_gpu,
     return error_count == 0;
 }
 
-// TODO: remove after depthwise conv generalization/optimization is complete
-template <typename OutDataType>
-void dump_output_tensor(const VerificationInfo<OutDataType>& verify_info,
-                        const ck_tile::DepthwiseConvFwdHostArgs& args,
-                        const ck_tile::stream_config& s,
-                        float time_ms)
-{
-    if(s.log_level_ < 2)
-        return;
-    if(verify_info.p_out_dev == nullptr || verify_info.p_out_host == nullptr)
-        return;
-
-    (void)hipStreamSynchronize(s.stream_id_);
-    verify_info.p_out_dev->FromDevice(verify_info.p_out_host->data());
-
-    const auto G  = static_cast<ck_tile::index_t>(args.G_);
-    const auto N  = static_cast<ck_tile::index_t>(args.N_);
-    const auto K  = static_cast<ck_tile::index_t>(args.K_);
-    const auto Ho = static_cast<ck_tile::index_t>(args.output_spatial_lengths_[0]);
-    const auto Wo = static_cast<ck_tile::index_t>(args.output_spatial_lengths_[1]);
-
-    std::cout << "\nKernel finished. Time: " << time_ms << " ms" << std::endl;
-    std::cout << "\n=== Global Output Data Dump ===" << std::endl;
-    std::cout << "Output shape: G=" << G << " N=" << N << " K=" << K << " Ho=" << Ho << " Wo=" << Wo
-              << std::endl;
-
-    constexpr ck_tile::index_t max_batch_to_dump   = 32;
-    constexpr ck_tile::index_t head_tail_batch_cnt = 2;
-    constexpr ck_tile::index_t head_tail_group_cnt = 2;
-    const OutDataType* p_out                       = verify_info.p_out_host->data();
-
-    for(ck_tile::index_t g = 0; g < G; g++)
-    {
-        if(g >= head_tail_group_cnt && g < G - head_tail_group_cnt)
-            continue;
-        for(ck_tile::index_t n = 0; n < std::min(N, max_batch_to_dump); n++)
-        {
-            if(n >= head_tail_batch_cnt && n < std::min(N, max_batch_to_dump) - head_tail_batch_cnt)
-                continue;
-            std::cout << "\n=== Group " << g + 1 << "/" << G << ", Batch " << n + 1 << "/"
-                      << std::min(N, max_batch_to_dump) << " ===" << std::endl;
-            for(ck_tile::index_t k = 0; k < K; k++)
-            {
-                std::cout << "\nGroup " << g << ", Batch " << n << ", Channel " << k << ":"
-                          << std::endl;
-                for(ck_tile::index_t h = 0; h < Ho; h++)
-                {
-                    std::cout << "Row " << h << ": ";
-                    for(ck_tile::index_t w = 0; w < Wo; w++)
-                    {
-                        ck_tile::long_index_t offset =
-                            static_cast<ck_tile::long_index_t>(g) * args.out_strides[0] +
-                            static_cast<ck_tile::long_index_t>(n) * args.out_strides[1] +
-                            static_cast<ck_tile::long_index_t>(k) * args.out_strides[2] +
-                            static_cast<ck_tile::long_index_t>(h) * args.out_strides[3] +
-                            static_cast<ck_tile::long_index_t>(w) * args.out_strides[4];
-                        std::cout << std::fixed << std::setprecision(3)
-                                  << static_cast<float>(p_out[offset]) << " ";
-                    }
-                    std::cout << std::endl;
-                }
-            }
-        }
-    }
-    std::cout << "=== End Global Output Dump ===\n" << std::endl;
-}
-
 // CPU reference for depthwise convolution forward (C=K=1 per group).
 // Layout: Input [G,N,1,Hi,Wi], Weight [G,1,1,Y,X], Output [G,N,1,Ho,Wo]
 template <typename InDataType, typename WeiDataType, typename AccDataType, typename OutDataType>
@@ -265,7 +198,7 @@ auto create_args(int argc, char* argv[])
         .insert("v", "1", "0: no verify, 1: verify, 2: verbose")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
-        .insert("init", "0", "0:random, 1:integer random, 2:constant(1), 3-5:debug patterns");
+        .insert("init", "0", "0:random, 1:integer random, 2:constant(1)");
 
     const bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);

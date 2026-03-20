@@ -87,11 +87,6 @@ struct DepthwiseConvFwdInvoker
             result.gb_per_sec = static_cast<float>(num_byte) / 1.E6 / time_ms;
         }
 
-        // TODO: remove after depthwise conv generalization/optimization is complete
-#if 0
-        dump_output_tensor(verify_info, args, s, time_ms);
-#endif
-
         if(verify_info.do_verification)
         {
             verify_info.p_out_dev->FromDevice(verify_info.p_out_host->data());

@@ -8,7 +8,7 @@ int run_depthwise_conv_fwd_example_prec(ck_tile::ArgParser& arg_parser)
 {
     const int verbosity                = arg_parser.get_int("v");
     const bool do_verification         = (verbosity > 0);
-    const bool debug_mode              = (verbosity >= 2);
+    const bool verbose                 = (verbosity >= 2);
     const int n_warmup                 = arg_parser.get_int("warmup");
     const int n_repeat                 = arg_parser.get_int("repeat");
     const ck_tile::index_t init_method = arg_parser.get_int("init");
@@ -92,25 +92,6 @@ int run_depthwise_conv_fwd_example_prec(ck_tile::ArgParser& arg_parser)
     ck_tile::HostTensor<OutDataType> out_ref(do_verification ? std::vector<std::size_t>{output_size}
                                                              : std::vector<std::size_t>{0});
 
-    // TODO: remove debug init patterns (case 3/4/5) after generalization/optimization is complete
-    auto fill_input_pattern = [&](auto value_fn) {
-        auto* ptr = in_host.data();
-        for(ck_tile::index_t g = 0; g < G; g++)
-            for(ck_tile::index_t n = 0; n < N; n++)
-                for(ck_tile::index_t c = 0; c < C; c++)
-                    for(ck_tile::index_t h = 0; h < H; h++)
-                        for(ck_tile::index_t w = 0; w < W; w++)
-                        {
-                            ck_tile::long_index_t offset =
-                                static_cast<ck_tile::long_index_t>(g) * in_strides[0] +
-                                static_cast<ck_tile::long_index_t>(n) * in_strides[1] +
-                                static_cast<ck_tile::long_index_t>(c) * in_strides[2] +
-                                static_cast<ck_tile::long_index_t>(h) * in_strides[3] +
-                                static_cast<ck_tile::long_index_t>(w) * in_strides[4];
-                            ptr[offset] = static_cast<InDataType>(value_fn(h, w));
-                        }
-    };
-
     switch(init_method)
     {
     case 0:
@@ -125,46 +106,6 @@ int run_depthwise_conv_fwd_example_prec(ck_tile::ArgParser& arg_parser)
         ck_tile::FillUniformDistribution<InDataType>{1.f, 1.f}(in_host);
         ck_tile::FillUniformDistribution<WeiDataType>{1.f, 1.f}(wei_host);
         break;
-    case 3:
-        fill_input_pattern([](ck_tile::index_t, ck_tile::index_t w) { return w % 64; });
-        std::fill(wei_host.begin(), wei_host.end(), WeiDataType{1});
-        if(debug_mode)
-        {
-            std::cout << "Input: column-wise (w % 64), Weight: all 1s" << std::endl;
-        }
-        break;
-    case 4:
-        fill_input_pattern([](ck_tile::index_t h, ck_tile::index_t) { return h; });
-        std::fill(wei_host.begin(), wei_host.end(), WeiDataType{1});
-        if(debug_mode)
-        {
-            std::cout << "Input: row pattern (h), Weight: all 1s" << std::endl;
-        }
-        break;
-    case 5: {
-        fill_input_pattern([](ck_tile::index_t, ck_tile::index_t w) { return w % 64; });
-        auto* wei_ptr = wei_host.data();
-        for(ck_tile::index_t g = 0; g < G; g++)
-            for(ck_tile::index_t k = 0; k < K; k++)
-                for(ck_tile::index_t c = 0; c < C; c++)
-                    for(ck_tile::index_t fh = 0; fh < Y; fh++)
-                        for(ck_tile::index_t fw = 0; fw < X; fw++)
-                        {
-                            ck_tile::long_index_t offset =
-                                static_cast<ck_tile::long_index_t>(g) * wei_strides[0] +
-                                static_cast<ck_tile::long_index_t>(k) * wei_strides[1] +
-                                static_cast<ck_tile::long_index_t>(c) * wei_strides[2] +
-                                static_cast<ck_tile::long_index_t>(fh) * wei_strides[3] +
-                                static_cast<ck_tile::long_index_t>(fw) * wei_strides[4];
-                            wei_ptr[offset] = static_cast<WeiDataType>(fh * X + fw);
-                        }
-        if(debug_mode)
-        {
-            std::cout << "Input: column-wise (w % 64), Weight: spatial pattern (fh*X+fw)"
-                      << std::endl;
-        }
-    }
-    break;
     default:
         in_host.SetZero();
         wei_host.SetZero();
@@ -213,7 +154,7 @@ int run_depthwise_conv_fwd_example_prec(ck_tile::ArgParser& arg_parser)
     const float gb_per_sec = static_cast<float>(num_byte) / 1.E6 / ave_time;
     const float gflops     = tflops * 1000.0f;
 
-    if(debug_mode)
+    if(verbose)
     {
         std::cout << "\n=== Best Performance ===" << std::endl;
         std::cout << "[Instance " << best_instance_idx << "] " << std::fixed << std::setprecision(6)
