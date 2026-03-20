@@ -79,7 +79,7 @@ private:
     // Array/enum constraint fields
     std::vector<int64_t> _validValuesInt;
     std::vector<std::string> _validValuesString;
-    std::optional<int64_t> _stringMaxLength;
+    std::optional<int32_t> _stringMaxLength;
 
     // Private helpers — complex logic that can't be inlined into the switch
     void setDefaultValue(hipdnnBackendAttributeType_t attributeType,
@@ -91,16 +91,6 @@ private:
                               const void* arrayOfElements);
 
     void getDefaultValue(hipdnnBackendAttributeType_t attributeType,
-                         int64_t requestedElementCount,
-                         int64_t* elementCount,
-                         void* arrayOfElements) const;
-
-    void getMaximumValue(hipdnnBackendAttributeType_t attributeType,
-                         int64_t requestedElementCount,
-                         int64_t* elementCount,
-                         void* arrayOfElements) const;
-
-    void getMinimumValue(hipdnnBackendAttributeType_t attributeType,
                          int64_t requestedElementCount,
                          int64_t* elementCount,
                          void* arrayOfElements) const;

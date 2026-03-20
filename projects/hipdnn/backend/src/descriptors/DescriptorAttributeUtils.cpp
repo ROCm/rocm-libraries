@@ -101,8 +101,8 @@ void setBoundedString(std::string& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
-                      int64_t maxLength,
                       const char* errorPrefix,
+                      int64_t maxLength,
                       int64_t minLength)
 {
     THROW_IF_TRUE(elementCount < minLength,
@@ -615,6 +615,40 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
     if(elementCount != nullptr)
     {
         *elementCount = 1;
+    }
+}
+
+void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
+                        const char* errorPrefix)
+{
+    switch(src.type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    {
+        hipdnn_data_sdk::data_objects::IntValueT intVal;
+        intVal.value = src.AsIntValue()->value;
+        dst.Set(intVal);
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    {
+        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
+        floatVal.value = src.AsFloatValue()->value;
+        dst.Set(floatVal);
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    {
+        hipdnn_data_sdk::data_objects::StringValueT strVal;
+        strVal.value = src.AsStringValue()->value;
+        dst.Set(std::move(strVal));
+        break;
+    }
+    default:
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              std::string(errorPrefix) + ": unknown value type ("
+                                  + std::to_string(static_cast<int>(src.type)) + ")");
     }
 }
 

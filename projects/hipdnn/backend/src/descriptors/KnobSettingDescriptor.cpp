@@ -43,16 +43,16 @@ void KnobSettingDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT:
         setBoundedString(_knobId,
                          attributeType,
                          elementCount,
                          arrayOfElements,
-                         MAX_KNOB_ID_LENGTH,
                          "KnobSettingDescriptor::setAttribute()",
+                         MAX_KNOB_ID_LENGTH,
                          1);
         break;
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT:
         setKnobValue(attributeType, elementCount, arrayOfElements);
         break;
     default:
@@ -146,7 +146,7 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT:
         getString(_knobId,
                   attributeType,
                   requestedElementCount,
@@ -154,7 +154,7 @@ void KnobSettingDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeN
                   arrayOfElements,
                   "KnobSettingDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE:
+    case HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT:
         getKnobValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     default:
@@ -263,35 +263,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobSettingT>
     auto knobSetting = std::make_unique<hipdnn_data_sdk::data_objects::KnobSettingT>();
     knobSetting->knob_id = _knobId;
 
-    // Deep-copy the KnobValueUnion
-    switch(_value.type)
-    {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-    {
-        hipdnn_data_sdk::data_objects::IntValueT intVal;
-        intVal.value = _value.AsIntValue()->value;
-        knobSetting->value.Set(intVal);
-        break;
-    }
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-    {
-        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
-        floatVal.value = _value.AsFloatValue()->value;
-        knobSetting->value.Set(floatVal);
-        break;
-    }
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-    {
-        hipdnn_data_sdk::data_objects::StringValueT strVal;
-        strVal.value = _value.AsStringValue()->value;
-        knobSetting->value.Set(std::move(strVal));
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "KnobSettingDescriptor::toKnobSettingT(): unknown value type ("
-                                  + std::to_string(static_cast<int>(_value.type)) + ")");
-    }
+    copyKnobValueUnion(_value, knobSetting->value, "KnobSettingDescriptor::toKnobSettingT()");
 
     return knobSetting;
 }

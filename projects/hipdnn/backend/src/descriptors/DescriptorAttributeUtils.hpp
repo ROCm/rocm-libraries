@@ -15,6 +15,7 @@
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
@@ -59,8 +60,8 @@ void setBoundedString(std::string& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
-                      int64_t maxLength,
                       const char* errorPrefix,
+                      int64_t maxLength,
                       int64_t minLength = 0);
 
 void getString(const std::string& source,
@@ -375,5 +376,11 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 int64_t* elementCount,
                                 void* arrayOfElements,
                                 const char* errorPrefix);
+
+/// Deep-copy a KnobValueUnion into another KnobValueUnion.
+/// Used by both KnobDescriptor::toKnobT() and KnobSettingDescriptor::toKnobSettingT().
+void copyKnobValueUnion(const hipdnn_data_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_data_sdk::data_objects::KnobValueUnion& dst,
+                        const char* errorPrefix);
 
 } // namespace hipdnn_backend

@@ -134,16 +134,16 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_KNOB_INFO_TYPE:
+    case HIPDNN_ATTR_KNOB_INFO_TYPE_EXT:
         setBoundedString(_knobId,
                          attributeType,
                          elementCount,
                          arrayOfElements,
-                         MAX_KNOB_ID_LENGTH,
                          "KnobDescriptor::setAttribute()",
+                         MAX_KNOB_ID_LENGTH,
                          1);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE:
+    case HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT:
         if(attributeType == HIPDNN_TYPE_INT64)
         {
             setOptionalScalar<HIPDNN_TYPE_INT64>(_maxValueInt,
@@ -169,7 +169,7 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                     + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
         }
         break;
-    case HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE:
+    case HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT:
         if(attributeType == HIPDNN_TYPE_INT64)
         {
             setOptionalScalar<HIPDNN_TYPE_INT64>(_minValueInt,
@@ -195,7 +195,7 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                     + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
         }
         break;
-    case HIPDNN_ATTR_KNOB_INFO_STRIDE:
+    case HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT:
         setOptionalScalar<HIPDNN_TYPE_INT64>(_stride,
                                              attributeType,
                                              elementCount,
@@ -205,18 +205,18 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                       HIPDNN_STATUS_BAD_PARAM,
                       "KnobDescriptor::setAttribute(): STRIDE must be positive (> 0).");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DESCRIPTION:
+    case HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT:
         setBoundedString(_description,
                          attributeType,
                          elementCount,
                          arrayOfElements,
-                         MAX_DESCRIPTION_LENGTH,
-                         "KnobDescriptor::setAttribute()");
+                         "KnobDescriptor::setAttribute()",
+                         MAX_DESCRIPTION_LENGTH);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE:
+    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT:
         setDefaultValue(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DEPRECATED:
+    case HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT:
         setScalar(_deprecated,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -224,7 +224,7 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                   arrayOfElements,
                   "KnobDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT:
+    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT:
         if(elementCount == 0)
         {
             _validValuesInt.clear();
@@ -239,11 +239,11 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                             "KnobDescriptor::setAttribute()");
         }
         break;
-    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING:
+    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT:
         setValidValuesString(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH:
-        setOptionalScalar<HIPDNN_TYPE_INT64>(_stringMaxLength,
+    case HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT:
+        setOptionalScalar<HIPDNN_TYPE_INT32>(_stringMaxLength,
                                              attributeType,
                                              elementCount,
                                              arrayOfElements,
@@ -294,8 +294,8 @@ void KnobDescriptor::setDefaultValue(hipdnnBackendAttributeType_t attributeType,
                          attributeType,
                          elementCount,
                          arrayOfElements,
-                         MAX_STRING_VALUE_LENGTH,
-                         "KnobDescriptor::setAttribute()");
+                         "KnobDescriptor::setAttribute()",
+                         MAX_STRING_VALUE_LENGTH);
         _defaultValue.Set(std::move(strVal));
         break;
     }
@@ -349,6 +349,45 @@ void KnobDescriptor::setValidValuesString(hipdnnBackendAttributeType_t attribute
     }
 }
 
+namespace
+{
+
+void getBoundValue(const std::optional<int64_t>& intVal,
+                   const std::optional<double>& doubleVal,
+                   const char* label,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements)
+{
+    switch(attributeType)
+    {
+    case HIPDNN_TYPE_INT64:
+        getOptionalScalar<HIPDNN_TYPE_INT64>(intVal,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "KnobDescriptor::getAttribute()");
+        break;
+    case HIPDNN_TYPE_DOUBLE:
+        getOptionalScalar<HIPDNN_TYPE_DOUBLE>(doubleVal,
+                                              attributeType,
+                                              requestedElementCount,
+                                              elementCount,
+                                              arrayOfElements,
+                                              "KnobDescriptor::getAttribute()");
+        break;
+    default:
+        throw HipdnnException(
+            HIPDNN_STATUS_BAD_PARAM,
+            std::string("KnobDescriptor::getAttribute(): unsupported attribute type for ") + label
+                + ": " + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+    }
+}
+
+} // anonymous namespace
+
 // ============================================================================
 // getAttribute
 // ============================================================================
@@ -365,7 +404,7 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_KNOB_INFO_TYPE:
+    case HIPDNN_ATTR_KNOB_INFO_TYPE_EXT:
         getString(_knobId,
                   attributeType,
                   requestedElementCount,
@@ -373,13 +412,25 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   arrayOfElements,
                   "KnobDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE:
-        getMaximumValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
+    case HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE_EXT:
+        getBoundValue(_maxValueInt,
+                      _maxValueDouble,
+                      "MAXIMUM_VALUE",
+                      attributeType,
+                      requestedElementCount,
+                      elementCount,
+                      arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE:
-        getMinimumValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
+    case HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE_EXT:
+        getBoundValue(_minValueInt,
+                      _minValueDouble,
+                      "MINIMUM_VALUE",
+                      attributeType,
+                      requestedElementCount,
+                      elementCount,
+                      arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_STRIDE:
+    case HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT:
         getOptionalScalar<HIPDNN_TYPE_INT64>(_stride,
                                              attributeType,
                                              requestedElementCount,
@@ -387,7 +438,7 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                                              arrayOfElements,
                                              "KnobDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DESCRIPTION:
+    case HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT:
         getString(_description,
                   attributeType,
                   requestedElementCount,
@@ -395,10 +446,10 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   arrayOfElements,
                   "KnobDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE:
+    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT:
         getDefaultValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DEPRECATED:
+    case HIPDNN_ATTR_KNOB_INFO_DEPRECATED_EXT:
         getScalar(_deprecated,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -407,7 +458,7 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   arrayOfElements,
                   "KnobDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT:
+    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT:
         getScalarVector(_validValuesInt,
                         HIPDNN_TYPE_INT64,
                         attributeType,
@@ -416,18 +467,18 @@ void KnobDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                         arrayOfElements,
                         "KnobDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING:
+    case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT:
         getValidValuesString(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH:
-        getOptionalScalar<HIPDNN_TYPE_INT64>(_stringMaxLength,
+    case HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT:
+        getOptionalScalar<HIPDNN_TYPE_INT32>(_stringMaxLength,
                                              attributeType,
                                              requestedElementCount,
                                              elementCount,
                                              arrayOfElements,
                                              "KnobDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE:
+    case HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_TYPE_EXT:
         getDefaultValueType(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     default:
@@ -476,68 +527,6 @@ void KnobDescriptor::getDefaultValue(hipdnnBackendAttributeType_t attributeType,
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
                               "KnobDescriptor::getAttribute(): unknown default value type ("
                                   + std::to_string(static_cast<int>(_defaultValue.type)) + ")");
-    }
-}
-
-void KnobDescriptor::getMaximumValue(hipdnnBackendAttributeType_t attributeType,
-                                     int64_t requestedElementCount,
-                                     int64_t* elementCount,
-                                     void* arrayOfElements) const
-{
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-        getOptionalScalar<HIPDNN_TYPE_INT64>(_maxValueInt,
-                                             attributeType,
-                                             requestedElementCount,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "KnobDescriptor::getAttribute()");
-        break;
-    case HIPDNN_TYPE_DOUBLE:
-        getOptionalScalar<HIPDNN_TYPE_DOUBLE>(_maxValueDouble,
-                                              attributeType,
-                                              requestedElementCount,
-                                              elementCount,
-                                              arrayOfElements,
-                                              "KnobDescriptor::getAttribute()");
-        break;
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              std::string("KnobDescriptor::getAttribute(): "
-                                          "unsupported attribute type for MAXIMUM_VALUE: ")
-                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
-    }
-}
-
-void KnobDescriptor::getMinimumValue(hipdnnBackendAttributeType_t attributeType,
-                                     int64_t requestedElementCount,
-                                     int64_t* elementCount,
-                                     void* arrayOfElements) const
-{
-    switch(attributeType)
-    {
-    case HIPDNN_TYPE_INT64:
-        getOptionalScalar<HIPDNN_TYPE_INT64>(_minValueInt,
-                                             attributeType,
-                                             requestedElementCount,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "KnobDescriptor::getAttribute()");
-        break;
-    case HIPDNN_TYPE_DOUBLE:
-        getOptionalScalar<HIPDNN_TYPE_DOUBLE>(_minValueDouble,
-                                              attributeType,
-                                              requestedElementCount,
-                                              elementCount,
-                                              arrayOfElements,
-                                              "KnobDescriptor::getAttribute()");
-        break;
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              std::string("KnobDescriptor::getAttribute(): "
-                                          "unsupported attribute type for MINIMUM_VALUE: ")
-                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
     }
 }
 
@@ -608,7 +597,7 @@ void KnobDescriptor::getDefaultValueType(hipdnnBackendAttributeType_t attributeT
                                          void* arrayOfElements) const
 {
     // Map the internal KnobValue discriminator to the corresponding attribute type
-    // that callers should use when reading HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE.
+    // that callers should use when reading HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE_EXT.
     int64_t valueType;
     switch(_defaultValue.type)
     {
@@ -651,35 +640,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
     knob->description = _description;
     knob->deprecated = _deprecated;
 
-    // Deep-copy the default value
-    switch(_defaultValue.type)
-    {
-    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-    {
-        hipdnn_data_sdk::data_objects::IntValueT intVal;
-        intVal.value = _defaultValue.AsIntValue()->value;
-        knob->default_value.Set(intVal);
-        break;
-    }
-    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-    {
-        hipdnn_data_sdk::data_objects::FloatValueT floatVal;
-        floatVal.value = _defaultValue.AsFloatValue()->value;
-        knob->default_value.Set(floatVal);
-        break;
-    }
-    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-    {
-        hipdnn_data_sdk::data_objects::StringValueT strVal;
-        strVal.value = _defaultValue.AsStringValue()->value;
-        knob->default_value.Set(std::move(strVal));
-        break;
-    }
-    default:
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "KnobDescriptor::toKnobT(): unknown default value type ("
-                                  + std::to_string(static_cast<int>(_defaultValue.type)) + ")");
-    }
+    copyKnobValueUnion(_defaultValue, knob->default_value, "KnobDescriptor::toKnobT()");
 
     // Build constraint based on default value type and set constraint fields
     switch(_defaultValue.type)
@@ -711,7 +672,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> KnobDescriptor::toKnobT() 
         if(!_validValuesString.empty() || _stringMaxLength.has_value())
         {
             hipdnn_data_sdk::data_objects::StringConstraintT stringConstraint;
-            stringConstraint.max_length = static_cast<int32_t>(_stringMaxLength.value_or(0));
+            stringConstraint.max_length = _stringMaxLength.value_or(0);
             stringConstraint.valid_values = _validValuesString;
             knob->constraint.Set(std::move(stringConstraint));
         }
