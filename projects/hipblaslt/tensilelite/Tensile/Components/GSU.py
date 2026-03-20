@@ -1590,11 +1590,8 @@ class GSUOn(GSU):
 
                     if kernel["ISA"][0] == 12:
                         # Some of operands of gfx12's v_cmp_ge_i32 & v_cndmask_b32 can't be used as sgpr
-                        tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
-                        module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr("GSUSync"), comment="copy GSUSync to vgpr"))
-                        module.add(VCmpGEI32(dst=VCC(), src0=0, src1=vgpr(tmpV01), comment=""))
+                        module.add(VCmpGEI32(dst=VCC(), src0=0, src1=sgpr("GSUSync"), comment=""))
                         module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=VCC(), comment="protect if OOB"))
-                        writer.vgprPool.checkIn(tmpV01)
                     else:
                         module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
                         module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
