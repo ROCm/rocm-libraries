@@ -74,7 +74,7 @@ Default structure example (Linux):
           ├── miopen_plugin.so
           └── other_plugin.so
 
-When ``HIPDNN_PLUGIN_DIR`` is set, hipDNN *only* loads plugins from the specified directory and supplementary custom paths, ignoring the default location. 
+When ``HIPDNN_PLUGIN_DIR`` is set, hipDNN *only* loads plugins from the specified directory and supplementary custom paths, ignoring the default location.
 This allows complete control over which plugins are loaded.
 
 .. code:: bash
@@ -87,8 +87,8 @@ Path resolution
 
 The ``HIPDNN_PLUGIN_DIR`` paths can be:
 
-- **Relative paths**: Resolved from the backend shared library location (typically ``/opt/rocm/lib`` on Linux).
-  
+- **Relative paths**: Resolved from the backend shared library location (typically ``/opt/rocm/lib`` on Linux, or ``C:\TheRock\bin`` on Windows if ROCm is installed to ``C:\TheROck``).
+
   - For example, if ``HIPDNN_PLUGIN_DIR`` is set to ``./test_plugins``, then hipDNN tries to load all plugins from ``/opt/rocm/lib/./test_plugins``.
 
 - **Absolute paths**: Used as specified.
