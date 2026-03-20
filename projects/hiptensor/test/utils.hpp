@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -126,6 +126,14 @@ inline bool isF16Supported()
            || (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1100") != std::string::npos)
+           || (deviceName.find("gfx1101") != std::string::npos)
+           || (deviceName.find("gfx1102") != std::string::npos)
+           || (deviceName.find("gfx1103") != std::string::npos)
+           || (deviceName.find("gfx1150") != std::string::npos)
+           || (deviceName.find("gfx1151") != std::string::npos)
+           || (deviceName.find("gfx1152") != std::string::npos)
+           || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos);
 }
@@ -144,6 +152,14 @@ inline bool isF32Supported()
            || (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1100") != std::string::npos)
+           || (deviceName.find("gfx1101") != std::string::npos)
+           || (deviceName.find("gfx1102") != std::string::npos)
+           || (deviceName.find("gfx1103") != std::string::npos)
+           || (deviceName.find("gfx1150") != std::string::npos)
+           || (deviceName.find("gfx1151") != std::string::npos)
+           || (deviceName.find("gfx1152") != std::string::npos)
+           || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos);
 }
@@ -163,7 +179,29 @@ inline bool isF64Supported()
            || (deviceName.find("gfx950") != std::string::npos);
 }
 
-inline bool isF16MatrixCoreSupported()
+inline bool isF16F16MatrixCoreSupported()
+{
+    hipDevice_t     mHandle;
+    hipDeviceProp_t mProps;
+
+    CHECK_HIP_ERROR(hipGetDevice(&mHandle));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&mProps, mHandle));
+
+    std::string deviceName(mProps.gcnArchName);
+
+    return (deviceName.find("gfx1100") != std::string::npos)
+           || (deviceName.find("gfx1101") != std::string::npos)
+           || (deviceName.find("gfx1102") != std::string::npos)
+           || (deviceName.find("gfx1103") != std::string::npos)
+           || (deviceName.find("gfx1150") != std::string::npos)
+           || (deviceName.find("gfx1151") != std::string::npos)
+           || (deviceName.find("gfx1152") != std::string::npos)
+           || (deviceName.find("gfx1153") != std::string::npos)
+           || (deviceName.find("gfx1200") != std::string::npos)
+           || (deviceName.find("gfx1201") != std::string::npos);
+}
+
+inline bool isF32F16MatrixCoreSupported()
 {
     hipDevice_t     mHandle;
     hipDeviceProp_t mProps;
@@ -177,11 +215,19 @@ inline bool isF16MatrixCoreSupported()
            || (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1100") != std::string::npos)
+           || (deviceName.find("gfx1101") != std::string::npos)
+           || (deviceName.find("gfx1102") != std::string::npos)
+           || (deviceName.find("gfx1103") != std::string::npos)
+           || (deviceName.find("gfx1150") != std::string::npos)
+           || (deviceName.find("gfx1151") != std::string::npos)
+           || (deviceName.find("gfx1152") != std::string::npos)
+           || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos);
 }
 
-inline bool isF32MatrixCoreSupported()
+inline bool isF32F32MatrixCoreSupported()
 {
     hipDevice_t     mHandle;
     hipDeviceProp_t mProps;
@@ -197,7 +243,27 @@ inline bool isF32MatrixCoreSupported()
            || (deviceName.find("gfx950") != std::string::npos);
 }
 
-inline bool isF64MatrixCoreSupported()
+inline bool isF16F32MatrixCoreSupported()
+{
+    return isF32F32MatrixCoreSupported();
+}
+
+inline bool isF64F64MatrixCoreSupported()
+{
+    hipDevice_t     mHandle;
+    hipDeviceProp_t mProps;
+
+    CHECK_HIP_ERROR(hipGetDevice(&mHandle));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&mProps, mHandle));
+
+    std::string deviceName(mProps.gcnArchName);
+
+    return (deviceName.find("gfx90a") != std::string::npos)
+           || (deviceName.find("gfx942") != std::string::npos)
+           || (deviceName.find("gfx950") != std::string::npos);
+}
+
+inline bool isF64F32MatrixCoreSupported()
 {
     hipDevice_t     mHandle;
     hipDeviceProp_t mProps;
@@ -260,6 +326,17 @@ __host__ static inline void fillLaunchKernel(DataType* data, uint32_t elementSiz
     auto blockDim = dim3(1024, 1, 1);
     auto gridDim  = dim3(ceilDiv(elementSize, blockDim.x), 1, 1);
     hipLaunchKernelGGL((fillKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, seed);
+}
+
+// fill kernel for 'elementSize' elements with positive values
+template <typename DataType>
+__host__ static inline void
+    fillPositiveValLaunchKernel(DataType* data, uint32_t elementSize, uint32_t seed)
+{
+    auto blockDim = dim3(1024, 1, 1);
+    auto gridDim  = dim3(ceilDiv(elementSize, blockDim.x), 1, 1);
+    hipLaunchKernelGGL(
+        (fillPositiveValKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, seed);
 }
 
 // fill kernel wrapper for 'elementSize' elements with a specific value

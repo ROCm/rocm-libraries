@@ -5,6 +5,9 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
+    "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
+    "dnn-providers/miopen-provider": "miopen-provider",
+    "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -17,7 +20,7 @@ subtree_to_project_map = {
     "projects/hipsparselt": "sparse",
     "projects/miopen": "miopen",
     "projects/rocblas": "blas",
-    "project/rocfft": "fft",
+    "projects/rocfft": "fft",
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
     "projects/rocsolver": "solver",
@@ -33,50 +36,27 @@ subtree_to_project_map = {
 project_map = {
     "prim": {
         "cmake_options": ["-DTHEROCK_ENABLE_PRIM=ON"],
-        "project_to_test": ["rocprim", "rocthrust", "hipcub"],
+        "projects_to_test": ["rocprim", "rocthrust", "hipcub"],
     },
     "rand": {
         "cmake_options": ["-DTHEROCK_ENABLE_RAND=ON"],
-        "project_to_test": ["rocrand", "hiprand"],
+        "projects_to_test": ["rocrand", "hiprand"],
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "project_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller"],
+        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller"],
     },
     "miopen": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN=ON",
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "additional_flags": {
-            # As composable_kernel is not enabled for Windows, we only enable these flags during Linux builds
-            "linux": [
-                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-            ]
-        },
-        "project_to_test": ["miopen", "miopen_plugin"],
+        "projects_to_test": ["miopen", "miopenprovider"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
-        "project_to_test": ["hipfft", "rocfft"],
-    },
-    "hipdnn": {  # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
-        "cmake_options": ["-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON"],
-        "additional_flags": {
-            # As composable_kernel is not enabled for Windows, we only enable these flags during Linux builds
-            "linux": [
-                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-            ]
-        },
-        "project_to_test": ["hipdnn", "miopen_plugin"],
-    },
-    "rocwmma": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
-        "project_to_test": ["rocwmma"],
+        "projects_to_test": ["hipfft", "rocfft"],
     },
 }
 
@@ -87,12 +67,48 @@ project_map = {
 additional_options = {
     "sparse": {
         "cmake_options": ["-DTHEROCK_ENABLE_SPARSE=ON"],
-        "project_to_test": ["rocsparse", "hipsparse", "hipsparselt"],
+        "projects_to_test": ["rocsparse", "hipsparse", "hipsparselt"],
         "project_to_add": "blas",
     },
     "solver": {
         "cmake_options": ["-DTHEROCK_ENABLE_SOLVER=ON"],
-        "project_to_test": ["rocsolver", "hipsolver"],
+        "projects_to_test": ["rocsolver", "hipsolver"],
+        "project_to_add": "blas",
+    },
+    "hipdnn": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": [
+            "hipdnn",
+            "hipdnn_install",
+            "hipdnn-samples",
+            "miopenprovider",
+            "hipblasltprovider",
+        ],
+        "project_to_add": "miopen",
+    },
+    "miopen-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": ["miopenprovider"],
+        "project_to_add": "miopen",
+    },
+    "hipblaslt-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+        ],
+        "projects_to_test": ["hipblasltprovider"],
+        "project_to_add": "blas",
+    },
+    "rocwmma": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
+        "projects_to_test": ["rocwmma"],
         "project_to_add": "blas",
     },
 }
@@ -123,8 +139,8 @@ def collect_projects_to_run(subtrees):
                 project_map[project_to_add]["cmake_options"].extend(
                     project_options_to_add["cmake_options"]
                 )
-                project_map[project_to_add]["project_to_test"].extend(
-                    project_options_to_add["project_to_test"]
+                project_map[project_to_add]["projects_to_test"].extend(
+                    project_options_to_add["projects_to_test"]
                 )
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
@@ -132,9 +148,9 @@ def collect_projects_to_run(subtrees):
                 project_map[project_to_add]["cmake_options"] = project_options_to_add[
                     "cmake_options"
                 ]
-                project_map[project_to_add]["project_to_test"] = project_options_to_add[
-                    "project_to_test"
-                ]
+                project_map[project_to_add]["projects_to_test"] = (
+                    project_options_to_add["projects_to_test"]
+                )
 
     # Check for potential dependencies
     to_remove_from_project_map = []
@@ -147,8 +163,8 @@ def collect_projects_to_run(subtrees):
                     project_map[project]["cmake_options"].extend(
                         project_map[dependency]["cmake_options"]
                     )
-                    project_map[project]["project_to_test"].extend(
-                        project_map[dependency]["project_to_test"]
+                    project_map[project]["projects_to_test"].extend(
+                        project_map[dependency]["projects_to_test"]
                     )
                     to_remove_from_project_map.append(dependency)
 
@@ -174,11 +190,18 @@ def collect_projects_to_run(subtrees):
 
             # To save time, only build what is needed
             project_map_data["cmake_options"].extend(["-DTHEROCK_ENABLE_ALL=OFF"])
+            # To ensure uniqueness of flags and tests
+            project_map_data["cmake_options"] = list(
+                set(project_map_data["cmake_options"])
+            )
+            project_map_data["projects_to_test"] = list(
+                set(project_map_data["projects_to_test"])
+            )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
-            project_to_test_options = ",".join(project_map_data["project_to_test"])
+            projects_to_test_options = ",".join(project_map_data["projects_to_test"])
             project_map_data["cmake_options"] = cmake_flag_options
-            project_map_data["project_to_test"] = project_to_test_options
+            project_map_data["projects_to_test"] = projects_to_test_options
             project_to_run.append(project_map_data)
 
     return project_to_run

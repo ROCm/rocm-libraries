@@ -591,8 +591,17 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
 {
     // use size in real units to decide what scheme to use
     const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
+    const auto& realStride = nodeData.direction == -1 ? nodeData.inStride : nodeData.outStride;
+    const auto& realDist   = nodeData.direction == -1 ? nodeData.iDist : nodeData.oDist;
+    const auto  isEven     = [](size_t val) { return val % 2 == 0; };
 
-    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1)
+    // For even-length optimization, we treat real data as
+    // complex-interleaved, so fastest dimension stride must be 1 for
+    // both input and output.  Subsequent strides + dist on the real
+    // side must all be expressible as complex stride + dist; that
+    // is, they must all be even.
+    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
+       && std::all_of(realStride.begin() + 1, realStride.end(), isEven) && isEven(realDist))
     {
         switch(nodeData.dimension)
         {
@@ -1059,9 +1068,36 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    CS_3D_PP)))
         return false;
 
+    auto find_length = [](const std::vector<std::vector<size_t>>& exceptions,
+                          const std::vector<size_t>&              length) -> bool {
+        const bool length_found
+            = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
+
+        return length_found;
+    };
+
+    // Batch size cut-off for enabling partial-pass 3D kernels may vary
+    // by GPU architecture, precision, and length
+    std::size_t cutOffBatch = 5;
+    if(nodeData.precision == rocfft_precision_single)
+    {
+        bool lenExceptionFound = false;
+
+        // Set a different batch cut-off for gfx1201/gfx950 when
+        // not hitting the excepted lengths in single-precision
+        std::vector<std::vector<size_t>> gfx1201LenException = {{52, 64, 64}, {128, 64, 64}};
+        lenExceptionFound = find_length(gfx1201LenException, nodeData.length);
+        if(get_curr_gcn_arch_name() == "gfx1201" && !lenExceptionFound)
+            cutOffBatch = 25;
+        std::vector<std::vector<size_t>> gfx950LenException = {{52, 64, 64}};
+        lenExceptionFound = find_length(gfx950LenException, nodeData.length);
+        if(get_curr_gcn_arch_name() == "gfx950" && !lenExceptionFound)
+            cutOffBatch = 25;
+    }
+
     // Partial pass is currently restricted to large enough batch sizes,
     // unite stride, interleaved FFTs.
-    bool batchCondition = (nodeData.batch >= 5);
+    bool batchCondition = (nodeData.batch >= cutOffBatch);
 
     size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
     bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);

@@ -33,41 +33,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename ReduceConfig, typename>
-struct wrapped_reduce_config
+template<class Value>
+struct reduce_config_selector
 {
-    static_assert(std::is_same<typename ReduceConfig::tag, reduce_config_tag>::value,
-                  "Config must be a specialization of struct template reduce_config");
+    using targets    = reduce_targets;
+    using param_type = reduce_config_params;
 
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr reduce_config_params params = ReduceConfig();
-    };
+    param_type params;
+
+    template<class Target>
+    constexpr reduce_config_selector(Target) : params(reduce_config_picker<Target, Value>())
+    {}
 };
-
-template<typename Value>
-struct wrapped_reduce_config<default_config, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr reduce_config_params params
-            = default_reduce_config<static_cast<unsigned int>(Arch), Value>();
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename ReduceConfig, typename Value>
-template<target_arch Arch>
-constexpr reduce_config_params
-    wrapped_reduce_config<ReduceConfig, Value>::architecture_config<Arch>::params;
-
-template<typename Value>
-template<target_arch Arch>
-constexpr reduce_config_params
-    wrapped_reduce_config<default_config, Value>::architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // namespace detail
 

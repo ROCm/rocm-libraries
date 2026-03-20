@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,13 +29,13 @@ Tests:
   category: pre_checkin
   function: hybmv_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: hybmv
   category: quick
   function: hybmv
   precision: *single_double_precisions_complex_real
-  M: [0, 10, 500, 7111, 10000]
-  N: [0, 33, 842, 4441, 10000]
+  M: [0, 10, 500, 7111]
+  N: [0, 33, 842, 4441]
   ell_width: [0, 2]
   alpha: [3.0]
   alphai: [-0.2]
@@ -50,11 +50,11 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  ell_width: [0, 2]
-  alpha: [3.0]
-  alphai: [-0.2]
-  beta: [0.67]
-  betai: [1.7]
+  ell_width: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  alpha: [1.0]
+  alphai: [-1.2]
+  beta: [1.2]
+  betai: [0.2]
   part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_MAX, HIPSPARSE_HYB_PARTITION_USER]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
@@ -64,3 +64,43 @@ Tests:
              nos5,
              nos6,
              nos7]
+
+- name: hybmv
+  category: nightly
+  function: hybmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  ell_width: [1, 2, 4, 5, 7, 8]
+  alpha: [2.1]
+  alphai: [1.2]
+  beta: [-0.67]
+  betai: [1.2]
+  part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_USER]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [shipsec1,
+             webbase-1M,
+             bmwcra_1,
+             rma10,
+             mc2depi,
+             ASIC_320k,
+             bibd_22_8,
+             webbase-1M]
+
+- name: hybmv
+  category: pre_checkin
+  function: hybmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  ell_width: [7]
+  alpha: [1.0]
+  alphai: [-1.2]
+  beta: [1.2]
+  betai: [0.2]
+  part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_MAX, HIPSPARSE_HYB_PARTITION_USER]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [nos7,
+             mc2depi,
+             bmwcra_1]
+  graph_test: [true]

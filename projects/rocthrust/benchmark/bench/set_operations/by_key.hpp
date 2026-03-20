@@ -140,9 +140,9 @@ void run_benchmark(benchmark::State& state,
 #define CREATE_BENCHMARK(KeyT, ValueT, Elements, EntropyReduction, InputSizeRatio)                                    \
   benchmark::RegisterBenchmark(                                                                                       \
     bench_utils::bench_naming::format_name(                                                                           \
-      "{algo:" + algo_name + ",subalgo:by_key" + ",key_type:" #KeyT + ",value_type:" #ValueT + ",elements:" #Elements \
-      + ",entropy:" + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction))                           \
-      + ",input_size_ratio:" #InputSizeRatio)                                                                         \
+      "{algo:" + algo_name + ",subalgo:by_key" + ",key_type:" #KeyT + ",value_type:" #ValueT                          \
+      + ",elements:" + bench_utils::format_pow2(Elements) + ",entropy:"                                               \
+      + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction)) + ",input_size_ratio:" #InputSizeRatio) \
       .c_str(),                                                                                                       \
     run_benchmark<KeyT, ValueT, OpT>,                                                                                 \
     Elements,                                                                                                         \
@@ -150,19 +150,21 @@ void run_benchmark(benchmark::State& state,
     EntropyReduction,                                                                                                 \
     InputSizeRatio)
 
-#define BENCHMARK_ELEMENTS(key_type, value_type, elements, entropy) \
-  CREATE_BENCHMARK(key_type, value_type, elements, entropy, 25),    \
-    CREATE_BENCHMARK(key_type, value_type, elements, entropy, 50),  \
-    CREATE_BENCHMARK(key_type, value_type, elements, entropy, 75)
+#define BENCHMARK_ELEMENTS(key_type, value_type, elements, entropy)            \
+  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, entropy, 25)); \
+  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, entropy, 50)); \
+  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, entropy, 75));
 
-#define BENCHMARK_VALUE_TYPE(key_type, value_type, entropy)     \
-  BENCHMARK_ELEMENTS(key_type, value_type, 1 << 16, entropy),   \
-    BENCHMARK_ELEMENTS(key_type, value_type, 1 << 20, entropy), \
-    BENCHMARK_ELEMENTS(key_type, value_type, 1 << 24, entropy), \
-    BENCHMARK_ELEMENTS(key_type, value_type, 1 << 28, entropy)
+#define BENCHMARK_VALUE_TYPE(key_type, value_type, entropy)                                                  \
+  for (size_t size : bench_utils::sizes)                                                                     \
+  {                                                                                                          \
+    if ((sizeof(key_type) * size + sizeof(value_type) * size) <= bench_utils::system.devProp.totalGlobalMem) \
+      BENCHMARK_ELEMENTS(key_type, value_type, size, entropy)                                                \
+  }
 
 #define BENCHMARK_KEY_TYPE_ENTROPY(key_type, entropy) \
-  BENCHMARK_VALUE_TYPE(key_type, int8_t, entropy), BENCHMARK_VALUE_TYPE(key_type, int64_t, entropy)
+  BENCHMARK_VALUE_TYPE(key_type, int8_t, entropy)     \
+  BENCHMARK_VALUE_TYPE(key_type, int64_t, entropy)
 
 template <class OpT>
 void add_benchmarks(
@@ -172,11 +174,11 @@ void add_benchmarks(
 
   for (int entropy_reduction : entropy_reductions)
   {
-    std::vector<benchmark::internal::Benchmark*> bs = {
-      BENCHMARK_KEY_TYPE_ENTROPY(int8_t, entropy_reduction),
-      BENCHMARK_KEY_TYPE_ENTROPY(int16_t, entropy_reduction),
-      BENCHMARK_KEY_TYPE_ENTROPY(int32_t, entropy_reduction),
-      BENCHMARK_KEY_TYPE_ENTROPY(int64_t, entropy_reduction)};
+    std::vector<benchmark::internal::Benchmark*> bs;
+    BENCHMARK_KEY_TYPE_ENTROPY(int8_t, entropy_reduction)
+    BENCHMARK_KEY_TYPE_ENTROPY(int16_t, entropy_reduction)
+    BENCHMARK_KEY_TYPE_ENTROPY(int32_t, entropy_reduction)
+    BENCHMARK_KEY_TYPE_ENTROPY(int64_t, entropy_reduction)
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
   }

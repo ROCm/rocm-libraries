@@ -1,30 +1,8 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
+#include <rocRoller/KernelGraph/Transforms/SwizzleScale_detail.hpp>
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
@@ -44,9 +22,8 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         using namespace Expression;
 
-        // map<loadTag, {multiplyTag, macroTileTag}>
-        std::map<int, std::pair<int, int>>
-            collectScaleLoadInfo(KernelGraph& graph, NaryArgument arg, int loopTag)
+        std::map<int, std::pair<int, int>> SwizzleScaleDetail::collectScaleLoadInfo(
+            KernelGraph& graph, NaryArgument arg, int loopTag)
         {
             std::map<int, std::pair<int, int>> scaleLoads;
             auto loopBodies = graph.control.getOutputNodeIndices<Body>(loopTag).to<std::vector>();
@@ -56,10 +33,10 @@ namespace rocRoller
                 for(auto const multiplyTag : filter(graph.control.isElemType<Multiply>(),
                                                     graph.control.depthFirstVisit(loopBodyTag)))
                 {
-                    auto [scaleMacTag, scaleMac] = graph.getDimension<MacroTile>(
-                        multiplyTag, Connections::typeArgument<MacroTile>(arg));
-
-                    scaleTileForMultiply[scaleMacTag] = multiplyTag;
+                    auto scaleMacTag
+                        = graph.mapper.get(multiplyTag, Connections::typeArgument<MacroTile>(arg));
+                    if(scaleMacTag != -1)
+                        scaleTileForMultiply[scaleMacTag] = multiplyTag;
                 }
 
                 auto isLoad = [&](int tag) {
@@ -80,12 +57,13 @@ namespace rocRoller
             return scaleLoads;
         }
 
-        void orderExchangesBeforeMultipliesInLoopBody(KernelGraph&       graph,
-                                                      ContextPtr         context,
-                                                      NaryArgument       arg,
-                                                      std::map<int, int> tileExchangeMap,
-                                                      std::map<int, std::pair<int, int>> scaleLoads,
-                                                      int                                loopTag)
+        void SwizzleScaleDetail::orderExchangesBeforeMultipliesInLoopBody(
+            KernelGraph&                       graph,
+            ContextPtr                         context,
+            NaryArgument                       arg,
+            std::map<int, int>                 tileExchangeMap,
+            std::map<int, std::pair<int, int>> scaleLoads,
+            int                                loopTag)
         {
             auto loopBodies = graph.control.getOutputNodeIndices<Body>(loopTag).to<std::vector>();
             for(auto loopBodyTag : loopBodies)
@@ -111,9 +89,8 @@ namespace rocRoller
             }
         }
 
-        std::map<int, std::map<int, int>>
-            filterLoadUnrollColouring(UnrollColouring const&                    colouring,
-                                      std::map<int, std::pair<int, int>> const& scaleLoads)
+        std::map<int, std::map<int, int>> SwizzleScaleDetail::filterLoadUnrollColouring(
+            UnrollColouring const& colouring, std::map<int, std::pair<int, int>> const& scaleLoads)
         {
             AssertFatal(!scaleLoads.empty(), "Scale loads are not found");
 
@@ -127,11 +104,11 @@ namespace rocRoller
             return rv;
         }
 
-        std::vector<DeferredConnection> addExchangeCT(KernelGraph& graph,
-                                                      ContextPtr   context,
-                                                      int          macTileTag,
-                                                      int          waveTileTag,
-                                                      NaryArgument arg)
+        std::vector<DeferredConnection> SwizzleScaleDetail::addExchangeCT(KernelGraph& graph,
+                                                                          ContextPtr   context,
+                                                                          int          macTileTag,
+                                                                          int          waveTileTag,
+                                                                          NaryArgument arg)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             AssertFatal(macTile.memoryType == MemoryType::WAVE_SWIZZLE,
@@ -252,7 +229,10 @@ namespace rocRoller
         std::tuple<std::vector<DeferredConnection>,
                    std::vector<DeferredConnection>,
                    std::map<int, int>>
-            addSwizzleLoadCT(KernelGraph& graph, ContextPtr context, int tag, NaryArgument arg)
+            SwizzleScaleDetail::addSwizzleLoadCT(KernelGraph& graph,
+                                                 ContextPtr   context,
+                                                 int          tag,
+                                                 NaryArgument arg)
         {
             AssertFatal(arg == NaryArgument::LHS_SCALE || arg == NaryArgument::RHS_SCALE);
 
@@ -364,20 +344,29 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWave0, 0));
             connections.push_back(DC<WaveTileNumber>(nWave1, 1));
 
-            uint const nLaneInSIMD   = 16;
-            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
-            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            uint const nLanesInSIMD      = 16;
+            uint const numElements       = waveTile.elements();
+            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint const numVgpr           = numElements / activeLanesInWave;
+
+            uint const nLanesInSIMDIndex = macTile.subTileSizes.at(2) / numVgpr; // k dimension
+            uint const nLanesInSIMDBlock = nLanesInSIMD / nLanesInSIMDIndex;
+            auto       laneInSIMD
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMD), literal(1u)));
+            auto laneInSIMDIndex
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMDIndex), literal(1u)));
+            auto laneInSIMDBlock
+                = graph.coordinates.addElement(Lane(literal(nLanesInSIMDBlock), literal(1u)));
+
+            uint const nSIMDsPerWave = wavefrontSize / nLanesInSIMD;
+            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLanesInSIMD;
             auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
-            auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
 
             uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const numElements       = waveTile.elements();
-            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint const numVgpr           = numElements / activeLanesInWave;
             uint const nVgprIndex
                 = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
             // Minimal swizzle tile size 64x4 or 32x8 = 256
@@ -408,18 +397,32 @@ namespace rocRoller
             auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, literal(1u)));
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
             graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex, laneInSIMD}, {lane});
+            graph.coordinates.addElement(
+                Flatten(), {laneInSIMDBlock, laneInSIMDIndex}, {laneInSIMD});
 
             std::map<int, int> unrolls;
 
-            auto existingUnroll0 = graph.mapper.get<Unroll>(tag, 0);
-            auto existingUnroll1 = graph.mapper.get<Unroll>(tag, 1);
-            auto existingUnroll2 = graph.mapper.get<Unroll>(tag, 2);
+            auto existingUnroll0 = graph.mapper.get<Unroll>(tag, rocRoller::XLOOP_UNROLL);
+            auto existingUnroll1 = graph.mapper.get<Unroll>(tag, rocRoller::YLOOP_UNROLL);
+            auto existingUnroll2 = graph.mapper.get<Unroll>(tag, rocRoller::KLOOP_UNROLL);
 
             if(arg == NaryArgument::LHS_SCALE)
             {
-                graph.coordinates.addElement(Tile(), {iWave0}, {SIMDIndex, laneInSIMD});
-                graph.coordinates.addElement(
-                    Tile(), {iWave1}, {block, SIMDBlock, vgprBlock, vgprIndex});
+
+                if(context->kernelOptions()->scaleSkipPermlane
+                   == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {laneInSIMDIndex, vgprBlock, vgprIndex});
+                }
+                else
+                {
+                    graph.coordinates.addElement(Tile(), {iWave0}, {SIMDIndex, laneInSIMD});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {block, SIMDBlock, vgprBlock, vgprIndex});
+                }
 
                 if(existingUnroll0 != -1)
                 {
@@ -452,9 +455,20 @@ namespace rocRoller
 
             if(arg == NaryArgument::RHS_SCALE)
             {
-                graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
-                graph.coordinates.addElement(
-                    Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});
+                if(context->kernelOptions()->scaleSkipPermlane
+                   == ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {iWave1}, {SIMDBlock, SIMDIndex, laneInSIMDBlock});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {laneInSIMDIndex, vgprBlock, vgprIndex});
+                }
+                else
+                {
+                    graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
+                    graph.coordinates.addElement(
+                        Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});
+                }
 
                 if(existingUnroll1 != -1)
                 {
@@ -490,7 +504,8 @@ namespace rocRoller
             return {connections, exchangeConnections, unrolls};
         }
 
-        std::pair<int, int> getOuterMergeFactors(KernelGraph const& graph, int macTileTag)
+        std::pair<int, int> SwizzleScaleDetail::getOuterMergeFactors(KernelGraph const& graph,
+                                                                     int                macTileTag)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto waveM   = macTile.subTileSizes.at(0);
@@ -512,7 +527,8 @@ namespace rocRoller
             return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }
 
-        std::pair<int, int> getInnerMergeFactors(KernelGraph const& graph, int macTileTag)
+        std::pair<int, int> SwizzleScaleDetail::getInnerMergeFactors(KernelGraph const& graph,
+                                                                     int                macTileTag)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto waveM   = macTile.subTileSizes.at(0);
@@ -535,11 +551,11 @@ namespace rocRoller
             return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }
 
-        std::map<int, std::vector<std::pair<int, int>>>
-            findMergeableLoads(KernelGraph const&                        graph,
-                               std::map<int, std::pair<int, int>> const& scaleLoads,
-                               std::map<int, std::map<int, int>>&        loadUnrollMap,
-                               NaryArgument                              arg)
+        std::map<int, std::vector<std::pair<int, int>>> SwizzleScaleDetail::findMergeableLoads(
+            KernelGraph const&                        graph,
+            std::map<int, std::pair<int, int>> const& scaleLoads,
+            std::map<int, std::map<int, int>>&        loadUnrollMap,
+            NaryArgument                              arg)
         {
             AssertFatal(!scaleLoads.empty() && !loadUnrollMap.empty());
 
@@ -630,9 +646,9 @@ namespace rocRoller
             };
 
             auto sampleLoad = loadUnrollMap.begin()->first;
-            auto unroll0    = graph.mapper.get<Unroll>(sampleLoad, 0);
-            auto unroll1    = graph.mapper.get<Unroll>(sampleLoad, 1);
-            auto unroll2    = graph.mapper.get<Unroll>(sampleLoad, 2);
+            auto unroll0    = graph.mapper.get<Unroll>(sampleLoad, rocRoller::XLOOP_UNROLL);
+            auto unroll1    = graph.mapper.get<Unroll>(sampleLoad, rocRoller::YLOOP_UNROLL);
+            auto unroll2    = graph.mapper.get<Unroll>(sampleLoad, rocRoller::KLOOP_UNROLL);
 
             // if unroll2 is -1, this returns 1.
             auto unrollKSize = getUnrollSize(graph, unroll2);
@@ -712,7 +728,7 @@ namespace rocRoller
         void
             swizzleScaleLoads(KernelGraph& graph, ContextPtr context, NaryArgument arg, int loopTag)
         {
-            auto scaleLoads = collectScaleLoadInfo(graph, arg, loopTag);
+            auto scaleLoads = SwizzleScaleDetail::collectScaleLoadInfo(graph, arg, loopTag);
 
             if(scaleLoads.empty())
             {
@@ -723,11 +739,13 @@ namespace rocRoller
 
             auto colouring = colourByUnrollValue(graph);
 
-            auto loadUnrollMap = filterLoadUnrollColouring(colouring, scaleLoads);
+            auto loadUnrollMap
+                = SwizzleScaleDetail::filterLoadUnrollColouring(colouring, scaleLoads);
             if(loadUnrollMap.empty())
                 return;
 
-            auto mergeables = findMergeableLoads(graph, scaleLoads, loadUnrollMap, arg);
+            auto mergeables
+                = SwizzleScaleDetail::findMergeableLoads(graph, scaleLoads, loadUnrollMap, arg);
 
             if(mergeables.empty())
                 return;
@@ -735,7 +753,7 @@ namespace rocRoller
             auto sampleLoad = mergeables.begin()->first;
 
             auto [loadConnections, exchangeConnections, unrollReindexMap]
-                = addSwizzleLoadCT(graph, context, sampleLoad, arg);
+                = SwizzleScaleDetail::addSwizzleLoadCT(graph, context, sampleLoad, arg);
 
             std::map<int, int> tileExchangeMap;
 
@@ -832,15 +850,16 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                auto destMacTileTag = context->kernelOptions()->scaleSkipPermlane
-                                          ? exchangeTileTag
-                                          : graph.coordinates.addElement(MacroTile());
+                auto destMacTileTag
+                    = context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None
+                          ? exchangeTileTag
+                          : graph.coordinates.addElement(MacroTile());
 
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
 
                 auto createNode
                     = [&context](int idx) -> rocRoller::KernelGraph::CoordinateGraph::Edge {
-                    if(context->kernelOptions()->scaleSkipPermlane)
+                    if(context->kernelOptions()->scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                         return Segment(idx);
 
                     return Index(idx);
@@ -882,6 +901,7 @@ namespace rocRoller
                         graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
                         destMacTileTag = context->kernelOptions()->scaleSkipPermlane
+                                                 != ScaleSkipPermlaneMode::None
                                              ? exchangeTileTag
                                              : graph.coordinates.addElement(MacroTile());
                         graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
@@ -933,7 +953,7 @@ namespace rocRoller
                 }
             }
 
-            orderExchangesBeforeMultipliesInLoopBody(
+            SwizzleScaleDetail::orderExchangesBeforeMultipliesInLoopBody(
                 graph, context, arg, tileExchangeMap, scaleLoads, loopTag);
         }
 

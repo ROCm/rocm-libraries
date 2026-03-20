@@ -22,6 +22,15 @@
 
 namespace ck_tile {
 
+template <typename... Args>
+CK_TILE_HOST void LogInfo(Args&&... args) noexcept
+{
+    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+    {
+        CK_TILE_INFO(std::forward<Args>(args)...);
+    }
+}
+
 /// @brief The Grouped Convolution kernel device arguments.
 template <typename GroupedConvTraitsType_>
 struct GroupedConvBwdWeightKernelArgs
@@ -106,13 +115,18 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
-                      << ", GemmBatch: " << GemmBatch
-                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << ", k_batch: " << k_batch
-                      << std::endl;
-        }
+        LogInfo("GemmM: ",
+                GemmM,
+                ", GemmN: ",
+                GemmN,
+                ", GemmK: ",
+                GemmK,
+                ", GemmBatch: ",
+                GemmBatch,
+                ", NumGroupsPerBatch: ",
+                NumGroupsPerBatch,
+                ", k_batch: ",
+                k_batch);
     }
 
     template <
@@ -192,13 +206,18 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
-                      << ", GemmBatch: " << GemmBatch
-                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << ", k_batch: " << k_batch
-                      << std::endl;
-        }
+        LogInfo("GemmM: ",
+                GemmM,
+                ", GemmN: ",
+                GemmN,
+                ", GemmK: ",
+                GemmK,
+                ", GemmBatch: ",
+                GemmBatch,
+                ", NumGroupsPerBatch: ",
+                NumGroupsPerBatch,
+                ", k_batch: ",
+                k_batch);
     }
 
     template <
@@ -285,13 +304,18 @@ struct GroupedConvBwdWeightKernelArgs
 
         k_batch = args.k_batch;
 
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
-                      << ", GemmBatch: " << GemmBatch
-                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << ", k_batch: " << k_batch
-                      << std::endl;
-        }
+        LogInfo("GemmM: ",
+                GemmM,
+                ", GemmN: ",
+                GemmN,
+                ", GemmK: ",
+                GemmK,
+                ", GemmBatch: ",
+                GemmBatch,
+                ", NumGroupsPerBatch: ",
+                NumGroupsPerBatch,
+                ", k_batch: ",
+                k_batch);
     }
 
     using ABCGridDescs = remove_cvref_t<
@@ -474,12 +498,12 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST static constexpr GroupedConvBwdWeightKernelArgsSpecialized
     MakeKernelArgs(const GroupedConvBwdWeightHostArgs& hostArgs)
     {
-        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-        {
-            std::cout << "MPerBlock: " << number<TilePartitioner::MPerBlock>{} << std::endl;
-            std::cout << "NPerBlock: " << number<TilePartitioner::NPerBlock>{} << std::endl;
-            std::cout << "KPerBlock: " << number<TilePartitioner::KPerBlock>{} << std::endl;
-        }
+        LogInfo("MPerBlock: ",
+                number<TilePartitioner::MPerBlock>{},
+                ", NPerBlock: ",
+                number<TilePartitioner::NPerBlock>{},
+                ", KPerBlock: ",
+                number<TilePartitioner::KPerBlock>{});
 
         auto kernel_args = GroupedConvBwdWeightKernelArgsSpecialized(hostArgs);
 
@@ -508,33 +532,17 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST static bool
     IsSupportedArgument(const GroupedConvBwdWeightKernelArgsSpecialized& kargs)
     {
-        if(kargs.k_batch < 1)
+        if constexpr(GemmPipeline_::Async)
         {
-            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            if(get_device_name() != "gfx950")
             {
-                CK_TILE_ERROR(
-                    "k_batch must be at least one. Ensure argument is created via MakeKernelArgs.");
-            }
-            return false;
-        }
-
-#if defined(__gfx11__)
-        if constexpr(EpiloguePipeline::MemoryOperation != ck_tile::memory_operation_enum::set)
-        {
-            return false;
-        }
-#endif
-
-        if constexpr(EpiloguePipeline_::MemoryOperation == memory_operation_enum::atomic_add)
-        {
-            if(kargs.k_batch == 1)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Atomic add epilogue only supports k_batch > 1.");
-                }
                 return false;
             }
+        }
+        if(kargs.k_batch < 1)
+        {
+            LogInfo("k_batch must be at least one. Ensure argument is created via MakeKernelArgs.");
+            return false;
         }
 
         if constexpr(!std::is_same_v<typename EpiloguePipeline::ODataType, float> &&
@@ -545,12 +553,8 @@ struct GroupedConvolutionBackwardWeightKernel
             // accuracy issues. Hence, we limit the maximum split-K value to 128 in such cases.
             if(kargs.k_batch > 128)
             {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR(
-                        "For epilogue output data type that is not float/double, we must have "
+                LogInfo("For epilogue output data type that is not float/double, we must have "
                         "k_batch <= 128.");
-                }
                 return false;
             }
         }
@@ -560,20 +564,24 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(kargs.k_batch != 1)
             {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Conditions not met for K_batch > 1!");
-                }
+                LogInfo("Conditions not met for K_batch > 1: VectorSizeC must be a multiple of 2 "
+                        "for fp16/bf16 when K_batch > 1.",
+                        "Now k_batch is ",
+                        kargs.k_batch,
+                        ", VectorSizeC is ",
+                        GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
 
         if(kargs.GemmK < TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}) * kargs.k_batch)
         {
-            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-            {
-                CK_TILE_ERROR("KBatch is too large, part of GPU wouldn't be utilized!");
-            }
+            LogInfo("KBatch is too large, part of GPU wouldn't be utilized! GemmK: ",
+                    kargs.GemmK,
+                    ", BlockGemmShape K: ",
+                    TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}),
+                    ", k_batch: ",
+                    kargs.k_batch);
             return false;
         }
 
@@ -593,6 +601,17 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(!(SpatialDim == 1 && ConvStride == 1 && LeftPad == 0 && RightPad == 0))
                 {
+                    LogInfo("For Filter1x1Stride1Pad0 specialization, all spatial dimensions must "
+                            "be 1, stride must be 1, and padding must be 0. Now for dimension ",
+                            i,
+                            ": SpatialDim is ",
+                            SpatialDim,
+                            ", ConvStride is ",
+                            ConvStride,
+                            ", LeftPad is ",
+                            LeftPad,
+                            ", RightPad is ",
+                            RightPad);
                     return false;
                 }
             }
@@ -608,6 +627,15 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(!(SpatialDim == 1 && LeftPad == 0 && RightPad == 0))
                 {
+                    LogInfo("For Filter1x1Pad0 specialization, all spatial dimensions must be 1 "
+                            "and padding must be 0. Now for dimension ",
+                            i,
+                            ": SpatialDim is ",
+                            SpatialDim,
+                            ", LeftPad is ",
+                            LeftPad,
+                            ", RightPad is ",
+                            RightPad);
                     return false;
                 }
             }
@@ -616,6 +644,7 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvC != 1)
             {
+                LogInfo("For Filter3x3 specialization, ConvC must be 1. Now ConvC is ", ConvC);
                 return false;
             }
             for(index_t i = 0; i < NDimSpatial; ++i)
@@ -624,6 +653,11 @@ struct GroupedConvolutionBackwardWeightKernel
 
                 if(filter_spatial_dim != I3)
                 {
+                    LogInfo("For Filter3x3 specialization, all spatial dimensions of the filter "
+                            "must be 3. Now for dimension ",
+                            i,
+                            ", filter_spatial_dim is ",
+                            filter_spatial_dim);
                     return false;
                 }
             }
@@ -632,8 +666,7 @@ struct GroupedConvolutionBackwardWeightKernel
         if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
                      ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
         {
-            CK_TILE_ERROR(
-                "Explicit Gemm is supported only for Filter1x1Stride1Pad0 specialization!");
+            LogInfo("ExplicitGemm is only supported for Filter1x1Stride1Pad0 specialization.");
             return false;
         }
 
@@ -645,14 +678,16 @@ struct GroupedConvolutionBackwardWeightKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for "
-                              "input image!");
+                LogInfo("Conv C is not a multiple of vector load size for input! ConvC: ",
+                        ConvC,
+                        ", VectorSizeB: ",
+                        GroupedConvTraitsType_::VectorSizeB);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported input layout!");
+            LogInfo("Not supported input layout! Now InLayout is ", InLayout::name);
             return false;
         }
 
@@ -662,13 +697,16 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvC % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ",
+                        ConvC,
+                        ", VectorSizeC: ",
+                        GroupedConvTraitsType_::VectorSizeC);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported weight layout!");
+            LogInfo("Not supported weight layout! Now WeiLayout is ", WeiLayout::name);
             return false;
         }
 
@@ -678,14 +716,16 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                CK_TILE_ERROR("Conv K is not a multiple of vector store size "
-                              "for output image!");
+                LogInfo("Conv K is not a multiple of vector load size for output! ConvK: ",
+                        ConvK,
+                        ", VectorSizeA: ",
+                        GroupedConvTraitsType_::VectorSizeA);
                 return false;
             }
         }
         else
         {
-            CK_TILE_ERROR("Not supported output layout!");
+            LogInfo("Not supported output layout! Now OutLayout is ", OutLayout::name);
             return false;
         }
 
@@ -694,7 +734,10 @@ struct GroupedConvolutionBackwardWeightKernel
             const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
             if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
             {
-                CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                LogInfo("Number of groups must be divisible by NumGroupsToMerge! ConvG: ",
+                        ConvG,
+                        ", NumGroupsToMerge: ",
+                        GroupedConvTraitsType_::NumGroupsToMerge);
                 return false;
             }
         }
@@ -704,29 +747,31 @@ struct GroupedConvolutionBackwardWeightKernel
 
     template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
     CK_TILE_DEVICE static auto
-    MakeGemmTensorViews(const OutDataType* a_ptr,
-                        const InDataType* b_ptr,
-                        const std::array<const void*, NumDTensor>& ds_ptr,
-                        WeiDataType* c_ptr,
-                        const GroupedConvBwdWeightKernelArgsSpecialized& kargs)
+    MakeCBlockWindow(WeiDataType* c_ptr,
+                     const GroupedConvBwdWeightKernelArgsSpecialized& kargs,
+                     const index_t block_idx_m,
+                     const index_t block_idx_n)
     {
-        static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
-        static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
-        const auto& a_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global>(a_ptr,
-                                                                kargs.a_grid_desc_k_m); // A: out
-        }();
+        const auto& c_tensor_view =
+            make_tensor_view<address_space_enum::global, DstInMemOp>(c_ptr, kargs.c_grid_desc_m_n);
 
-        const auto& b_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global>(b_ptr,
-                                                                kargs.b_grid_desc_k_n); // B: in
-        }();
+        const auto& c_pad_view = pad_tensor_view(
+            c_tensor_view,
+            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
+            sequence<true, true>{});
 
-        const auto& c_tensor_view = [&]() {
-            return make_tensor_view<address_space_enum::global, DstInMemOp>(c_ptr,
-                                                                            kargs.c_grid_desc_m_n);
-        }();
+        return make_tile_window(
+            c_pad_view,
+            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
+            {block_idx_m, block_idx_n});
+    }
 
+    CK_TILE_DEVICE static auto
+    MakeDBlockWindows(const std::array<const void*, NumDTensor>& ds_ptr,
+                      const GroupedConvBwdWeightKernelArgsSpecialized& kargs,
+                      const index_t block_idx_m,
+                      const index_t block_idx_n)
+    {
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
                 static_assert(std::is_same_v<std::tuple_element_t<i, DsLayout>, OutLayout>,
@@ -741,30 +786,7 @@ struct GroupedConvolutionBackwardWeightKernel
             },
             number<NumDTensor>{});
 
-        return make_tuple(a_tensor_view, b_tensor_view, ds_tensor_view, c_tensor_view);
-    }
-
-    template <typename TensorView>
-    CK_TILE_DEVICE static auto MakeGemmPadViews(const TensorView& views)
-    {
-        const auto& a_pad_view = [&]() {
-            const auto& a_tensor_view = views.at(I0);
-            return pad_tensor_view(a_tensor_view,
-                                   make_tuple(number<TilePartitioner::KPerBlock>{},
-                                              number<TilePartitioner::MPerBlock>{}),
-                                   sequence<true, true>{});
-        }();
-
-        const auto& b_pad_view = [&]() {
-            const auto& b_tensor_view = views.at(I1);
-            return pad_tensor_view(b_tensor_view,
-                                   make_tuple(number<TilePartitioner::KPerBlock>{},
-                                              number<TilePartitioner::NPerBlock>{}),
-                                   sequence<true, true>{});
-        }();
-
-        const auto& ds_tensor_view = views.at(I2);
-        const auto& ds_pad_view    = generate_tuple(
+        const auto& ds_pad_view = generate_tuple(
             [&](auto i) {
                 return pad_tensor_view(ds_tensor_view[i],
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
@@ -773,67 +795,58 @@ struct GroupedConvolutionBackwardWeightKernel
             },
             number<NumDTensor>{});
 
-        const auto& c_pad_view = [&]() {
-            const auto& c_tensor_view = views.at(I3);
-            return pad_tensor_view(c_tensor_view,
-                                   make_tuple(number<TilePartitioner::MPerBlock>{},
-                                              number<TilePartitioner::NPerBlock>{}),
-                                   sequence<true, true>{});
-        }();
-
-        return make_tuple(a_pad_view, b_pad_view, ds_pad_view, c_pad_view);
-    }
-
-    /**
-     * @brief Create views to the data that each workgroup will process.
-     *
-     * @param views padded views of A, B, D and C tensors
-     * @param i_m block m-index
-     * @param i_n block n-index
-     * @param i_k block k-index
-     *
-     * @return tuple of tile windows for A, B, D and C tensors
-     */
-    template <typename PadView>
-    CK_TILE_DEVICE static auto MakeGemmTileWindows(const PadView& views,
-                                                   const index_t i_m,
-                                                   const index_t i_n,
-                                                   const index_t i_k)
-    {
-        const auto& a_pad_view  = views.at(I0);
-        const auto& b_pad_view  = views.at(I1);
-        const auto& ds_pad_view = views.at(I2);
-        const auto& c_pad_view  = views.at(I3);
-
-        const auto& a_block_window = [&]() {
-            return make_tile_window(a_pad_view,
-                                    make_tuple(number<TilePartitioner::KPerBlock>{},
-                                               number<TilePartitioner::MPerBlock>{}),
-                                    {i_k, i_m});
-        }();
-
-        const auto& b_block_window = [&]() {
-            return make_tile_window(b_pad_view,
-                                    make_tuple(number<TilePartitioner::KPerBlock>{},
-                                               number<TilePartitioner::NPerBlock>{}),
-                                    {i_k, i_n});
-        }();
-
-        const auto ds_block_window = generate_tuple(
+        return generate_tuple(
             [&](auto i) {
                 return make_tile_window(ds_pad_view[i],
                                         make_tuple(number<TilePartitioner::MPerBlock>{},
                                                    number<TilePartitioner::NPerBlock>{}),
-                                        {i_m, i_n});
+                                        {block_idx_m, block_idx_n});
             },
             number<NumDTensor>{});
+    }
 
-        auto c_block_window = make_tile_window(
-            c_pad_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            {i_m, i_n});
+    CK_TILE_DEVICE static auto
+    MakeBBlockWindow(const InDataType* b_ptr,
+                     const GroupedConvBwdWeightKernelArgsSpecialized& kargs,
+                     const index_t block_idx_n,
+                     const index_t block_idx_k)
+    {
+        static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
+        const auto& b_tensor_view =
+            make_tensor_view<address_space_enum::global>(b_ptr, kargs.b_grid_desc_k_n);
 
-        return make_tuple(a_block_window, b_block_window, ds_block_window, c_block_window);
+        const auto& b_pad_view =
+            pad_tensor_view(b_tensor_view,
+                            make_tuple(number<TilePartitioner::KPerBlock>{} * kargs.k_batch,
+                                       number<TilePartitioner::NPerBlock>{}),
+                            sequence<true, true>{});
+
+        return make_tile_window(
+            b_pad_view,
+            make_tuple(number<TilePartitioner::KPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
+            {block_idx_k, block_idx_n});
+    }
+
+    CK_TILE_DEVICE static auto
+    MakeABlockWindow(const OutDataType* a_ptr,
+                     const GroupedConvBwdWeightKernelArgsSpecialized& kargs,
+                     const index_t block_idx_m,
+                     const index_t block_idx_k)
+    {
+        static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
+        const auto& a_tensor_view =
+            make_tensor_view<address_space_enum::global>(a_ptr, kargs.a_grid_desc_k_m);
+
+        const auto& a_pad_view =
+            pad_tensor_view(a_tensor_view,
+                            make_tuple(number<TilePartitioner::KPerBlock>{} * kargs.k_batch,
+                                       number<TilePartitioner::MPerBlock>{}),
+                            sequence<true, true>{});
+
+        return make_tile_window(
+            a_pad_view,
+            make_tuple(number<TilePartitioner::KPerBlock>{}, number<TilePartitioner::MPerBlock>{}),
+            {block_idx_k, block_idx_m});
     }
 
     /**
@@ -859,78 +872,34 @@ struct GroupedConvolutionBackwardWeightKernel
                                        const index_t block_idx_n,
                                        const index_t block_idx_k)
     {
-        // Create Gemm tensor views, pad views and tile windows
-        const auto& gemm_tensor_views_tuple =
-            MakeGemmTensorViews<EpiloguePipeline::MemoryOperation>(
-                a_ptr, b_ptr, ds_ptr, c_ptr, kargs);
-
-        const auto& gemm_pad_views = MakeGemmPadViews(gemm_tensor_views_tuple);
-        auto gemm_tile_windows =
-            MakeGemmTileWindows(gemm_pad_views, block_idx_m, block_idx_n, block_idx_k);
+        // Create block windows using helper methods
+        const auto& a_block_window = MakeABlockWindow(a_ptr, kargs, block_idx_m, block_idx_k);
+        const auto& b_block_window = MakeBBlockWindow(b_ptr, kargs, block_idx_n, block_idx_k);
+        const auto& d_block_window = MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 
         // Run GEMM cooperatively by whole workgroup.
-        const auto& a_block_window = gemm_tile_windows.at(I0);
-        const auto& b_block_window = gemm_tile_windows.at(I1);
-        const auto& d_block_window = gemm_tile_windows.at(I2);
-
         const auto& c_block_tile = GemmPipeline{}.template operator()(
             a_block_window, b_block_window, num_loop, smem_ptr_0);
 
-        // Run Epilogue Pipeline
-        auto& c_block_window = gemm_tile_windows.at(I3);
+        // Run Epilogue Pipeline with k_batch dispatching
+        if(kargs.k_batch == 1)
+        {
+            auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
+                c_ptr, kargs, block_idx_m, block_idx_n);
 
-        EpiloguePipeline{}.template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
-    }
+            EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+        }
+        else
+        {
+            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                           is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+            {
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                    c_ptr, kargs, block_idx_m, block_idx_n);
 
-    /**
-     * @brief Runs single GEMM problem cooperatively by whole workgroup.
-     *
-     * @note RunGEMM2LDS in with two shared memory buffers using the ping pong buffer mechanism.
-     *
-     * @param a_ptr input A pointer
-     * @param b_ptr input B pointer
-     * @param c_ptr output C pointer
-     * @param smem_ptr_0 The starting pointer of 1st shared memory block.
-     * @param smem_ptr_1 The starting pointer of 2nd shared memory block.
-     * @param kargs Grouped Convolution Backward Weight kernel arguments
-     * @param block_idx_m The GEMM's output M dimension tile index processed by this workgroup.
-     * @param block_idx_n The GEMM's output N dimension tile index processed by this workgroup.
-     *
-     */
-    CK_TILE_DEVICE static void RunGemm2LDS(const OutDataType* a_ptr,
-                                           const InDataType* b_ptr,
-                                           const std::array<const void*, NumDTensor>& ds_ptr,
-                                           WeiDataType* c_ptr,
-                                           void* __restrict__ smem_ptr_0,
-                                           void* __restrict__ smem_ptr_1,
-                                           const GroupedConvBwdWeightKernelArgsSpecialized& kargs,
-                                           const index_t num_loop,
-                                           const index_t block_idx_m,
-                                           const index_t block_idx_n,
-                                           const index_t block_idx_k)
-    {
-        // Create Gemm tensor views, pad views and tile windows
-        const auto& gemm_tensor_views_tuple =
-            MakeGemmTensorViews<EpiloguePipeline::MemoryOperation>(
-                a_ptr, b_ptr, ds_ptr, c_ptr, kargs);
-        const auto& gemm_pad_views = MakeGemmPadViews(gemm_tensor_views_tuple);
-        auto gemm_tile_windows =
-            MakeGemmTileWindows(gemm_pad_views, block_idx_m, block_idx_n, block_idx_k);
-
-        // Run GEMM cooperatively by whole workgroup.
-        const auto& a_block_window = gemm_tile_windows.at(I0);
-        const auto& b_block_window = gemm_tile_windows.at(I1);
-        const auto& d_block_window = gemm_tile_windows.at(I2);
-
-        const auto& c_block_tile = GemmPipeline{}.template operator()(
-            a_block_window, b_block_window, num_loop, smem_ptr_0, smem_ptr_1);
-
-        // Run Epilogue Pipeline
-        auto& c_block_window = gemm_tile_windows.at(I3);
-
-        EpiloguePipeline{}.template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+            }
+        }
     }
 
     CK_TILE_DEVICE void CallExplicitGemm(GroupedConvBwdWeightKernelArgsSpecialized& kargs) const
@@ -960,12 +929,6 @@ struct GroupedConvolutionBackwardWeightKernel
 
     CK_TILE_DEVICE void operator()(GroupedConvBwdWeightKernelArgsSpecialized& kargs) const
     {
-#if defined(__gfx11__)
-        if constexpr(EpiloguePipeline::MemoryOperation != ck_tile::memory_operation_enum::set)
-        {
-            return;
-        }
-#endif
         if constexpr(GroupedConvTraitsType_::ExplicitGemm)
         {
             CallExplicitGemm(kargs);
@@ -996,47 +959,20 @@ struct GroupedConvolutionBackwardWeightKernel
             const InDataType* b_ptr = static_cast<const InDataType*>(kargs.in_ptr) + group_offset_b;
             WeiDataType* c_ptr      = static_cast<WeiDataType*>(kargs.wei_ptr) + group_offset_c;
 
-            __shared__ char smem_ptr_0[GetSmemSize()];
+            __shared__ char smem_ptr[GetSmemSize()];
 
-            if constexpr(GemmPipeline::DoubleSmemBuffer == true)
+            // Disable Async for other archs than gfx950
+            if constexpr(GemmPipeline_::Async)
             {
-                __shared__ char smem_ptr_1[GemmPipeline::GetSmemSize()];
-                if constexpr(!(EpiloguePipeline::MemoryOperation ==
-                                   memory_operation_enum::atomic_add &&
-                               GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                               is_any_of<WeiDataType, fp16_t, bf16_t>::value))
-                {
-                    RunGemm2LDS(a_ptr,
-                                b_ptr,
-                                kargs.ds_ptr,
-                                c_ptr,
-                                smem_ptr_0,
-                                smem_ptr_1,
-                                kargs,
-                                num_loop,
-                                i_m,
-                                i_n,
-                                i_k);
-                }
+#if defined(__gfx950__)
+                RunGemm(
+                    a_ptr, b_ptr, kargs.ds_ptr, c_ptr, smem_ptr, kargs, num_loop, i_m, i_n, i_k);
+#endif
             }
             else
             {
-                if constexpr(!(EpiloguePipeline::MemoryOperation ==
-                                   memory_operation_enum::atomic_add &&
-                               GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                               is_any_of<WeiDataType, fp16_t, bf16_t>::value))
-                {
-                    RunGemm(a_ptr,
-                            b_ptr,
-                            kargs.ds_ptr,
-                            c_ptr,
-                            smem_ptr_0,
-                            kargs,
-                            num_loop,
-                            i_m,
-                            i_n,
-                            i_k);
-                }
+                RunGemm(
+                    a_ptr, b_ptr, kargs.ds_ptr, c_ptr, smem_ptr, kargs, num_loop, i_m, i_n, i_k);
             }
         }
     }

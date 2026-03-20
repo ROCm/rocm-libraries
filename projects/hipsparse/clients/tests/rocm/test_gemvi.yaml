@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@ Tests:
   category: pre_checkin
   function: gemvi_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: gemvi
   category: quick
   function: gemvi
@@ -43,3 +43,46 @@ Tests:
   betai: [1.7]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: gemvi
+  category: pre_checkin
+  function: gemvi
+  precision: *single_double_precisions_complex_real
+  M: [2345]
+  N: [2174]
+  nnz: [968, 2174]
+  alpha: [-1.0]
+  alphai: [1.2]
+  beta: [0.3]
+  betai: [-0.8]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: gemvi
+  category: nightly
+  function: gemvi
+  precision: *double_only_precisions_complex_real
+  M: [435]
+  N: [43545]
+  nnz: [23143, 34676]
+  alpha: [-1.5]
+  alphai: [-2.2]
+  beta: [1.5]
+  betai: [0.7]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+
+- name: gemvi
+  category: pre_checkin
+  function: gemvi
+  precision: *double_only_precisions_complex_real
+  M: [2345]
+  N: [2174]
+  nnz: [237]
+  alpha: [-0.5]
+  alphai: [-0.2]
+  beta: [0.5]
+  betai: [1.7]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  graph_test: [true]

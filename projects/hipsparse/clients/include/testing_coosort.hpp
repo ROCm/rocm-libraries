@@ -123,13 +123,6 @@ void testing_coosort(Arguments argus)
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures

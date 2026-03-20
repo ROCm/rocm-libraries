@@ -241,7 +241,7 @@ ConvSolution MultiMarginLossForward::GetSolution(
                     handle_.EnableProfiling(false);
                     start = miopen::make_hip_event();
                     stop  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
                 /* Phase 1: Calc loss for each element. */
                 {
@@ -269,7 +269,7 @@ ConvSolution MultiMarginLossForward::GetSolution(
                                                       wt.GetOffset(1));
 
                 int kernelCnt = 1;
-                for(kernelCnt; kernelCnt < kernels.size() - 1; kernelCnt++)
+                for(; kernelCnt < kernels.size() - 1; kernelCnt++)
                 {
                     decltype(auto) kernel = handle_.Run(kernels[kernelCnt]);
                     kernel(reduce_in, reduce_out, size);
@@ -282,13 +282,13 @@ ConvSolution MultiMarginLossForward::GetSolution(
 
                 if(profiling)
                 {
-                    hipEventRecord(stop.get(), handle_.GetStream());
-                    hipEventSynchronize(stop.get());
-                    hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                    (void)hipEventRecord(stop.get(), handle_.GetStream());
+                    (void)hipEventSynchronize(stop.get());
+                    (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
 
                     // Clean up
-                    hipEventDestroy(start.get());
-                    hipEventDestroy(stop.get());
+                    (void)hipEventDestroy(start.get());
+                    (void)hipEventDestroy(stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
 

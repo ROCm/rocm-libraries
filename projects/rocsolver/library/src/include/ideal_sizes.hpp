@@ -27,12 +27,15 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
+
 /*! \file
     \brief ideal_sizes.hpp gathers all constants that can be tuned for performance.
  *********************************************************************************/
 
 #define BS1 256 // generic 1 dimensional thread-block size used to call common kernels
-#define BS2 32 // generic 2 dimensional thread-block size used to call common kernels
+#define BS2 \
+    ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used to call common kernels
 
 /******************************* larf ****************************************
 *******************************************************************************/
@@ -366,7 +369,7 @@
 #define GETF2_SPKER_MAX_N 256 //always <= 256
 #endif
 #ifndef GETF2_SSKER_MAX_M
-#define GETF2_SSKER_MAX_M 512 //always <= 512 and <= GETF2_SPKER_MAX_M
+#define GETF2_SSKER_MAX_M ROCSOLVER_ASAN_VALUE(256, 512) //always <= 512 and <= GETF2_SPKER_MAX_M
 #endif
 #ifndef GETF2_SSKER_MAX_N
 #define GETF2_SSKER_MAX_N 64 //always <= wavefront and <= GETF2_SPKER_MAX_N

@@ -27,6 +27,7 @@
 #include "rocblas.h"
 #include "rocblas_block_sizes.h"
 #include "rocblas_gemm_ex.hpp"
+#include "rocblas_syrk_ex.hpp"
 #include "utility.hpp"
 
 namespace
@@ -50,17 +51,17 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        constexpr bool HERM = true;
+
         //Check if the handle is in the device memory size query, as there are two algorithms one which requires extra workspace memory and one which doesn't
         if(handle->is_device_memory_size_query())
         {
             //If rocblas_use_only_gemm is true then it is required to allocate extra workspace memory
-            static bool constexpr FORCEGEMM = false;
-            if(FORCEGEMM) //rocblas_use_only_gemm<T>(handle, n, k))
+            if(rocblas_internal_syrk_herk_ex_use_gemm<HERM>(compute_type))
             {
                 if(!n)
                     return rocblas_status_size_unchanged;
-                size_t size
-                    = rocblas_internal_syrk_herk_workspace<double, FORCEGEMM>(handle, n, k, 1);
+                size_t size = rocblas_internal_syrk_herk_ex_workspace<HERM>(handle, n, k, 1);
                 return handle->set_optimal_device_memory_size(size);
             }
             else

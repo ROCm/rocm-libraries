@@ -18,6 +18,10 @@ def runCI =
     //customize for project
     prj.paths.build_command = buildCommand
     prj.libraryDependencies = ['hipBLAS-common', 'hipBLASLt', 'rocBLAS', 'rocSPARSE', 'rocSOLVER', 'hipSPARSE']
+    prj.libraryDependencies.each { dep ->
+        auxiliary.registerDependencyBranchParameter(dep)
+    }
+    properties(auxiliary.addCommonProperties())
     prj.defaults.ccache = true
 
     // Define test architectures, optional rocm version argument is available
@@ -57,8 +61,9 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
     jobNameList.each
     {
         jobName, nodeDetails->
-        if (urlJobName == jobName)
+        if (urlJobName == jobName) {
             runCI(nodeDetails, jobName, buildCommand, label)
+        }
     }
 
     // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901
@@ -77,13 +82,6 @@ ci: {
 
     def jobNameList = []
     jobNameList = auxiliary.appendJobNameList(jobNameList)
-
-    propertyList.each
-    {
-        jobName, property->
-        if (urlJobName == jobName)
-            properties(auxiliary.addCommonProperties(property))
-    }
 
     String hostBuildCommand = './install.sh -c --compiler=g++'
     setupCI(urlJobName, jobNameList, hostBuildCommand, runCI, 'g++')

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,7 @@ Tests:
 - name: doti
   category: nightly
   function: doti
-  precision: *single_double_precisions_complex_real
-  N: [100000, 500000]
-  nnz: [0, 10000, 50000, 100000]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  precision: *double_only_precisions_complex_real
+  N: [10000000, 50000000]
+  nnz: [0, 1000000, 5000000]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]

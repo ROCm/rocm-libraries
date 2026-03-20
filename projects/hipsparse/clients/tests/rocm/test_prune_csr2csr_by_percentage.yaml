@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,35 +30,43 @@ Tests:
   category: pre_checkin
   function: prune_csr2csr_by_percentage_bad_arg
   precision: *single_double_precisions
-
+  
 - name: prune_csr2csr_by_percentage
   category: quick
   function: prune_csr2csr_by_percentage
   precision: *single_double_precisions
   M: [10, 500, 872]
   N: [33, 242, 623]
-  percentage: [0, 10, 50, 100]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  percentage: [0, 50, 100]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: prune_csr2csr_by_percentage_file
   category: pre_checkin
   function: prune_csr2csr_by_percentage
   precision: *single_double_precisions
   M: 1
-  percentage: [0, 10, 20, 50, 90, 100]
+  percentage: [0, 10, 20, 30, 50, 50, 60, 70, 80, 90, 100]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [rma10,
-             mac_econ_fwd500,
-             nos1,
+  filename: [nos1,
              nos2,
              nos3,
              nos4,
              nos5,
              nos6,
-             nos7,
+             nos7]
+
+- name: prune_csr2csr_by_percentage_file
+  category: nightly
+  function: prune_csr2csr_by_percentage
+  precision: *single_only_precisions
+  M: 1
+  percentage: [0, 10, 20, 50, 90, 100]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  filename: [rma10,
+             mac_econ_fwd500,
              Chebyshev4,
              sme3Dc,
              shipsec1]
-

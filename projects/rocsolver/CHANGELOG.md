@@ -2,6 +2,31 @@
 
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
+## (Unreleased) rocSOLVER
+
+### Added
+
+* Support added for the gfx1150, gfx1152, and gfx1153 architectures
+* Computation of different matrix norms
+    * LANGE
+    * LANGE_64
+* Computation of different matrix condition numbers
+    * GECON
+    * GECON_64
+
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+
+* Fixed a synchronization issue in STEBZ and downstream functions, such as SYEVX and SYEVDX.
+* Fixed a synchronization issue in GETF2.
+
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.32.0 for ROCm 7.2.0
 
 ### Optimized

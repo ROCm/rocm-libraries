@@ -5,7 +5,7 @@
 #include "ck/ck.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 #include "ck_tile/builder/reflect/instance_traits.hpp"
-#include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_weight_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_xdl_cshuffle.hpp"
 #include "ck_tile/builder/reflect/instance_traits_tile_grouped_convolution_backward_weight.hpp"
 #include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
 
@@ -184,7 +184,6 @@ TEST(InstanceTraits, TileInstanceStringReturnsCorrectFormat)
                                          16 /*N_Warp_Tile*/,
                                          16 /*K_Warp_Tile*/,
                                          GroupedConvTraitsType::FixedGemmParams::TransposeC,
-                                         ck_tile::memory_operation_enum::set /*memory_operation*/,
                                          1 /*kNumWaveGroups*/,
                                          GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
                                          GroupedConvTraitsType::VectorSizeC>>;

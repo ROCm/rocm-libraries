@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ struct find_first_of_impl_kernels
         ordered_bid.reset();
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void find_first_of_kernel_impl(InputIterator1           input,
                                    InputIterator2           keys,
@@ -61,7 +61,7 @@ struct find_first_of_impl_kernels
                                    ordered_block_id<size_t> ordered_bid,
                                    BinaryFunction           compare_function)
     {
-        constexpr find_first_of_config_params params = ArchConfig::params;
+        constexpr find_first_of_config_params params = TargetConfig::params;
 
         constexpr unsigned int block_size       = params.kernel_config.block_size;
         constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -183,17 +183,13 @@ hipError_t find_first_of_impl(void*          temporary_storage,
                               bool           debug_synchronous)
 {
     using type   = typename std::iterator_traits<InputIterator1>::value_type;
-    using config = wrapped_find_first_of_config<Config, type>;
+    using Selector = find_first_of_config_selector<type>;
     using find_first_of_kernels
         = find_first_of_impl_kernels<InputIterator1, InputIterator2, BinaryFunction>;
 
-    target_arch target_arch;
-    hipError_t  result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const find_first_of_config_params params = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -207,7 +203,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     ordered_bid_type::id_type* ordered_bid_storage = nullptr;
 
     // Calculate required temporary storage
-    result = temp_storage::partition(
+    hipError_t result = temp_storage::partition(
         temporary_storage,
         storage_size,
         temp_storage::make_linear_partition(
@@ -234,9 +230,9 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
     if(size > 0 && keys_size > 0)
     {
-        auto kernel = [=](auto arch_config)
+        auto kernel = [=](auto target_config)
         {
-            find_first_of_kernels::template find_first_of_kernel_impl<decltype(arch_config)>(
+            find_first_of_kernels::template find_first_of_kernel_impl<decltype(target_config)>(
                 input,
                 keys,
                 tmp_output,
@@ -246,7 +242,8 @@ hipError_t find_first_of_impl(void*          temporary_storage,
                 compare_function);
         };
 
-        auto find_first_of_configured_kernel = make_launch_plan<config>(target_arch, kernel);
+        auto find_first_of_configured_kernel
+            = make_launch_plan<Config, Selector>(current_target, kernel);
 
         const size_t shared_memory_size = 0;
 

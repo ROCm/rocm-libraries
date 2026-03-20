@@ -19,6 +19,14 @@
 
 namespace ck_tile {
 
+// buffer_load_dwordx3 to LDS uses a fixed 16-byte per-thread stride,
+// padding each 12-byte element to 16 bytes in LDS.
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr index_t lds_padded_sizeof()
+{
+    return (sizeof(T) == 12) ? 16 : sizeof(T);
+}
+
 // T may be scalar or vector
 // X may be scalar or vector
 // T and X have same scalar type
@@ -303,7 +311,6 @@ struct buffer_view<address_space_enum::global,
 #else
         bool constexpr use_amd_buffer_addressing = false;
 #endif
-
         if constexpr(use_amd_buffer_addressing)
         {
             constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
@@ -412,10 +419,12 @@ struct buffer_view<address_space_enum::global,
               typename std::enable_if<
                   std::is_same<typename vector_traits<remove_cvref_t<X>>::scalar_type,
                                typename vector_traits<remove_cvref_t<T>>::scalar_type>::value,
-                  bool>::type = false>
+                  bool>::type = false,
+              typename linear_offset_t>
     CK_TILE_DEVICE constexpr auto async_get(CK_TILE_LDS_ADDR remove_cvref_t<T>* smem,
                                             index_t i,
-                                            index_t linear_offset,
+                                            index_t wave_i,
+                                            linear_offset_t&& linear_offset,
                                             bool is_valid_element,
                                             bool_constant<oob_conditional_check> = {}) const
     {
@@ -427,14 +436,14 @@ struct buffer_view<address_space_enum::global,
                       "wrong! X should contain multiple T");
 
         constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
-        const int32x4_t src_wave_buffer_resource =
-            make_wave_buffer_resource(p_data_, (buffer_size_) * sizeof(type));
+        const auto rsrc = make_builtin_buffer_resource(p_data_, buffer_size_ * sizeof(type));
 
         amd_async_buffer_load_with_oob<remove_cvref_t<T>, t_per_x, Coherence>(
             smem,
-            src_wave_buffer_resource,
+            rsrc,
             i,
-            linear_offset,
+            wave_i,
+            std::forward<linear_offset_t>(linear_offset),
             is_valid_element,
             bool_constant<oob_conditional_check>{});
     }
@@ -825,11 +834,26 @@ struct buffer_view<address_space_enum::lds,
 
             return tmp;
 #else
-            using buf_t = ext_vector_t<typename vector_traits<remove_cvref_t<T>>::scalar_type,
-                                       scalar_per_t_vector * scalar_per_x_vector>;
-            // using buf_t = ushort __attribute__((ext_vector_type(8)));
-            auto rtn = *c_style_pointer_cast<const buf_t*>(&p_data_[i + linear_offset]);
-            return bit_cast<X>(rtn);
+            constexpr index_t load_elts = scalar_per_t_vector * scalar_per_x_vector;
+            if constexpr(load_elts == 12 && sizeof(typename X::value_type) == 1)
+            {
+                auto rtn = reinterpret_cast<const int32_t*>(p_data_) + (i + linear_offset) / 4;
+                struct
+                {
+                    int32_t x, y, z;
+                } tmp = {rtn[0], rtn[1], rtn[2]};
+                return bit_cast<X>(tmp);
+            }
+            else
+            {
+                using buf_t = ext_vector_t<typename vector_traits<remove_cvref_t<T>>::scalar_type,
+                                           scalar_per_t_vector * scalar_per_x_vector>;
+                constexpr index_t padded_stride = lds_padded_sizeof<T>();
+                const char* base =
+                    reinterpret_cast<const char*>(p_data_) + (i + linear_offset) * padded_stride;
+                auto rtn = *c_style_pointer_cast<const buf_t*>(base);
+                return bit_cast<X>(rtn);
+            }
 #endif
         }
         else
@@ -859,7 +883,8 @@ struct buffer_view<address_space_enum::lds,
                                           bool /*is_valid_element*/,
                                           bool_constant<pre_nop> = {}) const
     {
-        smem_load<sizeof(X)>{}(dst, v_offset * sizeof(T), i_offset * sizeof(T));
+        constexpr index_t padded_stride = lds_padded_sizeof<T>();
+        smem_load<sizeof(X)>{}(dst, v_offset * padded_stride, i_offset * padded_stride);
     }
 
     template <typename X,
@@ -968,6 +993,7 @@ struct buffer_view<address_space_enum::lds,
                         (std::is_same_v<remove_cvref_t<T>, int8x16_t> && std::is_same_v<remove_cvref_t<X>, int8x16_t>) ||
                         // int8 on thread buffer
                         (std::is_same_v<remove_cvref_t<T>, int8_t> && std::is_same_v<remove_cvref_t<X>, thread_buffer<int8_t, 16>>) ||
+                        (std::is_same_v<remove_cvref_t<T>, int8_t> && std::is_same_v<remove_cvref_t<X>, thread_buffer<int8_t, 12>>) ||
                         (std::is_same_v<remove_cvref_t<T>, int8_t> && std::is_same_v<remove_cvref_t<X>, thread_buffer<int8_t, 8>>) ||
                         (std::is_same_v<remove_cvref_t<T>, int8_t> && std::is_same_v<remove_cvref_t<X>, thread_buffer<int8_t, 4>>) ||
                         (std::is_same_v<remove_cvref_t<T>, int8_t> && std::is_same_v<remove_cvref_t<X>, thread_buffer<int8_t, 2>>) ||
@@ -1033,6 +1059,11 @@ struct buffer_view<address_space_enum::lds,
                     *c_style_pointer_cast<int32x2_t*>(&p_data_[i]) =
                         *c_style_pointer_cast<const int32x2_t*>(&x);
                 }
+                else if constexpr(std::is_same_v<remove_cvref_t<X>, thread_buffer<int8_t, 12>>)
+                {
+                    *c_style_pointer_cast<dwordx3_union*>(&p_data_[i]) =
+                        *c_style_pointer_cast<const dwordx3_union*>(&x);
+                }
                 else if constexpr((std::is_same_v<remove_cvref_t<T>, int8_t> &&
                                    std::is_same_v<remove_cvref_t<X>, int8x16_t>) ||
                                   (std::is_same_v<remove_cvref_t<T>, int8_t> &&
@@ -1074,6 +1105,12 @@ struct buffer_view<address_space_enum::lds,
                     // TODO: remove this after compiler fix
                     *c_style_pointer_cast<int32x4_t*>(&p_data_[i]) =
                         *c_style_pointer_cast<const int32x4_t*>(&x);
+                }
+                else
+                {
+                    static_assert(false,
+                                  "wrong! not implemented for this combination, please add "
+                                  "implementation");
                 }
             }
         }

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -125,11 +102,6 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(lowerTile);
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
-        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
-        kgraph                     = kgraph.transform(addComputeIndex);
-        kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
-        if(context->kernelOptions()->removeSetCoordinate)
-            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto command = std::make_shared<rocRoller::Command>();
         command->allocateArgument({DataType::E8M0, PointerType::PointerGlobal},
@@ -142,8 +114,13 @@ namespace PermLanesTest
                                   ArgumentType::Value,
                                   DataDirection::ReadOnly,
                                   "a");
+        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(context, command);
+        kgraph                = kgraph.transform(assignIndexExprs);
 
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context, command));
+        kgraph = kgraph.transform(std::make_shared<LoadPacked>(context));
+        if(context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
         kgraph = kgraph.transform(std::make_shared<CleanArguments>(context, command));
 
         context->schedule(k->preamble());

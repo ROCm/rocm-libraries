@@ -101,15 +101,13 @@ macro(_build_local)
 endmacro()
 
 function(_fetch_composable_kernel VERSION HASH)
-    if(HASH)
-        set(HASH_ARG HASH ${HASH})
-    endif()
 
-    message(STATUS "Fetching composable_kernel hash: ${HASH_ARG}")
+    set(_ck_src "${CMAKE_CURRENT_LIST_DIR}/../composablekernel")
+
+    message(STATUS "Using local composable_kernel from ${_ck_src}")
     FetchContent_Declare(
         composable_kernel
-        URL https://github.com/ROCm/composable_kernel/archive/${HASH}.zip
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_DIR ${_ck_src}
     )
 
     _save_var(GPU_ARCHS)

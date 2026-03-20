@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -125,9 +125,9 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
         auto kernel = KernelInfo{};
 
         kernel.kernel_name = "MIOpenBatchNormFwdTrainPerActivation";
-        kernel.kernel_file = "MIOpenBatchNormFwdTrainPerAct.cl";
+        kernel.kernel_file = "MIOpenBatchNormFwdTrainPerAct.cpp";
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);
@@ -146,8 +146,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             decltype(auto) params = raw_params.CastTo<miopen::batchnorm::FwdTrainInvokeParams>();
             const auto resultsave =
                 params.resultSaveMean != nullptr && params.resultSaveInvVariance != nullptr;
-            const auto resultrunning =
-                params.resultRunningMean != nullptr && params.resultRunningVariance != nullptr;
+            const auto resultrunning = params.prevResultRunningMean != nullptr &&
+                                       params.prevResultRunningVariance != nullptr &&
+                                       params.nextResultRunningMean != nullptr &&
+                                       params.nextResultRunningVariance != nullptr;
 
             if(resultsave && resultrunning)
             {
@@ -158,8 +160,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
                        params.bnScale,
                        params.bnBias,
                        params.expAvgFactor,
-                       params.resultRunningMean,
-                       params.resultRunningVariance,
+                       params.prevResultRunningMean,
+                       params.prevResultRunningVariance,
+                       params.nextResultRunningMean,
+                       params.nextResultRunningVariance,
                        params.epsilon,
                        params.resultSaveMean,
                        params.resultSaveInvVariance);
@@ -185,8 +189,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
                        params.bnScale,
                        params.bnBias,
                        params.expAvgFactor,
-                       params.resultRunningMean,
-                       params.resultRunningVariance,
+                       params.prevResultRunningMean,
+                       params.prevResultRunningVariance,
+                       params.nextResultRunningMean,
+                       params.nextResultRunningVariance,
                        params.epsilon);
             }
             else

@@ -9,6 +9,9 @@
 
 using namespace hipdnn_data_sdk::utilities;
 
+namespace
+{
+
 // Helper to process ITensor polymorphically
 template <typename T>
 void processITensorErased(ITensor& tensor, const std::function<void(T&)>& func)
@@ -19,6 +22,8 @@ void processITensorErased(ITensor& tensor, const std::function<void(T&)>& func)
         func(*value);
     }
 }
+
+} // namespace
 
 // ============================================================================
 // Basic Type-Erased Iterator Tests
@@ -209,7 +214,7 @@ TEST(TestTypeErasedIterator, MoveConstructor)
 
 TEST(TestTypeErasedIterator, EmptyTensor)
 {
-    std::vector<int64_t> dims;
+    const std::vector<int64_t> dims;
     Tensor<float> tensor(dims);
     ITensor* iTensor = &tensor;
 
@@ -318,8 +323,8 @@ TEST(TestTypeErasedIteratorInt, BasicIteration)
 
 TEST(TestTypeErasedIterator, StridedTensor)
 {
-    std::vector<int64_t> dims = {2, 2};
-    std::vector<int64_t> strides = {3, 1}; // Non-standard strides
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {3, 1}; // Non-standard strides
 
     Tensor<float> tensor(dims, strides);
 
@@ -391,7 +396,38 @@ TEST(TestTypeErasedIterator, HelperFunction)
 // Indices Access Tests
 // ============================================================================
 
-TEST(TestTypeErasedIterator, IndicesAccess)
+TEST(TestTypeErasedIterator, StridedIndicesAccess)
+{
+    Tensor<float> tensor({2, 3}, {6, 2});
+
+    ITensor* iTensor = &tensor;
+
+    auto it = iTensor->begin();
+
+    // Check initial indices
+    auto indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices.size(), 2);
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 0);
+
+    // Advance and check indices
+    ++it;
+    indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 1);
+
+    ++it;
+    indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 2);
+
+    ++it;
+    indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices[0], 1);
+    EXPECT_EQ(indices[1], 0);
+}
+
+TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 {
     Tensor<float> tensor({2, 3});
 
@@ -399,27 +435,22 @@ TEST(TestTypeErasedIterator, IndicesAccess)
 
     auto it = iTensor->begin();
 
-    // Check initial indices
-    auto indices = it.indices();
-    EXPECT_EQ(indices.size(), 2);
-    EXPECT_EQ(indices[0], 0);
-    EXPECT_EQ(indices[1], 0);
+    // Check initial index
+    auto index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 0);
 
-    // Advance and check indices
+    // Advance and check index
     ++it;
-    indices = it.indices();
-    EXPECT_EQ(indices[0], 0);
-    EXPECT_EQ(indices[1], 1);
+    index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 1);
 
     ++it;
-    indices = it.indices();
-    EXPECT_EQ(indices[0], 0);
-    EXPECT_EQ(indices[1], 2);
+    index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 2);
 
     ++it;
-    indices = it.indices();
-    EXPECT_EQ(indices[0], 1);
-    EXPECT_EQ(indices[1], 0);
+    index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 3);
 }
 
 // ============================================================================

@@ -9,7 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -29,7 +29,7 @@ struct GraphTensorBundle
                 continue;
             }
 
-            auto tensor = createTensorFromAttribute(*attr);
+            auto tensor = detail::createTensorFromAttribute(*attr);
             tensors.emplace(id, std::move(tensor));
         }
     }
@@ -62,6 +62,32 @@ struct GraphTensorBundle
             variantPack[id] = tensorPtr->rawDeviceData();
         }
         return variantPack;
+    }
+
+    hipdnn_data_sdk::utilities::ITensor& getTensor(int64_t uid)
+    {
+        auto it = tensors.find(uid);
+        if(it == tensors.end())
+        {
+            throw std::runtime_error(
+                "GraphTensorBundle: tensor with uid " + std::to_string(uid)
+                + " not found. The tensor may be marked as virtual in the graph"
+                  " (virtual tensors are skipped during bundle construction).");
+        }
+        return *it->second;
+    }
+
+    const hipdnn_data_sdk::utilities::ITensor& getTensor(int64_t uid) const
+    {
+        auto it = tensors.find(uid);
+        if(it == tensors.end())
+        {
+            throw std::runtime_error(
+                "GraphTensorBundle: tensor with uid " + std::to_string(uid)
+                + " not found. The tensor may be marked as virtual in the graph"
+                  " (virtual tensors are skipped during bundle construction).");
+        }
+        return *it->second;
     }
 
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;

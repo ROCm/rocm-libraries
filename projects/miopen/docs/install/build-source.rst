@@ -97,16 +97,10 @@ both database files to the source directory:
 
   cmake -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On ..
 
-To customize the database paths, use the ``MIOPEN_SYSTEM_DB_PATH`` (for the System PerfDb and FindDb)
-and ``MIOPEN_USER_DB_PATH`` (for the User PerfDb and FindDb) CMake variables.
-These db location variables are also settable at runtime through the environment.
+To customize the database paths, use the ``MIOPEN_SYSTEM_DB_PATH`` (for the System PerfDb)
+and ``MIOPEN_USER_DB_PATH`` (for the User PerfDb) CMake variables.
 
-It is safe to share the User Db location on a networked file system, however it is required that the machines
-accessing the shared files have unique hostnames for the file sharing implemented in MIOpen to function correctly.
-
-To learn more, see
-:doc:`using the performance database <../conceptual/perfdb>`
-:doc:`using the find database <../conceptual/finddb>`
+To learn more, see :doc:`using the performance database <../conceptual/perfdb>`.
 
 Persistent program cache
 --------------------------------------------------------------------------------------------------------
@@ -261,18 +255,10 @@ switch branches or merge changes in Git to ensure any large binaries are kept in
 Installing the dependencies manually
 ===============================================================
 
-If you're using Ubuntu v16, you can install the ``Boost`` packages using:
+If you're using Ubuntu, you can install the ``BZip2`` packages using:
 
 .. code:: shell
 
-   sudo apt-get install libboost-dev
-   sudo apt-get install libboost-system-dev
-   sudo apt-get install libboost-filesystem-dev
-
-.. note::
-
-   By default, MIOpen attempts to build with Boost statically linked libraries. To build
-   with dynamically linked Boost libraries, use the ``-DBoost_USE_STATIC_LIBS=Off`` flag during the
-   configuration stage. However, this is not recommended.
+   sudo apt-get install libbz2-dev
 
 You must install the ``half`` header from the `half website <http://half.sourceforge.net/>`_.

@@ -27,6 +27,7 @@
 #include "BenchmarkTimer.hpp"
 #include "PerformanceReporter.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "Reference.hpp"
 
@@ -160,38 +161,48 @@ namespace TensileLite
 
         void BenchmarkTimer::postSolution()
         {
-            bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
-            double timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
-                                                                 / m_numEnqueuesInSolution
-                                                             - m_flushTimeUs
-                                                       : std::numeric_limits<double>::quiet_NaN();
+            double timePerEnqueue_us;
+            double gflops;
+            double gflopsPerCu;
 
-            ContractionSolution::ProjectedPerformance pp;
-            double                                    flopCount = 0;
-            if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
-                pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
-                flopCount = problem->gemms[0].flopCount();
-            }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
-            {
-                pp        = m_solution->projectedPerformance(*problem, m_hardware);
-                flopCount = problem->flopCount();
-            }
-            else
-            {
-                throw std::runtime_error(
-                    "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                ScopedTimer timer("post_solution_perf_calc");
+                bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
+                timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
+                                                                     / m_numEnqueuesInSolution
+                                                                 - m_flushTimeUs
+                                                           : std::numeric_limits<double>::quiet_NaN();
+
+                ContractionSolution::ProjectedPerformance pp;
+                double                                    flopCount = 0;
+                if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                {
+                    pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
+                    flopCount = problem->gemms[0].flopCount();
+                }
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                {
+                    pp        = m_solution->projectedPerformance(*problem, m_hardware);
+                    flopCount = problem->flopCount();
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                }
+
+                gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
+                int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
+                int    usedCus     = std::min(tiles, perf.CUs);
+                gflopsPerCu = gflops / usedCus;
             }
 
-            double gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
-            int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
-            int    usedCus     = std::min(tiles, perf.CUs);
-            double gflopsPerCu = gflops / usedCus;
-
-            m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
-            m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
-            m_reporter->report(ResultKey::SpeedGFlops, gflops);
+            {
+                ScopedTimer timer("post_solution_reporting");
+                m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
+                m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
+                m_reporter->report(ResultKey::SpeedGFlops, gflops);
+            }
 
             m_timeInSolution        = double_millis::zero();
             m_numEnqueuesInSolution = 0;
@@ -234,9 +245,11 @@ namespace TensileLite
 
             double_millis totalTime(0.0);
 
+            // Skip the first warmup event (cold start) when multiple warmups are available
+            size_t warmupStartIdx = startEvents->size() == 1 ? 0 : 1;
             float enqTime = 0.0f;
             HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-            for(size_t i = 0; i < startEvents->size(); i++)
+            for(size_t i = warmupStartIdx; i < startEvents->size(); i++)
             {
                 HIP_CHECK_EXC(hipEventElapsedTime(
                     &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
@@ -259,7 +272,10 @@ namespace TensileLite
                                              TimingEvents const&            stopEvents)
         {
             if(m_syncAfterWarmups && (stopEvents->size() > 0) && (stopEvents->back().size() > 0))
+            {
+                ScopedTimer timer("validate_gpu_sync");
                 HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
+            }
         }
 
         size_t BenchmarkTimer::numSyncs()
@@ -383,6 +399,9 @@ namespace TensileLite
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents->size();
+
+            // Report GPU execution time for timing instrumentation
+            reportTiming("gpu_kernel_execution", totalTime.count());
 
             if(m_sleepPercent > 0)
             {

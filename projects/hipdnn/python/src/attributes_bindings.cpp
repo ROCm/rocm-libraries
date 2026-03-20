@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -170,6 +171,22 @@ void attributes_bindings(nb::module_& m)
                               .def("get_name", &graph::ConvWgradAttributes::get_name);
     // Add alias for shorter name
     m.attr("ConvWgradAttributes") = convWgradClass;
+
+    // MatmulAttributes
+    nb::class_<graph::MatmulAttributes>(m, "MatmulAttributes")
+        .def(nb::init<>())
+        .def(
+            "set_name",
+            [](graph::MatmulAttributes& self, const std::string& name) -> graph::MatmulAttributes& {
+                return self.set_name(name);
+            },
+            nb::arg("name"),
+            nb::rv_policy::reference_internal)
+        .def("get_name", &graph::MatmulAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::MatmulAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::MatmulAttributes::get_compute_data_type);
 
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")

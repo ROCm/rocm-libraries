@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Run a benchmark suite."""
 
@@ -33,7 +11,6 @@ import subprocess
 from dataclasses import fields
 from itertools import chain
 from pathlib import Path
-from typing import Dict, Tuple
 
 import pandas as pd
 import rrperf
@@ -64,7 +41,7 @@ def run_problems(
     generator,
     build_dir: Path,
     work_dir: Path,
-    env: Dict[str, str],
+    env: dict[str, str],
     id_filter: list[str],
     l2: bool,
 ) -> bool:
@@ -147,6 +124,25 @@ def generate_missing_attr_value(run, attr):
             wgm_dim = getattr(run, "workgroupMappingDim")
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
+        case "matchMemoryAccess":
+            return True
+        case "unroll_x" | "unroll_y":
+            return 0
+        case "storeLDS_D":
+            store = getattr(run, "store")
+            return "LDS" in store
+        case "streamK":
+            # Old version used bool, new version uses str
+            streamK = getattr(run, "streamK", "None")
+            if isinstance(streamK, str):
+                return streamK != "None"
+            return streamK
+        case "streamKTwoTile":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTile"
+        case "streamKTwoTileDPFirst":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTileDPFirst"
         case _:
             raise RuntimeError(
                 f"Cannot handle attribute missing in previous rrperf version: {attr}"
@@ -232,7 +228,7 @@ def run_cli(  # noqa: C901
     recast: bool = False,
     l2: bool = False,
     **kwargs,
-) -> Tuple[bool, Path]:
+) -> tuple[bool, Path]:
     """Run benchmarks!
 
     Implements the CLI 'run' subcommand.

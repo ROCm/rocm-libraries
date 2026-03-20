@@ -6,13 +6,36 @@
 #include "HipdnnStatus.h"
 #include "LastErrorManager.hpp"
 
-#include <iostream>
+#include <spdlog/fmt/fmt.h>
 
 namespace hipdnn_backend
 {
 
+template <typename T>
+std::string logPtr(T* ptr)
+{
+    // This function is not invoked if the macro is a no-op.
+    if(ptr == nullptr)
+    {
+        return "nullptr";
+    }
+
+    try
+    {
+        return ptr->toString();
+    }
+    catch(const std::exception& e)
+    {
+        return fmt::format("InvalidPtr[{:p}] ({})", static_cast<void*>(ptr), e.what());
+    }
+    catch(...)
+    {
+        return fmt::format("InvalidPtr[{:p}] (Unknown exception)", static_cast<void*>(ptr));
+    }
+}
+
 template <class F>
-hipdnnStatus_t tryCatch(F f, std::string const& prefix = std::string{})
+hipdnnStatus_t tryCatch(F f, const std::string& prefix = std::string{})
 {
     try
     {

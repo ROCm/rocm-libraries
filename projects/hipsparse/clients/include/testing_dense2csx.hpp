@@ -191,13 +191,6 @@ void testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    if(M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return;
-#endif
-    }
-
     int              DIMDIR = (HIPSPARSE_DIRECTION_ROW == DIRA) ? M : N;
     std::vector<T>   h_dense_val(LD * N);
     std::vector<int> h_nnzPerRowColumn(DIMDIR);

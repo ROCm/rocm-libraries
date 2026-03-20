@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
@@ -36,10 +38,10 @@ inline auto to<data_objects::ConvolutionFwdAttributes>(flatbuffers::FlatBufferBu
     auto& outputs = entry["outputs"];
     auto& params = entry["parameters"];
 
-    std::vector<int64_t> prePadding = params.at("pre_padding").get<std::vector<int64_t>>();
-    std::vector<int64_t> postPadding = params.at("post_padding").get<std::vector<int64_t>>();
-    std::vector<int64_t> stride = params.at("stride").get<std::vector<int64_t>>();
-    std::vector<int64_t> dilation = params.at("dilation").get<std::vector<int64_t>>();
+    const std::vector<int64_t> prePadding = params.at("pre_padding").get<std::vector<int64_t>>();
+    const std::vector<int64_t> postPadding = params.at("post_padding").get<std::vector<int64_t>>();
+    const std::vector<int64_t> stride = params.at("stride").get<std::vector<int64_t>>();
+    const std::vector<int64_t> dilation = params.at("dilation").get<std::vector<int64_t>>();
 
     return data_objects::CreateConvolutionFwdAttributesDirect(
         builder,
@@ -54,3 +56,5 @@ inline auto to<data_objects::ConvolutionFwdAttributes>(flatbuffers::FlatBufferBu
 }
 
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

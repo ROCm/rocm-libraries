@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -130,7 +130,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 
     // move stdout to devnull
-#ifdef WIN32
+#ifdef _WIN32
     int stdout_fd   = _fileno(stdout);
     int devnull     = _open("NUL", _O_WRONLY);
     int stdout_copy = _dup(stdout_fd);
@@ -145,7 +145,7 @@ void init_gtest_flags()
     (void)RUN_ALL_TESTS();
 
     // put stdout back
-#ifdef WIN32
+#ifdef _WIN32
     _dup2(stdout_copy, stdout_fd);
     _close(stdout_copy);
     _close(devnull);
@@ -218,8 +218,8 @@ void precompile_test_kernels(const std::string& precompile_file)
               << std::accumulate(tokens.begin(),
                                  tokens.end(),
                                  static_cast<size_t>(0),
-                                 [](size_t& acc, const decltype(tokens)::value_type& tok) {
-                                     return acc += tok.second.size();
+                                 [](size_t acc, const decltype(tokens)::value_type& tok) {
+                                     return acc + tok.second.size();
                                  })
               << " tokens...\n";
     EnvironmentSetTemp env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
@@ -395,8 +395,11 @@ int main(int argc, char* argv[])
         ->check(CLI::NonNegativeNumber);
     app.add_option("--mp_launch",
                    mp_launch,
-                   "Command line prefix to launch multi-process transforms, e.g. \"mpirun --np 4 "
-                   "/path/to/hipfft_mpi_worker\"")
+                   "Command line prefix to launch multi-process transforms, e.g. \n"
+                   "\"mpirun --np 4 /path/to/hipfft_mpi_worker\"\n"
+                   "NOTE: embedded quotes must be used for all command arguments that contain "
+                   "space character(s). For instance,\n"
+                   "\"mpirun --np 4 \\\"/path with spaces/to/hipfft_mpi_worker\\\"\"")
         ->default_val("")
         ->each([&](const std::string&) {
             if(mp_lib == fft_params::fft_mp_lib_none)
@@ -631,9 +634,12 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options
-    host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Host memory limit: " << ramgb << " GiB" << std::endl;
+    // Set host memory limit from command-line options (if more restrictive)
+    const auto usable_bytes = host_memory::singleton().get_usable_bytes();
+    if(ramgb * ONE_GiB < usable_bytes)
+        host_memory::singleton().set_limit_gbytes(ramgb);
+    std::cout << "Usable host memory: " << bytes_to_GiB(host_memory::singleton().get_usable_bytes())
+              << " GiB" << std::endl;
 
     if(use_fftw_wisdom)
     {

@@ -40,8 +40,6 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 
-#include <boost/range/adaptor/transformed.hpp>
-
 #include <cstdio>
 #include <cstring>
 #include <ios>
@@ -164,7 +162,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;
     std::size_t GetImage3dMaxWidth() const;
-    std::size_t GetWavefrontWidth() const;
+    virtual std::size_t GetWavefrontWidth() const;
     virtual std::size_t GetMaxComputeUnits() const;
     std::size_t GetMaxHardwareComputeUnits() const
     {
@@ -186,6 +184,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     Allocator::ManageDataPtr Create(std::size_t sz) const;
     Allocator::ManageDataPtr&
     WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const;
+    void WriteTo(const void* data, Data_t ddata, std::size_t sz) const;
     void ReadTo(void* data, const Allocator::ManageDataPtr& ddata, std::size_t sz) const;
     void ReadTo(void* data, ConstData_t ddata, std::size_t sz) const;
     shared<Data_t> CreateSubBuffer(Data_t data, std::size_t offset, std::size_t size) const;

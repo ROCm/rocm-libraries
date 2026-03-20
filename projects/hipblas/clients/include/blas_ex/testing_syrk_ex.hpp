@@ -221,8 +221,6 @@ void testing_syrk_ex(const Arguments& arg)
     hipDataType c_type       = arg.c_type;
     hipDataType compute_type = arg.compute_type;
 
-    using To_hpa = std::conditional_t<std::is_same_v<To, hipblasBfloat16>, float, To>;
-
     Tex h_alpha_Tex = arg.get_alpha<Tex>();
     Tex h_beta_Tex  = arg.get_beta<Tex>();
 
@@ -260,10 +258,10 @@ void testing_syrk_ex(const Arguments& arg)
     }
 
     // Allocate host memory
-    host_matrix<Ti>     hA(A_row, A_col, lda);
-    host_matrix<To>     hC_host(N, N, ldc);
-    host_matrix<To>     hC_device(N, N, ldc);
-    host_matrix<To_hpa> hC_gold(N, N, ldc);
+    host_matrix<Ti> hA(A_row, A_col, lda);
+    host_matrix<To> hC_host(N, N, ldc);
+    host_matrix<To> hC_device(N, N, ldc);
+    host_matrix<To> hC_gold(N, N, ldc);
 
     // Allocate device memory
     device_matrix<Ti>  dA(A_row, A_col, lda);
@@ -275,9 +273,10 @@ void testing_syrk_ex(const Arguments& arg)
 
     // Initial Data on CPU
     hipblas_init_matrix(hA, arg, hipblas_client_alpha_sets_nan, hipblas_general_matrix, true);
-    hipblas_init_matrix(hC_host, arg, hipblas_client_beta_sets_nan, hipblas_general_matrix);
+    hipblas_init_matrix(hC_host, arg, hipblas_client_beta_sets_nan, hipblas_symmetric_matrix);
 
     hC_device = hC_host;
+    hC_gold   = hC_host;
 
     // copy data from CPU to device
 
@@ -297,11 +296,11 @@ void testing_syrk_ex(const Arguments& arg)
                     transA,
                     N,
                     K,
-                    reinterpret_cast<Ts*>(&h_alpha_Tex),
+                    &h_alpha_Tex,
                     dA,
                     a_type,
                     lda,
-                    reinterpret_cast<Ts*>(&h_beta_Tex),
+                    &h_beta_Tex,
                     dC,
                     c_type,
                     ldc,
@@ -331,33 +330,34 @@ void testing_syrk_ex(const Arguments& arg)
         CHECK_HIP_ERROR(hC_device.transfer_from(dC));
 
         // reference BLAS
-        ref_syrk_ex<Ti, To_hpa, Tex>(
+        ref_syrk_ex<Ti, To, Tex>(
             uplo, transA, N, K, h_alpha_Tex, hA.data(), lda, h_beta_Tex, hC_gold.data(), ldc);
 
         if(unit_check)
         {
             // check for float16/bfloat16 input
-            if((getArchMajor() == 11)
-               && ((std::is_same<Tex, float>{} && std::is_same<Ti, hipblasBfloat16>{})
-                   || (std::is_same<Tex, float>{} && std::is_same<Ti, hipblasHalf>{})
-                   || (std::is_same<Tex, hipblasHalf>{} && std::is_same<Ti, hipblasHalf>{})))
+            if(arg.initialization != rand_int
+               || ((getArchMajor() == 11)
+                   && ((std::is_same<Tex, float>{} && std::is_same<Ti, hipblasBfloat16>{})
+                       || (std::is_same<Tex, float>{} && std::is_same<Ti, hipblasHalf>{})
+                       || (std::is_same<Tex, hipblasHalf>{} && std::is_same<Ti, hipblasHalf>{}))))
             {
                 const double tol = K * sum_error_tolerance_for_gfx11<Tex, Ti, To>;
-                near_check_mixed<To, To_hpa>(N, N, ldc, hC_gold.data(), hC_host.data(), tol);
-                near_check_mixed<To, To_hpa>(N, N, ldc, hC_gold.data(), hC_device.data(), tol);
+                near_check_general<To>(N, N, ldc, hC_gold.data(), hC_host.data(), tol);
+                near_check_general<To>(N, N, ldc, hC_gold.data(), hC_device.data(), tol);
             }
             else
             {
-                unit_check_mixed<To, To_hpa>(N, N, ldc, hC_gold, hC_host);
-                unit_check_mixed<To, To_hpa>(N, N, ldc, hC_gold, hC_device);
+                unit_check_general<To>(N, N, ldc, hC_gold, hC_host);
+                unit_check_general<To>(N, N, ldc, hC_gold, hC_device);
             }
         }
         if(norm_check)
         {
             hipblas_error_host = hipblas_abs(
-                norm_check_mixed<To_hpa, To>('F', N, N, ldc, hC_gold.data(), hC_host.data()));
+                norm_check_general<To>('F', N, N, ldc, hC_gold.data(), hC_host.data()));
             hipblas_error_device = hipblas_abs(
-                norm_check_mixed<To_hpa, To>('F', N, N, ldc, hC_gold.data(), hC_device.data()));
+                norm_check_general<To>('F', N, N, ldc, hC_gold.data(), hC_device.data()));
         }
     }
 

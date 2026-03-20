@@ -704,6 +704,31 @@ private:
   }
 };
 
+inline std::string format_pow2(size_t n)
+{
+  unsigned int k = 0;
+  while (!(n & 1))
+  {
+    k++;
+    n >>= 1;
+  }
+  return "1 << " + std::to_string(k);
+}
+
+struct sys_info
+{
+  hipDeviceProp_t devProp;
+  sys_info()
+  {
+    int device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+  }
+};
+
+inline sys_info system;
+inline constexpr size_t sizes[] = {1u << 16, 1u << 20, 1u << 24, 1u << 28};
+
 } // namespace bench_utils
 
 #endif // ROCTHRUST_BENCHMARKS_BENCH_UTILS_BENCH_UTILS_HPP_

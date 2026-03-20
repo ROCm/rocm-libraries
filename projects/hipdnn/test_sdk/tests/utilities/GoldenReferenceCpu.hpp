@@ -3,10 +3,13 @@
 
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <gtest/gtest.h>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -30,7 +33,7 @@ protected:
         // TODO: Temporary fix until reference data can be properly installed
         if(path.empty())
         {
-            HIPDNN_LOG_WARN("Reference not found for Cpu golden reference test");
+            HIPDNN_SDK_LOG_WARN("Reference not found for Cpu golden reference test");
             GTEST_SKIP();
         }
 
@@ -53,7 +56,7 @@ protected:
     }
 };
 
-auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
         hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
@@ -61,3 +64,5 @@ auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
         ".json"));
 }
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
