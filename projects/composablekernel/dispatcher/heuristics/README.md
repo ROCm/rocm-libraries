@@ -186,18 +186,6 @@ Trained on 25 shapes, 1,024 kernels, 21,920 valid benchmarks.
 | compv4 | 99.40% | 98.54% |
 | mem | 99.08% | 96.59% |
 
-**Out-of-Distribution (OOD) Testing:**
-
-Tested on unseen shapes with full oracle benchmarking (all 1024 kernels):
-
-| Shape | Oracle Best | Model Picked | Efficiency | Oracle Rank |
-|---|---|---|---|---|
-| M=7, N=256, K=512 | 0.44 TFLOPS | 0.44 TFLOPS | 100% | #2 |
-| M=48, N=192, K=384 | 1.85 TFLOPS | 1.85 TFLOPS | 100% | #1 ✓ |
-
-**Mean OOD Efficiency: 100%** — Model achieved oracle-best or rank #2 on diverse
-unseen shapes including tiny M (M=7) and non-power-of-2 dimensions.
-
 Training uses `log1p(TFLOPS)` as the target by default, which normalizes the
 scale across shapes spanning 0.02 to 2230 TFLOPS. This was the key finding
 that improved tiny-M shapes from 84% to 96% efficiency. See

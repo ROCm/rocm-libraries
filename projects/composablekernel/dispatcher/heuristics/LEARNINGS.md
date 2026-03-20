@@ -5,11 +5,11 @@ These inform the current defaults and explain why certain approaches were chosen
 
 ## 1. Log-Transform is Essential for Cross-Scale Accuracy
 
-**Problem**: GEMM TFLOPS spans 5 orders of magnitude -- from 0.02 TFLOPS (M=1,
-small N, small K) to 2230 TFLOPS (large square shapes on MI355X). When training
-on raw TFLOPS, the regression loss (RMSE) is dominated by large shapes where
-absolute errors are biggest. The model learns to predict large shapes accurately
-but ignores tiny shapes where the TFLOPS value is < 10.
+**Problem**: GEMM TFLOPS spans 5 orders of magnitude across different problem
+sizes. When training on raw TFLOPS, the regression loss (RMSE) is dominated by
+large shapes where absolute errors are biggest. The model learns to predict
+large shapes accurately but ignores tiny shapes where the TFLOPS values are
+much lower.
 
 **Evidence** (168 shapes, 626K rows, 5-fold GroupKFold CV):
 
@@ -32,23 +32,14 @@ TFLOPS gracefully, whereas `log(x)` produces -inf for x=0.
 
 M=1 (single-token inference) shapes are fundamentally different from batch shapes:
 
-- Most kernel configurations produce near-zero TFLOPS (< 1)
+- Most kernel configurations produce very low TFLOPS
 - The "best" kernel is often only marginally better than the rest
-- The oracle TFLOPS itself is very low (0.5-10), so any prediction error tanks efficiency
+- The oracle performance itself is very low, so any prediction error tanks efficiency
 - Many kernels fail outright (tile_m=128 with M=1 wastes 127/128 of the tile)
 
-The bottom-5 shapes in our evaluation are all M=1:
-
-
-| Shape                | Efficiency | Oracle TFLOPS |
-| -------------------- | ---------- | ------------- |
-| M=1, N=11008, K=1024 | 63.56%     | 4.5           |
-| M=1, N=8192, K=256   | 67.86%     | 0.8           |
-| M=1, N=8192, K=512   | 69.64%     | 1.7           |
-
-
-These shapes have such low absolute performance that the model's noise floor
-exceeds the performance difference between kernels.
+The bottom shapes in our evaluation are all M=1, with efficiencies in the
+63-70% range. These shapes have such low absolute performance that the model's
+noise floor exceeds the performance difference between kernels.
 
 **Mitigation**: Log-transform helps significantly (tiny_m improved from 84% to
 96%). For production use with M=1, consider a dedicated fallback (e.g.,
