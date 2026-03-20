@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Surrogate search for CK Tile kernel configuration optimization.
 
@@ -105,8 +108,12 @@ class SurrogateSearch:
         return scored[:top_k]
 
     def _search_de(
-        self, problem: dict, budget: int, top_k: int,
-        pop_size: int = 20, mutation_rate: float = 0.3,
+        self,
+        problem: dict,
+        budget: int,
+        top_k: int,
+        pop_size: int = 20,
+        mutation_rate: float = 0.3,
         crossover_rate: float = 0.7,
     ) -> list[tuple[dict, float]]:
         """Discrete Differential Evolution.
@@ -147,7 +154,11 @@ class SurrogateSearch:
                     continue
 
                 a_idx, b_idx, c_idx = self._rng.sample(candidates, 3)
-                a, b, c = population[a_idx][0], population[b_idx][0], population[c_idx][0]
+                a, b, c = (
+                    population[a_idx][0],
+                    population[b_idx][0],
+                    population[c_idx][0],
+                )
 
                 trial = dict(parent)
                 for param in param_names:
@@ -160,7 +171,9 @@ class SurrogateSearch:
 
                 if not self._fe.validate_config(trial):
                     for param in param_names:
-                        if param in trial and trial[param] not in self._param_space.get(param, [trial[param]]):
+                        if param in trial and trial[param] not in self._param_space.get(
+                            param, [trial[param]]
+                        ):
                             trial[param] = self._rng.choice(self._param_space[param])
                     if not self._fe.validate_config(trial):
                         new_pop.append((parent, parent_score))
@@ -219,7 +232,9 @@ if __name__ == "__main__":
     import argparse
     import time
 
-    parser = argparse.ArgumentParser(description="Surrogate search for optimal kernel config")
+    parser = argparse.ArgumentParser(
+        description="Surrogate search for optimal kernel config"
+    )
     parser.add_argument("--model_dir", required=True)
     parser.add_argument("--m", type=int, required=True)
     parser.add_argument("--n", type=int, required=True)
@@ -234,8 +249,12 @@ if __name__ == "__main__":
     predictor = Predictor(args.model_dir)
     searcher = SurrogateSearch(predictor, strategy=args.strategy)
     problem = {
-        "m": args.m, "n": args.n, "k": args.k,
-        "dtype": args.dtype, "layout": args.layout, "split_k": 1,
+        "m": args.m,
+        "n": args.n,
+        "k": args.k,
+        "dtype": args.dtype,
+        "layout": args.layout,
+        "split_k": 1,
     }
 
     print(f"Searching with strategy={args.strategy}, budget={args.budget}...")
@@ -243,9 +262,11 @@ if __name__ == "__main__":
     results = searcher.search(problem, budget=args.budget, top_k=args.top_k)
     elapsed = time.time() - t0
 
-    print(f"\nTop {len(results)} configs found in {elapsed*1000:.1f}ms:")
+    print(f"\nTop {len(results)} configs found in {elapsed * 1000:.1f}ms:")
     for i, (cfg, tflops) in enumerate(results):
-        tile_str = f"{cfg.get('tile_m','?')}x{cfg.get('tile_n','?')}x{cfg.get('tile_k','?')}"
-        warp_str = f"{cfg.get('warp_m','?')}x{cfg.get('warp_n','?')}x{cfg.get('warp_k','?')}"
-        print(f"  #{i+1}: {tflops:8.2f} TFLOPS  tile={tile_str} warp={warp_str} "
-              f"pipeline={cfg.get('pipeline','?')} scheduler={cfg.get('scheduler','?')}")
+        tile_str = f"{cfg.get('tile_m', '?')}x{cfg.get('tile_n', '?')}x{cfg.get('tile_k', '?')}"
+        warp_str = f"{cfg.get('warp_m', '?')}x{cfg.get('warp_n', '?')}x{cfg.get('warp_k', '?')}"
+        print(
+            f"  #{i + 1}: {tflops:8.2f} TFLOPS  tile={tile_str} warp={warp_str} "
+            f"pipeline={cfg.get('pipeline', '?')} scheduler={cfg.get('scheduler', '?')}"
+        )

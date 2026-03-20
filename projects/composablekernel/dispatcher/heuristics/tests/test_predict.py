@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Tests for predict.py.
 
@@ -8,12 +11,10 @@ missing model handling, and edge cases (single kernel, empty list).
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
-import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -57,17 +58,35 @@ def predictor(model_dir):
 
 
 def _problem():
-    return {"m": 1024, "n": 1024, "k": 1024, "dtype": "fp8", "layout": "rcr", "split_k": 1}
+    return {
+        "m": 1024,
+        "n": 1024,
+        "k": 1024,
+        "dtype": "fp8",
+        "layout": "rcr",
+        "split_k": 1,
+    }
 
 
 def _kernel(tile_m=128, pipeline="compv3"):
     return {
         "kernel_name": f"test_kernel_{tile_m}_{pipeline}",
-        "tile_m": tile_m, "tile_n": 128, "tile_k": 64,
-        "warp_m": 2, "warp_n": 2, "warp_k": 1,
-        "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
-        "pipeline": pipeline, "scheduler": "intrawave", "epilogue": "cshuffle",
-        "pad_m": False, "pad_n": False, "pad_k": False, "persistent": False,
+        "tile_m": tile_m,
+        "tile_n": 128,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 2,
+        "warp_k": 1,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "pipeline": pipeline,
+        "scheduler": "intrawave",
+        "epilogue": "cshuffle",
+        "pad_m": False,
+        "pad_n": False,
+        "pad_k": False,
+        "persistent": False,
     }
 
 
@@ -113,14 +132,41 @@ class TestPredictor:
             predictor.select_best(_problem(), [])
 
     def test_corner_case_m1(self, predictor):
-        prob = {"m": 1, "n": 4096, "k": 4096, "dtype": "fp8", "layout": "rcr", "split_k": 1}
+        prob = {
+            "m": 1,
+            "n": 4096,
+            "k": 4096,
+            "dtype": "fp8",
+            "layout": "rcr",
+            "split_k": 1,
+        }
         result = predictor.predict_tflops(prob, _kernel())
         assert np.isfinite(result)
 
     def test_different_shapes_give_different_results(self, predictor):
         k = _kernel()
-        r1 = predictor.predict_tflops({"m": 16, "n": 1536, "k": 7168, "dtype": "fp8", "layout": "rcr", "split_k": 1}, k)
-        r2 = predictor.predict_tflops({"m": 20480, "n": 7168, "k": 256, "dtype": "fp8", "layout": "rcr", "split_k": 1}, k)
+        r1 = predictor.predict_tflops(
+            {
+                "m": 16,
+                "n": 1536,
+                "k": 7168,
+                "dtype": "fp8",
+                "layout": "rcr",
+                "split_k": 1,
+            },
+            k,
+        )
+        r2 = predictor.predict_tflops(
+            {
+                "m": 20480,
+                "n": 7168,
+                "k": 256,
+                "dtype": "fp8",
+                "layout": "rcr",
+                "split_k": 1,
+            },
+            k,
+        )
         assert r1 != r2
 
 

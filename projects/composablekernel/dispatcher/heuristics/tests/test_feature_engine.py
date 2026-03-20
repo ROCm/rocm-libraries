@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Tests for feature_engine.py.
 
@@ -7,7 +10,6 @@ arithmetic intensity), corner-case shapes (M=1, huge M, square, skinny-K),
 parameter space validity, config validation, and batch vs single extraction parity.
 """
 
-import math
 import sys
 from pathlib import Path
 
@@ -19,9 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from feature_engine import (
     GemmUniversalFeatureEngine,
-    DTYPE_BYTES,
-    LAYOUT_MAP,
-    PIPELINE_MAP,
 )
 
 
@@ -29,33 +28,73 @@ from feature_engine import (
 def fe():
     """Default feature engine with MI355X-like hardware."""
     return GemmUniversalFeatureEngine(
-        num_cus=256, lds_capacity=65536, max_clock_mhz=2400,
-        simds_per_cu=4, shader_engines=32, max_waves_per_cu=32,
-        wavefront_size=64, l1_cache_kb=32, l2_cache_kb=4096,
-        l3_cache_kb=262144, num_xcd=8,
+        num_cus=256,
+        lds_capacity=65536,
+        max_clock_mhz=2400,
+        simds_per_cu=4,
+        shader_engines=32,
+        max_waves_per_cu=32,
+        wavefront_size=64,
+        l1_cache_kb=32,
+        l2_cache_kb=4096,
+        l3_cache_kb=262144,
+        num_xcd=8,
     )
 
 
 def _make_problem(m=1024, n=1024, k=1024, dtype="fp8", layout="rcr", split_k=1):
-    return {"m": m, "n": n, "k": k, "dtype": dtype, "layout": layout, "split_k": split_k}
-
-
-def _make_kernel(tile_m=128, tile_n=128, tile_k=64, warp_m=2, warp_n=2, warp_k=1,
-                 warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-                 pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-                 pad_m=False, pad_n=False, pad_k=False, persistent=False):
     return {
-        "tile_m": tile_m, "tile_n": tile_n, "tile_k": tile_k,
-        "warp_m": warp_m, "warp_n": warp_n, "warp_k": warp_k,
-        "warp_tile_m": warp_tile_m, "warp_tile_n": warp_tile_n, "warp_tile_k": warp_tile_k,
-        "pipeline": pipeline, "scheduler": scheduler, "epilogue": epilogue,
-        "pad_m": pad_m, "pad_n": pad_n, "pad_k": pad_k, "persistent": persistent,
+        "m": m,
+        "n": n,
+        "k": k,
+        "dtype": dtype,
+        "layout": layout,
+        "split_k": split_k,
+    }
+
+
+def _make_kernel(
+    tile_m=128,
+    tile_n=128,
+    tile_k=64,
+    warp_m=2,
+    warp_n=2,
+    warp_k=1,
+    warp_tile_m=32,
+    warp_tile_n=32,
+    warp_tile_k=16,
+    pipeline="compv3",
+    scheduler="intrawave",
+    epilogue="cshuffle",
+    pad_m=False,
+    pad_n=False,
+    pad_k=False,
+    persistent=False,
+):
+    return {
+        "tile_m": tile_m,
+        "tile_n": tile_n,
+        "tile_k": tile_k,
+        "warp_m": warp_m,
+        "warp_n": warp_n,
+        "warp_k": warp_k,
+        "warp_tile_m": warp_tile_m,
+        "warp_tile_n": warp_tile_n,
+        "warp_tile_k": warp_tile_k,
+        "pipeline": pipeline,
+        "scheduler": scheduler,
+        "epilogue": epilogue,
+        "pad_m": pad_m,
+        "pad_n": pad_n,
+        "pad_k": pad_k,
+        "persistent": persistent,
     }
 
 
 # ---------------------------------------------------------------------------
 # Basic consistency
 # ---------------------------------------------------------------------------
+
 
 class TestFeatureConsistency:
     def test_feature_count_matches_names(self, fe):
@@ -88,6 +127,7 @@ class TestFeatureConsistency:
 # ---------------------------------------------------------------------------
 # Formula correctness
 # ---------------------------------------------------------------------------
+
 
 class TestTileEfficiency:
     """Tile efficiency: fraction of the last tile that is useful work."""
@@ -179,6 +219,7 @@ class TestArithmeticIntensity:
 # Corner-case shapes
 # ---------------------------------------------------------------------------
 
+
 class TestCornerCaseShapes:
     def test_m1_single_token(self, fe):
         vec = fe.extract(_make_problem(m=1, n=4096, k=4096), _make_kernel())
@@ -220,33 +261,77 @@ class TestCornerCaseShapes:
 # Batch vs single extraction parity
 # ---------------------------------------------------------------------------
 
+
 class TestBatchParity:
     def test_batch_matches_single(self, fe):
         """Vectorized batch should produce identical results to row-by-row."""
         rows = [
-            {"m": 16, "n": 1536, "k": 7168, "split_k": 1, "dtype": "fp8", "layout": "rcr",
-             "tile_m": 128, "tile_n": 128, "tile_k": 128, "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128,
-             "pipeline": "compv3", "scheduler": "intrawave", "epilogue": "cshuffle",
-             "pad_m": False, "pad_n": False, "pad_k": False, "persistent": False},
-            {"m": 20480, "n": 7168, "k": 256, "split_k": 1, "dtype": "fp8", "layout": "rcr",
-             "tile_m": 64, "tile_n": 64, "tile_k": 128, "warp_m": 2, "warp_n": 2, "warp_k": 1,
-             "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
-             "pipeline": "mem", "scheduler": "interwave", "epilogue": "default",
-             "pad_m": True, "pad_n": True, "pad_k": True, "persistent": True},
+            {
+                "m": 16,
+                "n": 1536,
+                "k": 7168,
+                "split_k": 1,
+                "dtype": "fp8",
+                "layout": "rcr",
+                "tile_m": 128,
+                "tile_n": 128,
+                "tile_k": 128,
+                "warp_m": 1,
+                "warp_n": 4,
+                "warp_k": 1,
+                "warp_tile_m": 16,
+                "warp_tile_n": 16,
+                "warp_tile_k": 128,
+                "pipeline": "compv3",
+                "scheduler": "intrawave",
+                "epilogue": "cshuffle",
+                "pad_m": False,
+                "pad_n": False,
+                "pad_k": False,
+                "persistent": False,
+            },
+            {
+                "m": 20480,
+                "n": 7168,
+                "k": 256,
+                "split_k": 1,
+                "dtype": "fp8",
+                "layout": "rcr",
+                "tile_m": 64,
+                "tile_n": 64,
+                "tile_k": 128,
+                "warp_m": 2,
+                "warp_n": 2,
+                "warp_k": 1,
+                "warp_tile_m": 32,
+                "warp_tile_n": 32,
+                "warp_tile_k": 16,
+                "pipeline": "mem",
+                "scheduler": "interwave",
+                "epilogue": "default",
+                "pad_m": True,
+                "pad_n": True,
+                "pad_k": True,
+                "persistent": True,
+            },
         ]
         df = pd.DataFrame(rows)
         batch_result = fe.extract_batch(df)
 
         for i, row_dict in enumerate(rows):
             single_result = fe.extract(row_dict, row_dict)
-            np.testing.assert_allclose(batch_result[i], single_result, rtol=1e-10,
-                                       err_msg=f"Mismatch at row {i}")
+            np.testing.assert_allclose(
+                batch_result[i],
+                single_result,
+                rtol=1e-10,
+                err_msg=f"Mismatch at row {i}",
+            )
 
 
 # ---------------------------------------------------------------------------
 # Parameter space and validation
 # ---------------------------------------------------------------------------
+
 
 class TestParameterSpace:
     def test_parameter_space_non_empty(self, fe):
@@ -257,11 +342,19 @@ class TestParameterSpace:
 
     def test_valid_config_passes(self, fe):
         config = {
-            "tile_m": 128, "tile_n": 128, "tile_k": 64,
-            "warp_m": 2, "warp_n": 2, "warp_k": 1,
-            "pipeline": "compv3", "scheduler": "intrawave",
+            "tile_m": 128,
+            "tile_n": 128,
+            "tile_k": 64,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_k": 1,
+            "pipeline": "compv3",
+            "scheduler": "intrawave",
             "epilogue": "cshuffle",
-            "pad_m": False, "pad_n": False, "pad_k": False, "persistent": False,
+            "pad_m": False,
+            "pad_n": False,
+            "pad_k": False,
+            "persistent": False,
         }
         assert fe.validate_config(config) is True
 
@@ -271,8 +364,12 @@ class TestParameterSpace:
 
     def test_lds_constraint_rejects_huge_tile(self, fe):
         config = {
-            "tile_m": 256, "tile_n": 256, "tile_k": 256,
-            "warp_m": 2, "warp_n": 2, "warp_k": 1,
+            "tile_m": 256,
+            "tile_n": 256,
+            "tile_k": 256,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_k": 1,
             "pipeline": "compv4",
         }
         assert fe.validate_config(config) is False
@@ -288,6 +385,7 @@ class TestParameterSpace:
 # ---------------------------------------------------------------------------
 # Hardware features
 # ---------------------------------------------------------------------------
+
 
 class TestHardwareFeatures:
     def test_hardware_values_propagated(self, fe):

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Evaluation and reporting for CK Tile kernel performance models.
 
@@ -14,7 +17,6 @@ Usage:
 
 import argparse
 import json
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -37,7 +39,6 @@ def classify_shape_family(m: int, n: int, k: int) -> str:
       - tall: M/N > 2.0
       - wide: M/N < 0.5
     """
-    ratio_mn = m / max(n, 1)
     if m < 32:
         return "tiny_m"
     elif m < 256:
@@ -127,8 +128,12 @@ def evaluate_model(
         "num_valid_rows": len(valid),
         "num_shapes": total_shapes,
         "efficiency_mean": float(eff_df["efficiency"].mean()) if len(eff_df) > 0 else 0,
-        "efficiency_p10": float(eff_df["efficiency"].quantile(0.1)) if len(eff_df) > 0 else 0,
-        "efficiency_p50": float(eff_df["efficiency"].quantile(0.5)) if len(eff_df) > 0 else 0,
+        "efficiency_p10": float(eff_df["efficiency"].quantile(0.1))
+        if len(eff_df) > 0
+        else 0,
+        "efficiency_p50": float(eff_df["efficiency"].quantile(0.5))
+        if len(eff_df) > 0
+        else 0,
         "efficiency_min": float(eff_df["efficiency"].min()) if len(eff_df) > 0 else 0,
         "ndcg_at_1": ndcg1_count / max(total_shapes, 1),
         "top3_hit_rate": topk_hits[3] / max(total_shapes, 1),
@@ -149,7 +154,9 @@ def evaluate_model(
             "min": float(eff["efficiency"].min()),
         }
 
-    valid["shape_family"] = valid.apply(lambda r: classify_shape_family(r["m"], r["n"], r["k"]), axis=1)
+    valid["shape_family"] = valid.apply(
+        lambda r: classify_shape_family(r["m"], r["n"], r["k"]), axis=1
+    )
     valid["k_regime"] = valid["k"].apply(classify_k_regime)
 
     shape_family_metrics = {}
@@ -170,13 +177,17 @@ def evaluate_model(
         "shape_family_metrics": shape_family_metrics,
         "k_regime_metrics": k_regime_metrics,
         "pipeline_metrics": pipeline_metrics,
-        "per_shape_efficiency": eff_df.to_dict(orient="records") if len(eff_df) > 0 else [],
+        "per_shape_efficiency": eff_df.to_dict(orient="records")
+        if len(eff_df) > 0
+        else [],
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate CK Tile performance model")
-    parser.add_argument("--model_dir", required=True, help="Directory with trained models")
+    parser.add_argument(
+        "--model_dir", required=True, help="Directory with trained models"
+    )
     parser.add_argument("--data_dir", required=True, help="Directory with parquet data")
     parser.add_argument("--op", default="gemm_universal")
     parser.add_argument("--dtype", default="fp8")
@@ -185,7 +196,7 @@ def main():
 
     print(f"Loading data from {args.data_dir}...")
     df = build_training_dataset(args.data_dir, op_type=args.op, dtype=args.dtype)
-    print(f"  {len(df)} rows, {df.groupby(['m','n','k']).ngroups} shapes")
+    print(f"  {len(df)} rows, {df.groupby(['m', 'n', 'k']).ngroups} shapes")
 
     fe = GemmUniversalFeatureEngine()
     predictor = Predictor(args.model_dir, feature_engine=fe)
@@ -194,7 +205,7 @@ def main():
     results = evaluate_model(predictor, df, fe)
 
     gm = results["global_metrics"]
-    print(f"\nGlobal Metrics:")
+    print("\nGlobal Metrics:")
     print(f"  R2:             {gm['r2']:.4f}")
     print(f"  RMSE:           {gm['rmse']:.2f}")
     print(f"  Efficiency Mean: {gm['efficiency_mean']:.4f}")
@@ -206,20 +217,26 @@ def main():
     print(f"  Top-5 Hit Rate:  {gm['top5_hit_rate']:.4f}")
     print(f"  Top-10 Hit Rate: {gm['top10_hit_rate']:.4f}")
 
-    print(f"\nShape Family Breakdown:")
+    print("\nShape Family Breakdown:")
     for family, metrics in sorted(results["shape_family_metrics"].items()):
         if metrics.get("count", 0) > 0:
-            print(f"  {family:12s}: mean={metrics['mean']:.4f} p10={metrics['p10']:.4f} min={metrics['min']:.4f} (n={metrics['count']})")
+            print(
+                f"  {family:12s}: mean={metrics['mean']:.4f} p10={metrics['p10']:.4f} min={metrics['min']:.4f} (n={metrics['count']})"
+            )
 
-    print(f"\nK-Depth Regime Breakdown:")
+    print("\nK-Depth Regime Breakdown:")
     for regime, metrics in sorted(results["k_regime_metrics"].items()):
         if metrics.get("count", 0) > 0:
-            print(f"  {regime:12s}: mean={metrics['mean']:.4f} p10={metrics['p10']:.4f} min={metrics['min']:.4f} (n={metrics['count']})")
+            print(
+                f"  {regime:12s}: mean={metrics['mean']:.4f} p10={metrics['p10']:.4f} min={metrics['min']:.4f} (n={metrics['count']})"
+            )
 
-    print(f"\nPipeline Breakdown:")
+    print("\nPipeline Breakdown:")
     for pipeline, metrics in sorted(results["pipeline_metrics"].items()):
         if metrics.get("count", 0) > 0:
-            print(f"  {pipeline:15s}: mean={metrics['mean']:.4f} p10={metrics['p10']:.4f} (n={metrics['count']})")
+            print(
+                f"  {pipeline:15s}: mean={metrics['mean']:.4f} p10={metrics['p10']:.4f} (n={metrics['count']})"
+            )
 
     if args.output:
         with open(args.output, "w") as f:

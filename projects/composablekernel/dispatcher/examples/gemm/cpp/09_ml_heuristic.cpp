@@ -30,33 +30,81 @@ using Algorithm = decl::Algorithm;
 
 // Multiple kernel configs for ML to choose from
 DECL_KERNEL_SET(ml_kernels,
-    // Small tiles
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(64, 64, 32).wave(2, 2, 1).warp(16, 16, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(64, 64, 64).wave(2, 2, 1).warp(16, 16, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    // Medium tiles
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(128, 128, 32).wave(2, 2, 1).warp(32, 32, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(128, 128, 64).wave(2, 2, 1).warp(32, 32, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(128, 128, 64).wave(2, 2, 1).warp(32, 32, 16)
-             .pipeline("compv4").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    // Large tiles
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(256, 256, 32).wave(2, 2, 1).warp(32, 32, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(256, 128, 32).wave(2, 2, 1).warp(32, 32, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942")
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm().tile(128, 256, 32).wave(2, 2, 1).warp(32, 32, 16)
-             .pipeline("compv3").scheduler("intrawave").epilogue("cshuffle"), "gfx942"));
+                // Small tiles
+                .add(Signature().dtype("fp16").layout("rcr"),
+                     Algorithm()
+                         .tile(64, 64, 32)
+                         .wave(2, 2, 1)
+                         .warp(16, 16, 16)
+                         .pipeline("compv3")
+                         .scheduler("intrawave")
+                         .epilogue("cshuffle"),
+                     "gfx942")
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(64, 64, 64)
+                             .wave(2, 2, 1)
+                             .warp(16, 16, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942")
+                    // Medium tiles
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(128, 128, 32)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942")
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(128, 128, 64)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942")
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(128, 128, 64)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv4")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942")
+                    // Large tiles
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(256, 256, 32)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942")
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(256, 128, 32)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942")
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(128, 256, 32)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx942"));
 
 int main(int argc, char* argv[])
 {
@@ -71,11 +119,12 @@ int main(int argc, char* argv[])
 
     print_header("Example 09: ML-Based Kernel Selection");
 
-    std::string gfx_arch = args.get("--arch", "gfx942");
+    std::string gfx_arch   = args.get("--arch", "gfx942");
     std::string model_path = args.get("--model", "");
-    bool log_transform = (args.get("--log_transform", "false") == "true");
+    bool log_transform     = (args.get("--log_transform", "false") == "true");
 
-    if(model_path.empty()) {
+    if(model_path.empty())
+    {
         std::cerr << "Error: --model <path> is required" << std::endl;
         std::cerr << "Usage: ./gemm_09_ml_heuristic --model path/to/model_tflops.lgbm" << std::endl;
         return 1;
@@ -89,7 +138,8 @@ int main(int argc, char* argv[])
     // Load ML model and create heuristic
     HardwareProfile hw;
     MLHeuristic ml_heuristic(model_path, &registry, hw, log_transform);
-    if(!ml_heuristic.is_loaded()) {
+    if(!ml_heuristic.is_loaded())
+    {
         std::cerr << "Failed to load model. Exiting." << std::endl;
         return 1;
     }
@@ -97,14 +147,12 @@ int main(int argc, char* argv[])
     // Wire ML heuristic into dispatcher
     Dispatcher dispatcher(&registry);
     dispatcher.set_strategy(Dispatcher::SelectionStrategy::Heuristic);
-    dispatcher.set_heuristic([&ml_heuristic](const Problem& p) {
-        return ml_heuristic(p);
-    });
+    dispatcher.set_heuristic([&ml_heuristic](const Problem& p) { return ml_heuristic(p); });
 
     std::cout << "Strategy: ML Heuristic (LightGBM)" << std::endl;
 
     // Test with different problem sizes
-    using DataType = ck_tile::fp16_t;
+    using DataType                               = ck_tile::fp16_t;
     std::vector<std::tuple<int, int, int>> sizes = {
         {128, 128, 64},
         {512, 512, 256},
@@ -113,45 +161,46 @@ int main(int argc, char* argv[])
     };
 
     std::cout << std::endl
-              << std::setw(20) << "Shape"
-              << std::setw(30) << "Selected Kernel"
-              << std::setw(15) << "Pred TFLOPS"
-              << std::setw(12) << "Select ms"
-              << std::setw(10) << "Status" << std::endl;
+              << std::setw(20) << "Shape" << std::setw(30) << "Selected Kernel" << std::setw(15)
+              << "Pred TFLOPS" << std::setw(12) << "Select ms" << std::setw(10) << "Status"
+              << std::endl;
     std::cout << std::string(87, '-') << std::endl;
 
     bool all_passed = true;
 
-    for(const auto& [M, N, K] : sizes) {
+    for(const auto& [M, N, K] : sizes)
+    {
         Problem problem;
-        problem.M = M; problem.N = N; problem.K = K; problem.k_batch = 1;
+        problem.M       = M;
+        problem.N       = N;
+        problem.K       = K;
+        problem.k_batch = 1;
 
-        auto t0 = std::chrono::high_resolution_clock::now();
-        auto kernel = dispatcher.select_kernel(problem);
-        auto t1 = std::chrono::high_resolution_clock::now();
+        auto t0          = std::chrono::high_resolution_clock::now();
+        auto kernel      = dispatcher.select_kernel(problem);
+        auto t1          = std::chrono::high_resolution_clock::now();
         double select_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-        std::string size_str = std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+        std::string size_str =
+            std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
 
-        if(!kernel) {
-            std::cout << std::setw(20) << size_str
-                      << std::setw(30) << "NONE"
-                      << std::setw(15) << "N/A"
-                      << std::setw(12) << std::fixed << std::setprecision(2) << select_ms
+        if(!kernel)
+        {
+            std::cout << std::setw(20) << size_str << std::setw(30) << "NONE" << std::setw(15)
+                      << "N/A" << std::setw(12) << std::fixed << std::setprecision(2) << select_ms
                       << std::setw(10) << "FAIL" << std::endl;
             all_passed = false;
             continue;
         }
 
-        double pred = ml_heuristic.predict_tflops(problem, kernel->get_key());
+        double pred      = ml_heuristic.predict_tflops(problem, kernel->get_key());
         std::string name = kernel->get_key().encode_identifier();
-        if(name.length() > 27) name = name.substr(0, 27) + "..";
+        if(name.length() > 27)
+            name = name.substr(0, 27) + "..";
 
-        std::cout << std::setw(20) << size_str
-                  << std::setw(30) << name
-                  << std::setw(15) << std::fixed << std::setprecision(2) << pred
-                  << std::setw(12) << std::setprecision(2) << select_ms
-                  << std::setw(10) << "OK" << std::endl;
+        std::cout << std::setw(20) << size_str << std::setw(30) << name << std::setw(15)
+                  << std::fixed << std::setprecision(2) << pred << std::setw(12)
+                  << std::setprecision(2) << select_ms << std::setw(10) << "OK" << std::endl;
     }
 
     std::cout << std::endl

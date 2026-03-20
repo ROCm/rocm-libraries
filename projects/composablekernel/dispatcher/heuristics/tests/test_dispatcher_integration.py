@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Tests for dispatcher_integration.py.
 
@@ -40,6 +43,7 @@ SAMPLE_KERNEL_NAME = (
 # kernel_config_to_feature_dict
 # ---------------------------------------------------------------------------
 
+
 class TestKernelConfigToFeatureDict:
     def test_parses_standard_name(self):
         feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
@@ -67,6 +71,7 @@ class TestKernelConfigToFeatureDict:
 # ---------------------------------------------------------------------------
 # Name mapping: feature dict <-> dispatcher config
 # ---------------------------------------------------------------------------
+
 
 class TestNameMapping:
     """The critical inversion: feature engine warp_m/n/k (warps per block)
@@ -121,6 +126,7 @@ class TestNameMapping:
 # MLKernelSpec
 # ---------------------------------------------------------------------------
 
+
 class TestMLKernelSpec:
     def test_from_feature_dict(self):
         feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
@@ -147,14 +153,27 @@ class TestMLKernelSpec:
         spec = feature_dict_to_ml_spec(feat, 0.0)
         disp_from_spec = ml_spec_to_dispatcher_config(spec)
         disp_from_feat = feature_dict_to_dispatcher_config(feat)
-        for key in ["tile_m", "tile_n", "tile_k", "wave_m", "wave_n", "wave_k",
-                     "warp_m", "warp_n", "warp_k", "pipeline", "scheduler", "epilogue"]:
+        for key in [
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "wave_m",
+            "wave_n",
+            "wave_k",
+            "warp_m",
+            "warp_n",
+            "warp_k",
+            "pipeline",
+            "scheduler",
+            "epilogue",
+        ]:
             assert disp_from_spec[key] == disp_from_feat[key], f"Mismatch on {key}"
 
 
 # ---------------------------------------------------------------------------
 # Binary pool loading
 # ---------------------------------------------------------------------------
+
 
 class TestLoadKernelPool:
     def test_loads_from_real_bin_dir(self):
@@ -174,6 +193,7 @@ class TestLoadKernelPool:
 # ---------------------------------------------------------------------------
 # ML heuristic function
 # ---------------------------------------------------------------------------
+
 
 class TestCreateMLHeuristic:
     @pytest.fixture

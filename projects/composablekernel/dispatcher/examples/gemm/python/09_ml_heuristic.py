@@ -40,16 +40,15 @@ from ctypes_utils import (
     KernelConfig,
     setup_gemm_dispatcher,
     cleanup_gemm,
-    reset_for_example,
 )
 
 from predict import Predictor
-from feature_engine import GemmUniversalFeatureEngine
 
 
 @dataclass
 class KernelSpec:
     """Kernel specification -- same structure as 08_heuristics.py"""
+
     name: str
     tile_m: int
     tile_n: int
@@ -102,32 +101,61 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
     """Convert a KernelSpec to the dict format the feature engine expects."""
     return {
         "kernel_name": spec.name,
-        "tile_m": spec.tile_m, "tile_n": spec.tile_n, "tile_k": spec.tile_k,
-        "warp_m": spec.wave_m, "warp_n": spec.wave_n, "warp_k": spec.wave_k,
-        "warp_tile_m": spec.warp_m, "warp_tile_n": spec.warp_n, "warp_tile_k": spec.warp_k,
-        "pipeline": spec.pipeline, "scheduler": spec.scheduler,
+        "tile_m": spec.tile_m,
+        "tile_n": spec.tile_n,
+        "tile_k": spec.tile_k,
+        "warp_m": spec.wave_m,
+        "warp_n": spec.wave_n,
+        "warp_k": spec.wave_k,
+        "warp_tile_m": spec.warp_m,
+        "warp_tile_n": spec.warp_n,
+        "warp_tile_k": spec.warp_k,
+        "pipeline": spec.pipeline,
+        "scheduler": spec.scheduler,
         "epilogue": "cshuffle",
-        "pad_m": False, "pad_n": False, "pad_k": False, "persistent": False,
-        "dtype": dtype, "layout": layout,
+        "pad_m": False,
+        "pad_n": False,
+        "pad_k": False,
+        "persistent": False,
+        "dtype": dtype,
+        "layout": layout,
     }
 
 
 def spec_to_kernel_config(spec: KernelSpec, dtype: str, arch: str) -> KernelConfig:
     """Convert a KernelSpec to the dispatcher's KernelConfig for JIT compilation."""
     return KernelConfig(
-        dtype_a=dtype, dtype_b=dtype, dtype_c=dtype, dtype_acc="fp32",
-        layout_a="row", layout_b="col", layout_c="row",
-        tile_m=spec.tile_m, tile_n=spec.tile_n, tile_k=spec.tile_k,
-        wave_m=spec.wave_m, wave_n=spec.wave_n, wave_k=spec.wave_k,
-        warp_m=spec.warp_m, warp_n=spec.warp_n, warp_k=spec.warp_k,
-        pipeline=spec.pipeline, scheduler=spec.scheduler, epilogue="cshuffle",
+        dtype_a=dtype,
+        dtype_b=dtype,
+        dtype_c=dtype,
+        dtype_acc="fp32",
+        layout_a="row",
+        layout_b="col",
+        layout_c="row",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        wave_m=spec.wave_m,
+        wave_n=spec.wave_n,
+        wave_k=spec.wave_k,
+        warp_m=spec.warp_m,
+        warp_n=spec.warp_n,
+        warp_k=spec.warp_k,
+        pipeline=spec.pipeline,
+        scheduler=spec.scheduler,
+        epilogue="cshuffle",
         gfx_arch=arch,
     )
 
 
 def ml_select_kernel(
-    predictor: Predictor, pool: List[KernelSpec],
-    M: int, N: int, K: int, dtype: str, layout: str,
+    predictor: Predictor,
+    pool: List[KernelSpec],
+    M: int,
+    N: int,
+    K: int,
+    dtype: str,
+    layout: str,
 ) -> tuple:
     """Score all kernels in the pool and return (best_spec, predicted_tflops)."""
     problem = {"m": M, "n": N, "k": K, "dtype": dtype, "layout": layout, "split_k": 1}
@@ -146,9 +174,18 @@ def main():
     parser = argparse.ArgumentParser(description="ML-based kernel selection for GEMM")
     parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16", "fp8"])
     parser.add_argument("--arch", default="gfx942")
-    parser.add_argument("--model_dir", default=str(
-        Path(__file__).parent.parent.parent.parent / "heuristics" / "models" / "gemm_universal_fp8_gfx950"))
-    parser.add_argument("--no_run", action="store_true", help="Only predict, don't run GEMMs")
+    parser.add_argument(
+        "--model_dir",
+        default=str(
+            Path(__file__).parent.parent.parent.parent
+            / "heuristics"
+            / "models"
+            / "gemm_universal_fp8_gfx950"
+        ),
+    )
+    parser.add_argument(
+        "--no_run", action="store_true", help="Only predict, don't run GEMMs"
+    )
     args = parser.parse_args()
 
     print("=" * 75)
@@ -160,7 +197,7 @@ def main():
     print(f"  Pool:   {len(KERNEL_POOL)} kernels")
 
     predictor = Predictor(args.model_dir)
-    print(f"  Model loaded successfully")
+    print("  Model loaded successfully")
 
     np_dtype = np.float16 if args.dtype in ["fp16", "bf16"] else np.float16
 
@@ -183,8 +220,9 @@ def main():
     for M, N, K in test_sizes:
         t0 = time.time()
         best_spec, pred_tflops = ml_select_kernel(
-            predictor, KERNEL_POOL, M, N, K, args.dtype, "rcr")
-        select_ms = (time.time() - t0) * 1000
+            predictor, KERNEL_POOL, M, N, K, args.dtype, "rcr"
+        )
+        _ = (time.time() - t0) * 1000  # ML selection time (unused)
 
         size_str = f"{M}x{N}x{K}"
         line = f"  {size_str:<20} {best_spec.name:<25} {pred_tflops:>12.2f}"
@@ -225,12 +263,16 @@ def main():
         result = dispatcher.run(A, B, M, N, K)
 
         if result.success:
-            C_ref = np.matmul(A.astype(np.float32), B.astype(np.float32)).astype(np_dtype)
+            C_ref = np.matmul(A.astype(np.float32), B.astype(np.float32)).astype(
+                np_dtype
+            )
             max_err = np.max(np.abs(result.output - C_ref))
             passed = max_err < 1e-2
             status = "PASS" if passed else "FAIL"
             line += f" {result.time_ms:>10.4f} {result.tflops:>10.2f} {status:<8}"
-            results.append((size_str, best_spec.name, passed, result.time_ms, result.tflops))
+            results.append(
+                (size_str, best_spec.name, passed, result.time_ms, result.tflops)
+            )
         else:
             line += f" {'N/A':>10} {'N/A':>10} {'FAIL':<8}"
             results.append((size_str, best_spec.name, False, 0, 0))

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Dispatcher integration for ML-based kernel selection.
 
@@ -24,15 +27,12 @@ Usage:
     best_spec = heuristic(M=1024, N=1024, K=1024, kernel_pool=KERNEL_POOL)
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 
 from data_pipeline import parse_kernel_name
-from feature_engine import GemmUniversalFeatureEngine, PIPELINE_MAP, SCHEDULER_MAP, EPILOGUE_MAP
 from predict import Predictor
 
 
@@ -92,7 +92,9 @@ def kernel_config_to_feature_dict(kernel_name: str) -> dict:
     return parsed
 
 
-def feature_dict_to_dispatcher_config(feat: dict, dtype: str = "fp8", arch: str = "gfx950") -> dict:
+def feature_dict_to_dispatcher_config(
+    feat: dict, dtype: str = "fp8", arch: str = "gfx950"
+) -> dict:
     """Convert a feature-engine kernel dict to dispatcher KernelConfig fields.
 
     Handles the naming inversion:
@@ -212,12 +214,18 @@ def create_ml_heuristic(
         kernel_pool = load_kernel_pool_from_binaries(bin_dir)
 
     if not kernel_pool:
-        raise ValueError(f"No kernel configs found. Check bin_dir or provide kernel_pool.")
+        raise ValueError(
+            "No kernel configs found. Check bin_dir or provide kernel_pool."
+        )
 
     def heuristic(M: int, N: int, K: int) -> MLKernelSpec:
         problem = {
-            "m": M, "n": N, "k": K,
-            "dtype": dtype, "layout": layout, "split_k": 1,
+            "m": M,
+            "n": N,
+            "k": K,
+            "dtype": dtype,
+            "layout": layout,
+            "split_k": 1,
         }
 
         ranked = predictor.rank_kernels(problem, kernel_pool)
@@ -264,8 +272,12 @@ def create_ranked_heuristic(
 
     def heuristic(M: int, N: int, K: int) -> list[MLKernelSpec]:
         problem = {
-            "m": M, "n": N, "k": K,
-            "dtype": dtype, "layout": layout, "split_k": 1,
+            "m": M,
+            "n": N,
+            "k": K,
+            "dtype": dtype,
+            "layout": layout,
+            "split_k": 1,
         }
 
         ranked = predictor.rank_kernels(problem, kernel_pool)
@@ -278,7 +290,9 @@ def create_ranked_heuristic(
     return heuristic
 
 
-def ml_spec_to_dispatcher_config(spec: MLKernelSpec, dtype: str = "fp8", arch: str = "gfx950") -> dict:
+def ml_spec_to_dispatcher_config(
+    spec: MLKernelSpec, dtype: str = "fp8", arch: str = "gfx950"
+) -> dict:
     """Convert an MLKernelSpec to a dict compatible with ctypes_utils.KernelConfig."""
     layout_a, layout_b, layout_c = "row", "col", "row"
     c_dtype = DTYPE_TO_C_DTYPE.get(dtype, dtype)
