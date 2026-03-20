@@ -11,7 +11,7 @@
 #include "BatchnormApplicabilityChecks.hpp"
 #include "HipKernelUtils.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 // --- Type Configuration Helpers ---
@@ -597,4 +597,4 @@ void checkBatchnormFwdTrainingTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
 }
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm

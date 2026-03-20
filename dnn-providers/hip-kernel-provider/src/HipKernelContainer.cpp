@@ -4,8 +4,8 @@
 #include "HipKernelContainer.hpp"
 #include "CurrentDevicePropertyProvider.hpp"
 #include "engines/HipKernelEngine.hpp"
-#include "engines/plans/BatchnormPlanBuilder.hpp"
 #include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
+#include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
@@ -32,8 +32,8 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
              -> std::unique_ptr<
                  hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
-             engine->addPlanBuilder(
-                 std::make_unique<BatchnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
              return engine;

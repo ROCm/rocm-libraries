@@ -12,7 +12,7 @@
 #include "hip/IKernelCompiler.hpp"
 #include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 class BatchnormPlanBuilder
@@ -54,4 +54,4 @@ private:
     const IDevicePropertyProvider& _devicePropertyProvider;
 };
 
-}
+} // namespace hip_kernel_provider::batchnorm

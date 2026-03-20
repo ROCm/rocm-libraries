@@ -10,7 +10,7 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
-namespace hip_kernel_provider::test_bn_common
+namespace hip_kernel_provider::batchnorm::test::common
 {
 
 struct BatchnormTestCase
@@ -117,4 +117,4 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingFull3dTestCases()
     };
 }
 
-} // namespace hip_kernel_provider::test_bn_common
+} // namespace hip_kernel_provider::batchnorm::test::common

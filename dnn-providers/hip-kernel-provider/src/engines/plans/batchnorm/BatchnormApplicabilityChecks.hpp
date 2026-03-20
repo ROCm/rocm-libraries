@@ -14,7 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
-namespace hip_kernel_provider
+namespace hip_kernel_provider::batchnorm
 {
 
 // --- Tensor Descriptor Value Object ---
@@ -166,4 +166,4 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIntermedia
 
 } // namespace bn_type_configs
 
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm
