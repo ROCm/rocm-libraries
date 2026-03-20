@@ -242,7 +242,7 @@ void test_segmented_topk_air_keys(std::vector<typename Params::key_type> const& 
     }
 
     const auto                               h_output = d_output.load();
-    std::__remove_cvref_t<decltype(h_input)> h_expected{};
+    std::vector<key_type>                    h_expected{};
     auto                                     pred = [](auto _1, auto _2)
     {
         if constexpr(select_min)
@@ -435,7 +435,7 @@ void test_segmented_topk_air_pairs_unstable(
 
     const auto                                    h_output_keys   = d_output_keys.load();
     const auto                                    h_output_values = d_output_values.load();
-    std::__remove_cvref_t<decltype(h_input_keys)> h_expected_keys{};
+    std::vector<key_type>                         h_expected_keys{};
     auto                                          pred = [](auto _1, auto _2)
     {
         if constexpr(select_min)
