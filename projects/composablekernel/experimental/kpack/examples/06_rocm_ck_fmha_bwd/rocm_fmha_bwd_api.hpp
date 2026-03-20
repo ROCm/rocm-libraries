@@ -14,6 +14,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -168,6 +169,33 @@ static_assert(std::is_trivially_copyable_v<FmhaBwdOGradDotOBatchArgs>,
               "FmhaBwdOGradDotOBatchArgs must be trivially copyable for kernarg passing");
 static_assert(std::is_standard_layout_v<FmhaBwdOGradDotOBatchArgs>,
               "FmhaBwdOGradDotOBatchArgs must be standard layout");
+static_assert(sizeof(FmhaBwdOGradDotOBatchArgs) == 72, "unexpected FmhaBwdOGradDotOBatchArgs size");
+static_assert(alignof(FmhaBwdOGradDotOBatchArgs) == 8,
+              "unexpected FmhaBwdOGradDotOBatchArgs alignment");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, o_ptr) == 0, "unexpected offset for o_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, do_ptr) == 8, "unexpected offset for do_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, d_ptr) == 16, "unexpected offset for d_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, p_undrop) == 24,
+              "unexpected offset for p_undrop");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, seqlen_q) == 28,
+              "unexpected offset for seqlen_q");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, hdim_v) == 32, "unexpected offset for hdim_v");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, stride_do) == 36,
+              "unexpected offset for stride_do");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, stride_o) == 40,
+              "unexpected offset for stride_o");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, nhead_stride_do) == 44,
+              "unexpected offset for nhead_stride_do");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, nhead_stride_o) == 48,
+              "unexpected offset for nhead_stride_o");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, nhead_stride_d) == 52,
+              "unexpected offset for nhead_stride_d");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, batch_stride_do) == 56,
+              "unexpected offset for batch_stride_do");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, batch_stride_o) == 60,
+              "unexpected offset for batch_stride_o");
+static_assert(offsetof(FmhaBwdOGradDotOBatchArgs, batch_stride_d) == 64,
+              "unexpected offset for batch_stride_d");
 
 /// Group-mode kernel arguments.
 /// Layout matches CK Tile's FmhaBwdOGradDotOGroupModeKargs exactly.
@@ -200,6 +228,33 @@ static_assert(std::is_trivially_copyable_v<FmhaBwdOGradDotOGroupArgs>,
               "FmhaBwdOGradDotOGroupArgs must be trivially copyable for kernarg passing");
 static_assert(std::is_standard_layout_v<FmhaBwdOGradDotOGroupArgs>,
               "FmhaBwdOGradDotOGroupArgs must be standard layout");
+static_assert(sizeof(FmhaBwdOGradDotOGroupArgs) == 80, "unexpected FmhaBwdOGradDotOGroupArgs size");
+static_assert(alignof(FmhaBwdOGradDotOGroupArgs) == 8,
+              "unexpected FmhaBwdOGradDotOGroupArgs alignment");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, o_ptr) == 0, "unexpected offset for o_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, do_ptr) == 8, "unexpected offset for do_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, d_ptr) == 16, "unexpected offset for d_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, p_undrop) == 24,
+              "unexpected offset for p_undrop");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, seqlen_q) == 28,
+              "unexpected offset for seqlen_q");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, hdim_v) == 32, "unexpected offset for hdim_v");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, stride_do) == 36,
+              "unexpected offset for stride_do");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, stride_o) == 40,
+              "unexpected offset for stride_o");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, nhead_stride_do) == 44,
+              "unexpected offset for nhead_stride_do");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, nhead_stride_o) == 48,
+              "unexpected offset for nhead_stride_o");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, nhead_stride_d) == 52,
+              "unexpected offset for nhead_stride_d");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, seqstart_q_ptr) == 56,
+              "unexpected offset for seqstart_q_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, seqlen_q_ptr) == 64,
+              "unexpected offset for seqlen_q_ptr");
+static_assert(offsetof(FmhaBwdOGradDotOGroupArgs, cu_seqlen_q_ptr) == 72,
+              "unexpected offset for cu_seqlen_q_ptr");
 
 // ---------------------------------------------------------------------------
 // Grid calculation
