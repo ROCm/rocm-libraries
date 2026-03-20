@@ -231,9 +231,39 @@ namespace rocRoller::Client::GEMMClient
             hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
         }
 
+        // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
+        std::vector<PackedTypeA> hostAForKernel(hostA);
+        if(not problemParams.types.pretileA.empty() && problemParams.types.pretileA.size() == 2)
+        {
+            auto const packing = TypeInfo<PackedTypeA>::ElementBits / TypeInfo<A>::ElementBits;
+
+            std::vector<size_t> sizes       = descA.sizes();
+            std::vector<size_t> preTileSize = problemParams.types.pretileA;
+            if(packing > 1)
+            {
+                // Tile sizes are in logical elements; convert sizes and preTileSize to packed
+                // element space. Packing is along the last (fast) dimension for A (K).
+                AssertFatal(sizes[1] % packing == 0,
+                            "pretileA: K dimension must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type A.");
+                AssertFatal(preTileSize[1] % packing == 0,
+                            "pretileA: tile K must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type A.");
+                sizes[1] /= packing;
+                preTileSize[1] /= packing;
+            }
+
+            // The preSwizzle helper assumes column-major; so we swap sizes here.
+            std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
+            std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
+            hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+        }
+
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
-        RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
+        RotatingBuffer<PackedTypeA> rotatingA(hostAForKernel, rotatingSize);
         RotatingBuffer<PackedTypeB> rotatingB(hostBForKernel, rotatingSize);
         RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
@@ -1722,6 +1752,7 @@ int main(int argc, const char* argv[])
                    "Experimental: Skip Permlane instructions for scale data. Options: None, "
                    "PreSwizzleScale, PreSwizzleScaleGFX950.");
 
+    auto pretileAOption = app.add_option("--pretileA", "Pre-tile A matrix. Dimensions are: MxK.");
     auto pretileBOption = app.add_option("--pretileB", "Pre-tile B matrix. Dimensions are: KxN.");
 
     bool pretileScale = false;
@@ -1943,6 +1974,11 @@ int main(int argc, const char* argv[])
 
     CLI11_PARSE(app, argc, argv);
 
+    if(pretileAOption->count() > 0)
+    {
+        auto xy        = pretileAOption->as<Client::GEMMClient::XYTuple>();
+        types.pretileA = {static_cast<unsigned long>(xy.x), static_cast<unsigned long>(xy.y)};
+    }
     if(pretileBOption->count() > 0)
     {
         auto xy        = pretileBOption->as<Client::GEMMClient::XYTuple>();

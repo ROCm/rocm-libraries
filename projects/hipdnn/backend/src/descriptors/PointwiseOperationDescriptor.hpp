@@ -7,6 +7,7 @@
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -63,12 +64,17 @@ public:
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
 
+    static std::shared_ptr<PointwiseOperationDescriptor>
+        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
+
     static hipdnnBackendDescriptorType_t getStaticType();
 
     std::string toString() const override;
 
 private:
     hipdnn_data_sdk::data_objects::PointwiseAttributesT _data;
+    std::string _name;
 
     // Store tensor descriptor references for validation and graph building
     std::shared_ptr<TensorDescriptor> _in0Desc;

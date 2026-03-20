@@ -123,11 +123,11 @@ public:
             for(size_t i = 0; i < spatialDims; ++i)
             {
                 auto spatialIdx = i + 2;
-                int64_t const xDim = xDims[spatialIdx];
-                int64_t const dyDim = dyDims[spatialIdx];
-                int64_t const kernelDim = dwDims[spatialIdx];
+                const int64_t xDim = xDims[spatialIdx];
+                const int64_t dyDim = dyDims[spatialIdx];
+                const int64_t kernelDim = dwDims[spatialIdx];
 
-                int64_t const kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
+                const int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
                 auto numerator = xDim + prePadding[i] + postPadding[i] - kernelSize;
 
                 HIPDNN_RETURN_IF_LT(numerator,
@@ -139,7 +139,7 @@ public:
                                         + std::to_string(kernelDim) + ") and dilation ("
                                         + std::to_string(dilation[i]) + ")");
 
-                int64_t const expectedDyDim = (numerator / stride[i]) + 1;
+                const int64_t expectedDyDim = (numerator / stride[i]) + 1;
 
                 // Verifying dy implicitly verifies dw and x
                 HIPDNN_RETURN_IF_NE(

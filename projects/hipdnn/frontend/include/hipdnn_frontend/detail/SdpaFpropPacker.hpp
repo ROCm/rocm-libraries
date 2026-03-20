@@ -183,7 +183,7 @@ inline Error createSdpaFpropOperation(
     // Set boolean scalar parameters
     if(attributes.generate_stats.has_value())
     {
-        bool const val = attributes.generate_stats.value();
+        const bool val = attributes.generate_stats.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT,
                                                    HIPDNN_TYPE_BOOLEAN,
@@ -214,7 +214,7 @@ inline Error createSdpaFpropOperation(
     // Set optional float scalar parameters
     if(attributes.dropout_probability.has_value())
     {
-        float const val = attributes.dropout_probability.value();
+        const float val = attributes.dropout_probability.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT,
                                                    HIPDNN_TYPE_FLOAT,
@@ -223,7 +223,7 @@ inline Error createSdpaFpropOperation(
     }
     if(attributes.attn_scale_value.has_value())
     {
-        float const val = attributes.attn_scale_value.value();
+        const float val = attributes.attn_scale_value.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT,
                                                    HIPDNN_TYPE_FLOAT,
@@ -234,7 +234,7 @@ inline Error createSdpaFpropOperation(
     // Set optional int64 scalar parameters
     if(attributes.left_bound.has_value())
     {
-        int64_t const val = attributes.left_bound.value();
+        const int64_t val = attributes.left_bound.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT,
                                                    HIPDNN_TYPE_INT64,
@@ -243,7 +243,7 @@ inline Error createSdpaFpropOperation(
     }
     if(attributes.right_bound.has_value())
     {
-        int64_t const val = attributes.right_bound.value();
+        const int64_t val = attributes.right_bound.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT,
                                                    HIPDNN_TYPE_INT64,
