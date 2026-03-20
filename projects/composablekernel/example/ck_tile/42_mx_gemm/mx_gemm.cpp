@@ -77,8 +77,67 @@ float invoke_mx_gemm(ck_tile::DeviceMem& a_dev_buf,
             args, ck_tile::stream_config{nullptr, true, 1, n_warmup, n_repeat, true, true, 50});
     };
 
-    float ave_time = (args.k_batch == 1) ? invoke_splitk_path(std::false_type{})
-                                         : invoke_splitk_path(std::true_type{});
+    float ave_time = 0.0f;
+    if constexpr(!GemmConfig::Preshuffle)
+    {
+        // non-preshuffle path (standard pipeline)
+        ave_time = (args.k_batch == 1) ? invoke_splitk_path(std::false_type{})
+                                       : invoke_splitk_path(std::true_type{});
+    }
+    else
+    {
+        // preshuffle path (split-K & tail handling) ported from flatmm
+        using GemmShape = ck_tile::TileGemmShape<
+            ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
+            ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
+            ck_tile::sequence<GemmConfig::M_Warp_Tile,
+                              GemmConfig::N_Warp_Tile,
+                              GemmConfig::K_Warp_Tile>>;
+        using TilePartitioner =
+            ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
+                                                       GemmConfig::TileParitionerGroupNum,
+                                                       GemmConfig::TileParitionerM01>;
+
+        const ck_tile::index_t k_per_split = (K + kbatch - 1) / kbatch;
+        const ck_tile::index_t k_grain     = GemmConfig::K_Tile;
+        const ck_tile::index_t k_pad       = (k_per_split + k_grain - 1) / k_grain * k_grain;
+        const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(k_pad);
+        const bool has_hot_loop =
+            ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num =
+            ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::GetBlockLoopTailNum(num_loop);
+
+        ave_time = ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::template TailHandler<true>(
+            [&](auto has_hot_loop_, auto tail_num_) {
+                constexpr auto has_hot_loop_v = has_hot_loop_.value;
+                constexpr auto tail_num_v     = tail_num_.value;
+
+                auto invoke_splitk_path_with_tail = [&](auto split_k_) {
+                    return mx_gemm_calc<GemmConfig,
+                                        ADataType,
+                                        BDataType,
+                                        AccDataType,
+                                        CDataType,
+                                        ALayout,
+                                        BLayout,
+                                        CLayout,
+                                        ScaleM,
+                                        ScaleN,
+                                        UsePersistentKernel,
+                                        split_k_.value,
+                                        has_hot_loop_v,
+                                        tail_num_v>(
+                        args,
+                        ck_tile::stream_config{
+                            nullptr, true, 1, n_warmup, n_repeat, true, true, 50});
+                };
+
+                return (args.k_batch == 1) ? invoke_splitk_path_with_tail(std::false_type{})
+                                           : invoke_splitk_path_with_tail(std::true_type{});
+            },
+            has_hot_loop,
+            tail_num);
+    }
 
     constexpr int APackedSize = ck_tile::numeric_traits<ADataType>::PackedSize;
     constexpr int BPackedSize = ck_tile::numeric_traits<BDataType>::PackedSize;

@@ -30,6 +30,96 @@ auto calculate_rtol_atol_mx(ck_tile::index_t K, float max_accumulated_value)
     return ck_tile::make_tuple(rtol, atol);
 }
 
+template <typename GemmConfig>
+struct TestMXGemmArchTraits
+{
+    template <typename dtype>
+    static auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
+    {
+        constexpr ck_tile::index_t NLane = GemmConfig::N_Warp_Tile;
+        auto src_lengths                 = src.get_lengths();
+        const int K                      = src_lengths[0];
+        const int N                      = src_lengths[1];
+        constexpr int packed_size        = ck_tile::numeric_traits<dtype>::PackedSize;
+        const int KPack = std::is_same_v<dtype, ck_tile::pk_fp6x16_t> ? 32 : 16 * packed_size;
+
+        const int KLane = ck_tile::get_warp_size() / NLane;
+        const int K0    = K / (KLane * KPack);
+
+        ck_tile::HostTensor<dtype> shuffled(ck_tile::HostTensorDescriptor(
+            {static_cast<std::size_t>(N * K)}, {static_cast<std::size_t>(1)}));
+
+        for(int n = 0; n < N; ++n)
+        {
+            for(int k = 0; k < K; k += packed_size)
+            {
+                const int n0 = n / NLane;
+                const int n1 = n % NLane;
+
+                const int k0    = k / (KLane * KPack);
+                const int tempk = k % (KLane * KPack);
+                const int k1    = tempk / KPack;
+                const int k2    = tempk % KPack;
+
+                const int outputIndex = n0 * KPack * NLane * KLane * K0 +
+                                        k0 * KPack * NLane * KLane + k1 * KPack * NLane +
+                                        n1 * KPack + k2;
+
+                shuffled(outputIndex) = src(k, n);
+            }
+        }
+
+        return shuffled;
+    }
+
+    template <bool KLast, typename dtype>
+    static auto preShuffleScale(ck_tile::HostTensor<dtype>& src)
+    {
+        auto src_lengths = src.get_lengths();
+        const auto MN    = KLast ? src_lengths[0] : src_lengths[1];
+        const auto K     = KLast ? src_lengths[1] : src_lengths[0];
+
+        constexpr std::size_t MNXdlPack   = 2;
+        constexpr std::size_t KXdlPack    = 2;
+        constexpr std::size_t XdlMNThread = GemmConfig::N_Warp_Tile;
+        constexpr std::size_t XdlKThread  = ck_tile::get_warp_size() / XdlMNThread;
+
+        const auto MNPadded = ck_tile::integer_least_multiple(MN, XdlMNThread * MNXdlPack);
+        ck_tile::HostTensor<dtype> shuffled(ck_tile::HostTensorDescriptor(
+            {static_cast<std::size_t>(MNPadded * K)}, {static_cast<std::size_t>(1)}));
+
+        const std::size_t K0 = K / KXdlPack / XdlKThread;
+
+        for(std::size_t n = 0; n < static_cast<std::size_t>(MNPadded); ++n)
+        {
+            for(std::size_t k = 0; k < static_cast<std::size_t>(K); ++k)
+            {
+                const auto n0    = n / (XdlMNThread * MNXdlPack);
+                const auto tempn = n % (XdlMNThread * MNXdlPack);
+                const auto n1    = tempn % XdlMNThread;
+                const auto n2    = tempn / XdlMNThread;
+
+                const auto k0    = k / (XdlKThread * KXdlPack);
+                const auto tempk = k % (XdlKThread * KXdlPack);
+                const auto k1    = tempk % XdlKThread;
+                const auto k2    = tempk / XdlKThread;
+
+                const auto outputIndex = n0 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread * K0 +
+                                         k0 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread +
+                                         k1 * MNXdlPack * KXdlPack * XdlMNThread +
+                                         n1 * MNXdlPack * KXdlPack + k2 * MNXdlPack + n2;
+
+                if constexpr(KLast)
+                    shuffled(outputIndex) = n < static_cast<std::size_t>(MN) ? src(n, k) : dtype{};
+                else
+                    shuffled(outputIndex) = n < static_cast<std::size_t>(MN) ? src(k, n) : dtype{};
+            }
+        }
+
+        return shuffled;
+    }
+};
+
 template <typename ADataType,
           typename BDataType,
           typename GemmConfig,
@@ -75,17 +165,42 @@ class TestMxGemmUtil : public ::testing::Test
         ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_a_host);
         ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_b_host);
 
+        const auto b_host_for_device = [&]() {
+            if constexpr(GemmConfig::Preshuffle)
+                return TestMXGemmArchTraits<GemmConfig>::preShuffleWeight(b_host);
+            else
+                return b_host;
+        }();
+
+        const auto scale_a_host_for_device = [&]() {
+            if constexpr(GemmConfig::Preshuffle)
+                return TestMXGemmArchTraits<GemmConfig>::template preShuffleScale<true>(
+                    scale_a_host);
+            else
+                return scale_a_host;
+        }();
+
+        const auto scale_b_host_for_device = [&]() {
+            if constexpr(GemmConfig::Preshuffle)
+                return TestMXGemmArchTraits<GemmConfig>::template preShuffleScale<false>(
+                    scale_b_host);
+            else
+                return scale_b_host;
+        }();
+
         ck_tile::DeviceMem a_dev_buf(a_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem b_dev_buf(b_host.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem b_dev_buf(b_host_for_device.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_dev_buf(c_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem scale_a_dev_buf(scale_a_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem scale_b_dev_buf(scale_b_host.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem scale_a_dev_buf(
+            scale_a_host_for_device.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem scale_b_dev_buf(
+            scale_b_host_for_device.get_element_space_size_in_bytes());
 
         a_dev_buf.ToDevice(a_host.data());
-        b_dev_buf.ToDevice(b_host.data());
+        b_dev_buf.ToDevice(b_host_for_device.data());
         c_dev_buf.SetZero();
-        scale_a_dev_buf.ToDevice(scale_a_host.data());
-        scale_b_dev_buf.ToDevice(scale_b_host.data());
+        scale_a_dev_buf.ToDevice(scale_a_host_for_device.data());
+        scale_b_dev_buf.ToDevice(scale_b_host_for_device.data());
 
         ScaleM scale_m(reinterpret_cast<ScaleType*>(scale_a_dev_buf.GetDeviceBuffer()));
         ScaleN scale_n(reinterpret_cast<ScaleType*>(scale_b_dev_buf.GetDeviceBuffer()));
@@ -103,18 +218,67 @@ class TestMxGemmUtil : public ::testing::Test
                                             scale_m,
                                             scale_n);
 
-        mx_gemm_calc<GemmConfig,
-                     ADataType,
-                     BDataType,
-                     AccDataType,
-                     CDataType,
-                     ALayout,
-                     BLayout,
-                     CLayout,
-                     ScaleM,
-                     ScaleN,
-                     true,
-                     false>(args, ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+        if constexpr(!GemmConfig::Preshuffle)
+        {
+            mx_gemm_calc<GemmConfig,
+                         ADataType,
+                         BDataType,
+                         AccDataType,
+                         CDataType,
+                         ALayout,
+                         BLayout,
+                         CLayout,
+                         ScaleM,
+                         ScaleN,
+                         true,
+                         false>(args,
+                                ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+        }
+        else
+        {
+            using GemmShape = ck_tile::TileGemmShape<
+                ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
+                ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
+                ck_tile::sequence<GemmConfig::M_Warp_Tile,
+                                  GemmConfig::N_Warp_Tile,
+                                  GemmConfig::K_Warp_Tile>>;
+            using TilePartitioner =
+                ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
+                                                           GemmConfig::TileParitionerGroupNum,
+                                                           GemmConfig::TileParitionerM01>;
+
+            const ck_tile::index_t k_pad =
+                (K + GemmConfig::K_Tile - 1) / GemmConfig::K_Tile * GemmConfig::K_Tile;
+            const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(k_pad);
+            const bool has_hot_loop =
+                ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::BlockHasHotloop(num_loop);
+            const ck_tile::TailNumber tail_num =
+                ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::GetBlockLoopTailNum(num_loop);
+
+            ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::template TailHandler<true>(
+                [&](auto has_hot_loop_, auto tail_num_) {
+                    constexpr auto has_hot_loop_v = has_hot_loop_.value;
+                    constexpr auto tail_num_v     = tail_num_.value;
+
+                    return mx_gemm_calc<GemmConfig,
+                                        ADataType,
+                                        BDataType,
+                                        AccDataType,
+                                        CDataType,
+                                        ALayout,
+                                        BLayout,
+                                        CLayout,
+                                        ScaleM,
+                                        ScaleN,
+                                        true,
+                                        false,
+                                        has_hot_loop_v,
+                                        tail_num_v>(
+                        args, ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+                },
+                has_hot_loop,
+                tail_num);
+        }
 
         c_dev_buf.FromDevice(c_host.data());
 

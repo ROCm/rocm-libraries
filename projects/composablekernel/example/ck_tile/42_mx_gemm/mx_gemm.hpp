@@ -90,10 +90,30 @@ struct MXfp4_GemmConfig16 : MxGemmConfig
     static constexpr ck_tile::index_t K_Tile = 256;
 };
 
+struct MXfp4_GemmConfig16_Preshuffle : MXfp4_GemmConfig16
+{
+    // Smallest possible N_Tile is 512 for fp4 preshuffle
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 512;
+    static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
+};
+
 // GEMM config with 16x16 warp tile
 struct MXfp8_GemmConfig16 : MxGemmConfig
 {
     static constexpr ck_tile::index_t M_Tile = 64;
     static constexpr ck_tile::index_t N_Tile = 64;
     static constexpr ck_tile::index_t K_Tile = 256;
+};
+
+struct MXfp8_GemmConfig16_Preshuffle : MXfp8_GemmConfig16
+{
+    // Smallest possible N_Tile is 256 for fp8 preshuffle
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 256;
+    static constexpr ck_tile::index_t K_Tile = 256;
+    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Default;
+    static constexpr bool Preshuffle         = true;
 };

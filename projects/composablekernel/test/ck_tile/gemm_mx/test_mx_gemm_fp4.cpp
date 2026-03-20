@@ -8,7 +8,8 @@ using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
 using MxFp4Types = ::testing::Types<
-    std::tuple<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, MXfp4_GemmConfig16, Row, Col, Row>>;
+    std::tuple<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, MXfp4_GemmConfig16, Row, Col, Row>,
+    std::tuple<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, MXfp4_GemmConfig16_Preshuffle, Row, Col, Row>>;
 
 template <typename TypeParam>
 class TestMxGemmFp4 : public TestMxGemmUtil<std::tuple_element_t<0, TypeParam>,
@@ -24,7 +25,21 @@ TYPED_TEST_SUITE(TestMxGemmFp4, MxFp4Types);
 
 TYPED_TEST(TestMxGemmFp4, BasicSizes)
 {
-    this->Run(64, 64, 256);
-    this->Run(128, 128, 256);
-    this->Run(64, 128, 512);
+    using GemmConfig = std::tuple_element_t<2, TypeParam>;
+
+    if constexpr(GemmConfig::Preshuffle)
+    {
+        // Preshuffle path: B preshuffle layout requires
+        // M_Tile>=128, N_Tile>=512, K_Tile>=256
+        this->Run(128, 512, 256);
+        this->Run(256, 512, 256);
+        this->Run(256, 1024, 512);
+    }
+    else
+    {
+        // Non-preshuffle path
+        this->Run(64, 64, 256);
+        this->Run(128, 128, 256);
+        this->Run(64, 128, 512);
+    }
 }

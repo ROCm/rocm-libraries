@@ -7,6 +7,8 @@
 #include "mx_gemm.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/gemm_mx_kernel.hpp"
+#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_pipeline_agmem_bgmem_creg_v1.hpp"
+#include <type_traits>
 
 template <typename Layout>
 using is_row_major_t = ck_tile::bool_constant<
@@ -23,7 +25,9 @@ template <typename GemmConfig,
           typename ScaleM,
           typename ScaleN,
           bool persistent,
-          bool Splitk>
+          bool Splitk,
+          bool HasHotLoop_             = true, // preshuffle
+          ck_tile::TailNumber TailNum_ = ck_tile::TailNumber::Even>
 float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::stream_config& s)
 {
     using GemmShape = ck_tile::TileGemmShape<
@@ -49,6 +53,7 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
     static_assert(sizeof(ComputeDataType) >= sizeof(BDataType),
                   "mixed_prec_gemm requires ADataType is a wider type than BDataType");
 
+    // Non-preshuffle
     using MXPipelineProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
                                                                     BDataType,
                                                                     AccDataType,
@@ -56,15 +61,55 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                                                     MXGemmTraits,
                                                                     GemmConfig::Scheduler>;
 
-    // Use the new MX comp_async pipeline with MX scaling support
-    using MXGemmPipeline = ck_tile::MXGemmPipelineAgBgCrCompAsync<MXPipelineProblem>;
+    // Preshuffle
+    using MXPipelinePreshuffleProblem =
+        ck_tile::MXGemmPipelineProblem<ADataType,
+                                       BDataType,
+                                       AccDataType,
+                                       GemmShape,
+                                       MXGemmTraits,
+                                       GemmConfig::Scheduler,
+                                       ck_tile::element_wise::PassThrough,
+                                       ck_tile::element_wise::PassThrough,
+                                       HasHotLoop_,
+                                       TailNum_>;
+
+    // Choose pipeline problem based on preshuffle availability
+    using MXSelectPipelineProblem =
+        std::conditional_t<GemmConfig::Preshuffle, MXPipelinePreshuffleProblem, MXPipelineProblem>;
+
+    // Choose pipeline: Preshuffle or comp async
+    using MXGemmPipeline =
+        std::conditional_t<GemmConfig::Preshuffle,
+                           ck_tile::MXGemmPipelineAGmemBGmemCRegV1<MXSelectPipelineProblem>,
+                           ck_tile::MXGemmPipelineAgBgCrCompAsync<MXSelectPipelineProblem>>;
 
     using TilePartitioner =
         ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
                                                    GemmConfig::TileParitionerGroupNum,
                                                    GemmConfig::TileParitionerM01>;
 
-    using GemmEpilogue = ck_tile::CShuffleEpilogue<
+    // Non-preshuffle epilogue problem
+    using GemmEpilogueProblem = ck_tile::CShuffleEpilogueProblem<ComputeDataType,
+                                                                 ComputeDataType,
+                                                                 ck_tile::tuple<>,
+                                                                 AccDataType,
+                                                                 CDataType,
+                                                                 ck_tile::tuple<>,
+                                                                 CLayout,
+                                                                 ck_tile::element_wise::PassThrough,
+                                                                 TilePartitioner::MPerBlock,
+                                                                 TilePartitioner::NPerBlock,
+                                                                 GemmConfig::M_Warp,
+                                                                 GemmConfig::N_Warp,
+                                                                 GemmConfig::M_Warp_Tile,
+                                                                 GemmConfig::N_Warp_Tile,
+                                                                 GemmConfig::K_Warp_Tile,
+                                                                 MXPipelineProblem::TransposeC>;
+
+    // Preshuffle epilogue problem
+    static constexpr ck_tile::index_t BlockedXDLN_PerWarp = 2;
+    using PreshuffleEpilogueProblem =
         ck_tile::CShuffleEpilogueProblem<ComputeDataType,
                                          ComputeDataType,
                                          ck_tile::tuple<>, // DsDataType
@@ -80,7 +125,18 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          GemmConfig::M_Warp_Tile,
                                          GemmConfig::N_Warp_Tile,
                                          GemmConfig::K_Warp_Tile,
-                                         MXPipelineProblem::TransposeC>>;
+                                         MXPipelineProblem::TransposeC,
+                                         GemmConfig::NumWaveGroups,
+                                         false,
+                                         1,
+                                         GemmConfig::TiledMMAPermuteN,
+                                         BlockedXDLN_PerWarp>;
+
+    // Select epilogue problem based on preshuffle availability
+    using SelectEpilogueProblem =
+        std::conditional_t<GemmConfig::Preshuffle, PreshuffleEpilogueProblem, GemmEpilogueProblem>;
+
+    using GemmEpilogue = ck_tile::CShuffleEpilogue<SelectEpilogueProblem>;
 
     using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 
