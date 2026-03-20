@@ -122,7 +122,8 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
 
     if(summary.mismatchCount > 0)
     {
-        summary.meanAbsDiff = static_cast<float>(sumAbsDiff / summary.mismatchCount);
+        summary.meanAbsDiff
+            = static_cast<float>(sumAbsDiff / static_cast<double>(summary.mismatchCount));
 
         std::sort(summary.worstMismatches.begin(),
                   summary.worstMismatches.end(),
