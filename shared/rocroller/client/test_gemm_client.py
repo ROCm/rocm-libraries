@@ -254,6 +254,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileA: []
   pretileB: []
 tailLoops: true
 streamK: None
@@ -319,6 +320,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileA: []
   pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
@@ -382,6 +384,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileA: []
   pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
@@ -786,6 +789,12 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["k"] == 7
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
+
+    # pretileA
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--wgts=256x256x256", "--pretileA=64x128"]
+    )
+    assert post["types"]["pretileA"] == [64, 128]
 
     # pretileB
     post = run_and_load_example_yaml(
