@@ -174,7 +174,3 @@ generate_sharded_instantiations(
   OUTPUT_DIR ${GENERATED_DIR}/xdl/mem
 )
 add_instance_library(device_grouped_conv2d_fwd_instance ${GROUPED_CONV2D_FWD})
-
-  set(EXAMPLE_COMPILE_OPTIONS)
-list(APPEND EXAMPLE_COMPILE_OPTIONS -fverbose-asm --save-temps -Wno-gnu-line-marker)
-target_compile_options(device_grouped_conv2d_fwd_instance PRIVATE ${EXAMPLE_COMPILE_OPTIONS})

@@ -24,36 +24,36 @@ void add_device_grouped_conv2d_fwd_xdl_merged_groups_nhwgc_gkyxc_nhwgk_bf16_inst
                                                                 PassThrough,
                                                                 PassThrough>>>& instances)
 {
-    // if(ck::get_device_name() == "gfx950")
-    // {
-    //     add_device_operation_instances(
-    //         instances,
-    //         device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_2x<2,
-    //                                                                     NHWGC,
-    //                                                                     GKYXC,
-    //                                                                     Empty_Tuple,
-    //                                                                     NHWGK,
-    //                                                                     ConvFwdDefault>{});
+    if(ck::get_device_name() == "gfx950")
+    {
+        add_device_operation_instances(
+            instances,
+            device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_2x<2,
+                                                                        NHWGC,
+                                                                        GKYXC,
+                                                                        Empty_Tuple,
+                                                                        NHWGK,
+                                                                        ConvFwdDefault>{});
 
-    //     add_device_operation_instances(
-    //         instances,
-    //         device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_2x<2,
-    //                                                                     NHWGC,
-    //                                                                     GKYXC,
-    //                                                                     Empty_Tuple,
-    //                                                                     NHWGK,
-    //                                                                     ConvFwd3x3>{});
-    // }
-    // else
-    // {
-        // add_device_operation_instances(
-        //     instances,
-        //     device_grouped_conv_fwd_xdl_merged_groups_bf16_instances<2,
-        //                                                              NHWGC,
-        //                                                              GKYXC,
-        //                                                              Empty_Tuple,
-        //                                                              NHWGK,
-        //                                                              ConvFwdDefault>{});
+        add_device_operation_instances(
+            instances,
+            device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_2x<2,
+                                                                        NHWGC,
+                                                                        GKYXC,
+                                                                        Empty_Tuple,
+                                                                        NHWGK,
+                                                                        ConvFwd3x3>{});
+    }
+    else
+    {
+        add_device_operation_instances(
+            instances,
+            device_grouped_conv_fwd_xdl_merged_groups_bf16_instances<2,
+                                                                     NHWGC,
+                                                                     GKYXC,
+                                                                     Empty_Tuple,
+                                                                     NHWGK,
+                                                                     ConvFwdDefault>{});
 
         add_device_operation_instances(
             instances,
@@ -63,7 +63,7 @@ void add_device_grouped_conv2d_fwd_xdl_merged_groups_nhwgc_gkyxc_nhwgk_bf16_inst
                                                                      Empty_Tuple,
                                                                      NHWGK,
                                                                      ConvFwd3x3>{});
-    // }
+    }
 }
 
 } // namespace instance

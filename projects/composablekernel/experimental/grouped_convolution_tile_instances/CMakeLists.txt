@@ -33,9 +33,4 @@ if(GPU_TARGETS MATCHES "gfx9")
         "${PROJECT_SOURCE_DIR}/experimental/builder/test/utils")
 
   target_compile_options(device_grouped_conv_bwd_weight_tile_instances PRIVATE -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0)
-
-
-  set(EXAMPLE_COMPILE_OPTIONS)
-list(APPEND EXAMPLE_COMPILE_OPTIONS -fverbose-asm --save-temps -Wno-gnu-line-marker)
-target_compile_options(device_grouped_conv_fwd_tile_instances PRIVATE ${EXAMPLE_COMPILE_OPTIONS})
 endif()

@@ -1330,12 +1330,14 @@ struct xor_t : public base_transform<2, 2>
 
         idx_low(number<0>{}) = idx_up[number<0>{}];
 
-        if constexpr (ApplyModulo) {
+        if constexpr(ApplyModulo)
+        {
             idx_low(number<1>{}) =
                 idx_up[number<1>{}] ^ (idx_up[number<0>{}] % up_lengths_[number<1>{}]);
-        } else {
-            idx_low(number<1>{}) =
-                idx_up[number<1>{}] ^ (idx_up[number<0>{}]);
+        }
+        else
+        {
+            idx_low(number<1>{}) = idx_up[number<1>{}] ^ (idx_up[number<0>{}]);
         }
     }
 
