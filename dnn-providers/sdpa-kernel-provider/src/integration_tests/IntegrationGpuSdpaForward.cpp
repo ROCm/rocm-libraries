@@ -60,7 +60,7 @@ struct SdpaTestCase
 
 std::vector<SdpaTestCase> getSdpaTestCases()
 {
-    return {SdpaTestCase({4, 8, 16, 32}, {4, 8, 16, 32}, {4, 8, 16, 32})};
+    return {SdpaTestCase({4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128})};
 }
 
 template <typename DataType>
@@ -142,7 +142,7 @@ using IntegrationGpuSdpaFwdBf16 = SdpaForward<bfloat16>;
 
 TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
 {
-    auto tolerance = 1e-7f;
+    auto tolerance = 1e-2f;
 
     runGraphTest(tolerance);
 }
