@@ -32,7 +32,7 @@ endif()
 if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 else()
-    set(CMAKE_INSTALL_PREFIX "C:/dist/TheRock" CACHE PATH "")
+    set(CMAKE_INSTALL_PREFIX "C:/Program Files/composable_kernel" CACHE PATH "")
 endif()
 
 # Enable ASAN  when THEROCK_SANITIZER is set to ASAN or HOST_ASAN

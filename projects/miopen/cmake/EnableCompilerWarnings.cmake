@@ -102,7 +102,6 @@ set(__clang_cxx_compile_options
     -Wno-documentation
     -Wno-deprecated-builtins
     -Wno-enum-constexpr-conversion
-    -Wno-unused-parameter
     -Wmissing-noreturn
     -Wno-nrvo)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")

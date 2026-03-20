@@ -89,6 +89,8 @@ struct EnvVar
 
     explicit EnvVar(const char* const name, const T& def_val)
     {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         // NOLINTNEXTLINE (concurrency-mt-unsafe)
         const char* vp = std::getenv(name);
         if(vp != nullptr) // a value was provided
@@ -100,6 +102,7 @@ struct EnvVar
         {
             value = def_val;
         }
+#pragma clang diagnostic pop
     }
 };
 } // end namespace internal
