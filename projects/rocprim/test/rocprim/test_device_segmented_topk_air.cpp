@@ -133,8 +133,8 @@ void test_segmented_topk_air_keys(std::vector<typename Params::key_type> const& 
         = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(d_input.get());
 
     common::device_ptr<offsets_type> d_offsets(h_offsets);
-    common::device_ptr<void>        temporary_storage;
-    size_t                          storage_size = 0;
+    common::device_ptr<void>         temporary_storage;
+    size_t                           storage_size = 0;
 
     // Get size of temporary_storage
     auto ret = rocprim::detail::device_segmented_topk_air<config, select_min>(nullptr,
@@ -321,8 +321,8 @@ void test_segmented_topk_air_pairs_unstable(
         = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(d_input_values.get());
 
     common::device_ptr<offsets_type> d_offsets(h_offsets);
-    common::device_ptr<void>        temporary_storage;
-    size_t                          storage_size = 0;
+    common::device_ptr<void>         temporary_storage;
+    size_t                           storage_size = 0;
 
     // Get size of temporary_storage
     auto ret = rocprim::detail::device_segmented_topk_air<config, select_min>(nullptr,
@@ -612,8 +612,8 @@ TYPED_TEST_SUITE(RocprimDeviceSegmentedTopkTests, RocprimDeviceSegmentedTopkTest
 
 TYPED_TEST(RocprimDeviceSegmentedTopkTests, DeviceSegmentedTopk)
 {
-    using key_type     = typename TestFixture::key_type;
-    using value_type   = typename TestFixture::value_type;
+    using key_type      = typename TestFixture::key_type;
+    using value_type    = typename TestFixture::value_type;
     using offsets_type  = typename TestFixture::offsets_type;
     using size_out_type = typename TestFixture::size_out_type;
     using size_in_type  = typename TestFixture::size_in_type;
@@ -621,9 +621,9 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, DeviceSegmentedTopk)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    std::random_device                       rd;
-    const size_t                             seed = rd();
-    std::default_random_engine               gen(seed);
+    std::random_device                             rd;
+    const size_t                                   seed = rd();
+    std::default_random_engine                     gen(seed);
     common::uniform_int_distribution<offsets_type> segment_length_dis(
         TestFixture::min_segment_length,
         TestFixture::max_segment_length);
