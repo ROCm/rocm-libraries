@@ -48,13 +48,6 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricTestCases()
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
-    // Generate cartesian product for dataset 1
-    int num_uint16_case        = 0;
-    int num_uint32_case        = 0;
-    int num_uint32_case_imgidx = 0;
-    int num_uint64_case        = 0;
-    int num_uint64_case_imgidx = 0;
-
     for(const auto& input_dims : dataset1_inputs)
     {
         pooling2d_gtest::AddTestCasesForInput(input_dims,
@@ -65,13 +58,8 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricTestCases()
                                               modes,
                                               wsidx_values,
                                               test_cases,
-                                              num_uint16_case,
-                                              num_uint32_case,
-                                              num_uint32_case_imgidx,
-                                              num_uint64_case,
-                                              num_uint64_case_imgidx,
-                                              true,   // skip_wide_check=true for Dataset 1
-                                              false); // apply_index_type_limits=false for Dataset 1
+                                              true,   // skip_wide_check
+                                              false); // is_wide_dataset
     }
 
     // Cache the results

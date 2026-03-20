@@ -52,7 +52,7 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
     // Match ctest wsidx exactly (only 1 for 3D)
     std::vector<int> wsidx_values = {1};
 
-    // Generate cartesian product for dataset 0
+    // Counters limit non-uint8 index type cases to 5 each (matching original ctest behavior)
     int num_uint16_case        = 0;
     int num_uint32_case        = 0;
     int num_uint32_case_imgidx = 0;

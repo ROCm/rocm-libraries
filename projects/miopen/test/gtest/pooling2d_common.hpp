@@ -340,6 +340,42 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
     }
 }
 
+// Overload for when apply_index_type_limits is false: counters are not needed.
+inline void AddTestCasesForInput(const std::vector<int>& input_dims,
+                                 const std::vector<std::vector<int>>& lens_list,
+                                 const std::vector<std::vector<int>>& strides_list,
+                                 const std::vector<std::vector<int>>& pads_list,
+                                 const std::vector<miopenIndexType_t>& index_types,
+                                 const std::vector<miopenPoolingMode_t>& modes,
+                                 const std::vector<int>& wsidx_values,
+                                 std::vector<PoolingTestCase>& test_cases,
+                                 bool skip_wide_check,
+                                 bool is_wide_dataset,
+                                 const std::string& in_layout  = "NCHW",
+                                 const std::string& out_layout = "NCHW")
+{
+    int num_uint16_case = 0, num_uint32_case = 0, num_uint32_case_imgidx = 0;
+    int num_uint64_case = 0, num_uint64_case_imgidx = 0;
+    AddTestCasesForInput(input_dims,
+                         lens_list,
+                         strides_list,
+                         pads_list,
+                         index_types,
+                         modes,
+                         wsidx_values,
+                         test_cases,
+                         num_uint16_case,
+                         num_uint32_case,
+                         num_uint32_case_imgidx,
+                         num_uint64_case,
+                         num_uint64_case_imgidx,
+                         skip_wide_check,
+                         false, // apply_index_type_limits
+                         is_wide_dataset,
+                         in_layout,
+                         out_layout);
+}
+
 template <typename T, typename Index>
 void RunPooling2dTestWithIndexType(const PoolingTestCase& test_case)
 {

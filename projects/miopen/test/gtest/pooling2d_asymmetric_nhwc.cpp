@@ -34,9 +34,6 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricNHWCTestCase
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
-    int num_uint16_case = 0, num_uint32_case = 0, num_uint32_case_imgidx = 0;
-    int num_uint64_case = 0, num_uint64_case_imgidx = 0;
-
     for(const auto& input_dims : dataset1_inputs)
     {
         pooling2d_gtest::AddTestCasesForInput(input_dims,
@@ -47,14 +44,8 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricNHWCTestCase
                                               modes,
                                               wsidx_values,
                                               test_cases,
-                                              num_uint16_case,
-                                              num_uint32_case,
-                                              num_uint32_case_imgidx,
-                                              num_uint64_case,
-                                              num_uint64_case_imgidx,
-                                              true,
-                                              false,
-                                              false,
+                                              true,   // skip_wide_check
+                                              false,  // is_wide_dataset
                                               "NHWC",
                                               "NHWC");
     }

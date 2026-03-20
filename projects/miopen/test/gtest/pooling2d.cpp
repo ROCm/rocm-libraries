@@ -59,9 +59,7 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
-    // Generate cartesian product for dataset 0
-    // This matches the original ctest test_pooling2d behavior (default dataset, dataset_id=0)
-    // Filter invalid combinations at generation time instead of skipping at runtime
+    // Counters limit non-uint8 index type cases to 5 each (matching original ctest behavior)
     int num_uint16_case        = 0;
     int num_uint32_case        = 0;
     int num_uint32_case_imgidx = 0;
