@@ -65,6 +65,9 @@ TEST_F(TestHalf, NumericLimitsSpecificValues)
     auto epsFloat = static_cast<float>(eps);
     EXPECT_TRUE(nearEqual(epsFloat, 0.0009765625f, 0.0001f));
     EXPECT_EQ(eps.data, 0x1400);
+
+    // half round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<half>::round_error()), 0.5f);
 }
 
 // ============================================================================

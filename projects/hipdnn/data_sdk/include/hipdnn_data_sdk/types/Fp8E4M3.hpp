@@ -83,7 +83,7 @@ constexpr uint8_t FP8_E4M3_LOWEST = 0xFE;
 constexpr uint8_t FP8_E4M3_EPSILON = 0x20;
 
 /// Round error (0.5)
-constexpr uint8_t FP8_E4M3_ROUND_ERROR = 0x38;
+constexpr uint8_t FP8_E4M3_ROUND_ERROR = 0x30;
 
 /// Rounding threshold for round-to-nearest-even (midpoint of 20-bit remainder)
 constexpr uint32_t FP8_E4M3_ROUND_THRESHOLD = 0x80000;

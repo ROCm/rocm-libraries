@@ -95,6 +95,9 @@ TEST_F(TestFp8E4M3, NumericLimitsSpecificValues)
     const fp8_e4m3 eps = std::numeric_limits<fp8_e4m3>::epsilon();
     auto epsFloat = static_cast<float>(eps);
     EXPECT_EQ(epsFloat, 0.125f);
+
+    // E4M3 round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp8_e4m3>::round_error()), 0.5f);
 }
 
 // ============================================================================

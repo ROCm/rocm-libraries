@@ -40,6 +40,8 @@ TEST(TestFp4E2M1, RoundTripAllValues)
 // Rounding Tests
 // ============================================================================
 
+namespace
+{
 struct RoundingTestCase
 {
     float input;
@@ -50,6 +52,7 @@ struct RoundingTestCase
         return os << tc.input << " -> " << tc.expected;
     }
 };
+} // namespace
 
 class TestFp4E2M1Rounding : public ::testing::TestWithParam<RoundingTestCase>
 {
@@ -199,6 +202,7 @@ TEST(TestFp4E2M1, NumericLimitsSpecificValues)
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::min()), 1.0f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::lowest()), -6.0f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::epsilon()), 0.5f);
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::round_error()), 0.5f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::denorm_min()), 0.5f);
 }
 

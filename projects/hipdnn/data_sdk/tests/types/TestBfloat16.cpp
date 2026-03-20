@@ -216,6 +216,9 @@ TEST_F(TestBfloat16, NumericLimitsSpecificValues)
     auto epsFloat = static_cast<float>(eps);
     EXPECT_TRUE(nearEqual(epsFloat, 0.0078125f, 0.0001f));
     EXPECT_EQ(eps.data, 0x3C00);
+
+    // bfloat16 round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<bfloat16>::round_error()), 0.5f);
 }
 
 // ============================================================================

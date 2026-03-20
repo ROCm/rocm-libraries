@@ -122,6 +122,27 @@ struct PortableTypeTraits<fp6_e2m3>
 };
 
 template <>
+struct PortableTypeTraits<fp6_e3m2>
+{
+    // Note: fp6_e3m2 has no NaN or infinity
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = false;
+    static constexpr uint8_t ONE_BITS = 0x0C;
+    static constexpr uint8_t NEG_ONE_BITS = 0x2C;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NEG_ZERO_BITS = 0x20;
+
+    static fp6_e3m2 fromBits(uint8_t bits)
+    {
+        return fp6_e3m2::from_bits(bits);
+    }
+    static uint8_t toBits(fp6_e3m2 val)
+    {
+        return val.data;
+    }
+};
+
+template <>
 struct PortableTypeTraits<fp8_e4m3>
 {
     // Note: fp8_e4m3 has no infinity
@@ -196,7 +217,7 @@ class PortableFloatTypes : public ::testing::Test
 };
 
 using PortableTypes
-    = ::testing::Types<bfloat16, half, fp4_e2m1, fp6_e2m3, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
+    = ::testing::Types<bfloat16, half, fp4_e2m1, fp6_e2m3, fp6_e3m2, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
 TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
 
 // ============================================================================
@@ -233,12 +254,13 @@ TYPED_TEST(PortableFloatTypes, TypeProperties)
     using T = TypeParam;
 
     // Size check - 16-bit types are 2 bytes, 8-bit types are 1 byte
-    // fp4_e2m1 and fp6_e2m3 skipped - sizeof only reflects storage, not bit width
+    // fp4_e2m1, fp6_e2m3, fp6_e3m2 skipped - sizeof only reflects storage, not bit width
     if constexpr(std::is_same_v<T, bfloat16> || std::is_same_v<T, half>)
     {
         EXPECT_EQ(sizeof(T), 2);
     }
-    else if constexpr(!std::is_same_v<T, fp4_e2m1> && !std::is_same_v<T, fp6_e2m3>)
+    else if constexpr(!std::is_same_v<T, fp4_e2m1> && !std::is_same_v<T, fp6_e2m3>
+                      && !std::is_same_v<T, fp6_e3m2>)
     {
         EXPECT_EQ(sizeof(T), 1);
     }
@@ -648,7 +670,6 @@ TYPED_TEST(PortableFloatTypes, InfinityHandling)
         EXPECT_TRUE(signbit(negInf));
         EXPECT_FALSE(isnan(negInf));
     }
-    // fp4_e2m1, fp8_e4m3 and fp8_e8m0 have no infinity - skipped
 }
 
 // ============================================================================
