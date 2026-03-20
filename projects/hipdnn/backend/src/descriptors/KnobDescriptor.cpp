@@ -262,19 +262,12 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                   "KnobDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT_EXT:
-        if(elementCount == 0)
-        {
-            _validValuesInt.clear();
-        }
-        else
-        {
-            setScalarVector(_validValuesInt,
-                            HIPDNN_TYPE_INT64,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "KnobDescriptor::setAttribute()");
-        }
+        setScalarVector(_validValuesInt,
+                        HIPDNN_TYPE_INT64,
+                        attributeType,
+                        elementCount,
+                        arrayOfElements,
+                        "KnobDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT:
         setValidValuesString(attributeType, elementCount, arrayOfElements);
@@ -298,18 +291,8 @@ void KnobDescriptor::setValidValuesString(hipdnnBackendAttributeType_t attribute
                                           int64_t elementCount,
                                           const void* arrayOfElements)
 {
-    // Type check first so a wrong-type clear call is still rejected.
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "KnobDescriptor::setAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-
-    // nullptr clears the list (mirrors VALID_VALUES_INT semantics).
-    if(arrayOfElements == nullptr)
-    {
-        _validValuesString.clear();
-        return;
-    }
-
+    checkSetArgs(
+        HIPDNN_TYPE_CHAR, attributeType, arrayOfElements, "KnobDescriptor::setAttribute()");
     THROW_IF_LT(elementCount,
                 static_cast<int64_t>(1),
                 HIPDNN_STATUS_BAD_PARAM,

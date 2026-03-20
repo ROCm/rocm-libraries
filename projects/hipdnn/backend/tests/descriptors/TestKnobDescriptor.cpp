@@ -929,25 +929,11 @@ TEST_F(TestKnobDescriptor, GetValidValuesStringTruncatesToBufferSize)
     ASSERT_STREQ(buf.data() + 2, "b");
 }
 
-TEST_F(TestKnobDescriptor, SetValidValuesStringNullClears)
+TEST_F(TestKnobDescriptor, SetValidValuesStringNullPtrFails)
 {
-    // Set some values, then clear by passing nullptr
-    using namespace std::string_literals;
-    const auto input = "option_a\0option_b"s;
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT,
-                                                  HIPDNN_TYPE_CHAR,
-                                                  static_cast<int64_t>(input.size()),
-                                                  input.data()));
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT, HIPDNN_TYPE_CHAR, 0, nullptr));
-    setKnobId("test_knob");
-    setStringDefault("default");
-    ASSERT_NO_THROW(getDescriptor()->finalize());
-
-    int64_t totalBytes = 99;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT, HIPDNN_TYPE_CHAR, 0, &totalBytes, nullptr));
-    ASSERT_EQ(totalBytes, 0);
+    ASSERT_THROW(getDescriptor()->setAttribute(
+                     HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING_EXT, HIPDNN_TYPE_CHAR, 0, nullptr),
+                 HipdnnException);
 }
 
 TEST_F(TestKnobDescriptor, SetValidValuesStringReplaces)
