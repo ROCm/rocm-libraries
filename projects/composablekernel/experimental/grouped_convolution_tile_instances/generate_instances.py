@@ -534,7 +534,7 @@ def parse_bwd_data_instances(instances, problem_name):
         if block_gemm_pipeline_scheduler == "Default":
             block_gemm_pipeline_scheduler = "Intrawave"
 
-        blk_gemm_pipeline_version = "v3"
+        blk_gemm_pipeline_version = "v1"
         if block_gemm_pipeline_scheduler == "Interwave":
             blk_gemm_pipeline_version = "v1"
 
@@ -577,6 +577,9 @@ def parse_bwd_data_instances(instances, problem_name):
             continue
         if pipeline_version == "V6":
             print(f"Skipping instance {instance_id} with V6 since it's not supported yet.")
+            continue
+        if k_per_block > (warp_size * a_scalar_per_vector) or n_per_block > (warp_size * b_scalar_per_vector):
+            print(f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet.")
             continue
 
         # Check vector sizes for A and B tensors - we cannot oversubscribe.

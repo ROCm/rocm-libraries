@@ -60,17 +60,22 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
 
     using Types = ck_tile::builder::factory::internal::TileConvTensorTypes<SIGNATURE.data_type>;
 
+    const std::size_t zeroing_size =
+        ConvDirectionIsBackwardData<SIGNATURE>
+            ? std::accumulate(std::begin(kargs.in_g_n_c_wis_lengths.data),
+                              std::end(kargs.in_g_n_c_wis_lengths.data),
+                              1,
+                              std::multiplies<std::size_t>())
+            : std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
+                              std::end(kargs.wei_g_k_c_xs_lengths.data),
+                              1,
+                              std::multiplies<std::size_t>());
+
     auto preprocess = [&]() {
         if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
         {
             if(kargs.k_batch > 1)
             {
-                const std::size_t zeroing_size =
-                    std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
-                                    std::end(kargs.wei_g_k_c_xs_lengths.data),
-                                    1,
-                                    std::multiplies<std::size_t>());
-
                 ck_tile::hip_check_error(
                     hipMemsetAsync(kargs.wei_ptr,
                                    0,
@@ -78,23 +83,14 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
                                    s_conf.stream_id_));
             }
         }
-
-        if constexpr(ConvDirectionIsBackwardData<SIGNATURE>)
+        else if constexpr(ConvDirectionIsBackwardData<SIGNATURE>)
         {
-            if(kargs.k_batch > 1)
-            {
-                const std::size_t zeroing_size =
-                    std::accumulate(std::begin(kargs.in_g_n_c_wis_lengths.data),
-                                    std::end(kargs.in_g_n_c_wis_lengths.data),
-                                    1,
-                                    std::multiplies<std::size_t>());
 
-                ck_tile::hip_check_error(
-                    hipMemsetAsync(kargs.in_ptr,
-                                   0,
-                                   zeroing_size * sizeof(typename Types::EDataType),
-                                   s_conf.stream_id_));
-            }
+            ck_tile::hip_check_error(
+                hipMemsetAsync(kargs.in_ptr,
+                               0,
+                               zeroing_size * sizeof(typename Types::EDataType),
+                               s_conf.stream_id_));
         }
     };
 
