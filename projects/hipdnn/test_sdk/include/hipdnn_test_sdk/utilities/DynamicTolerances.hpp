@@ -11,6 +11,51 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/TensorView.hpp>
+
+namespace hipdnn_test_sdk::utilities
+{
+
+/**
+ * @brief Computes Higham's error growth factor γ_k for floating-point accumulation.
+ *
+ * For k accumulations with machine epsilon u:
+ *   - Linear (when nU < 0.01):     γ_k = (2*k*u) / (1 - 2*k*u)  [deterministic worst-case]
+ *   - Statistical (when nU >= 0.01): γ_k = K_SIGMA * sqrt(2*k) * u [probabilistic, K_SIGMA=6]
+ *
+ * where nU = 2*k*u.
+ *
+ * The switch at nU = 0.01 is chosen because the linear bound inflates noticeably
+ * above this point (at nU=0.01 the overshoot is ~1%, at nU=0.1 it's ~11%).
+ *
+ * This is a pure math function that never throws. Callers are responsible for
+ * checking if the returned gamma is too large for their use case (e.g., gamma >= 0.5
+ * means the error bound exceeds 50% of the signal).
+ *
+ * Reusable across conv, matmul, and any operation that accumulates k products.
+ *
+ * @param k Number of accumulations (reduction dimension).
+ * @param epsilon Machine epsilon for the compute type.
+ * @return The error growth factor γ_k as a double.
+ */
+inline double computeGamma(uint64_t k, double epsilon)
+{
+    constexpr double NU_THRESHOLD = 0.01;
+
+    const double nU = 2.0 * static_cast<double>(k) * epsilon;
+
+    if(nU < NU_THRESHOLD)
+    {
+        return nU / (1.0 - nU);
+    }
+
+    constexpr double K_SIGMA = 6.0;
+    return K_SIGMA * std::sqrt(2.0 * static_cast<double>(k)) * epsilon;
+}
+
+} // namespace hipdnn_test_sdk::utilities
 
 namespace hipdnn_test_sdk::utilities::conv
 {
@@ -481,3 +526,192 @@ float calculateConvFpropTolerance(
 }
 
 } // namespace hipdnn_test_sdk::utilities::conv
+
+namespace hipdnn_test_sdk::utilities::matmul
+{
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
+using hipdnn_data_sdk::utilities::ITensor;
+using hipdnn_data_sdk::utilities::TensorView;
+
+/**
+ * @brief Computes the infinity-norm (max absolute row sum) of a matrix tensor.
+ *
+ * The infinity-norm is defined as: ||A||_inf = max_i (sum_j |A[i,j]|)
+ *
+ * This is the appropriate subordinate matrix norm for element-wise error bounds
+ * via Higham's analysis: max_ij |error_ij| <= gamma_k * ||A||_inf * ||B||_inf.
+ *
+ * For batched tensors (>2D), the infinity-norm is computed across all batches,
+ * returning the maximum row sum over all rows in all batches.
+ *
+ * Uses iterateAlongDimensions + ConstTensorView to correctly handle padded
+ * and non-packed tensor layouts via stride-aware indexing.
+ *
+ * @tparam T The data type of the tensor elements.
+ * @param tensor The input tensor (must have at least 2 dimensions).
+ * @return The infinity-norm as a double.
+ */
+template <typename T>
+double computeMatrixInfNorm(ITensor& tensor)
+{
+    using hipdnn_data_sdk::utilities::iterateAlongDimensions;
+
+    const auto& dims = tensor.dims();
+    const TensorView<T> view(tensor);
+
+    auto cols = dims.back();
+
+    // outerDims = [batch..., rows] — everything except the last dim (cols)
+    auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
+
+    double maxRowSum = 0.0;
+
+    iterateAlongDimensions(outerDims, [&](const std::vector<int64_t>& outerIndices) {
+        double rowSum = 0.0;
+
+        auto fullIndices = outerIndices;
+        fullIndices.push_back(0);
+
+        for(int64_t j = 0; j < cols; ++j)
+        {
+            fullIndices.back() = j;
+            rowSum += static_cast<double>(
+                hipdnn_data_sdk::types::fabs(view.getHostValue(fullIndices)));
+        }
+
+        maxRowSum = std::max(maxRowSum, rowSum);
+    });
+
+    return maxRowSum;
+}
+
+/**
+ * @brief Calculates the expected tolerance for Matrix Multiplication operations.
+ *
+ * This function estimates the maximum expected element-wise error due to floating-point
+ * accumulation during the computation of C = A × B using Higham's error analysis.
+ *
+ * Norm Selection: Infinity-norm (max absolute row sum)
+ * =====================================================
+ * We use the infinity-norm ||A||_inf = max_i (sum_j |A[i,j]|) because Higham's element-wise
+ * error bound for matrix multiplication gives:
+ *   max_ij |fl(C)_ij - C_ij| <= gamma_k * ||A||_inf * ||B||_inf
+ *
+ * This is the correct subordinate matrix norm for bounding the maximum element-wise error,
+ * which is what allClose-style validation checks.
+ *
+ * Error Bound (Higham's Analysis):
+ * =================================
+ * For C = A*B where A is m×k and B is k×n:
+ *   max_ij |error_ij| <= γ_k * ||A||_inf * ||B||_inf
+ *
+ * where γ_k is the error growth factor:
+ *   - High Precision (FP32, FP64): γ_k = (2*k*u) / (1 - 2*k*u)  (linear worst-case bound)
+ *   - Low Precision (FP16, BF16):  γ_k = K_SIGMA * sqrt(2*k) * u  (statistical bound, K_SIGMA=6)
+ *   - u = machine epsilon for ComputeType
+ *
+ * The function also accounts for precision loss from input/output casting if needed.
+ *
+ * @tparam OutputType The data type of the output matrix C.
+ * @tparam InputType The data type of the input matrices A and B.
+ * @tparam ComputeType The data type used for accumulation (default: float).
+ * @param a The input matrix A.
+ * @param b The input matrix B.
+ * @return The calculated tolerance value as float.
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateMatmulTolerance(ITensor& a, ITensor& b)
+{
+    // Validate ComputeType
+    static_assert(std::is_same_v<ComputeType, float> || std::is_same_v<ComputeType, double>
+                      || std::is_same_v<ComputeType, half> || std::is_same_v<ComputeType, bfloat16>,
+                  "ComputeType must be float, double, half, or bfloat16");
+
+    // Validate tensor dimensions for matmul compatibility
+    const auto& aDims = a.dims();
+    const auto& bDims = b.dims();
+
+    if(aDims.size() < 2 || bDims.size() < 2)
+    {
+        throw std::invalid_argument("Matrices must have at least 2 dimensions for matmul.");
+    }
+
+    // Extract reduction dimension K (last dim of A, second-to-last dim of B)
+    const int64_t k = aDims[aDims.size() - 1];
+    const int64_t bRows = bDims[bDims.size() - 2];
+
+    if(k != bRows)
+    {
+        throw std::invalid_argument(
+            "Matrix dimensions incompatible for multiplication: A columns != B rows.");
+    }
+
+    if(k <= 0)
+    {
+        throw std::invalid_argument("Reduction dimension k must be positive.");
+    }
+
+    auto numberOfAccumulations = static_cast<uint64_t>(k);
+
+    // Compute infinity-norms of input matrices (max absolute row sum)
+    const double normA = computeMatrixInfNorm<InputType>(a);
+    const double normB = computeMatrixInfNorm<InputType>(b);
+
+    // Apply Higham's error bound: max_ij |error_ij| <= γ_k * ||A||_inf * ||B||_inf
+    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
+
+    constexpr double GAMMA_MAX = 0.5;
+    if(gamma >= GAMMA_MAX)
+    {
+        throw std::overflow_error(
+            "Error growth factor gamma >= 0.5: the accumulation error exceeds 50% of the signal. "
+            "The computation may be numerically meaningless at this precision and reduction size.");
+    }
+
+    double accumulatedTolerance = gamma * normA * normB;
+
+    // Calculate input casting error
+    // If InputType has higher precision (smaller epsilon) than ComputeType, we lose precision
+    // when loading inputs (downcasting). Example: double -> float.
+    // If InputType has lower precision than ComputeType, no additional error (upcasting).
+    auto inputEpsilon = static_cast<double>(std::numeric_limits<InputType>::epsilon());
+    if(inputEpsilon < epsilon)
+    {
+        // Input precision is higher than compute precision, so we have casting error.
+        // Each element loses precision proportional to epsilon when cast.
+        // Worst-case error contribution from input casting:
+        //   Error ≈ 2 * ||A||_inf * ||B||_inf * epsilon
+        const double castingError = 2.0 * normA * normB * epsilon;
+        accumulatedTolerance += castingError;
+    }
+
+    // Calculate output casting error
+    // If OutputType has lower precision (larger epsilon) than ComputeType, we lose precision
+    // when storing the result (downcasting). Example: float -> half.
+    auto outputEpsilon = static_cast<double>(std::numeric_limits<OutputType>::epsilon());
+    double castTolerance = 0.0;
+
+    if(outputEpsilon > epsilon)
+    {
+        // The error is bounded by the precision of the OutputType at the final accumulated value.
+        // Maximum possible output magnitude: ||A||_inf * ||B||_inf
+        const double maxPossibleOutputValue = normA * normB;
+        castTolerance = maxPossibleOutputValue * outputEpsilon;
+    }
+
+    // Total tolerance is the sum of accumulation error and casting errors
+    const double totalTolerance = accumulatedTolerance + castTolerance;
+
+    // Check if totalTolerance exceeds the maximum representable value of OutputType
+    if(totalTolerance > static_cast<double>(std::numeric_limits<OutputType>::max()))
+    {
+        throw std::overflow_error(
+            "Calculated tolerance exceeds the maximum representable value of the output type.");
+    }
+
+    return static_cast<float>(totalTolerance);
+}
+
+} // namespace hipdnn_test_sdk::utilities::matmul
