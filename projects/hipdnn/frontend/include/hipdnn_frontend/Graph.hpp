@@ -1107,9 +1107,18 @@ public:
     }
 
     /// @cond INTERNAL
-    // Serialization APIs are hidden from public docs — they depend on
-    // FlatBuffers internals that may change in a future release.
+    // Serialization APIs are hidden from public docs — these will be
+    // removed in a future release.
 
+    /**
+     * @brief Serialize the graph to a FlatBuffer DetachedBuffer
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     *
+     * @param buffer Output buffer populated with the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error toFlatBuffer(flatbuffers::DetachedBuffer& buffer) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -1117,12 +1126,26 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Serialize the graph to a FlatBuffer DetachedBuffer
+     *
+     * Assigns UIDs to any tensors that do not already have them.
+     *
+     * @return DetachedBuffer containing the serialized graph
+     */
     flatbuffers::DetachedBuffer toFlatBuffer()
     {
         assignUnsetTensorUids();
         return buildFlatbufferOperationGraphConst();
     }
 
+    /**
+     * @brief Deserialize the graph from a FlatBuffer Graph object
+     *
+     * @param fbGraph Pointer to the FlatBuffer Graph object
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error fromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         try
@@ -1141,6 +1164,13 @@ public:
         }
     }
 
+    /**
+     * @brief Deserialize the graph from a FlatBuffer DetachedBuffer
+     *
+     * @param buffer The buffer containing the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error fromFlatBuffer(const flatbuffers::DetachedBuffer& buffer)
     {
         if(useDescriptorApi())
@@ -1152,21 +1182,57 @@ public:
         return fromFlatBuffer(fbGraph);
     }
 
+    /**
+     * @brief Serialize the graph to a FlatBuffer DetachedBuffer
+     *
+     * Equivalent to toFlatBuffer(buffer).
+     *
+     * @param buffer Output buffer populated with the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error serialize(flatbuffers::DetachedBuffer& buffer) const
     {
         return toFlatBuffer(buffer);
     }
 
+    /**
+     * @brief Deserialize the graph from a FlatBuffer Graph object
+     *
+     * Equivalent to fromFlatBuffer(fbGraph).
+     *
+     * @param fbGraph Pointer to the FlatBuffer Graph object
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
     {
         return fromFlatBuffer(fbGraph);
     }
 
+    /**
+     * @brief Deserialize the graph from a FlatBuffer DetachedBuffer
+     *
+     * Equivalent to fromFlatBuffer(buffer).
+     *
+     * @param buffer The buffer containing the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(const flatbuffers::DetachedBuffer& buffer)
     {
         return fromFlatBuffer(buffer);
     }
 
+    /**
+     * @brief Serialize the graph to binary
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     *
+     * @param data Output vector populated with the serialized bytes
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error serialize(std::vector<uint8_t>& data) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -1175,6 +1241,13 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Serialize the graph to binary
+     *
+     * Assigns UIDs to any tensors that do not already have them.
+     *
+     * @return Vector of bytes containing the serialized graph
+     */
     std::vector<uint8_t> toBinary()
     {
         assignUnsetTensorUids();
@@ -1182,6 +1255,14 @@ public:
         return {buffer.data(), buffer.data() + buffer.size()};
     }
 
+    /**
+     * @brief Deserialize the graph from binary
+     *
+     * @param handle The hipDNN handle (can be nullptr)
+     * @param data The serialized graph bytes
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
     {
         if(useDescriptorApi())
@@ -1194,6 +1275,15 @@ public:
     }
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    /**
+     * @brief Serialize the graph to JSON
+     *
+     * All tensors must have UIDs assigned before calling this method.
+     *
+     * @param j Output JSON object populated with the serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::ATTRIBUTE_NOT_SET
+     *         if any tensors are missing UIDs.
+     */
     Error serialize(nlohmann::json& j) const
     {
         HIPDNN_CHECK_ERROR(checkTensorUidsSet());
@@ -1206,6 +1296,13 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Serialize the graph to JSON
+     *
+     * Assigns UIDs to any tensors that do not already have them.
+     *
+     * @return JSON object containing the serialized graph
+     */
     nlohmann::json toJson()
     {
         assignUnsetTensorUids();
@@ -1215,6 +1312,13 @@ public:
         return *sdkGraph;
     }
 
+    /**
+     * @brief Deserialize the graph from JSON
+     *
+     * @param j JSON object containing a serialized graph
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if deserialization fails. Call get_message() for details.
+     */
     Error deserialize(const nlohmann::json& j)
     {
         try
