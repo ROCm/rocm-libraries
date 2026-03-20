@@ -284,7 +284,7 @@
 /*! \brief Determines the maximum size at which rocSOLVER can use POTF2
     \details
     POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
-    within the LDS share memory using compact storage.
+    within the LDS shared memory using compact storage.
     The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
 #ifndef POTF2_MAX_SMALL_SIZE
 #define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 16) ? 128 : 256)

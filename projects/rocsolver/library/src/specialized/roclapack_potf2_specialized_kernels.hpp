@@ -47,7 +47,7 @@ ROCSOLVER_BEGIN_NAMESPACE
  *
  * NB           Number of panels to perform blocked decomposition.
  *              ceildiv(n, PANEL_SIZE)
- * PANEL_SIZE   Size of panel to perform non-blocked decompostion.
+ * PANEL_SIZE   Size of panel to perform non-blocked decomposition.
  *              PANEL_SIZE == BlockDim.x == BlockDim.y
 **/
 template <int NB, int PANEL_SIZE, typename T, typename I, typename INFO, typename U>
