@@ -284,16 +284,21 @@ def run_benchmark(
         
         # Parse JSON output
         output = result.stdout.strip()
-        
+
         # Try to find JSON in output
         json_match = re.search(r'\{.*\}', output, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
+            # Extract from nested perf_result object
+            perf = data.get('perf_result', {})
+            avg_time_ms = perf.get('latency(ms)', 0)
+            tflops = perf.get('tflops(TFlops)', 0)
+
             return BenchmarkResult(
                 kernel_name=kernel.name,
                 m=problem.m, n=problem.n, k=problem.k,
-                avg_time_ms=data.get('avg_time_ms', 0),
-                tflops=data.get('tflops', 0),
+                avg_time_ms=avg_time_ms,
+                tflops=tflops,
                 is_valid=True,
             )
         else:
