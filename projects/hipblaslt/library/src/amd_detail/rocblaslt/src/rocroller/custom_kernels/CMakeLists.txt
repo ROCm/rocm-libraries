@@ -64,13 +64,13 @@ set(CUSTOM_KERNEL_ASM_SOURCES
     # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_128x32x256.s
     # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_224x160x256.s
     # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x160x256.s
-    # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x192x256.s
+    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x192x256.s
     # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x224x256.s
     # Static wave kernels
-    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_256x192x256_43392x13056x1792.s
-    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_256x192x256_31104x16896x7168.s
-    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_256x192x256_14976x51712x7680.s
-    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_64x64x256_256x128x256.s
+    # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_256x192x256_43392x13056x1792.s
+    # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_256x192x256_31104x16896x7168.s
+    # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_256x192x256_14976x51712x7680.s
+    # ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_static_gemm_64x64x256_256x128x256.s
 )
 
 # Build combined .co from all assembly sources

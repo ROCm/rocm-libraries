@@ -733,8 +733,20 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            hotIterations);
     }
 
-    if(kernel->isCustomKernel())
-        return runCustomKernel(kernel, prob);
+    auto& wgt = kernel->params->workgroupTile;
 
+    if(kernel->isCustomKernel())
+    {
+        std::string kernelName = kernel->module->getKernelName();
+        std::string source     = (kernelName.find("wave") == 0) ? "wave" : "aiter";
+        std::cerr << "[KERNEL_SOURCE] m=" << prob.m << " n=" << prob.n << " k=" << prob.k
+                  << " source=" << source << " tile=" << wgt.m << "x" << wgt.n << "x" << wgt.k
+                  << " kernel=" << kernelName << std::endl;
+        return runCustomKernel(kernel, prob);
+    }
+
+    std::cerr << "[KERNEL_SOURCE] m=" << prob.m << " n=" << prob.n << " k=" << prob.k
+              << " source=rocroller" << " tile=" << wgt.m << "x" << wgt.n << "x" << wgt.k
+              << std::endl;
     return runGemmKernel(kernel, prob);
 }
