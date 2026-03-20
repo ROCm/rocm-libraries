@@ -22,11 +22,11 @@ using namespace hipdnn_sdk_test_utils;
 TEST(TestSdpaFwdPlan, ExecutePlan)
 {
     // [B=1, H=2, Sq=4, Skv=4, D=8] — standard MHA (numHeads == numKvHeads)
-    std::vector<int64_t> const qDims = {1, 2, 4, 8};
-    std::vector<int64_t> const kDims = {1, 2, 4, 8};
-    std::vector<int64_t> const vDims = {1, 2, 4, 8};
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
 
-    unsigned int const seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     SdpaFwdTensorBundle<float> planTensorBundle(qDims, kDims, vDims, seed);
     SdpaFwdTensorBundle<float> directTensorBundle(qDims, kDims, vDims, seed);
 
@@ -34,7 +34,7 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
@@ -59,8 +59,8 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
     SdpaFwdPlan<float, float, float, float> patient(std::move(params));
     patient.execute(variantPack);
 
-    float const tolerance = 1e-5f;
-    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
 }
@@ -68,11 +68,11 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
 TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
 {
     // [B=1, H=2, Sq=4, Skv=4, D=8] with causal mask
-    std::vector<int64_t> const qDims = {1, 2, 4, 8};
-    std::vector<int64_t> const kDims = {1, 2, 4, 8};
-    std::vector<int64_t> const vDims = {1, 2, 4, 8};
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
 
-    unsigned int const seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     SdpaFwdTensorBundle<float> planTensorBundle(qDims, kDims, vDims, seed);
     SdpaFwdTensorBundle<float> directTensorBundle(qDims, kDims, vDims, seed);
 
@@ -80,7 +80,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
@@ -109,17 +109,17 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     SdpaFwdPlan<float, float, float, float> patient(std::move(params));
     patient.execute(variantPack);
 
-    float const tolerance = 1e-5f;
-    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
 }
 
 TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> const qDims = {1, 2, 4, 8};
-    std::vector<int64_t> const kDims = {1, 2, 4, 8};
-    std::vector<int64_t> const vDims = {1, 2, 4, 8};
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
 
     SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims, /*seed=*/1);
 
@@ -127,22 +127,22 @@ TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool const result
+    const bool result
         = dynamic_cast<SdpaFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> const qDims = {1, 2, 4, 8};
-    std::vector<int64_t> const kDims = {1, 2, 4, 8};
-    std::vector<int64_t> const vDims = {1, 2, 4, 8};
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
 
     SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims, /*seed=*/1);
 
@@ -150,16 +150,16 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     // Correct data types: applicable
-    SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> const
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
     // Mismatched data types: not applicable
-    SdpaFwdPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF> const
+    const SdpaFwdPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF>
         halfPlanBuilder;
     EXPECT_FALSE(
         halfPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));

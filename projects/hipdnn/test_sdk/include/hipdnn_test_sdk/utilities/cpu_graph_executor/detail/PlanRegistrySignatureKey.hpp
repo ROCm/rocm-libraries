@@ -51,7 +51,7 @@ struct PlanRegistrySignatureKeyHash
 {
     std::size_t operator()(const PlanRegistrySignatureKey& k) const
     {
-        return std::visit([](auto const& x) { return x.hashSelf(); }, k);
+        return std::visit([](const auto& x) { return x.hashSelf(); }, k);
     }
 };
 

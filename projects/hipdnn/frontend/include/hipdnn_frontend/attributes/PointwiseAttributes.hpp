@@ -58,6 +58,8 @@ namespace hipdnn_frontend::graph
 class PointwiseAttributes : public Attributes<PointwiseAttributes>
 {
 public:
+    PointwiseAttributes() = default;
+
     /// @brief Get the pointwise operation mode
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseMode get_mode() const

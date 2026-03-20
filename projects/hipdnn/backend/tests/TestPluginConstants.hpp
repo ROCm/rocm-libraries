@@ -11,7 +11,7 @@ namespace hipdnn_backend::plugin_constants
 inline const std::string& getTestPluginDefaultDir()
 {
 
-    static std::string const s_defaultDir
+    static const std::string s_defaultDir
 #if defined(_WIN32)
         = "bin/test_plugins";
 #else

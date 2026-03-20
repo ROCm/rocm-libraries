@@ -273,9 +273,9 @@ TEST_F(TestGraph, BatchnormNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -319,9 +319,9 @@ TEST_F(TestGraph, BatchnormBackwardNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto dy = std::make_shared<TensorAttributes>();
@@ -357,9 +357,9 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -401,9 +401,9 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -600,9 +600,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -697,9 +697,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -798,9 +798,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -921,9 +921,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormAndPointwiseGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -1121,9 +1121,9 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormInferenceGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -1232,9 +1232,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormBackwardGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto dy = std::make_shared<TensorAttributes>();
@@ -1838,9 +1838,9 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto xPointwise = std::make_shared<TensorAttributes>();
@@ -3024,7 +3024,7 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
     const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     graph.create_execution_plans(heurModes);
 
-    int64_t const workspaceSize = 123454;
+    const int64_t workspaceSize = 123454;
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(executionPlanDesc,
                                     HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
@@ -3194,7 +3194,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // get_workspace_size mock
-    int64_t const expectedWorkspaceSize = 12345;
+    const int64_t expectedWorkspaceSize = 12345;
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(execPlanDesc,
                                     HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
@@ -3316,7 +3316,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good());
 
-    std::vector<HeuristicMode> const heurModes = {HeuristicMode::FALLBACK};
+    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     auto planResult = graph.create_execution_plans(heurModes);
     EXPECT_TRUE(planResult.is_good());
 
@@ -3796,7 +3796,7 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_EQ(y->get_uid(), 500);
 
     // The new UID for bias should be unique
-    int64_t const biasUid = bias->get_uid();
+    const int64_t biasUid = bias->get_uid();
     EXPECT_NE(biasUid, 100);
     EXPECT_NE(biasUid, 200);
     EXPECT_NE(biasUid, 300);
@@ -4245,9 +4245,9 @@ TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    std::vector<int64_t> const dims = {1, 2, 3, 4};
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    std::vector<int64_t> const derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     auto x = std::make_shared<TensorAttributes>();
@@ -4456,7 +4456,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -4605,7 +4605,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -4754,7 +4754,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -4887,7 +4887,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtFailsWithoutGraphBuilt)
     Graph graph;
     createBasicBatchnormGraph(graph);
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     std::vector<KnobSetting> settings;
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
 
@@ -4937,7 +4937,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -4994,7 +4994,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
         });
 
     // Empty settings - should not call backendSetAttribute for knobs
-    std::vector<KnobSetting> const settings;
+    const std::vector<KnobSetting> settings;
     auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
@@ -5038,7 +5038,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -5289,7 +5289,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
             engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -5761,8 +5761,8 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
 
     EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    std::string const alphaId = "knob_alpha";
-    std::string const betaId = "knob_beta";
+    const std::string alphaId = "knob_alpha";
+    const std::string betaId = "knob_beta";
 
     // Create flatbuffer knobs
     flatbuffers::FlatBufferBuilder builder1;
@@ -6063,7 +6063,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t const engineId = 42;
+    const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
@@ -6246,7 +6246,7 @@ TEST_F(TestGraph, MoveConstruction)
         .set_io_data_type(DataType::FLOAT);
 
     // Move construct
-    Graph const movedGraph(std::move(originalGraph));
+    const Graph movedGraph(std::move(originalGraph));
 
     // Verify moved graph has the original state
     EXPECT_EQ(movedGraph.get_name(), "OriginalGraph");
@@ -6292,11 +6292,11 @@ TEST_F(TestGraph, MoveConstructionWithNodes)
 
     // Get tensor count before move
     auto tensorsBeforeMove = originalGraph.getTensorsByName();
-    size_t const tensorCountBeforeMove = tensorsBeforeMove.size();
+    const size_t tensorCountBeforeMove = tensorsBeforeMove.size();
     EXPECT_GT(tensorCountBeforeMove, 0);
 
     // Move construct
-    Graph const movedGraph(std::move(originalGraph));
+    const Graph movedGraph(std::move(originalGraph));
 
     // Verify moved graph has the nodes
     auto tensorsAfterMove = movedGraph.getTensorsByName();
@@ -6320,7 +6320,7 @@ TEST_F(TestGraph, MoveAssignmentWithNodes)
 
     // Get tensor count before move
     auto tensorsBeforeMove = originalGraph.getTensorsByName();
-    size_t const tensorCountBeforeMove = tensorsBeforeMove.size();
+    const size_t tensorCountBeforeMove = tensorsBeforeMove.size();
     EXPECT_GT(tensorCountBeforeMove, 0);
 
     Graph movedGraph;
@@ -6348,7 +6348,7 @@ TEST_F(TestGraph, MoveConstructionWithPreferredEngineId)
     EXPECT_EQ(originalGraph.get_preferred_engine_id_ext().value(), 42);
 
     // Move construct
-    Graph const movedGraph(std::move(originalGraph));
+    const Graph movedGraph(std::move(originalGraph));
 
     // Verify preferred engine id was moved
     EXPECT_TRUE(movedGraph.get_preferred_engine_id_ext().has_value());
@@ -6443,7 +6443,7 @@ TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
     exactRule.engineName = hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME;
     exactRule.tensors = {TensorPattern{{1, 3, 32, 32}, {}}, TensorPattern{{64, 3, 3, 3}, {}}};
 
-    EngineOverrideConfig const config({std::move(exactRule)});
+    const EngineOverrideConfig config({std::move(exactRule)});
 
     auto result = config.matchOperation("conv_fprop", {x, w});
     ASSERT_TRUE(result.has_value());
@@ -6747,7 +6747,7 @@ TEST_F(TestGraph, BuildAndSerializeCustomOpGraph)
     inputB->set_uid(2).set_name("B").set_dim({4, 8}).set_stride({8, 1}).set_data_type(
         DataType::FLOAT);
 
-    std::vector<uint8_t> const payload = {0xDE, 0xAD};
+    const std::vector<uint8_t> payload = {0xDE, 0xAD};
 
     CustomOpAttributes attributes;
     attributes.set_name("CustomOpNode").set_custom_op_id("example.my_add").set_data(payload);

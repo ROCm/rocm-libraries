@@ -386,11 +386,11 @@ void TestLogBufferEnvEnabled()
     }
 
     // test log dump after throw
-    MIOPEN_LOG_W("warn");
-    MIOPEN_LOG_I("info");
-    MIOPEN_LOG_I2("info2");
-    MIOPEN_LOG_T("trace");
-    EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
+    MIOPEN_LOG_W("warn 2nd");
+    MIOPEN_LOG_I("info 2nd");
+    MIOPEN_LOG_I2("info2 2nd");
+    MIOPEN_LOG_T("trace 2nd");
+    MIOPEN_LOG_E("error 2nd");
 
     EXPECT_TRUE(fs::exists(filename));
     {
@@ -405,10 +405,10 @@ void TestLogBufferEnvEnabled()
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
             case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
             case 4: ASSERT_TRUE(isSubStr(line, "")); break;
-            case 5: ASSERT_TRUE(isSubStr(line, "warn")); break;
-            case 6: ASSERT_TRUE(isSubStr(line, "info")); break;
-            case 7: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 8: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            case 5: ASSERT_TRUE(isSubStr(line, "warn 2nd")); break;
+            case 6: ASSERT_TRUE(isSubStr(line, "info 2nd")); break;
+            case 7: ASSERT_TRUE(isSubStr(line, "info2 2nd")); break;
+            case 8: ASSERT_TRUE(isSubStr(line, "error 2nd")); break;
             case 9: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
@@ -416,6 +416,9 @@ void TestLogBufferEnvEnabled()
         ASSERT_TRUE(line_i == 10);
     }
     fs::remove(filename);
+
+    EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
+    ASSERT_FALSE(fs::exists(filename));
 }
 
 void TestLogBufferOff()

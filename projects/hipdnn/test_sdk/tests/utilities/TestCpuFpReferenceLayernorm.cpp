@@ -116,8 +116,8 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation3D)
 
     EXPECT_NEAR(mean.getHostValue(0), 3.5, tolerance);
 
-    double const expectedVar = 17.5 / 6.0;
-    double const expectedRstd = 1.0 / std::sqrt(expectedVar + 1e-5);
+    const double expectedVar = 17.5 / 6.0;
+    const double expectedRstd = 1.0 / std::sqrt(expectedVar + 1e-5);
     EXPECT_NEAR(rstd.getHostValue(0), expectedRstd, tolerance);
 
     // Verify each output element: y = (x - mean) * rstd
@@ -125,8 +125,8 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSanityValidation3D)
     {
         for(int j = 0; j < 3; j++)
         {
-            double const xVal = x.getHostValue(0, i, j);
-            double const expected = (xVal - 3.5) * expectedRstd;
+            const double xVal = x.getHostValue(0, i, j);
+            const double expected = (xVal - 3.5) * expectedRstd;
             EXPECT_NEAR(y.getHostValue(0, i, j), expected, tolerance);
         }
     }
@@ -157,7 +157,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllZeros)
         bias.setHostValue(3.0, i);
     }
 
-    double const epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
@@ -198,7 +198,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropAllOnes)
     scale.fillWithValue(1.5);
     bias.fillWithValue(0.25);
 
-    double const epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
@@ -238,7 +238,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropConstantInput)
     scale.fillWithValue(1.0);
     bias.fillWithValue(-1.0);
 
-    double const epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
@@ -277,7 +277,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropSingleFeature)
     scale.setHostValue(2.0, 0);
     bias.setHostValue(1.0, 0);
 
-    double const epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
@@ -338,7 +338,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropIdentityTransform)
     double outputVar = 0.0;
     for(int i = 0; i < 6; i++)
     {
-        double const diff = y.getHostValue(0, i) - outputMean;
+        const double diff = y.getHostValue(0, i) - outputMean;
         outputVar += diff * diff;
     }
     outputVar /= 6.0;
@@ -378,7 +378,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropNegativeAndMixedValues)
 
     EXPECT_NEAR(mean.getHostValue(0), 0.0, tolerance);
 
-    double const expectedRstd = 1.0 / std::sqrt(5.0 + 1e-5);
+    const double expectedRstd = 1.0 / std::sqrt(5.0 + 1e-5);
     EXPECT_NEAR(rstd.getHostValue(0), expectedRstd, tolerance);
 
     // Output should be antisymmetric: y[0]=-y[3], y[1]=-y[2]
@@ -418,14 +418,14 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeEpsilon)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    double const largeEpsilon = 100.0;
+    const double largeEpsilon = 100.0;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, largeEpsilon, 1, &mean, &rstd);
 
     auto tolerance = layernorm::getTolerance<double>();
 
     EXPECT_NEAR(mean.getHostValue(0), 2.5, tolerance);
 
-    double const expectedRstd = 1.0 / std::sqrt(1.25 + largeEpsilon);
+    const double expectedRstd = 1.0 / std::sqrt(1.25 + largeEpsilon);
     EXPECT_NEAR(rstd.getHostValue(0), expectedRstd, tolerance);
 
     // With large epsilon, rstd is small so all outputs should be near 0 (bias)
@@ -457,7 +457,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
     Tensor<double> mean({1});
     Tensor<double> rstd({1});
 
-    double const offset = 1e15;
+    const double offset = 1e15;
     x.setHostValue(offset + 1.0, 0, 0);
     x.setHostValue(offset + 2.0, 0, 1);
     x.setHostValue(offset + 3.0, 0, 2);
@@ -474,7 +474,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
     EXPECT_NEAR(mean.getHostValue(0), offset + 2.5, tolerance);
 
     // Variance should be exactly 1.25, same as if offset were 0
-    double const expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
+    const double expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
     EXPECT_NEAR(rstd.getHostValue(0), expectedRstd, tolerance);
 
     // Normalized output should match the small-value case exactly
@@ -516,7 +516,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutScaleBias)
 
     auto tolerance = layernorm::getTolerance<double>();
 
-    double const expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
+    const double expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
     EXPECT_NEAR(mean.getHostValue(0), 2.5, tolerance);
     EXPECT_NEAR(rstd.getHostValue(0), expectedRstd, tolerance);
 
@@ -566,7 +566,7 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropTypicalTransformerShape)
             float outVar = 0.0f;
             for(int h = 0; h < 64; h++)
             {
-                float const diff = y.getHostValue(b, s, h) - outMean;
+                const float diff = y.getHostValue(b, s, h) - outMean;
                 outVar += diff * diff;
             }
             outVar /= 64.0f;
@@ -726,7 +726,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropOneHotRows)
     auto tolerance = layernorm::getTolerance<double>();
 
     // All rows have same mean = 1/3
-    double const expectedMean = 1.0 / 3.0;
+    const double expectedMean = 1.0 / 3.0;
     for(int b = 0; b < 3; b++)
     {
         EXPECT_NEAR(mean.getHostValue(b), expectedMean, tolerance);
@@ -783,8 +783,8 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
     auto tolerance = layernorm::getTolerance<double>();
 
     // mean=2.5, var=1.25, rstd=1/sqrt(1.25+1e-5)
-    double const expectedMean = 2.5;
-    double const expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
+    const double expectedMean = 2.5;
+    const double expectedRstd = 1.0 / std::sqrt(1.25 + 1e-5);
     EXPECT_NEAR(mean.getHostValue(0), expectedMean, tolerance);
 
     // y[i] = scale[i] * (x[i] - mean) * rstd + bias[i]
@@ -792,10 +792,10 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPerFeatureScaleBias)
     auto yTolerance = 1e-5;
     for(int i = 0; i < 4; i++)
     {
-        double const xVal = x.getHostValue(0, i);
-        double const scaleVal = scale.getHostValue(i);
-        double const biasVal = bias.getHostValue(i);
-        double const expected = scaleVal * (xVal - expectedMean) * expectedRstd + biasVal;
+        const double xVal = x.getHostValue(0, i);
+        const double scaleVal = scale.getHostValue(i);
+        const double biasVal = bias.getHostValue(i);
+        const double expected = scaleVal * (xVal - expectedMean) * expectedRstd + biasVal;
         EXPECT_NEAR(y.getHostValue(0, i), expected, yTolerance);
     }
 }
@@ -840,7 +840,7 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropWithoutMeanRstdOutputs)
 
 TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
 {
-    Tensor<float> const x({2, 4});
+    const Tensor<float> x({2, 4});
     Tensor<float> y({2, 4});
     Tensor<float> scale({4});
     Tensor<float> bias({4});
@@ -860,7 +860,7 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
 
 TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnScalarTensor)
 {
-    Tensor<float> const x({});
+    const Tensor<float> x({});
     Tensor<float> y({});
     Tensor<float> scale({});
     Tensor<float> bias({});
@@ -902,13 +902,13 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop1D)
 
     EXPECT_NEAR(mean.getHostValue(0), 6.0, tolerance);
 
-    double const expectedRstd = 1.0 / std::sqrt(8.0 + 1e-5);
+    const double expectedRstd = 1.0 / std::sqrt(8.0 + 1e-5);
     EXPECT_NEAR(rstd.getHostValue(0), expectedRstd, tolerance);
 
     // y = (x - 6) * rstd
     for(int i = 0; i < 5; i++)
     {
-        double const xVal = x.getHostValue(i);
+        const double xVal = x.getHostValue(i);
         EXPECT_NEAR(y.getHostValue(i), (xVal - 6.0) * expectedRstd, tolerance);
     }
 
@@ -979,7 +979,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop4DNormalizeLast1)
                 double outVar = 0.0;
                 for(int w = 0; w < 4; w++)
                 {
-                    double const diff = y.getHostValue(b, c, h, w) - outMean;
+                    const double diff = y.getHostValue(b, c, h, w) - outMean;
                     outVar += diff * diff;
                 }
                 outVar /= 4.0;
@@ -1150,7 +1150,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2)
                 {
                     for(int d4 = 0; d4 < 5; d4++)
                     {
-                        double const diff = y.getHostValue(b0, b1, b2, d3, d4) - outMean;
+                        const double diff = y.getHostValue(b0, b1, b2, d3, d4) - outMean;
                         outVar += diff * diff;
                     }
                 }

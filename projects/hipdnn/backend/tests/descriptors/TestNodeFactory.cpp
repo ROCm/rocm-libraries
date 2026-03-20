@@ -150,7 +150,7 @@ TEST_F(TestNodeFactory, BuildTensorMapSuccess)
 
 TEST_F(TestNodeFactory, BuildTensorMapEmptyVector)
 {
-    std::vector<std::unique_ptr<TensorAttributesT>> const tensors;
+    const std::vector<std::unique_ptr<TensorAttributesT>> tensors;
 
     auto result = NodeFactory::buildTensorMap(tensors);
 
