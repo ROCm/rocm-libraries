@@ -73,6 +73,8 @@ struct MmaLayoutTestKernel
             AVecType a_frag{};
             BVecType b_frag{};
             CVecType c_frag{};
+            uint32_t sparse_idx{};
+            static_assert(MmaOp::kCompressionRatio <= 2); // Allow only 4:2 compression (or no).
 
             // get (m, k, n), where "1" should be placed for this block
             const index_t case_idx = blockIdx.x;
@@ -84,9 +86,15 @@ struct MmaLayoutTestKernel
             for(index_t v = 0; v < a_vec_size; ++v)
             {
                 auto a_coords = ARegMap::calc_matrix_indices_from_lane_vector(lane, v);
-                if(a_coords[0] == m && a_coords[1] == k)
+
+                // When dealing with sparse intrinsics, the A matrix is compressed in the K
+                // direction and we just put our "1" in the k / 2 position (rounded down).
+                if(a_coords[0] == m && a_coords[1] == (k / MmaOp::kCompressionRatio))
                 {
                     a_frag[v] = 1;
+
+                    // Calc an appropriate sparse idx value for a single 1 in position k.
+                    sparse_idx = 0x88888888 | ((k % 2) << (v * 2));
                 }
             }
 
@@ -99,7 +107,14 @@ struct MmaLayoutTestKernel
                 }
             }
 
-            c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
+            if constexpr(MmaOpTraits<MmaOp>::IsSparse)
+            {
+                c_frag = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
+            }
+            else
+            {
+                c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
+            }
 
             // TODO: this tolerance might not be suitable for all data types and
             // should be revisited if we add more configurations
@@ -194,7 +209,8 @@ using Gfx11Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target11,  MmaOpFamily::DENSE> // wmma_f32_16x16x16_f16_w32
 >;
 using Gfx12Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target12,  MmaOpFamily::DENSE>  // wmma_f32_16x16x16_f16_w32_gfx12
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultSparseMfmaCtrlFlags,          Target12,  MmaOpFamily::SPARSE> // swmmac_f32_16x16x32_f16_w32
 >;
 // clang-format on
 
