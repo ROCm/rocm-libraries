@@ -1178,7 +1178,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
         }
     }
 
-    bool batched = prob.batch_A != nullptr;
+    bool batched = !prob.strided_batch;
     return prob.handle->tryHipBLASLt(batched);
 #else
     return false;
