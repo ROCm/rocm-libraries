@@ -1,16 +1,16 @@
 # Create a documentation preview in the pull request
 # --------------------------------------------------
 # This GitHub Actions workflow triggers by commenting '/docs-preview' on a PR.
-# It will build the documentation and display the preview via Netlify.
+# It creates a new Read the Docs version for the PR branch and triggers a build.
 #
 # Key Steps:
 # 1. Use the script (.github/scripts/pr_detect_changed_subtrees.py) to detect changed project
-# 2. Install the environment and dependencies using project's requirements.txt
-# 3. Build the documentation using Sphinx and Doxygen
-# 4. Deploy the preview to Netlify
+# 2. Get the PR branch name and derive the RTD version slug
+# 3. Activate the branch as a new version on Read the Docs (key difference from update-docs.yml)
+# 4. Trigger a build for that version
+# 5. Comment the preview URL back on the PR
 #
-# The workflow provides a look and feel to the reviewer. Note if multiple projects are involved in one PR,
-# it will only display the preview for one of the projects.
+# Note: if multiple projects are changed in one PR, only the first detected project is previewed.
 
 name: Docs Preview
 
@@ -25,15 +25,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Only run when '/docs-preview' is commented on a PR by a member, owner, or collaborator
-    if: >
-      ${{ github.event.issue.pull_request }} &&
-      contains(${{ github.event.comment.body }}, '/docs-preview') &&
-      (
-        ${{ github.event.comment.author_association }} == 'MEMBER' ||
-        ${{ github.event.comment.author_association }} == 'OWNER' ||
-        ${{ github.event.comment.author_association }} == 'COLLABORATOR'
-      )
+    # Only run when '/docs-preview' is commented on a PR by a member or owner
+    if: >-
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/docs-preview') &&
+      (github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'OWNER')
     steps:
       - name: Generate a token
         id: generate-token
@@ -81,57 +78,68 @@ jobs:
         run: |
           project=$(echo "${{ steps.detect.outputs.subtrees }}" | head -n1)
           echo "project=$project" >> $GITHUB_OUTPUT
+          echo "project_name=$(echo "$project" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
 
-      - name: Get PR details
+      - name: Get PR branch
         if: steps.extract.outputs.project
         id: pr
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
-          echo "head_sha=$(echo $PR_DATA | jq -r .head.sha)" >> $GITHUB_OUTPUT
-          echo "pr_number=$(echo $PR_DATA | jq -r .number)" >> $GITHUB_OUTPUT
+          echo "branch=$(echo $PR_DATA | jq -r .head.ref)" >> $GITHUB_OUTPUT
 
-      - name: Checkout full repo with changed project
+      - name: Derive RTD slugs and verify project exists
         if: steps.extract.outputs.project
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          ref: ${{ steps.pr.outputs.head_sha }}
-          sparse-checkout: |
-            .github
-            ${{ steps.extract.outputs.project }}
-          token: ${{ steps.generate-token.outputs.token }}
-          fetch-depth: 0
-
-      # Setup dependencies and build the docs
-      - name: Install Python dependencies and build docs
-        if: steps.extract.outputs.project
+        id: rtd
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
-          REQ_FILE="${{ steps.extract.outputs.project }}/docs/sphinx/requirements.txt"
-          if [ -f "$REQ_FILE" ]; then
-            echo "Installing requirements from $REQ_FILE"
-            pip install -r "$REQ_FILE"
-            sudo apt-get update
-            sudo apt-get install -y doxygen graphviz
-            cd ${{ steps.extract.outputs.project }}/docs
-            python -m sphinx -T -b html -d _build/doctrees -D language=en . _build/html
+          branch_name="${{ steps.pr.outputs.branch }}"
+          version_slug="${branch_name//\//-}"
+          project_slug="advanced-micro-devices-${{ steps.extract.outputs.project_name }}"
+
+          echo "version_slug=$version_slug" >> $GITHUB_OUTPUT
+          echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
+
+          project_list=$(curl \
+            -H "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/?expand=advanced-micro-devices&limit=300" \
+            | jq -r '.results[].slug')
+
+          if echo "$project_list" | grep -Fxq "$project_slug"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "No requirements.txt found at $REQ_FILE, skipping."
+            echo "${{ steps.extract.outputs.project_name }} does not exist on Read the Docs, skipping."
+            echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # Deploy to Netlify
-      - name: Deploy PR preview to Netlify
-        if: steps.extract.outputs.project
-        uses: nwtgck/actions-netlify@v3.0
-        with:
-          publish-dir: ${{ steps.extract.outputs.project }}/docs/_build/html
-          production-deploy: false
-          github-token: ${{ steps.generate-token.outputs.token }}
-          deploy-message: "Deploy preview for PR #${{ github.event.pull_request.number }}"
-          alias: pr-${{ github.event.pull_request.number }}
-          enable-pull-request-comment: true
-          enable-commit-comment: false
-          overwrites-pull-request-comment: true
+      - name: Activate PR branch as a new RTD version
+        if: steps.rtd.outputs.exists == 'true'
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_PAT }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PROJECT_ID }}
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl -f -s -X PATCH \
+            -H "Authorization: Token $RTD_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"active": true}' \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+
+      - name: Trigger RTD build for PR branch
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl -f -s -X POST \
+            -H "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/builds/"
+
+      - name: Comment RTD preview URL on PR
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          preview_url="https://${{ steps.rtd.outputs.project_slug }}.readthedocs-hosted.com/en/${{ steps.rtd.outputs.version_slug }}/"
+          gh pr comment ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url"
