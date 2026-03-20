@@ -220,17 +220,12 @@ using KernelTypesStreamKFp8NonPersistentTreeCompV3 = ::testing::Types<
     std::tuple<    Col,     Row,     Row,       F8,         F8,        F32,        F16,         I128,        I128,        I32,    NonPersistent,   CompV3,   Tree>
 >;
 
-// ============================= Mem Pipeline =============================
+// ============================= Other Pipelines =============================
 
-using KernelTypesStreamKMem = ::testing::Types<
+using KernelTypesStreamKPipelines = ::testing::Types<
     std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     Persistent,      Mem,   Atomic>,
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     NonPersistent,   Mem,   Tree>,
-    std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     Persistent,      Mem,   Linear>
->;
-
-// ============================= Mem Pipeline =============================
-
-using KernelTypesStreamKCompV4 = ::testing::Types<
+    std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     Persistent,      Mem,   Linear>,
     std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     Persistent,      CompV4,  Atomic>,
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     NonPersistent,   CompV4,  Tree>,
     std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,         I256,        I256,        I32,     Persistent,      CompV4,  Linear>
