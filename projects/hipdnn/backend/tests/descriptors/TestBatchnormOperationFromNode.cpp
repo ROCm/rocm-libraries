@@ -959,8 +959,7 @@ TEST_F(TestBatchnormOperationFromNode, FailsWithWrongAttributeType)
 {
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
-    PointwiseAttributesT wrongAttrs;
-    node.attributes.Set(wrongAttrs);
+    node.attributes.Set(PointwiseAttributesT{});
 
     ASSERT_THROW_HIPDNN_STATUS(BatchnormOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
