@@ -26,12 +26,6 @@ public:
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    // BatchnormFwdTrainingParams(
-    //     const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    //     const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    //     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-    //         tensorMap);
-
     BatchnormFwdTrainingParams(const BatchnormFwdTrainingParams&) = delete;
     BatchnormFwdTrainingParams& operator=(const BatchnormFwdTrainingParams&) = delete;
 
@@ -55,9 +49,6 @@ public:
     const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningMean() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
 
-    // const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
-    // const hipdnn_data_sdk::data_objects::TensorAttributes* activationOut() const;
-
 private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
@@ -76,10 +67,6 @@ private:
     std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _nextRunningMean;
     std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> _nextRunningVariance;
     bool _hasRunningStats{false};
-
-    // // Optional activation fusion
-    // std::optional<hip_kernel_utils::ActivationParams> _optActivation;
-    // const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>

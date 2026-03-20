@@ -24,7 +24,6 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
     , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
     , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
-// , _activationOut(nullptr)
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
@@ -66,68 +65,6 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         _hasRunningStats = true;
     }
 }
-
-// BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-//     const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-//     const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-//     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-//         tensorMap)
-//     : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
-//     , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
-//     , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
-//     , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
-//     , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
-//     , _activationOut(&(hip_kernel_utils::findTensorAttributes(
-//           tensorMap, pointwiseAttributes.out_0_tensor_uid())))
-// {
-//     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
-//     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-//     _epsilonValue
-//         = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
-
-//     // Validate that activation input matches batchnorm output
-//     if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
-//     {
-//         throw hipdnn_plugin_sdk::HipdnnPluginException(
-//             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-//             "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
-//     }
-
-//     // Save mean and inv_variance are optional
-//     if(attributes.mean_tensor_uid().has_value())
-//     {
-//         _mean = &(hip_kernel_utils::findTensorAttributes(tensorMap,
-//                                                          attributes.mean_tensor_uid().value()));
-//     }
-
-//     if(attributes.inv_variance_tensor_uid().has_value())
-//     {
-//         _invVariance = &(hip_kernel_utils::findTensorAttributes(
-//             tensorMap, attributes.inv_variance_tensor_uid().value()));
-//     }
-
-//     if(attributes.prev_running_mean_tensor_uid().has_value()
-//        && attributes.prev_running_variance_tensor_uid().has_value()
-//        && attributes.momentum_tensor_uid().has_value()
-//        && attributes.next_running_mean_tensor_uid().has_value()
-//        && attributes.next_running_variance_tensor_uid().has_value())
-//     {
-//         // Extract momentum value from pass-by-value tensor (cast to double for kernel compatibility)
-//         auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
-//         _momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
-//             momentumTensorAttr, "Momentum");
-
-//         _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
-//             tensorMap, attributes.prev_running_mean_tensor_uid().value()));
-//         _prevRunningVariance = &(hip_kernel_utils::findTensorAttributes(
-//             tensorMap, attributes.prev_running_variance_tensor_uid().value()));
-//         _nextRunningMean = &(hip_kernel_utils::findTensorAttributes(
-//             tensorMap, attributes.next_running_mean_tensor_uid().value()));
-//         _nextRunningVariance = &(hip_kernel_utils::findTensorAttributes(
-//             tensorMap, attributes.next_running_variance_tensor_uid().value()));
-//         _hasRunningStats = true;
-//     }
-// }
 
 const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::x() const
 {
@@ -203,18 +140,6 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
 {
     return _nextRunningVariance.value();
 }
-
-// const std::optional<hip_kernel_utils::ActivationParams>&
-//     BatchnormFwdTrainingParams::optActivation() const
-// {
-//     return _optActivation;
-// }
-
-// const hipdnn_data_sdk::data_objects::TensorAttributes*
-//     BatchnormFwdTrainingParams::activationOut() const
-// {
-//     return _activationOut;
-// }
 
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
     : _trainingParams(std::move(trainingParams))
@@ -429,12 +354,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // Get activation mode
     int nrnOpId = 0;
 
-    // if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
-    // {
-    //     const auto& activation = *(_trainingParams.optActivation());
-    //     nrnOpId = static_cast<int>(activation.mode);
-    // }
-
     // Prepare compilation options
     std::vector<std::string> options;
     auto rocmPath
@@ -556,6 +475,8 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     // Get device buffer pointers
     auto xBuffer = hip_kernel_utils::findDeviceBuffer(
         _trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer = hip_kernel_utils::findDeviceBuffer(
+        _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
     auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
         _trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
     auto biasBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -618,143 +539,6 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     // Get activation parameters
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
-
-    // if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
-    // {
-    //     const auto& activation = *(_trainingParams.optActivation());
-    //     activationAlpha = static_cast<float>(activation.alpha);
-    //     activationBeta = static_cast<float>(activation.beta);
-    // }
-
-    // // Launch kernel with appropriate output buffer
-    // if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
-    // {
-    //     auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
-    //         _trainingParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
-
-    //     if(variant != 2)
-    //     {
-    //         if(_trainingParams.hasSaveMeanVariance() && _trainingParams.hasRunningStats())
-    //         {
-    //             hipKernel.Launch(handle.getStream(),
-    //                              xBuffer.ptr,
-    //                              activationOutBuffer.ptr,
-    //                              scaleBuffer.ptr,
-    //                              biasBuffer.ptr,
-    //                              inhw,
-    //                              expAvgFactor,
-    //                              prevRunningMeanPtr,
-    //                              prevRunningVariancePtr,
-    //                              nextRunningMeanPtr,
-    //                              nextRunningVariancePtr,
-    //                              epsilon,
-    //                              resultSaveMeanPtr,
-    //                              resultSaveInvVariancePtr,
-    //                              alpha,
-    //                              beta);
-    //         }
-    //         else if(_trainingParams.hasSaveMeanVariance())
-    //         {
-    //             hipKernel.Launch(handle.getStream(),
-    //                              xBuffer.ptr,
-    //                              activationOutBuffer.ptr,
-    //                              scaleBuffer.ptr,
-    //                              biasBuffer.ptr,
-    //                              inhw,
-    //                              epsilon,
-    //                              resultSaveMeanPtr,
-    //                              resultSaveInvVariancePtr,
-    //                              alpha,
-    //                              beta);
-    //         }
-    //         else if(_trainingParams.hasRunningStats())
-    //         {
-    //             hipKernel.Launch(handle.getStream(),
-    //                              xBuffer.ptr,
-    //                              activationOutBuffer.ptr,
-    //                              scaleBuffer.ptr,
-    //                              biasBuffer.ptr,
-    //                              inhw,
-    //                              expAvgFactor,
-    //                              prevRunningMeanPtr,
-    //                              prevRunningVariancePtr,
-    //                              nextRunningMeanPtr,
-    //                              nextRunningVariancePtr,
-    //                              epsilon,
-    //                              alpha,
-    //                              beta);
-    //         }
-    //         else
-    //         {
-    //             hipKernel.Launch(handle.getStream(),
-    //                              xBuffer.ptr,
-    //                              activationOutBuffer.ptr,
-    //                              scaleBuffer.ptr,
-    //                              biasBuffer.ptr,
-    //                              inhw,
-    //                              epsilon,
-    //                              alpha,
-    //                              beta);
-    //         }
-    //     }
-    //     else
-    //     {
-    //         // Launch the kernels
-    //         // 1. BatchNormFwdTrainSpatialMeanVariance kernel
-    //         hipKernelMeanVariance.Launch(handle.getStream(), xBuffer.ptr, activationOutBuffer.ptr);
-    //         // 2. BatchNormFwdTrainSpatialFinalMeanVariance kernel
-    //         if(_trainingParams.hasSaveMeanVariance() && _trainingParams.hasRunningStats())
-    //         {
-    //             hipKernelFinalMeanVariance.Launch(handle.getStream(),
-    //                                               activationOutBuffer.ptr,
-    //                                               inhw,
-    //                                               expAvgFactor,
-    //                                               prevRunningMeanPtr,
-    //                                               prevRunningVariancePtr,
-    //                                               nextRunningMeanPtr,
-    //                                               nextRunningVariancePtr,
-    //                                               epsilon,
-    //                                               resultSaveMeanPtr,
-    //                                               resultSaveInvVariancePtr);
-    //         }
-    //         else if(_trainingParams.hasSaveMeanVariance())
-    //         {
-    //             hipKernelFinalMeanVariance.Launch(handle.getStream(),
-    //                                               activationOutBuffer.ptr,
-    //                                               inhw,
-    //                                               epsilon,
-    //                                               resultSaveMeanPtr,
-    //                                               resultSaveInvVariancePtr);
-    //         }
-    //         else if(_trainingParams.hasRunningStats())
-    //         {
-    //             hipKernelFinalMeanVariance.Launch(handle.getStream(),
-    //                                               activationOutBuffer.ptr,
-    //                                               inhw,
-    //                                               expAvgFactor,
-    //                                               prevRunningMeanPtr,
-    //                                               prevRunningVariancePtr,
-    //                                               nextRunningMeanPtr,
-    //                                               nextRunningVariancePtr,
-    //                                               epsilon);
-    //         }
-    //         else
-    //         {
-    //             hipKernelFinalMeanVariance.Launch(
-    //                 handle.getStream(), activationOutBuffer.ptr, inhw, epsilon);
-    //         }
-    //         // 3. BatchNormFwdTrainSpatialNorm kernel
-    //         hipKernelNorm.Launch(handle.getStream(),
-    //                              xBuffer.ptr,
-    //                              activationOutBuffer.ptr,
-    //                              scaleBuffer.ptr,
-    //                              biasBuffer.ptr,
-    //                              alpha,
-    //                              beta);
-    //     }
-    // }
-    auto yBuffer = hip_kernel_utils::findDeviceBuffer(
-        _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
     if(_kernelVariant != 2)
     {
