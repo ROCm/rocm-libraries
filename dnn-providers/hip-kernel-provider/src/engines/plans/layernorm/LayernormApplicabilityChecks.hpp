@@ -8,24 +8,22 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
+#include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
-namespace hip_kernel_provider::batchnorm
+namespace hip_kernel_provider::layernorm
 {
 
 // --- Tensor Descriptor Value Object ---
 
-struct BatchnormTensorDescriptor
+struct LayernormTensorDescriptor
 {
     std::vector<int64_t> dims;
     std::vector<int64_t> strides;
     std::vector<int64_t> strideOrder;
 
-    explicit BatchnormTensorDescriptor(const hipdnn_data_sdk::data_objects::TensorAttributes* attr);
+    explicit LayernormTensorDescriptor(const hipdnn_data_sdk::data_objects::TensorAttributes* attr);
 
     size_t numDims() const
     {
@@ -38,15 +36,16 @@ struct BatchnormTensorDescriptor
 
 namespace validators
 {
+
 void validateDimensionCount(size_t numDims);
 
-void validateConsistentDimensions(const std::vector<BatchnormTensorDescriptor>& tensors);
+void validateConsistentDimensions(const std::vector<LayernormTensorDescriptor>& tensors);
 
-void validatePackedTensors(const std::vector<BatchnormTensorDescriptor>& tensors);
+void validatePackedTensors(const std::vector<LayernormTensorDescriptor>& tensors);
 
 void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t numDims);
 
-void validateConsistentLayouts(const std::vector<BatchnormTensorDescriptor>& tensors);
+void validateConsistentLayouts(const std::vector<LayernormTensorDescriptor>& tensors);
 
 void validateDataTypeIsSupported(
     hipdnn_data_sdk::data_objects::DataType dataType,
@@ -55,6 +54,14 @@ void validateDataTypeIsSupported(
 
 void validateConsistentDataTypes(
     const std::vector<int64_t>& tensorIds,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
+    const std::string& typeErrorMessage,
+    const std::string& consistencyErrorMessage);
+
+void validateConsistentDataTypes(
+    const std::vector<std::optional<int64_t>>& tensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     const std::unordered_set<hipdnn_data_sdk::data_objects::DataType>& allowedTypes,
@@ -75,11 +82,28 @@ void validateConsistentShapes(
     const std::vector<int64_t>& referenceShape,
     const std::string& errorMessage);
 
-void validateSpatialDimensions(const std::vector<int64_t>& ioDims);
+void validateConsistentShapes(
+    const std::vector<std::optional<int64_t>>& tensorIds,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const std::vector<int64_t>& referenceShape,
+    const std::string& errorMessage);
+
+void validateNormalizedDim(
+    const std::vector<int64_t>& ioTensorIds,
+    const std::vector<int64_t>& affineTensorIds,
+    const std::vector<std::optional<int64_t>>& statTensorIds,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 } // namespace validators
 
 // --- Component Validators ---
+
+void checkTensorLayoutsAndDimsSupported(
+    const std::vector<int64_t>& tensorIds,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 void checkTensorLayoutsAndDimsSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -88,82 +112,53 @@ void checkTensorLayoutsAndDimsSupported(
 void checkTensorDataTypesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
-    const std::vector<int64_t>& statTensorIds,
-    const std::vector<int64_t>& intermediateTensorIds,
+    const std::vector<std::optional<int64_t>>& statTensorIds,
+    const std::vector<int64_t>& epsilonTensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
 void checkTensorShapesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
-    const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    bool isTraining);
-
-// --- High-Level Configuration Validators ---
-
-void checkBatchnormInferenceTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const std::vector<std::optional<int64_t>>& statTensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormInferenceVarianceExtTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+// --- High-level Configuration Validators ---
+
+void checkLayernormTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::LayernormAttributes& lnAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormInferenceActivationTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
+// Layernorm Type Configuration ---
 
-void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-void checkBatchnormFwdActivationModeSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
-
-void checkBatchnormBwdActivationModeSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
-
-void checkBatchnormFwdTrainingTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
-
-// --- Batchnorm Type Configuration ---
-
-// hip-kernel-provider batchnorm requirements (based on underlying kernel constraints):
-// - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
-// - Affine/Stat/Intermediate tensors: FLOAT only
+// hip-kernel-provider layernorm requirements (based on underlying kernel constraints):
+// - IO/Affine/Stat tensors: same type (FLOAT, HALF or BFLOAT16)
+// - Epsilon tensors: FLOAT only
 struct TensorTypes
 {
     hipdnn_data_sdk::data_objects::DataType io;
     hipdnn_data_sdk::data_objects::DataType affine;
     hipdnn_data_sdk::data_objects::DataType stat;
-    hipdnn_data_sdk::data_objects::DataType intermediate;
+    hipdnn_data_sdk::data_objects::DataType epsilon;
 };
 
 namespace type_configs
 {
 using DT = hipdnn_data_sdk::data_objects::DataType;
 
-inline constexpr TensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr TensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr TensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr TensorTypes FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr TensorTypes HALF = {DT::HALF, DT::HALF, DT::HALF, DT::FLOAT};
+inline constexpr TensorTypes BFLOAT16 = {DT::BFLOAT16, DT::BFLOAT16, DT::BFLOAT16, DT::FLOAT};
 
-inline constexpr std::array<TensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
+inline constexpr std::array<TensorTypes, 3> VALID = {FLOAT, HALF, BFLOAT16};
 
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIntermediateTypes();
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedEpsilonTypes();
 
 } // namespace type_configs
 
-} // namespace hip_kernel_provider::batchnorm
+} // namespace hip_kernel_provider::layernorm
