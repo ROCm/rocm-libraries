@@ -28,6 +28,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 24 &&
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "rmsnorm_attributes_generated.h"
+#include "rmsnorm_backward_attributes_generated.h"
 #include "sdpa_attributes_generated.h"
 #include "sdpa_backward_attributes_generated.h"
 #include "tensor_attributes_generated.h"
@@ -66,11 +67,12 @@ enum class NodeAttributes : uint8_t {
   BlockScaleQuantizeAttributes = 14,
   SdpaBackwardAttributes = 15,
   CustomOpAttributes = 16,
+  RMSNormBackwardAttributes = 17,
   MIN = NONE,
-  MAX = CustomOpAttributes
+  MAX = RMSNormBackwardAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[17] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[18] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -88,13 +90,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[17] {
     NodeAttributes::BlockScaleDequantizeAttributes,
     NodeAttributes::BlockScaleQuantizeAttributes,
     NodeAttributes::SdpaBackwardAttributes,
-    NodeAttributes::CustomOpAttributes
+    NodeAttributes::CustomOpAttributes,
+    NodeAttributes::RMSNormBackwardAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[18] = {
+  static const char * const names[19] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -112,13 +115,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "BlockScaleQuantizeAttributes",
     "SdpaBackwardAttributes",
     "CustomOpAttributes",
+    "RMSNormBackwardAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::CustomOpAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RMSNormBackwardAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -191,6 +195,10 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::CustomOpAt
   static const NodeAttributes enum_value = NodeAttributes::CustomOpAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::RMSNormBackwardAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -257,6 +265,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::SdpaB
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::CustomOpAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::CustomOpAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::RMSNormBackwardAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -417,6 +429,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::CustomOpAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributesT *>(value) : nullptr;
   }
+  hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *AsRMSNormBackwardAttributes() {
+    return type == NodeAttributes::RMSNormBackwardAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *AsRMSNormBackwardAttributes() const {
+    return type == NodeAttributes::RMSNormBackwardAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -489,6 +509,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::CustomOpAttributes: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::RMSNormBackwardAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -586,6 +610,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::CustomOpAttributes *attributes_as_CustomOpAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes ? static_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes *attributes_as_RMSNormBackwardAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes ? static_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -666,6 +693,10 @@ template<> inline const hipdnn_data_sdk::data_objects::SdpaBackwardAttributes *N
 
 template<> inline const hipdnn_data_sdk::data_objects::CustomOpAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::CustomOpAttributes>() const {
   return attributes_as_CustomOpAttributes();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes>() const {
+  return attributes_as_RMSNormBackwardAttributes();
 }
 
 struct NodeBuilder {
@@ -1098,6 +1129,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::RMSNormBackwardAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1181,6 +1216,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::RMSNormBackwardAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1252,6 +1291,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::CustomOpAttributesT *>(value);
       return CreateCustomOpAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::RMSNormBackwardAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(value);
+      return CreateRMSNormBackwardAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1320,6 +1363,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::CustomOpAttributes: {
       value = new hipdnn_data_sdk::data_objects::CustomOpAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::CustomOpAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::RMSNormBackwardAttributes: {
+      value = new hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(u.value));
       break;
     }
     default:
@@ -1406,6 +1453,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::CustomOpAttributes: {
       auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::CustomOpAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::RMSNormBackwardAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormBackwardAttributesT *>(value);
       delete ptr;
       break;
     }

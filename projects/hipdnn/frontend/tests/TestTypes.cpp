@@ -343,3 +343,140 @@ TEST(TestTypes, FromHipdnnConvModeRoundTrip)
         EXPECT_EQ(roundTripped, mode);
     }
 }
+
+TEST(TestTypes, FromHipdnnPointwiseModeAllValidModes)
+{
+    using namespace hipdnn_frontend;
+
+    const std::vector<std::pair<hipdnnPointwiseMode_t, PointwiseMode>> validModes = {
+        {HIPDNN_POINTWISE_ABS, PointwiseMode::ABS},
+        {HIPDNN_POINTWISE_ADD, PointwiseMode::ADD},
+        {HIPDNN_POINTWISE_ADD_SQUARE, PointwiseMode::ADD_SQUARE},
+        {HIPDNN_POINTWISE_BINARY_SELECT, PointwiseMode::BINARY_SELECT},
+        {HIPDNN_POINTWISE_CEIL, PointwiseMode::CEIL},
+        {HIPDNN_POINTWISE_CMP_EQ, PointwiseMode::CMP_EQ},
+        {HIPDNN_POINTWISE_CMP_GE, PointwiseMode::CMP_GE},
+        {HIPDNN_POINTWISE_CMP_GT, PointwiseMode::CMP_GT},
+        {HIPDNN_POINTWISE_CMP_LE, PointwiseMode::CMP_LE},
+        {HIPDNN_POINTWISE_CMP_LT, PointwiseMode::CMP_LT},
+        {HIPDNN_POINTWISE_CMP_NEQ, PointwiseMode::CMP_NEQ},
+        {HIPDNN_POINTWISE_DIV, PointwiseMode::DIV},
+        {HIPDNN_POINTWISE_ELU_BWD, PointwiseMode::ELU_BWD},
+        {HIPDNN_POINTWISE_ELU_FWD, PointwiseMode::ELU_FWD},
+        {HIPDNN_POINTWISE_ERF, PointwiseMode::ERF},
+        {HIPDNN_POINTWISE_EXP, PointwiseMode::EXP},
+        {HIPDNN_POINTWISE_FLOOR, PointwiseMode::FLOOR},
+        {HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD, PointwiseMode::GELU_APPROX_TANH_BWD},
+        {HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD, PointwiseMode::GELU_APPROX_TANH_FWD},
+        {HIPDNN_POINTWISE_GELU_BWD, PointwiseMode::GELU_BWD},
+        {HIPDNN_POINTWISE_GELU_FWD, PointwiseMode::GELU_FWD},
+        {HIPDNN_POINTWISE_GEN_INDEX, PointwiseMode::GEN_INDEX},
+        {HIPDNN_POINTWISE_IDENTITY, PointwiseMode::IDENTITY},
+        {HIPDNN_POINTWISE_LOG, PointwiseMode::LOG},
+        {HIPDNN_POINTWISE_LOGICAL_AND, PointwiseMode::LOGICAL_AND},
+        {HIPDNN_POINTWISE_LOGICAL_NOT, PointwiseMode::LOGICAL_NOT},
+        {HIPDNN_POINTWISE_LOGICAL_OR, PointwiseMode::LOGICAL_OR},
+        {HIPDNN_POINTWISE_MAX, PointwiseMode::MAX},
+        {HIPDNN_POINTWISE_MIN, PointwiseMode::MIN},
+        {HIPDNN_POINTWISE_MUL, PointwiseMode::MUL},
+        {HIPDNN_POINTWISE_NEG, PointwiseMode::NEG},
+        {HIPDNN_POINTWISE_RECIPROCAL, PointwiseMode::RECIPROCAL},
+        {HIPDNN_POINTWISE_RELU_BWD, PointwiseMode::RELU_BWD},
+        {HIPDNN_POINTWISE_RELU_FWD, PointwiseMode::RELU_FWD},
+        {HIPDNN_POINTWISE_RSQRT, PointwiseMode::RSQRT},
+        {HIPDNN_POINTWISE_SIGMOID_BWD, PointwiseMode::SIGMOID_BWD},
+        {HIPDNN_POINTWISE_SIGMOID_FWD, PointwiseMode::SIGMOID_FWD},
+        {HIPDNN_POINTWISE_SIN, PointwiseMode::SIN},
+        {HIPDNN_POINTWISE_SOFTPLUS_BWD, PointwiseMode::SOFTPLUS_BWD},
+        {HIPDNN_POINTWISE_SOFTPLUS_FWD, PointwiseMode::SOFTPLUS_FWD},
+        {HIPDNN_POINTWISE_SQRT, PointwiseMode::SQRT},
+        {HIPDNN_POINTWISE_SUB, PointwiseMode::SUB},
+        {HIPDNN_POINTWISE_SWISH_BWD, PointwiseMode::SWISH_BWD},
+        {HIPDNN_POINTWISE_SWISH_FWD, PointwiseMode::SWISH_FWD},
+        {HIPDNN_POINTWISE_TAN, PointwiseMode::TAN},
+        {HIPDNN_POINTWISE_TANH_BWD, PointwiseMode::TANH_BWD},
+        {HIPDNN_POINTWISE_TANH_FWD, PointwiseMode::TANH_FWD},
+    };
+
+    for(const auto& [hipdnnMode, expectedMode] : validModes)
+    {
+        auto [mode, err] = fromHipdnnPointwiseMode(hipdnnMode);
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnPointwiseMode failed for mode value " << static_cast<int>(hipdnnMode);
+        EXPECT_EQ(mode, expectedMode) << "Mismatch for mode value " << static_cast<int>(hipdnnMode);
+    }
+}
+
+TEST(TestTypes, FromHipdnnPointwiseModeUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownMode = static_cast<hipdnnPointwiseMode_t>(9999);
+    auto [mode, err] = fromHipdnnPointwiseMode(unknownMode);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(mode, PointwiseMode::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto mode : {PointwiseMode::ABS,
+                     PointwiseMode::ADD,
+                     PointwiseMode::ADD_SQUARE,
+                     PointwiseMode::BINARY_SELECT,
+                     PointwiseMode::CEIL,
+                     PointwiseMode::CMP_EQ,
+                     PointwiseMode::CMP_GE,
+                     PointwiseMode::CMP_GT,
+                     PointwiseMode::CMP_LE,
+                     PointwiseMode::CMP_LT,
+                     PointwiseMode::CMP_NEQ,
+                     PointwiseMode::DIV,
+                     PointwiseMode::ELU_BWD,
+                     PointwiseMode::ELU_FWD,
+                     PointwiseMode::ERF,
+                     PointwiseMode::EXP,
+                     PointwiseMode::FLOOR,
+                     PointwiseMode::GELU_APPROX_TANH_BWD,
+                     PointwiseMode::GELU_APPROX_TANH_FWD,
+                     PointwiseMode::GELU_BWD,
+                     PointwiseMode::GELU_FWD,
+                     PointwiseMode::GEN_INDEX,
+                     PointwiseMode::IDENTITY,
+                     PointwiseMode::LOG,
+                     PointwiseMode::LOGICAL_AND,
+                     PointwiseMode::LOGICAL_NOT,
+                     PointwiseMode::LOGICAL_OR,
+                     PointwiseMode::MAX,
+                     PointwiseMode::MIN,
+                     PointwiseMode::MUL,
+                     PointwiseMode::NEG,
+                     PointwiseMode::RECIPROCAL,
+                     PointwiseMode::RELU_BWD,
+                     PointwiseMode::RELU_FWD,
+                     PointwiseMode::RSQRT,
+                     PointwiseMode::SIGMOID_BWD,
+                     PointwiseMode::SIGMOID_FWD,
+                     PointwiseMode::SIN,
+                     PointwiseMode::SOFTPLUS_BWD,
+                     PointwiseMode::SOFTPLUS_FWD,
+                     PointwiseMode::SQRT,
+                     PointwiseMode::SUB,
+                     PointwiseMode::SWISH_BWD,
+                     PointwiseMode::SWISH_FWD,
+                     PointwiseMode::TAN,
+                     PointwiseMode::TANH_BWD,
+                     PointwiseMode::TANH_FWD})
+    {
+        auto hipdnnOpt = toBackendPointwiseMode(mode);
+        ASSERT_TRUE(hipdnnOpt.has_value())
+            << "toBackendPointwiseMode failed for mode " << static_cast<int>(mode);
+        auto [roundTripped, err] = fromHipdnnPointwiseMode(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnPointwiseMode failed for mode " << static_cast<int>(mode);
+        EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
+    }
+}
