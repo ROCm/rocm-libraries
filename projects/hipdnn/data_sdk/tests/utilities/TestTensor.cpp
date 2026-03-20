@@ -137,42 +137,42 @@ TEST(TestTensor, ExceedDimensions)
 TEST(TestTensor, GetIndex)
 {
     //Strides {60, 20, 5, 1}
-    Tensor<float> tensor({2, 3, 4, 5});
+    const Tensor<float> tensor({2, 3, 4, 5});
 
     // 1*60 + 2*20 + 3*5 + 4*1 = 119
     EXPECT_EQ(tensor.getIndex(1, 2, 3, 4), 119);
-    std::vector<int64_t> indices1 = {1, 2, 3, 4};
+    const std::vector<int64_t> indices1 = {1, 2, 3, 4};
     EXPECT_EQ(tensor.getIndex(indices1), 119);
 
     // Test first element
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 0), 0);
-    std::vector<int> indices2 = {0, 0, 0, 0};
+    const std::vector<int64_t> indices2 = {0, 0, 0, 0};
     EXPECT_EQ(tensor.getIndex(indices2), 0);
 
     // Test partial indices
     EXPECT_EQ(tensor.getIndex(1, 0), 60);
-    std::vector<size_t> indices3 = {1, 0};
+    const std::vector<int64_t> indices3 = {1, 0};
     EXPECT_EQ(tensor.getIndex(indices3), 60);
 
     EXPECT_EQ(tensor.getIndex(0, 1), 20);
-    std::vector<size_t> indices4 = {0, 1};
+    const std::vector<int64_t> indices4 = {0, 1};
     EXPECT_EQ(tensor.getIndex(indices4), 20);
 }
 
 TEST(TestTensor, GetIndexNhwc)
 {
     //Strides {60, 1, 15, 3}
-    Tensor<float> tensor({2, 3, 4, 5}, TensorLayout::NHWC);
+    const Tensor<float> tensor({2, 3, 4, 5}, TensorLayout::NHWC);
 
     // 1*60 + 2*1 + 3*15 + 4*3 = 119
     EXPECT_EQ(tensor.getIndex(1, 2, 3, 4), 119);
-    std::vector<int64_t> indices = {1, 2, 3, 4};
+    const std::vector<int64_t> indices = {1, 2, 3, 4};
     EXPECT_EQ(tensor.getIndex(indices), 119);
 }
 
 TEST(TestTensor, GetIndexEdgeCases)
 {
-    Tensor<float> tensor({10, 20});
+    const Tensor<float> tensor({10, 20});
 
     // Last element
     EXPECT_EQ(tensor.getIndex(9, 19), 199);
@@ -186,17 +186,17 @@ TEST(TestTensor, GetIndexEdgeCases)
     EXPECT_EQ(tensor.getIndex(indices), 100);
 
     // Empty dim
-    std::vector<int64_t> emptyIndices;
+    const std::vector<int64_t> emptyIndices;
     EXPECT_EQ(tensor.getIndex(emptyIndices), 0);
 }
 
 TEST(TestTensor, GetIndexInvalidCases)
 {
-    Tensor<float> tensor({2, 3, 4});
+    const Tensor<float> tensor({2, 3, 4});
 
     EXPECT_THROW(tensor.getIndex(0, 1, 2, 3), std::invalid_argument);
 
-    std::vector<int64_t> tooManyIndices = {0, 1, 2, 3};
+    const std::vector<int64_t> tooManyIndices = {0, 1, 2, 3};
     EXPECT_THROW(tensor.getIndex(tooManyIndices), std::invalid_argument);
 }
 
@@ -206,7 +206,7 @@ TEST(TestTensor, GetHostValueWithVector)
     tensor.fillWithValue(0.0f);
 
     tensor.setHostValue(42.0f, 1, 2, 3);
-    std::vector<size_t> indices2 = {1, 2, 3};
+    const std::vector<int64_t> indices2 = {1, 2, 3};
     EXPECT_FLOAT_EQ(tensor.getHostValue(indices2), 42.0f);
 }
 
@@ -215,13 +215,13 @@ TEST(TestTensor, SetHostValueWithVector)
     Tensor<float> tensor({2, 3, 4});
     tensor.fillWithValue(0.0f);
 
-    std::vector<int64_t> indices1 = {0, 1, 2};
+    const std::vector<int64_t> indices1 = {0, 1, 2};
     tensor.setHostValue(10.0f, indices1);
 
-    std::vector<size_t> indices2 = {1, 0, 3};
+    const std::vector<int64_t> indices2 = {1, 0, 3};
     tensor.setHostValue(20.0f, indices2);
 
-    std::vector<int> indices3 = {1, 2, 1};
+    const std::vector<int64_t> indices3 = {1, 2, 1};
     tensor.setHostValue(30.0f, indices3);
 
     EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2), 10.0f);
@@ -257,7 +257,7 @@ TEST(TestTensor, MixedIndexingMethods)
 
 TEST(TestTensor, GetIndexConsistency)
 {
-    Tensor<float> tensor({5, 6, 7});
+    const Tensor<float> tensor({5, 6, 7});
 
     for(int i = 0; i < 5; ++i)
     {
@@ -267,7 +267,7 @@ TEST(TestTensor, GetIndexConsistency)
             {
                 auto variadicIndex = tensor.getIndex(i, j, k);
 
-                std::vector<int64_t> vecIndices = {i, j, k};
+                const std::vector<int64_t> vecIndices = {i, j, k};
                 auto vectorIndex = tensor.getIndex(vecIndices);
 
                 EXPECT_EQ(variadicIndex, vectorIndex);
@@ -357,9 +357,9 @@ TEST(TestTensor, DefaultPackedStridesIndexing)
 TEST(TestTensor, DefaultPackedStridesCompatibleWithNchw)
 {
     // Default packed strides should be equivalent to NCHW for 4D tensors
-    std::vector<int64_t> dims = {2, 3, 4, 5};
-    Tensor<float> tensorDefault(dims);
-    Tensor<float> tensorNchw(dims, TensorLayout::NCHW);
+    const std::vector<int64_t> dims = {2, 3, 4, 5};
+    const Tensor<float> tensorDefault(dims);
+    const Tensor<float> tensorNchw(dims, TensorLayout::NCHW);
 
     EXPECT_EQ(tensorDefault.strides(), tensorNchw.strides());
 }
@@ -367,9 +367,9 @@ TEST(TestTensor, DefaultPackedStridesCompatibleWithNchw)
 TEST(TestTensor, DefaultPackedStridesCompatibleWithNcdhw)
 {
     // Default packed strides should be equivalent to NCDHW for 5D tensors
-    std::vector<int64_t> dims = {2, 3, 4, 5, 6};
-    Tensor<float> tensorDefault(dims);
-    Tensor<float> tensorNcdhw(dims, TensorLayout::NCDHW);
+    const std::vector<int64_t> dims = {2, 3, 4, 5, 6};
+    const Tensor<float> tensorDefault(dims);
+    const Tensor<float> tensorNcdhw(dims, TensorLayout::NCDHW);
 
     EXPECT_EQ(tensorDefault.strides(), tensorNcdhw.strides());
 }
@@ -467,93 +467,93 @@ TEST(TestTensor, ElementAccessOperatorNdhwc)
 TEST(TestTensor, GetIndex5D)
 {
     //Strides {120, 60, 20, 5, 1}
-    Tensor<float> tensor({2, 2, 3, 4, 5}, TensorLayout::NCDHW);
+    const Tensor<float> tensor({2, 2, 3, 4, 5}, TensorLayout::NCDHW);
 
     // 1*120 + 1*60 + 2*20 + 3*5 + 4*1 = 239
     EXPECT_EQ(tensor.getIndex(1, 1, 2, 3, 4), 239);
-    std::vector<int64_t> indices1 = {1, 1, 2, 3, 4};
+    const std::vector<int64_t> indices1 = {1, 1, 2, 3, 4};
     EXPECT_EQ(tensor.getIndex(indices1), 239);
 
     // Test first element
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 0, 0), 0);
-    std::vector<int> indices2 = {0, 0, 0, 0, 0};
+    const std::vector<int64_t> indices2 = {0, 0, 0, 0, 0};
     EXPECT_EQ(tensor.getIndex(indices2), 0);
 
     // Test partial indices
     EXPECT_EQ(tensor.getIndex(1, 0), 120);
-    std::vector<size_t> indices3 = {1, 0};
+    const std::vector<int64_t> indices3 = {1, 0};
     EXPECT_EQ(tensor.getIndex(indices3), 120);
 
     EXPECT_EQ(tensor.getIndex(0, 1), 60);
-    std::vector<size_t> indices4 = {0, 1};
+    const std::vector<int64_t> indices4 = {0, 1};
     EXPECT_EQ(tensor.getIndex(indices4), 60);
 }
 
 TEST(TestTensor, GetIndex5DNdhwc)
 {
     //Strides {120, 1, 40, 10, 2}
-    Tensor<float> tensor({2, 2, 3, 4, 5}, TensorLayout::NDHWC);
+    const Tensor<float> tensor({2, 2, 3, 4, 5}, TensorLayout::NDHWC);
 
     // 1*120 + 1*1 + 2*40 + 3*10 + 4*2 = 239
     EXPECT_EQ(tensor.getIndex(1, 1, 2, 3, 4), 239);
-    std::vector<int64_t> indices = {1, 1, 2, 3, 4};
+    const std::vector<int64_t> indices = {1, 1, 2, 3, 4};
     EXPECT_EQ(tensor.getIndex(indices), 239);
 }
 
 TEST(TestTensor, ConstructorThrowsOnMismatchedDimsAndStrides)
 {
-    std::vector<int64_t> dims = {2, 3, 4};
-    std::vector<int64_t> strides = {12, 4}; // Only 2 strides for 3 dims
+    const std::vector<int64_t> dims = {2, 3, 4};
+    const std::vector<int64_t> strides = {12, 4}; // Only 2 strides for 3 dims
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 TEST(TestTensor, ConstructorThrowsOnNegativeDimension)
 {
-    std::vector<int64_t> dims = {2, -3, 4};
-    std::vector<int64_t> strides = {12, 4, 1};
+    const std::vector<int64_t> dims = {2, -3, 4};
+    const std::vector<int64_t> strides = {12, 4, 1};
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 TEST(TestTensor, ConstructorThrowsOnZeroDimension)
 {
-    std::vector<int64_t> dims = {2, 0, 4};
-    std::vector<int64_t> strides = {12, 4, 1};
+    const std::vector<int64_t> dims = {2, 0, 4};
+    const std::vector<int64_t> strides = {12, 4, 1};
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 TEST(TestTensor, ConstructorThrowsOnNegativeStride)
 {
-    std::vector<int64_t> dims = {2, 3, 4};
-    std::vector<int64_t> strides = {12, -4, 1};
+    const std::vector<int64_t> dims = {2, 3, 4};
+    const std::vector<int64_t> strides = {12, -4, 1};
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 TEST(TestTensor, ConstructorThrowsOnZeroStride)
 {
-    std::vector<int64_t> dims = {2, 3, 4};
-    std::vector<int64_t> strides = {12, 0, 1};
+    const std::vector<int64_t> dims = {2, 3, 4};
+    const std::vector<int64_t> strides = {12, 0, 1};
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 TEST(TestTensor, ConstructorThrowsOnMultipleInvalidDimensions)
 {
-    std::vector<int64_t> dims = {-2, 1, -4};
-    std::vector<int64_t> strides = {12, 4, 1};
+    const std::vector<int64_t> dims = {-2, 1, -4};
+    const std::vector<int64_t> strides = {12, 4, 1};
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 TEST(TestTensor, ConstructorThrowsOnMultipleInvalidStrides)
 {
-    std::vector<int64_t> dims = {2, 3, 4};
-    std::vector<int64_t> strides = {-12, 1, -1};
+    const std::vector<int64_t> dims = {2, 3, 4};
+    const std::vector<int64_t> strides = {-12, 1, -1};
 
-    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
 // Sparse (strided) tensor test
@@ -561,8 +561,8 @@ TEST(TestTensor, SparseTensorCreationAndUsage)
 {
     // Create a sparse tensor with dims {2,2,2,2} and strides {2,4,8,16}
     // This represents a non-packed layout with gaps in memory
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    const std::vector<int64_t> dims = {2, 2, 2, 2};
+    const std::vector<int64_t> strides = {2, 4, 8, 16};
 
     Tensor<float> tensor(dims, strides);
 

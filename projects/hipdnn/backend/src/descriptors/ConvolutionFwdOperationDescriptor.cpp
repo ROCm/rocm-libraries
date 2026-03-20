@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -125,6 +126,13 @@ void ConvolutionFwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                     arrayOfElements,
                     "ConvolutionFwdOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        setString(_name,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "ConvolutionFwdOperationDescriptor::setAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "ConvolutionFwdOperationDescriptor::setAttribute: attributeName not "
@@ -220,6 +228,22 @@ void ConvolutionFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                     arrayOfElements,
                     "ConvolutionFwdOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_NAME_EXT:
+        getString(_name,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ConvolutionFwdOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_TYPE_EXT:
+        getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "ConvolutionFwdOperationDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "ConvolutionFwdOperationDescriptor::getAttribute: attributeName not "
@@ -241,9 +265,33 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
     ConvolutionFwdOperationDescriptor::buildNode() const
 {
     auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
     node->attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionFwdAttributesT(_data));
     return node;
+}
+
+std::shared_ptr<ConvolutionFwdOperationDescriptor> ConvolutionFwdOperationDescriptor::fromNode(
+    const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsConvolutionFwdAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "ConvolutionFwdOperationDescriptor::fromNode: ConvolutionFwdAttributes is null");
+
+    auto desc = std::make_shared<ConvolutionFwdOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "ConvolutionFwdOperationDescriptor::fromNode: X");
+    desc->_wDesc = findTensorInMap(
+        tensorMap, attrs->w_tensor_uid, "ConvolutionFwdOperationDescriptor::fromNode: W");
+    desc->_yDesc = findTensorInMap(
+        tensorMap, attrs->y_tensor_uid, "ConvolutionFwdOperationDescriptor::fromNode: Y");
+    desc->finalize();
+    return desc;
 }
 
 hipdnnBackendDescriptorType_t ConvolutionFwdOperationDescriptor::getStaticType()
@@ -255,7 +303,8 @@ std::string ConvolutionFwdOperationDescriptor::toString() const
 {
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "ConvolutionFwdOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", w_uid=" + std::to_string(_data.w_tensor_uid);
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
     str += ", pre_padding=" + vecToString(_data.pre_padding);

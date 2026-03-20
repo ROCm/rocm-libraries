@@ -8,6 +8,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/Visibility.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 
 namespace hipdnn_frontend::detail
 {
@@ -45,7 +46,8 @@ public:
         = 0;
     virtual const char* getErrorString(hipdnnStatus_t status) = 0;
     virtual void getLastErrorString(char* message, size_t maxSize) = 0;
-    virtual hipdnnStatus_t versionExt(const char** version) = 0;
+    virtual hipdnn_data_sdk::utilities::Version version() = 0;
+    virtual const char* versionString() = 0;
     virtual hipdnnStatus_t backendCreateAndDeserializeGraphExt(
         hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize)
         = 0;
@@ -54,6 +56,12 @@ public:
     virtual hipdnnStatus_t setEnginePluginPathsExt(size_t numPaths,
                                                    const char* const* pluginPaths,
                                                    hipdnnPluginLoadingMode_ext_t mode)
+        = 0;
+
+    virtual hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
+                                                         size_t* numPluginPaths,
+                                                         char** pluginPaths,
+                                                         size_t* maxStringLen)
         = 0;
 
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance

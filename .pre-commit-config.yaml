@@ -41,6 +41,8 @@ exclude: |
     # ==========================================================================
     # Permanent exclusions
     # ==========================================================================
+    # Auto-generated GitHub Agentic Workflow lock files
+    \.github/workflows/.*\.lock\.yml$|
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers

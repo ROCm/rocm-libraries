@@ -57,7 +57,7 @@
     #include <stdint.h>
 #endif
 
-inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
+constexpr inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
 {
     switch(alg)
     {
@@ -71,7 +71,7 @@ inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm a
 }
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
