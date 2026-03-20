@@ -1377,7 +1377,7 @@ public:
      * 5. Plan finalization
      *
      * @note This method does not allow setting engine knobs. If you need
-     * to configure knobs, use get_available_engines(), get_knobs_for_engine(),
+     * to configure knobs, use get_ranked_engine_ids(), get_knobs_for_engine(),
      * and create_execution_plan_ext() instead.
      *
      * @code{.cpp}
