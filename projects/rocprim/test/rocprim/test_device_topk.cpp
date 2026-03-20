@@ -88,6 +88,16 @@ void inline compare_k(InputVector input, OutputVector output, SizeOut k)
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input, k));
 }
 
+// Get the free memory size with a coefficient.
+size_t get_current_free_mem_size(float coefficient)
+{
+    size_t free_mem;
+    [[maybe_unused]]
+    size_t total_mem;
+    HIP_CHECK(hipMemGetInfo(&free_mem, &total_mem));
+    return static_cast<size_t>(static_cast<float>(free_mem) * coefficient);
+}
+
 namespace std
 {
 template<>
@@ -635,6 +645,14 @@ void topk_large_sizes_test(bool debug_synchronous)
         {
             // Default stream does not support hipGraph stream capture, so create one
             HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+        }
+
+        // This test needs to allocate 2 buffers of size: sizeof(key_type) * size, plus temporary storage.
+        // Check if there could be no enough memory space
+        if(2 * sizeof(key_type) * size > get_current_free_mem_size(0.9))
+        {
+            std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+            return;
         }
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
