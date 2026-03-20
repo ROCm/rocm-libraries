@@ -132,7 +132,7 @@ protected:
 
         _handle = createHandle();
 
-        std::vector<int64_t> dims = {1, 3, 4, 4};
+        const std::vector<int64_t> dims = {1, 3, 4, 4};
         SimpleTensorBundle<float> tensorBundle(dims);
 
         auto graph = createSimplePointwiseGraph("EngineFilteringTest", dims);

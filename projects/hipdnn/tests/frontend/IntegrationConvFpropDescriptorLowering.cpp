@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -19,6 +20,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
+using namespace hipdnn_tests::constants::integration;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using ConvModeSdk = hipdnn_data_sdk::data_objects::ConvMode;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
@@ -33,24 +35,6 @@ public:
     using Graph::build_operation_graph_via_descriptors;
     using Graph::get_raw_graph_descriptor;
 };
-
-// -- Test constants for ConvFpropGraphRoundTrip --
-// These use different values from the shared constants (different dims/strides/UIDs)
-// and are specific to the conv fprop lowering tests.
-
-constexpr int64_t K_TENSOR_X_UID = 10;
-constexpr int64_t K_TENSOR_W_UID = 20;
-constexpr int64_t K_TENSOR_Y_UID = 30;
-
-constexpr std::array<int64_t, 4> K_TENSOR_X_DIMS = {2, 3, 14, 14};
-constexpr std::array<int64_t, 4> K_TENSOR_X_STRIDES = {588, 196, 14, 1};
-constexpr std::array<int64_t, 4> K_TENSOR_W_DIMS = {8, 3, 3, 3};
-constexpr std::array<int64_t, 4> K_TENSOR_W_STRIDES = {27, 9, 3, 1};
-
-constexpr std::array<int64_t, 2> K_CONV_PRE_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_POST_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_STRIDE = {2, 2};
-constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
 
 // -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
 
@@ -282,7 +266,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         << "Y tensor UID " << convFwd->y_tensor_uid << " not found in graph tensors";
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {convFwd->x_tensor_uid, convFwd->w_tensor_uid, convFwd->y_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u) << "Conv node tensor UIDs are not distinct";
 }

@@ -50,6 +50,7 @@
  * - 2600-2699: SDPA forward propagation operation attributes
  * - 2700-2799: Layernorm operation attributes
  * - 2800-2899: Block scale quantize operation attributes
+ * - 2807-2899: Block scale dequantize operation attributes
  * - 2900-2913: Batchnorm training forward operation attributes
  * - 60000+: Extension attributes
  */
@@ -193,6 +194,9 @@ typedef enum
 
     /** @brief Preferred engine ID for execution plan selection (int64_t, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT = 607,
+
+    /** @brief Name of the operation graph (HIPDNN_TYPE_CHAR, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT = 608,
 
     /** @} */
 
@@ -799,7 +803,6 @@ typedef enum
 
     /** @brief Math precision (compute data type) for layernorm */
     HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
-
     /** @} */
 
     /**
@@ -828,6 +831,32 @@ typedef enum
 
     /** @brief Math precision for block scale quantize */
     HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_MATH_PREC_EXT = 2806,
+
+    /** @} */
+
+    /**
+     * @name BlockScaleDequantize Operation Attributes (2807-2899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT = 2807,
+
+    /** @brief Scale tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT = 2808,
+
+    /** @brief Output tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT = 2809,
+
+    /** @brief Block sizes for each dimension */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT = 2810,
+
+    /** @brief Whether scale is negative */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT = 2811,
+
+    /** @brief Math precision for block scale dequantize */
+    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT = 2812,
 
     /** @} */
 

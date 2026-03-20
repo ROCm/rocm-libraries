@@ -813,6 +813,7 @@ void testing_gemm_ex(const Arguments& arg)
     rocblas_gemm_algo algo = rocblas_gemm_algo(arg.algo);
 
 #ifdef BUILD_WITH_TENSILE // tensile or hipblaslt only for now
+/* TODO requires full data for query otherwise no solution guarantees
     if(compare_solutions && algo == rocblas_gemm_algo_solution_index)
     {
         arguments = &run_arg; // override
@@ -856,6 +857,7 @@ void testing_gemm_ex(const Arguments& arg)
             GTEST_SKIP() << "Backend returning 0 valid solutions";
         }
     }
+*/
 #endif
 
     for(auto sol : solutions_that_solve)

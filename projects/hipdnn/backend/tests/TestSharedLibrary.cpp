@@ -51,7 +51,7 @@ TEST(TestSharedLibrary, LoadLibraryWithLibExt)
 
 TEST(TestSharedLibrary, LoadLibraryCtor)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 }
 
 TEST(TestSharedLibrary, LoadLibraryWrongPath)
@@ -69,27 +69,27 @@ TEST(TestSharedLibrary, LoadLibraryCtorWrongPath)
 
 TEST(TestSharedLibrary, GetSymbol)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 
     ASSERT_NO_THROW(library.getSymbol(SYMBOL_NAME));
 }
 
 TEST(TestSharedLibrary, GetSymbolUninitialized)
 {
-    plugin::SharedLibrary library;
+    const plugin::SharedLibrary library;
     ASSERT_THROW_HIPDNN_STATUS(library.getSymbol(SYMBOL_NAME), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST(TestSharedLibrary, GetSymbolWrongName)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 
     ASSERT_THROW_HIPDNN_STATUS(library.getSymbol(WRONG_SYMBOL_NAME), HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST(TestSharedLibrary, CallFunction)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 
     // Get the function pointer
     using FuncType = hipdnnPluginStatus_t (*)(const char**);

@@ -64,9 +64,9 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
 {
     // CpuFpReferenceMatmul::isApplicable should return true for Matmul node
     {
-        std::vector<int64_t> aDims = {2, 2, 3};
-        std::vector<int64_t> bDims = {2, 3, 4};
-        std::vector<int64_t> cDims = {2, 2, 4};
+        const std::vector<int64_t> aDims = {2, 2, 3};
+        const std::vector<int64_t> bDims = {2, 3, 4};
+        const std::vector<int64_t> cDims = {2, 2, 4};
 
         MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, 1);
         auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
@@ -74,14 +74,14 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto& graph = std::get<0>(graphTuple);
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(flatbufferGraph.data(),
-                                                                      flatbufferGraph.size());
+        const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(flatbufferGraph.data(),
+                                                                            flatbufferGraph.size());
         EXPECT_TRUE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
     }
 
     // CpuFpReferenceMatmul::isApplicable should return false for any other node type
     {
-        std::vector<int64_t> dims = {1, 3, 4, 4};
+        const std::vector<int64_t> dims = {1, 3, 4, 4};
 
         auto graphTuple = buildPointwiseUnaryGraph(dims,
                                                    dims,
@@ -95,8 +95,8 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto& graph = std::get<0>(graphTuple);
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(flatbufferGraph.data(),
-                                                                      flatbufferGraph.size());
+        const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(flatbufferGraph.data(),
+                                                                            flatbufferGraph.size());
         EXPECT_FALSE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
     }
 }

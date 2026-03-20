@@ -75,7 +75,7 @@ public:
         // SECTION 4: Validate Channel Dimensions and Scale Tensor Shape
         // Scale is per-channel with shape [1, C, 1, 1, ...]
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
