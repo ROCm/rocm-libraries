@@ -4,9 +4,9 @@
 #include "SdpaKernelPlanBuilder.hpp"
 #include "SdpaKernelPlan.hpp"
 #include "asm/AsmKernelPath.hpp"
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hip/hip_runtime.h>
 #include <cmath>
+#include <hip/hip_runtime.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace sdpa_kernel_provider
 {
@@ -55,16 +55,16 @@ void SdpaKernelPlanBuilder::buildPlan(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     SdpaKernelContext& executionContext) const
 {
-    // 1. Load kernel module
-    std::string coPath = asm_kernels::getAsmKernelPath(
-        "gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
+    // Load kernel module
+    std::string coPath
+        = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
 
     hipModule_t module;
     hipError_t err = hipModuleLoad(&module, coPath.c_str());
     if(err != hipSuccess)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to load kernel module: " << coPath
-                                << " error: " << hipGetErrorString(err));
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
         return;
     }
 
@@ -72,18 +72,17 @@ void SdpaKernelPlanBuilder::buildPlan(
     err = hipModuleGetFunction(&function, module, "_ZN5aiter24fmha_fwd_hd128_bf16_rtneE");
     if(err != hipSuccess)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: "
-                                << hipGetErrorString(err));
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: " << hipGetErrorString(err));
         err = hipModuleUnload(module);
         if(err != hipSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Failed to unload kernel module on error, error: "
-                                    << hipGetErrorString(err));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to unload kernel module on error, error: " << hipGetErrorString(err));
         }
         return;
     }
 
-    // 2. Extract SDPA attributes and tensor metadata
+    // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
     auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_data_sdk::data_objects::SdpaAttributes>();
     auto& tensorMap = opGraph.getTensorMap();
@@ -121,7 +120,7 @@ void SdpaKernelPlanBuilder::buildPlan(
     size_t qStrideBatch = static_cast<size_t>(qStrides->Get(0));
     size_t qStrideHead = static_cast<size_t>(qStrides->Get(1));
     size_t qStrideSeq = static_cast<size_t>(qStrides->Get(2));
-    size_t qStrideRow = qStrideSeq;  // Same as sequence stride
+    size_t qStrideRow = qStrideSeq; // Same as sequence stride
 
     // Extract strides - K: [B, H_kv, S_kv, D_qk]
     auto* kStrides = kTensor->strides();
@@ -149,17 +148,34 @@ void SdpaKernelPlanBuilder::buildPlan(
         attnScale = scaleValue.value();
     }
 
-    // 3. Create plan with all metadata
-    executionContext.setPlan(std::make_unique<SdpaKernelPlan>(
-        module, function,
-        qUid, kUid, vUid, oUid,
-        batchSize, numHeadsQ, numHeadsKv,
-        seqLenQ, seqLenKv, headDimQk, headDimV,
-        qStrideSeq, qStrideRow, qStrideHead, qStrideBatch,
-        kStrideSeq, kStrideHead, kStrideBatch,
-        vStrideSeq, vStrideHead, vStrideBatch,
-        oStrideSeq, oStrideHead, oStrideBatch,
-        attnScale));
+    // Create plan with all metadata
+    executionContext.setPlan(std::make_unique<SdpaKernelPlan>(module,
+                                                              function,
+                                                              qUid,
+                                                              kUid,
+                                                              vUid,
+                                                              oUid,
+                                                              batchSize,
+                                                              numHeadsQ,
+                                                              numHeadsKv,
+                                                              seqLenQ,
+                                                              seqLenKv,
+                                                              headDimQk,
+                                                              headDimV,
+                                                              qStrideSeq,
+                                                              qStrideRow,
+                                                              qStrideHead,
+                                                              qStrideBatch,
+                                                              kStrideSeq,
+                                                              kStrideHead,
+                                                              kStrideBatch,
+                                                              vStrideSeq,
+                                                              vStrideHead,
+                                                              vStrideBatch,
+                                                              oStrideSeq,
+                                                              oStrideHead,
+                                                              oStrideBatch,
+                                                              attnScale));
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> SdpaKernelPlanBuilder::getCustomKnobs(

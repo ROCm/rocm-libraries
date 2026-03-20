@@ -3,24 +3,40 @@
 
 #include "SdpaKernelPlan.hpp"
 #include "asm/AsmSdpaFwdKernelArgs.hpp"
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hip/hip_runtime.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
 
 namespace sdpa_kernel_provider
 {
 
-SdpaKernelPlan::SdpaKernelPlan(
-    hipModule_t module,
-    hipFunction_t function,
-    int64_t qUid, int64_t kUid, int64_t vUid, int64_t oUid,
-    size_t batchSize, size_t numHeadsQ, size_t numHeadsKv,
-    size_t seqLenQ, size_t seqLenKv, size_t headDimQk, size_t headDimV,
-    size_t qStrideSeq, size_t qStrideRow, size_t qStrideHead, size_t qStrideBatch,
-    size_t kStrideSeq, size_t kStrideHead, size_t kStrideBatch,
-    size_t vStrideSeq, size_t vStrideHead, size_t vStrideBatch,
-    size_t oStrideSeq, size_t oStrideHead, size_t oStrideBatch,
-    float attnScale)
+SdpaKernelPlan::SdpaKernelPlan(hipModule_t module,
+                               hipFunction_t function,
+                               int64_t qUid,
+                               int64_t kUid,
+                               int64_t vUid,
+                               int64_t oUid,
+                               size_t batchSize,
+                               size_t numHeadsQ,
+                               size_t numHeadsKv,
+                               size_t seqLenQ,
+                               size_t seqLenKv,
+                               size_t headDimQk,
+                               size_t headDimV,
+                               size_t qStrideSeq,
+                               size_t qStrideRow,
+                               size_t qStrideHead,
+                               size_t qStrideBatch,
+                               size_t kStrideSeq,
+                               size_t kStrideHead,
+                               size_t kStrideBatch,
+                               size_t vStrideSeq,
+                               size_t vStrideHead,
+                               size_t vStrideBatch,
+                               size_t oStrideSeq,
+                               size_t oStrideHead,
+                               size_t oStrideBatch,
+                               float attnScale)
     : _module(module)
     , _function(function)
     , _qUid(qUid)
@@ -58,8 +74,8 @@ SdpaKernelPlan::~SdpaKernelPlan()
         hipError_t err = hipModuleUnload(_module);
         if(err != hipSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Failed to unload kernel module, error: "
-                                    << hipGetErrorString(err));
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to unload kernel module, error: " << hipGetErrorString(err));
         }
     }
 }
@@ -75,20 +91,20 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
                              uint32_t numDeviceBuffers,
                              void* /*workspace*/) const
 {
-    // 1. Build UID→ptr map from device buffers
+    // Build UID→ptr map from device buffers
     std::unordered_map<int64_t, void*> uidToPtrMap;
     for(uint32_t i = 0; i < numDeviceBuffers; ++i)
     {
         uidToPtrMap[deviceBuffers[i].uid] = deviceBuffers[i].ptr;
     }
 
-    // 2. Get tensor pointers
+    // Get tensor pointers
     void* qPtr = uidToPtrMap.at(_qUid);
     void* kPtr = uidToPtrMap.at(_kUid);
     void* vPtr = uidToPtrMap.at(_vUid);
     void* oPtr = uidToPtrMap.at(_oUid);
 
-    // 3. Populate kernel args struct
+    // Populate kernel args struct
     fmha_fwd_v3_args args{};
 
     // Output/input pointers
@@ -96,7 +112,7 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
     args.ptr_q = qPtr;
     args.ptr_k = kPtr;
     args.ptr_v = vPtr;
-    args.ptr_lse = nullptr;  // POC: no LSE output (withStats = false)
+    args.ptr_lse = nullptr; // POC: no LSE output (withStats = false)
 
     // Attention scale
     args.scalar = _attnScale;
@@ -118,8 +134,8 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
     args.s_k_Bs = static_cast<unsigned int>(_kStrideBatch * bf16_size);
 
     // Options
-    args.s_opt = 0;  // Default: no special options (RTNE rounding)
-    args.s_lse = 0;  // POC: don't compute LSE
+    args.s_opt = 0; // Default: no special options (RTNE rounding)
+    args.s_lse = 0; // POC: don't compute LSE
 
     // KV dimensions
     args.s_kv_seq_len = static_cast<unsigned int>(_seqLenKv);
@@ -161,7 +177,7 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
     args.s_descale_v_Bs = 0;
     args.s_descale_v_Hs = 0;
 
-    // 4. Compute grid dimensions
+    // Compute grid dimensions
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
     constexpr size_t ts_qo = 256;
     unsigned int gdx = static_cast<unsigned int>((_seqLenQ + ts_qo - 1) / ts_qo);
@@ -173,17 +189,26 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
     constexpr unsigned int bdy = 1;
     constexpr unsigned int bdz = 1;
 
-    // 5. Launch kernel
-    void* kernelArgs[] = {&args};
+    // Launch kernel using HIP_LAUNCH_PARAM mechanism
+    // This is required for passing large argument structures(656 bytes) to ASM kernels
+    size_t argSize = sizeof(args);
+    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                      &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                      &argSize,
+                      HIP_LAUNCH_PARAM_END};
 
-    hipError_t err = hipModuleLaunchKernel(
-        _function,
-        gdx, gdy, gdz,  // grid dimensions
-        bdx, bdy, bdz,  // block dimensions
-        0,              // shared memory bytes (kernel uses LDS internally)
-        nullptr,        // stream (use default)
-        kernelArgs,     // kernel arguments
-        nullptr);       // extra options
+    hipError_t err = hipModuleLaunchKernel(_function,
+                                           gdx,
+                                           gdy,
+                                           gdz, // grid dimensions
+                                           bdx,
+                                           bdy,
+                                           bdz, // block dimensions
+                                           0, // shared memory bytes (kernel uses LDS internally)
+                                           nullptr, // stream (use default)
+                                           nullptr, // kernel arguments (not used with config)
+                                           config); // extra options (HIP_LAUNCH_PARAM config)
 
     if(err != hipSuccess)
     {
@@ -192,7 +217,8 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
     }
 
     HIPDNN_PLUGIN_LOG_INFO("SDPA kernel launched: grid=[" << gdx << "," << gdy << "," << gdz
-                           << "] block=[" << bdx << "," << bdy << "," << bdz << "]");
+                                                          << "] block=[" << bdx << "," << bdy << ","
+                                                          << bdz << "]");
 }
 
 }
