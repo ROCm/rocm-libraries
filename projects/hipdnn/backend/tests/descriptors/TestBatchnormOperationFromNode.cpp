@@ -117,20 +117,20 @@ protected:
         nextRunningVarianceAttrs.strides = {1};
 
         _tensorMap[12] = TensorDescriptor::fromFlatBuffer(nextRunningVarianceAttrs);
-        TensorAttributesT peer_statsAttrs0;
-        peer_statsAttrs0.uid = 100;
-        peer_statsAttrs0.data_type = DataType::FLOAT;
-        peer_statsAttrs0.dims = {1};
-        peer_statsAttrs0.strides = {1};
+        TensorAttributesT peerStatsAttrs0;
+        peerStatsAttrs0.uid = 100;
+        peerStatsAttrs0.data_type = DataType::FLOAT;
+        peerStatsAttrs0.dims = {1};
+        peerStatsAttrs0.strides = {1};
 
-        _tensorMap[100] = TensorDescriptor::fromFlatBuffer(peer_statsAttrs0);
-        TensorAttributesT peer_statsAttrs1;
-        peer_statsAttrs1.uid = 101;
-        peer_statsAttrs1.data_type = DataType::FLOAT;
-        peer_statsAttrs1.dims = {1};
-        peer_statsAttrs1.strides = {1};
+        _tensorMap[100] = TensorDescriptor::fromFlatBuffer(peerStatsAttrs0);
+        TensorAttributesT peerStatsAttrs1;
+        peerStatsAttrs1.uid = 101;
+        peerStatsAttrs1.data_type = DataType::FLOAT;
+        peerStatsAttrs1.dims = {1};
+        peerStatsAttrs1.strides = {1};
 
-        _tensorMap[101] = TensorDescriptor::fromFlatBuffer(peer_statsAttrs1);
+        _tensorMap[101] = TensorDescriptor::fromFlatBuffer(peerStatsAttrs1);
     }
 
     static hipdnn_data_sdk::data_objects::BatchnormAttributesT createStandardBatchnormAttrs()
