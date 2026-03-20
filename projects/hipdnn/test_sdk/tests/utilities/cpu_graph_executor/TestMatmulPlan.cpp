@@ -41,11 +41,11 @@ protected:
 
 TEST_F(TestMatmulPlan, ExecutePlan)
 {
-    std::vector<int64_t> aDims = {2, 3};
-    std::vector<int64_t> bDims = {3, 4};
-    std::vector<int64_t> cDims = {2, 4};
+    const std::vector<int64_t> aDims = {2, 3};
+    const std::vector<int64_t> bDims = {3, 4};
+    const std::vector<int64_t> cDims = {2, 4};
 
-    unsigned int seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     MatmulTensorBundle<float> planTensorBundle(aDims, bDims, cDims, false, false, seed);
     MatmulTensorBundle<float> directTensorBundle(aDims, bDims, cDims, false, false, seed);
 
@@ -66,17 +66,17 @@ TEST_F(TestMatmulPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(matmul::getTolerance<float>(),
-                                                           matmul::getTolerance<float>());
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(matmul::getTolerance<float>(),
+                                                                 matmul::getTolerance<float>());
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.cTensor, planTensorBundle.cTensor));
 }
 
 TEST(TestMatmulPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> aDims = {2, 2, 3};
-    std::vector<int64_t> bDims = {2, 3, 4};
-    std::vector<int64_t> cDims = {2, 2, 4};
+    const std::vector<int64_t> aDims = {2, 2, 3};
+    const std::vector<int64_t> bDims = {2, 3, 4};
+    const std::vector<int64_t> cDims = {2, 2, 4};
 
     MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, getGlobalTestSeed());
 
@@ -85,32 +85,32 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
 
     // Correct case
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     // Mismatched compute data type
-    MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF>
+    const MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF>
         halfPlanBuilder;
     EXPECT_FALSE(halfPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     // Missed tensor in tensorMap
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
+    const MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 
     // Incorrect tensor data types
-    MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT>
+    const MatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT>
         mixedPlanBuilder;
     EXPECT_FALSE(mixedPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     // Uncompatible node type
-    std::vector<int64_t> dims = {1, 3, 4, 4};
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graphPointwiseTuple = buildPointwiseUnaryGraph(dims,
                                                         dims,
                                                         DataType::FLOAT,
@@ -122,21 +122,22 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
 
     auto flatbufferGraphPointwise
         = std::get<0>(graphPointwiseTuple)->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapPointwise(flatbufferGraphPointwise.data(),
-                                    flatbufferGraphPointwise.size());
+    const GraphWrapper graphWrapPointwise(flatbufferGraphPointwise.data(),
+                                          flatbufferGraphPointwise.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapPointwise.getNode(0),
                                                graphWrapPointwise.getTensorMap()));
 }
 
 TEST(TestMatmulPlanBuilder, BuildNodePlan)
 {
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    const MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        patient;
 
     // Correct case
     {
-        std::vector<int64_t> aDims = {2, 2, 3};
-        std::vector<int64_t> bDims = {2, 3, 4};
-        std::vector<int64_t> cDims = {2, 2, 4};
+        const std::vector<int64_t> aDims = {2, 2, 3};
+        const std::vector<int64_t> bDims = {2, 3, 4};
+        const std::vector<int64_t> cDims = {2, 2, 4};
 
         MatmulTensorBundle<float> tensorBundle(
             aDims, bDims, cDims, false, false, getGlobalTestSeed());
@@ -146,13 +147,13 @@ TEST(TestMatmulPlanBuilder, BuildNodePlan)
         auto& graph = std::get<0>(graphTuple);
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
         EXPECT_NO_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)));
     }
 
     // Uncompatible node type
     {
-        std::vector<int64_t> dims = {1, 3, 4, 4};
+        const std::vector<int64_t> dims = {1, 3, 4, 4};
         auto graphTuple = buildPointwiseUnaryGraph(dims,
                                                    dims,
                                                    DataType::FLOAT,
@@ -164,16 +165,16 @@ TEST(TestMatmulPlanBuilder, BuildNodePlan)
 
         auto& graph = std::get<0>(graphTuple);
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
         EXPECT_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
     }
 }
 
 TEST(TestMatmulPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> aDims = {2, 2, 3};
-    std::vector<int64_t> bDims = {2, 3, 4};
-    std::vector<int64_t> cDims = {2, 2, 4};
+    const std::vector<int64_t> aDims = {2, 2, 3};
+    const std::vector<int64_t> bDims = {2, 3, 4};
+    const std::vector<int64_t> cDims = {2, 2, 4};
 
     MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, getGlobalTestSeed());
 
@@ -182,12 +183,14 @@ TEST(TestMatmulPlanBuilder, PlanConstruction)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
 
-    MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    const MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result = dynamic_cast<MatmulPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+    const bool result
+        = dynamic_cast<MatmulPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }

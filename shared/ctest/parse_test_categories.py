@@ -6,17 +6,6 @@ import argparse
 import contextlib
 
 
-def flatten_list(items):
-    """Flatten nested lists into a single flat list."""
-    result = []
-    for item in items:
-        if isinstance(item, list):
-            result.extend(flatten_list(item))
-        else:
-            result.append(item)
-    return result
-
-
 def gpu_arch_matches(specific_arch, pattern_arch):
     """
     Check if a specific GPU architecture matches a pattern with X wildcards.
@@ -254,8 +243,11 @@ def main():
                 if gpu_arch_matches(gpu_arch, config_arch):
                     patterns = gpu_config.get("test_patterns", [])
                     if patterns:
-                        # Flatten nested lists (from YAML anchor references)
-                        all_applicable_patterns.extend(flatten_list(patterns))
+                        for p in patterns:
+                            if isinstance(p, list):
+                                all_applicable_patterns.extend(p)
+                            else:
+                                all_applicable_patterns.append(p)
 
                     # Collect applicable categories from this config
                     gpu_labels = gpu_config.get("labels", [])

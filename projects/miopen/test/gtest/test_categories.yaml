@@ -301,11 +301,6 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/1"  # activ_hip_graph - 4.35 sec
   - "Smoke/GPU_HipGraphExistTest_FP32.HipGraphExist/3"  # no_graph - 10.42 sec
 
-# NOTE: The parser (parse_test_categories.py) uses flatten_list() to handle YAML anchor
-# references in lists. This means you can safely use "- *anchor" syntax to extend lists:
-#   test_patterns:
-#     - *gfx11_common_patterns   # Anchor reference (flattened automatically)
-#     - "extra_pattern"          # Additional patterns
 exclude_gpu:
   exclude_gpu_gfx120X:
     test_patterns: *gfx11_common_patterns

@@ -34,7 +34,7 @@ TEST(TestRMSNormNode, RMSNormNodeProperties)
     auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
     auto error = node.infer_properties_node();
 
@@ -63,8 +63,8 @@ TEST(TestRMSNormNode, PreValidateNode)
 
     rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -74,30 +74,31 @@ TEST(TestRMSNormNode, PreValidateNodeMissingValues)
 {
     RMSNormAttributes rmsnormAttributes;
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    rmsnormAttributes = RMSNormAttributes{};
     rmsnormAttributes.set_x(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
     auto rmsnormAttributesCopy = rmsnormAttributes;
-    RMSNormNode nodeWithX(std::move(rmsnormAttributesCopy), graphAttributes);
+    const RMSNormNode nodeWithX(std::move(rmsnormAttributesCopy), graphAttributes);
 
     error = nodeWithX.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     rmsnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     rmsnormAttributesCopy = rmsnormAttributes;
-    RMSNormNode nodeWithScale(std::move(rmsnormAttributesCopy), graphAttributes);
+    const RMSNormNode nodeWithScale(std::move(rmsnormAttributesCopy), graphAttributes);
 
     error = nodeWithScale.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
     rmsnormAttributesCopy = rmsnormAttributes;
-    RMSNormNode nodeWithY(std::move(rmsnormAttributesCopy), graphAttributes);
+    const RMSNormNode nodeWithY(std::move(rmsnormAttributesCopy), graphAttributes);
 
     error = nodeWithY.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -114,7 +115,7 @@ TEST(TestRMSNormNode, PreValidateNodeMissingValues)
     scaleTensor->set_dim({1, 64, 1, 1});
 
     rmsnormAttributesCopy = rmsnormAttributes;
-    RMSNormNode nodeWithAllValues(std::move(rmsnormAttributesCopy), graphAttributes);
+    const RMSNormNode nodeWithAllValues(std::move(rmsnormAttributesCopy), graphAttributes);
 
     error = nodeWithAllValues.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -144,8 +145,8 @@ TEST(TestRMSNormNode, PreValidateNodeWithBias)
 
     rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -175,8 +176,8 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedBiasChannelDimensions)
 
     rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -208,7 +209,7 @@ TEST(TestRMSNormNode, InferPropertiesNode)
     auto epsilonTensor = rmsnormAttributes.get_epsilon();
     epsilonTensor->set_dim({1}).set_value(1e-5f);
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -247,7 +248,7 @@ TEST(TestRMSNormNode, InferPropertiesNodeWithInvRms)
     auto invRmsTensor = rmsnormAttributes.get_inv_rms();
     invRmsTensor->set_uid(5).set_name("InvRmsTensor");
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -290,7 +291,7 @@ TEST(TestRMSNormNode, InferPropertiesNodeWithBias)
     auto biasTensor = rmsnormAttributes.get_bias();
     biasTensor->set_uid(6).set_name("BiasTensor");
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -334,8 +335,8 @@ TEST(TestRMSNormNode, PackNode)
     epsilonTensor->set_uid(4).set_name("EpsilonTensor").set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -383,8 +384,8 @@ TEST(TestRMSNormNode, PackNodeWithBias)
     biasTensor->set_uid(5).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     rmsnormAttributes.set_bias(biasTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -419,8 +420,8 @@ TEST(TestRMSNormNode, GatherHipdnnTensors)
     yTensor->set_uid(4).set_name("Y");
     rmsnormAttributes.set_y(yTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -461,8 +462,8 @@ TEST(TestRMSNormNode, GatherHipdnnTensorsWithInvRmsAndBias)
     biasTensor->set_uid(6).set_name("Bias");
     rmsnormAttributes.set_bias(biasTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -501,8 +502,8 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedInputOutputShapes)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -527,8 +528,8 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedChannelDimensions)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -553,8 +554,8 @@ TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
     epsilonTensor->set_dim({1}).set_value(1e-5f);
     rmsnormAttributes.set_epsilon(epsilonTensor);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -585,8 +586,8 @@ TEST(TestRMSNormNode, PreValidateAcceptsValid5DSpatialDimensions)
 
     rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -612,9 +613,16 @@ TEST(TestRMSNormNode, PreValidateAcceptsSingleElementSpatialDimensions)
 
     rmsnormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
 
-    GraphAttributes graphAttributes;
-    RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const RMSNormNode node(std::move(rmsnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestRMSNormNode, GetNodeTypeReturnsRmsNorm)
+{
+    const GraphAttributes graphAttrs;
+    const RMSNormNode node(RMSNormAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::RMS_NORM);
 }

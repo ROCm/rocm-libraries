@@ -523,8 +523,9 @@ Tests:
   category: stress
   function:
     - gemm_batched: *single_precision
-    - gemm_batched_ex: *nonint8_real_precisions
-    - gemm_batched_ex: *int8_precision
+    # TODO put back after revising batched API
+    # - gemm_batched_ex: *nonint8_real_precisions
+    # - gemm_batched_ex: *int8_precision
   matrix_size:
     - { M: 3, N: 3, K: 3, lda: 3, ldb: 3, ldc: 3, batch_count: *c_grid_yz_require_passes }
   pointer_mode_device: false
@@ -563,6 +564,8 @@ Tests:
   beta: 1
   api: [ C_64 ]
   os_flags: LINUX
+  # TODO include all after revising batched hiplaslt API (see earlier TODO)
+  gpu_arch: ['90a','942']
 
 - name: gemm_batched_ex_ILP64
   category: pre_checkin

@@ -313,8 +313,8 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestCalculateConvWrwTolerance, DetectsFailure)
 {
     // N=1, Spatial=10x10 => Accumulations = 100
-    std::vector<int64_t> dims = {1, 1, 10, 10};
-    std::vector<int64_t> strides = {100, 100, 10, 1};
+    const std::vector<int64_t> dims = {1, 1, 10, 10};
+    const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
     auto baseline = hipdnn_data_sdk::utilities::createTensor(
@@ -357,7 +357,7 @@ TEST(TestCalculateConvWrwTolerance, ThrowsOnSingularity)
     // nU = 2 * n * epsilon.
     // We need nU >= 1.0 => n >= 1 / (2 * epsilon) = 2^22 = 4,194,304.
     // Let's use 5,000,000.
-    std::vector<int64_t> dims = {5000000, 1, 1, 1};
+    const std::vector<int64_t> dims = {5000000, 1, 1, 1};
 
     EXPECT_THROW((calculateConvWrwTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, dims)),
                  std::overflow_error);
@@ -377,8 +377,8 @@ TEST(TestCalculateConvWrwTolerance, ThrowsOnOutputOverflow)
     // accumulatedTolerance approx 2.38e-6 * 1e11 approx 2.38e5 = 238,000
     // 238,000 > 65,504 => Should throw.
 
-    std::vector<int64_t> dims = {10, 1, 1, 1};
-    double val = 1.0e5;
+    const std::vector<int64_t> dims = {10, 1, 1, 1};
+    const double val = 1.0e5;
 
     EXPECT_THROW((calculateConvWrwTolerance<half, float, float>(-val, val, -val, val, dims)),
                  std::overflow_error);
@@ -706,8 +706,8 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestCalculateConvDgradTolerance, DetectsFailure)
 {
     // wDims=[K=10, C=1, R=10, S=10] => Accumulations = 10 * 10 * 10 = 1000
-    std::vector<int64_t> dims = {1, 1, 10, 10};
-    std::vector<int64_t> strides = {100, 100, 10, 1};
+    const std::vector<int64_t> dims = {1, 1, 10, 10};
+    const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
     auto baseline = hipdnn_data_sdk::utilities::createTensor(
@@ -722,7 +722,7 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.05f); // Small error
     actualFailing->fillTensorWithValue(2.5f); // Large error
 
-    std::vector<int64_t> wDims = {10, 1, 10, 10}; // Accum = 1000
+    const std::vector<int64_t> wDims = {10, 1, 10, 10}; // Accum = 1000
     auto tol = calculateConvDgradTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, wDims);
 
     // tol should be reasonable for 1000 accumulations with half/half/float
@@ -747,7 +747,7 @@ TEST(TestCalculateConvDgradTolerance, ThrowsOnSingularity)
     // nU = 2 * n * epsilon.
     // We need nU >= 1.0 => n >= 1 / (2 * epsilon) = 2^22 = 4,194,304.
     // wDims=[K=2048, C=1, R=2048, S=1] => Accum = 2048 * 2048 = 4,194,304.
-    std::vector<int64_t> wDims = {2048, 1, 2048, 1};
+    const std::vector<int64_t> wDims = {2048, 1, 2048, 1};
 
     EXPECT_THROW((calculateConvDgradTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, wDims)),
                  std::overflow_error);
@@ -766,8 +766,8 @@ TEST(TestCalculateConvDgradTolerance, ThrowsOnOutputOverflow)
     // accumulatedTolerance approx 2.38e-6 * 1e11 approx 2.38e5 = 238,000
     // 238,000 > 65,504 => Should throw.
 
-    std::vector<int64_t> wDims = {10, 1, 1, 1};
-    double val = 1.0e5;
+    const std::vector<int64_t> wDims = {10, 1, 1, 1};
+    const double val = 1.0e5;
 
     EXPECT_THROW((calculateConvDgradTolerance<half, float, float>(-val, val, -val, val, wDims)),
                  std::overflow_error);
@@ -1059,8 +1059,8 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestCalculateConvFpropTolerance, DetectsFailure)
 {
     // C=10, R=10, S=1 => Accumulations = 100
-    std::vector<int64_t> dims = {1, 10, 10, 1};
-    std::vector<int64_t> strides = {100, 100, 10, 1};
+    const std::vector<int64_t> dims = {1, 10, 10, 1};
+    const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
     auto baseline = hipdnn_data_sdk::utilities::createTensor(
@@ -1085,12 +1085,12 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
 
     {
         SCOPED_TRACE("Validator should have passed");
-        bool valid = validator->allClose(*baseline, *actualPassing);
+        const bool valid = validator->allClose(*baseline, *actualPassing);
         EXPECT_TRUE(valid);
     }
     {
         SCOPED_TRACE("Validator should have failed");
-        bool valid = validator->allClose(*baseline, *actualFailing);
+        const bool valid = validator->allClose(*baseline, *actualFailing);
         EXPECT_FALSE(valid);
     }
 }
@@ -1102,7 +1102,7 @@ TEST(TestCalculateConvFpropTolerance, ThrowsOnSingularity)
     // nU = 2 * n * epsilon.
     // We need nU >= 1.0 => n >= 1 / (2 * epsilon) = 2^22 = 4,194,304.
     // Let's use C=5,000,000, R=1, S=1 => accumulations = 5,000,000.
-    std::vector<int64_t> dims = {1, 5000000, 1, 1};
+    const std::vector<int64_t> dims = {1, 5000000, 1, 1};
 
     EXPECT_THROW((calculateConvFpropTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, dims)),
                  std::overflow_error);
@@ -1122,8 +1122,8 @@ TEST(TestCalculateConvFpropTolerance, ThrowsOnOutputOverflow)
     // accumulatedTolerance approx 2.38e-6 * 1e11 approx 2.38e5 = 238,000
     // 238,000 > 65,504 => Should throw.
 
-    std::vector<int64_t> dims = {1, 10, 1, 1};
-    double val = 1.0e5;
+    const std::vector<int64_t> dims = {1, 10, 1, 1};
+    const double val = 1.0e5;
 
     EXPECT_THROW((calculateConvFpropTolerance<half, float, float>(-val, val, -val, val, dims)),
                  std::overflow_error);

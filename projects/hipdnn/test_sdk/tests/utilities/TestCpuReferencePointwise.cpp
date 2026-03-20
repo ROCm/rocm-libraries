@@ -8,12 +8,14 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 namespace
 {
@@ -325,8 +327,8 @@ protected:
 
         for(int i = 0; i < 5; ++i)
         {
-            input1.setHostValue(static_cast<Input1Type>(static_cast<float>(i + 1)), i);
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>(i * 2)), i);
+            input1.setHostValue(safeTestTypeCast<Input1Type>(static_cast<float>(i + 1)), i);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(i * 2)), i);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -357,14 +359,14 @@ protected:
             for(int n = 0; n < 4; ++n)
             {
                 input1.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
             }
         }
 
         // Fill input2 with pattern: [10, 20, 30, 40]
         for(int n = 0; n < 4; ++n)
         {
-            input2.setHostValue(static_cast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
@@ -378,7 +380,7 @@ protected:
             {
                 auto input1Val = static_cast<float>((m * 10) + n);
                 auto input2Val = static_cast<float>((n + 1) * 10);
-                expected.setHostValue(static_cast<OutputType>(input1Val + input2Val), m, n);
+                expected.setHostValue(safeTestTypeCast<OutputType>(input1Val + input2Val), m, n);
             }
         }
 
@@ -410,7 +412,7 @@ protected:
             {
                 for(int h = 0; h < 4; ++h)
                 {
-                    float input1Val = TEST_VALUE_5;
+                    const float input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
                     expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
                 }
@@ -446,7 +448,7 @@ protected:
             {
                 for(int h = 0; h < 4; ++h)
                 {
-                    float input1Val = TEST_VALUE_5;
+                    const float input1Val = TEST_VALUE_5;
                     auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
                     expected.setHostValue(static_cast<OutputType>(input1Val - input2Val), n, c, h);
                 }
@@ -469,12 +471,12 @@ protected:
 
         input2.setHostValue(
             static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
                             0,
                             0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
                             0,
                             2,
                             0,
@@ -493,12 +495,12 @@ protected:
                 {
                     for(int w = 0; w < 2; ++w)
                     {
-                        float input1Val = TEST_VALUE_1;
+                        const float input1Val = TEST_VALUE_1;
                         auto input2Val = static_cast<float>(
                             (static_cast<float>(c) + 1.0f)
                             * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                         expected.setHostValue(
-                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                            safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -521,7 +523,7 @@ protected:
             for(int h = 0; h < 3; ++h)
             {
                 input1.setHostValue(
-                    static_cast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
             }
         }
 
@@ -530,7 +532,7 @@ protected:
             for(int w = 0; w < 4; ++w)
             {
                 input2.setHostValue(
-                    static_cast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
             }
         }
 
@@ -552,7 +554,7 @@ protected:
                         // input2[0,c,0,w] broadcasts to input2[n,c,h,w]
                         auto input2Val = static_cast<float>((c * 100) + w);
                         expected.setHostValue(
-                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                            safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -565,16 +567,17 @@ protected:
 
     void testBroadcast5D()
     {
-        std::vector<int64_t> dims1 = {2, 3, 2, 2, 2}; // [N,C,D,H,W] = [2,3,2,2,2]
-        std::vector<int64_t> strides1 = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        const std::vector<int64_t> dims1 = {2, 3, 2, 2, 2}; // [N,C,D,H,W] = [2,3,2,2,2]
+        const std::vector<int64_t> strides1 = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<Input1Type> input1(dims1, strides1);
 
-        std::vector<int64_t> dims2 = {1, 3, 1, 1, 1}; // [1,C,1,1,1] = [1,3,1,1,1]
-        std::vector<int64_t> strides2 = {3, 1, 1, 1, 1}; // Row-major strides for [1,3,1,1,1]
+        const std::vector<int64_t> dims2 = {1, 3, 1, 1, 1}; // [1,C,1,1,1] = [1,3,1,1,1]
+        const std::vector<int64_t> strides2 = {3, 1, 1, 1, 1}; // Row-major strides for [1,3,1,1,1]
         Tensor<Input2Type> input2(dims2, strides2);
 
-        std::vector<int64_t> outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
-        std::vector<int64_t> outputStrides = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
+        const std::vector<int64_t> outputDims = {2, 3, 2, 2, 2}; // Output: [2,3,2,2,2]
+        const std::vector<int64_t> outputStrides
+            = {24, 8, 4, 2, 1}; // Row-major strides for [2,3,2,2,2]
         Tensor<OutputType> output(outputDims, outputStrides);
 
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2));
@@ -582,13 +585,13 @@ protected:
         // Set channel-specific values in input2
         input2.setHostValue(
             static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
                             0,
                             1,
                             0,
                             0,
                             0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
                             0,
                             2,
                             0,
@@ -615,7 +618,7 @@ protected:
                                 (static_cast<float>(c) + 1.0f)
                                 * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                             expected.setHostValue(
-                                static_cast<OutputType>(input1Val + input2Val), n, c, d, h, w);
+                                safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, d, h, w);
                         }
                     }
                 }
@@ -773,8 +776,8 @@ protected:
             static_cast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
 
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
-        float lowerClip = -TEST_VALUE_2; // -2.0
-        float upperClip = TEST_VALUE_4; // 4.0
+        const float lowerClip = -TEST_VALUE_2; // -2.0
+        const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
@@ -839,8 +842,8 @@ protected:
         upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
-        float lowerClip = -TEST_VALUE_2; // -2.0
-        float upperClip = TEST_VALUE_4; // 4.0
+        const float lowerClip = -TEST_VALUE_2; // -2.0
+        const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(

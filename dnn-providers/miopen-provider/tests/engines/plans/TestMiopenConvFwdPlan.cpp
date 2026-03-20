@@ -282,6 +282,48 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    const size_t defaultSize = 4096;
+    HipdnnMiopenSettings settings;
+    settings.setDefaultWorkspaceSize(defaultSize);
+
+    ConvFwdPlan plan(_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), defaultSize);
+}
+
+TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    const size_t defaultSize = 4096;
+    const size_t knobLimit = 2048;
+    HipdnnMiopenSettings settings;
+    settings.setDefaultWorkspaceSize(defaultSize);
+    settings.setWorkspaceSizeLimit(knobLimit);
+
+    ConvFwdPlan plan(_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), knobLimit);
+}
+
 TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)
 {
     // Create a valid convolution graph
