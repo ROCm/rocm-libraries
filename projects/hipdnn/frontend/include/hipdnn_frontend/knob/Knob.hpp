@@ -54,8 +54,11 @@ namespace hipdnn_frontend
  *
  * @code{.cpp}
  * // Get available knobs for an engine
- * auto engines = graph.get_available_engines(handle);
- * auto knobs = engines[0].getKnobs();
+ * std::vector<int64_t> engineIds;
+ * graph.get_ranked_engine_ids(engineIds);
+ *
+ * std::vector<Knob> knobs;
+ * graph.get_knobs_for_engine(engineIds[0], knobs);
  *
  * for(const auto& knob : knobs)
  * {
@@ -63,7 +66,7 @@ namespace hipdnn_frontend
  * }
  * @endcode
  *
- * @see KnobSetting, IConstraint, Graph::get_available_engines()
+ * @see KnobSetting, IConstraint, Graph::get_knobs_for_engine()
  */
 class Knob
 {
