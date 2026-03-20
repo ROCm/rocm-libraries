@@ -430,6 +430,53 @@ TEST_F(TestBatchnormOperationFromNode, BuildNodeRoundTrip)
     EXPECT_EQ(rebuiltAttrs->inv_variance_tensor_uid, 10);
     EXPECT_EQ(rebuiltAttrs->next_running_mean_tensor_uid, 11);
     EXPECT_EQ(rebuiltAttrs->next_running_variance_tensor_uid, 12);
+
+    // Verify peer_stats round-trip
+    ASSERT_EQ(rebuiltAttrs->peer_stats_tensor_uid.size(), 2);
+    EXPECT_EQ(rebuiltAttrs->peer_stats_tensor_uid[0], 100);
+    EXPECT_EQ(rebuiltAttrs->peer_stats_tensor_uid[1], 101);
+}
+
+TEST_F(TestBatchnormOperationFromNode, BuildNodeRoundTripWithOnlyRequiredTensors)
+{
+    auto attrs = createStandardBatchnormAttrs();
+    attrs.prev_running_mean_tensor_uid = flatbuffers::nullopt;
+    attrs.prev_running_variance_tensor_uid = flatbuffers::nullopt;
+    attrs.momentum_tensor_uid = flatbuffers::nullopt;
+    attrs.mean_tensor_uid = flatbuffers::nullopt;
+    attrs.inv_variance_tensor_uid = flatbuffers::nullopt;
+    attrs.next_running_mean_tensor_uid = flatbuffers::nullopt;
+    attrs.next_running_variance_tensor_uid = flatbuffers::nullopt;
+    attrs.peer_stats_tensor_uid.clear();
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+    auto rebuiltNode = desc->buildNode();
+
+    const auto* rebuiltAttrs = rebuiltNode->attributes.AsBatchnormAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+
+    // Required tensors preserved
+    EXPECT_EQ(rebuiltAttrs->x_tensor_uid, 50);
+    EXPECT_EQ(rebuiltAttrs->scale_tensor_uid, 51);
+    EXPECT_EQ(rebuiltAttrs->bias_tensor_uid, 52);
+    EXPECT_EQ(rebuiltAttrs->epsilon_tensor_uid, 53);
+    EXPECT_EQ(rebuiltAttrs->y_tensor_uid, 54);
+
+    // Optional tensors remain unset
+    EXPECT_FALSE(rebuiltAttrs->prev_running_mean_tensor_uid.has_value());
+    EXPECT_FALSE(rebuiltAttrs->prev_running_variance_tensor_uid.has_value());
+    EXPECT_FALSE(rebuiltAttrs->momentum_tensor_uid.has_value());
+    EXPECT_FALSE(rebuiltAttrs->mean_tensor_uid.has_value());
+    EXPECT_FALSE(rebuiltAttrs->inv_variance_tensor_uid.has_value());
+    EXPECT_FALSE(rebuiltAttrs->next_running_mean_tensor_uid.has_value());
+    EXPECT_FALSE(rebuiltAttrs->next_running_variance_tensor_uid.has_value());
+
+    // Peer stats empty
+    EXPECT_TRUE(rebuiltAttrs->peer_stats_tensor_uid.empty());
 }
 
 TEST_F(TestBatchnormOperationFromNode, NamePreservedFromNode)
@@ -470,4 +517,312 @@ TEST_F(TestBatchnormOperationFromNode, BuildNodePreservesName)
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
+}
+
+TEST_F(TestBatchnormOperationFromNode, GetAttributeWorksAfterFromNode)
+{
+    auto node = createStandardNode();
+    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+
+    // Verify compute type via getAttribute
+    hipdnnDataType_t computeType = {};
+    int64_t dtCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &dtCount, &computeType);
+    ASSERT_EQ(dtCount, 1);
+    EXPECT_EQ(computeType, HIPDNN_DATA_FLOAT);
+
+    // Verify operation type
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    int64_t opTypeCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
+    ASSERT_EQ(opTypeCount, 1);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM);
+
+    // Verify name (empty default from fixture, count==1 for null terminator)
+    int64_t nameCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &nameCount, nullptr);
+    EXPECT_EQ(nameCount, 1);
+
+    // --- Required tensor attributes ---
+
+    // X tensor
+    hipdnn_backend::ScopedDescriptor xScoped;
+    int64_t xCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_X_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &xCount,
+                       static_cast<void*>(xScoped.getPtr()));
+    ASSERT_EQ(xCount, 1);
+    ASSERT_NE(xScoped.get(), nullptr);
+    int64_t xUid = 0;
+    int64_t xUidCount = 0;
+    xScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &xUidCount, &xUid);
+    EXPECT_EQ(xUid, 50);
+
+    // Scale tensor
+    hipdnn_backend::ScopedDescriptor scaleScoped;
+    int64_t scaleCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &scaleCount,
+                       static_cast<void*>(scaleScoped.getPtr()));
+    ASSERT_EQ(scaleCount, 1);
+    ASSERT_NE(scaleScoped.get(), nullptr);
+    int64_t scaleUid = 0;
+    int64_t scaleUidCount = 0;
+    scaleScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &scaleUidCount, &scaleUid);
+    EXPECT_EQ(scaleUid, 51);
+
+    // Bias tensor
+    hipdnn_backend::ScopedDescriptor biasScoped;
+    int64_t biasCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &biasCount,
+                       static_cast<void*>(biasScoped.getPtr()));
+    ASSERT_EQ(biasCount, 1);
+    ASSERT_NE(biasScoped.get(), nullptr);
+    int64_t biasUid = 0;
+    int64_t biasUidCount = 0;
+    biasScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &biasUidCount, &biasUid);
+    EXPECT_EQ(biasUid, 52);
+
+    // Epsilon tensor
+    hipdnn_backend::ScopedDescriptor epsilonScoped;
+    int64_t epsilonCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &epsilonCount,
+                       static_cast<void*>(epsilonScoped.getPtr()));
+    ASSERT_EQ(epsilonCount, 1);
+    ASSERT_NE(epsilonScoped.get(), nullptr);
+    int64_t epsilonUid = 0;
+    int64_t epsilonUidCount = 0;
+    epsilonScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &epsilonUidCount, &epsilonUid);
+    EXPECT_EQ(epsilonUid, 53);
+
+    // Y tensor
+    hipdnn_backend::ScopedDescriptor yScoped;
+    int64_t yCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &yCount,
+                       static_cast<void*>(yScoped.getPtr()));
+    ASSERT_EQ(yCount, 1);
+    ASSERT_NE(yScoped.get(), nullptr);
+    int64_t yUid = 0;
+    int64_t yUidCount = 0;
+    yScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &yUidCount, &yUid);
+    EXPECT_EQ(yUid, 54);
+
+    // --- Optional tensor attributes (all set in standard fixture) ---
+
+    // PrevRunningMean tensor
+    hipdnn_backend::ScopedDescriptor prevRunMeanScoped;
+    int64_t prevRunMeanCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_MEAN_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &prevRunMeanCount,
+                       static_cast<void*>(prevRunMeanScoped.getPtr()));
+    ASSERT_EQ(prevRunMeanCount, 1);
+    ASSERT_NE(prevRunMeanScoped.get(), nullptr);
+    int64_t prevRunMeanUid = 0;
+    int64_t prevRunMeanUidCount = 0;
+    prevRunMeanScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &prevRunMeanUidCount, &prevRunMeanUid);
+    EXPECT_EQ(prevRunMeanUid, 6);
+
+    // PrevRunningVariance tensor
+    hipdnn_backend::ScopedDescriptor prevRunVarScoped;
+    int64_t prevRunVarCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PREV_RUNNING_VARIANCE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &prevRunVarCount,
+                       static_cast<void*>(prevRunVarScoped.getPtr()));
+    ASSERT_EQ(prevRunVarCount, 1);
+    ASSERT_NE(prevRunVarScoped.get(), nullptr);
+    int64_t prevRunVarUid = 0;
+    int64_t prevRunVarUidCount = 0;
+    prevRunVarScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &prevRunVarUidCount, &prevRunVarUid);
+    EXPECT_EQ(prevRunVarUid, 7);
+
+    // Momentum tensor
+    hipdnn_backend::ScopedDescriptor momentumScoped;
+    int64_t momentumCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &momentumCount,
+                       static_cast<void*>(momentumScoped.getPtr()));
+    ASSERT_EQ(momentumCount, 1);
+    ASSERT_NE(momentumScoped.get(), nullptr);
+    int64_t momentumUid = 0;
+    int64_t momentumUidCount = 0;
+    momentumScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &momentumUidCount, &momentumUid);
+    EXPECT_EQ(momentumUid, 8);
+
+    // Mean tensor
+    hipdnn_backend::ScopedDescriptor meanScoped;
+    int64_t meanCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &meanCount,
+                       static_cast<void*>(meanScoped.getPtr()));
+    ASSERT_EQ(meanCount, 1);
+    ASSERT_NE(meanScoped.get(), nullptr);
+    int64_t meanUid = 0;
+    int64_t meanUidCount = 0;
+    meanScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &meanUidCount, &meanUid);
+    EXPECT_EQ(meanUid, 9);
+
+    // InvVariance tensor
+    hipdnn_backend::ScopedDescriptor invVarScoped;
+    int64_t invVarCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INV_VARIANCE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &invVarCount,
+                       static_cast<void*>(invVarScoped.getPtr()));
+    ASSERT_EQ(invVarCount, 1);
+    ASSERT_NE(invVarScoped.get(), nullptr);
+    int64_t invVarUid = 0;
+    int64_t invVarUidCount = 0;
+    invVarScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &invVarUidCount, &invVarUid);
+    EXPECT_EQ(invVarUid, 10);
+
+    // NextRunningMean tensor
+    hipdnn_backend::ScopedDescriptor nextRunMeanScoped;
+    int64_t nextRunMeanCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_MEAN_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &nextRunMeanCount,
+                       static_cast<void*>(nextRunMeanScoped.getPtr()));
+    ASSERT_EQ(nextRunMeanCount, 1);
+    ASSERT_NE(nextRunMeanScoped.get(), nullptr);
+    int64_t nextRunMeanUid = 0;
+    int64_t nextRunMeanUidCount = 0;
+    nextRunMeanScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &nextRunMeanUidCount, &nextRunMeanUid);
+    EXPECT_EQ(nextRunMeanUid, 11);
+
+    // NextRunningVariance tensor
+    hipdnn_backend::ScopedDescriptor nextRunVarScoped;
+    int64_t nextRunVarCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_NEXT_RUNNING_VARIANCE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &nextRunVarCount,
+                       static_cast<void*>(nextRunVarScoped.getPtr()));
+    ASSERT_EQ(nextRunVarCount, 1);
+    ASSERT_NE(nextRunVarScoped.get(), nullptr);
+    int64_t nextRunVarUid = 0;
+    int64_t nextRunVarUidCount = 0;
+    nextRunVarScoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &nextRunVarUidCount, &nextRunVarUid);
+    EXPECT_EQ(nextRunVarUid, 12);
+
+    // --- Peer stats tensor array ---
+
+    // Query count first
+    int64_t peerStatsCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       0,
+                       &peerStatsCount,
+                       nullptr);
+    ASSERT_EQ(peerStatsCount, 2);
+
+    // Retrieve both peer_stats descriptors
+    hipdnn_backend::ScopedDescriptor peerStats0Scoped;
+    hipdnn_backend::ScopedDescriptor peerStats1Scoped;
+    hipdnnBackendDescriptor_t peerStatsArray[2] = {};
+    int64_t peerStatsRetrievedCount = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       2,
+                       &peerStatsRetrievedCount,
+                       static_cast<void*>(peerStatsArray));
+    ASSERT_EQ(peerStatsRetrievedCount, 2);
+    // Transfer ownership to ScopedDescriptors
+    peerStats0Scoped = hipdnn_backend::ScopedDescriptor(peerStatsArray[0]);
+    peerStats1Scoped = hipdnn_backend::ScopedDescriptor(peerStatsArray[1]);
+    ASSERT_NE(peerStats0Scoped.get(), nullptr);
+    ASSERT_NE(peerStats1Scoped.get(), nullptr);
+
+    int64_t peer0Uid = 0;
+    int64_t peer0UidCount = 0;
+    peerStats0Scoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &peer0UidCount, &peer0Uid);
+    EXPECT_EQ(peer0Uid, 100);
+
+    int64_t peer1Uid = 0;
+    int64_t peer1UidCount = 0;
+    peerStats1Scoped.get()->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &peer1UidCount, &peer1Uid);
+    EXPECT_EQ(peer1Uid, 101);
+}
+
+TEST_F(TestBatchnormOperationFromNode, OperationTypeAttributeReturnsCorrectValue)
+{
+    auto node = createStandardNode();
+    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    int64_t opTypeCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
+    ASSERT_EQ(opTypeCount, 1);
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_BATCHNORM);
+}
+
+TEST_F(TestBatchnormOperationFromNode, OptionalTensorReferencesMatchTensorMap)
+{
+    auto node = createStandardNode();
+    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+
+    EXPECT_EQ(desc->getPrevRunningMeanDesc(), _tensorMap[6]);
+    EXPECT_EQ(desc->getPrevRunningVarianceDesc(), _tensorMap[7]);
+    EXPECT_EQ(desc->getMomentumDesc(), _tensorMap[8]);
+    EXPECT_EQ(desc->getMeanDesc(), _tensorMap[9]);
+    EXPECT_EQ(desc->getInvVarianceDesc(), _tensorMap[10]);
+    EXPECT_EQ(desc->getNextRunningMeanDesc(), _tensorMap[11]);
+    EXPECT_EQ(desc->getNextRunningVarianceDesc(), _tensorMap[12]);
+}
+
+TEST_F(TestBatchnormOperationFromNode, PeerStatsTensorReferencesPopulated)
+{
+    auto node = createStandardNode();
+    auto desc = BatchnormOperationDescriptor::fromNode(node, _tensorMap);
+
+    auto tensors = desc->getTensorDescriptors();
+    // 5 required + 2 (mean, inv_var) + 5 (running stats) + 2 peer_stats = 14 total
+    ASSERT_EQ(tensors.size(), 14);
+
+    // Last 2 are peer_stats (UIDs 100, 101)
+    EXPECT_EQ(tensors[12]->getData().uid, 100);
+    EXPECT_EQ(tensors[13]->getData().uid, 101);
+
+    // Verify they are the same shared_ptr instances from tensorMap
+    EXPECT_EQ(tensors[12], _tensorMap[100]);
+    EXPECT_EQ(tensors[13], _tensorMap[101]);
 }
