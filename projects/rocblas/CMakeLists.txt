@@ -44,6 +44,33 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 include(build-options) # library and client
 include(toolchain-options)
 
+# Optional YAML/CTest categorization (shared/ctest). Default ON when shared module exists under ROCM_LIBRARIES_ROOT.
+set(_rocblas_enable_ctest_default OFF)
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  set(_rocblas_enable_ctest_default ON)
+endif()
+option(ROCBLAS_ENABLE_CTEST
+  "Enable YAML-based CTest labels and install-time CTestTestfile (needs clients/gtest/test_categories.yaml and rocm-libraries shared/ctest)"
+  ${_rocblas_enable_ctest_default})
+
+set(ROCBLAS_HAS_CTEST_CATEGORIES OFF)
+if(BUILD_CLIENTS_TESTS AND ROCBLAS_ENABLE_CTEST)
+  set(_ROCBLAS_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/clients/gtest/test_categories.yaml")
+  set(_ROCBLAS_SHARED_CTEST "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  if(NOT EXISTS "${_ROCBLAS_TEST_CATEGORIES_YAML}")
+    message(FATAL_ERROR
+      "ROCBLAS_ENABLE_CTEST is ON but test_categories.yaml was not found:\n  ${_ROCBLAS_TEST_CATEGORIES_YAML}\n"
+      "Set ROCBLAS_ENABLE_CTEST=OFF or restore the file.")
+  endif()
+  if(NOT EXISTS "${_ROCBLAS_SHARED_CTEST}")
+    message(FATAL_ERROR
+      "ROCBLAS_ENABLE_CTEST is ON but shared ctest CMake module was not found:\n  ${_ROCBLAS_SHARED_CTEST}\n"
+      "Set ROCM_LIBRARIES_ROOT to the rocm-libraries root or ROCBLAS_ENABLE_CTEST=OFF.")
+  endif()
+  include("${_ROCBLAS_SHARED_CTEST}")
+  set(ROCBLAS_HAS_CTEST_CATEGORIES ON)
+endif()
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
@@ -256,10 +283,11 @@ if( BUILD_WITH_HIPBLASLT )
   rocm_package_add_dependencies(DEPENDS "hipblaslt >= ${HIPBLASLT_VERSION}")
 endif()
 
+if(BUILD_CLIENTS_TESTS)
+  enable_testing()
+endif()
+
 if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
-  if(BUILD_CLIENTS_TESTS)
-    enable_testing()
-  endif()
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)

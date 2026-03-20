@@ -353,6 +353,7 @@ When tests are installed (e.g. into `/opt/rocm/bin/`), the **build-tree** test d
 **Example (rocBLAS):**
 
 - Build: parser writes tests into `install_CTestTestfile.cmake`; CMake installs it as `CTestTestfile.cmake` to `bin/rocblas/`.
+- CMake: `ROCBLAS_ENABLE_CTEST` defaults **ON** when `${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake` exists; if **ON**, missing YAML or shared module is a **configure error** (set **OFF** to skip categorization).
 - Install layout: `bin/rocblas-test` (executable) and `bin/rocblas/CTestTestfile.cmake` (test definitions).
 - Run from install: `cd /opt/rocm/bin/rocblas && ctest -L quick -N` (list) or `ctest -L quick` (run).
 
