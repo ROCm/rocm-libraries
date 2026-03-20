@@ -494,13 +494,15 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
     }
 
 
-def spec_to_kernel_config(spec: KernelSpec, dtype: str, arch: str) -> KernelConfig:
+def spec_to_kernel_config(
+    spec: KernelSpec, dtype: str, arch: str, dtype_acc: str = "fp32"
+) -> KernelConfig:
     """Convert KernelSpec to KernelConfig for dispatcher"""
     return KernelConfig(
         dtype_a=dtype,
         dtype_b=dtype,
         dtype_c=dtype,
-        dtype_acc="fp32",
+        dtype_acc=dtype_acc,
         layout_a="row",
         layout_b="col",
         layout_c="row",
@@ -541,7 +543,14 @@ def ml_select_kernel(
 
 
 def run_single_gemm(
-    M: int, N: int, K: int, dtype: str, arch: str, predictor, dry_run: bool = False
+    M: int,
+    N: int,
+    K: int,
+    dtype: str,
+    arch: str,
+    predictor,
+    dry_run: bool = False,
+    dtype_acc: str = "fp32",
 ) -> dict:
     """Run a single GEMM with ML heuristic selection"""
 
@@ -570,7 +579,7 @@ def run_single_gemm(
         return result
 
     # Build and run kernel
-    config = spec_to_kernel_config(best_spec, dtype, arch)
+    config = spec_to_kernel_config(best_spec, dtype, arch, dtype_acc)
 
     try:
         setup = setup_gemm_dispatcher(
@@ -633,6 +642,12 @@ def main():
     )
     parser.add_argument(
         "--arch", default="gfx950", help="GPU architecture (default: gfx950)"
+    )
+    parser.add_argument(
+        "--dtype_acc",
+        default="fp32",
+        choices=["fp16", "fp32"],
+        help="Accumulator data type (default: fp32)",
     )
     parser.add_argument(
         "--model_dir",
@@ -709,6 +724,7 @@ def main():
         f"  Model:          {args.model_dir if args.model_dir else 'first-fit (no ML)'}"
     )
     print(f"  Data types:     {', '.join(args.dtypes)}")
+    print(f"  Accumulator:    {args.dtype_acc}")
     print(f"  Architecture:   {args.arch}")
     print(f"  Kernel pool:    {len(KERNEL_POOL)} kernels")
     print(f"  Problem shapes: {len(shapes)}")
@@ -754,7 +770,7 @@ def main():
 
             for i, (M, N, K) in enumerate(shapes):
                 result = run_single_gemm(
-                    M, N, K, dtype, args.arch, predictor, args.dry_run
+                    M, N, K, dtype, args.arch, predictor, args.dry_run, args.dtype_acc
                 )
 
                 # Write to CSV
