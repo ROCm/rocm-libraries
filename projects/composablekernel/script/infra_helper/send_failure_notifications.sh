@@ -22,7 +22,7 @@ PATTERNS=(
     'login attempt to .* failed with status: 401 Unauthorized'
     'docker login failed'
     'HTTP request sent .* 404 Not Found'
-    'cat: .* No such file or directory'
+    '/sys/module/amdgpu/version: No such file or directory'
     'GPU not found'
     'Could not connect to Redis at .* Connection timed out'
     'unauthorized: your account must log in with a Personal Access Token'
