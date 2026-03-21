@@ -4379,6 +4379,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # init local write offsets to nondtl loads in tail loop.
       module.add(self.lwaInitAddressesForDTLTailLoop(kernel, tensorParameters1st))
       module.add(self.lwaInitAddressesForDTLTailLoop(kernel, tensorParameters2nd))
+      if kernel["ProblemType"]["MXBlock%s"%tc1]:
+        module.add(self.lwaInitAddressesForDTLTailLoop(kernel, tensorParameters1st["MX"]))
+      if kernel["ProblemType"]["MXBlock%s"%tc2]:
+        module.add(self.lwaInitAddressesForDTLTailLoop(kernel, tensorParameters2nd["MX"]))
 
       # the following read/write addresses could be modified in recalcLocal(Read|Write)Addresses due to policy change
       self.oriLraA = None # back up original local read address vgpr
@@ -5498,21 +5502,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # num vgprs: global -> local elements : MXSA
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numVgprG2L = 0
-      if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]: #TODO
-        self.states.mxsa.numVgprG2L = roundUp((kernel["NumLoadsCoalescedMXSA"] * kernel["NumLoadsPerpendicularMXSA"] * \
+      numVgprG2LMXSAllocatedLocal = 0
+
+      statesMXSANumVgprG2L = roundUp((kernel["NumLoadsCoalescedMXSA"] * kernel["NumLoadsPerpendicularMXSA"] * \
           kernel["GlobalReadVectorWidthMXSA"]) / (float)(self.states.bpr))
-        if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
-          tpMXSA = self.states.bpr if vwmxsa < self.states.bpr else vwmxsa
-          self.states.mxsa.numVgprG2LAllocated = roundUp((kernel["NumLoadsCoalescedMXSA"] * kernel["NumLoadsPerpendicularMXSA"] * \
-            tpMXSA) / (float)(self.states.bpr))
-        else:
-          self.states.mxsa.numVgprG2LAllocated = self.states.mxsa.numVgprG2L
+      tpMXSALocal = self.states.bpr if vwmxsa < self.states.bpr else vwmxsa
+      numVgprG2LMXSAllocatedLocal = roundUp((kernel["NumLoadsCoalescedMXSA"] * kernel["NumLoadsPerpendicularMXSA"] * \
+          tpMXSALocal) / (float)(self.states.bpr))
+
+      if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and (vwmxsa < self.states.bpr):
+        # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
+        # We should optimize the usage for better performance.
+        statesMXSANumVgprG2LAllocated = statesMXSANumVgprG2L * (int)(self.states.bpr/vwmxsa)
+      else:
+        statesMXSANumVgprG2LAllocated = statesMXSANumVgprG2L
+
+      if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]:
+        self.states.mxsa.numVgprG2L = statesMXSANumVgprG2L
+        self.states.mxsa.numVgprG2LAllocated = statesMXSANumVgprG2LAllocated
+        self.states.mxsa.numVgprG2LTailloopAllocated = self.states.mxsa.numVgprG2LAllocated
+      else:
+        self.states.mxsa.numVgprG2L = 0
+        self.states.mxsa.numVgprG2LAllocated = 0
+        self.states.mxsa.numVgprG2LTailloopAllocated = statesMXSANumVgprG2LAllocated
       # using _ds_store_b8: need one more vgpr space to do lshr
       if tensorParametersMXSA["localWriteInstruction"].blockWidth == 0.25:
         self.states.mxsa.numVgprG2L = self.states.mxsa.numVgprG2L * 2
-        self.states.mxsa.numVgprG2LAllocated = self.states.mxsa.numVgprG2LAllocated * 2
+        self.states.mxsa.numVgprG2LAllocated += numVgprG2LMXSAllocatedLocal
+        self.states.mxsa.numVgprG2LTailloopAllocated += numVgprG2LMXSAllocatedLocal
       # double numVgprG2L if DirectToVgpr is enabled
-      if kernel["DirectToVgprA"]:
+      if kernel["DirectToVgprMXSA"]:
         self.states.mxsa.numVgprG2L *= 2
         self.states.mxsa.numVgprG2LAllocated *= 2
 
@@ -5559,21 +5578,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # num vgprs: global -> local elements : MXSB
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numVgprG2L = 0
-      if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]: #TODO
-        self.states.mxsb.numVgprG2L = roundUp((kernel["NumLoadsCoalescedMXSB"] * kernel["NumLoadsPerpendicularMXSB"] * \
+      numVgprG2LMXSBllocatedLocal = 0
+
+      statesMXSBNumVgprG2L = roundUp((kernel["NumLoadsCoalescedMXSB"] * kernel["NumLoadsPerpendicularMXSB"] * \
           kernel["GlobalReadVectorWidthMXSB"]) / (float)(self.states.bpr))
-        if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
-          tpMXSB = self.states.bpr if vwmxsb < self.states.bpr else vwmxsb
-          self.states.mxsb.numVgprG2LAllocated = roundUp((kernel["NumLoadsCoalescedMXSB"] * kernel["NumLoadsPerpendicularMXSB"] * \
-            tpMXSB) / (float)(self.states.bpr))
-        else:
-          self.states.mxsb.numVgprG2LAllocated = self.states.mxsb.numVgprG2L
+      tpMXSBLocal = self.states.bpr if vwmxsb < self.states.bpr else vwmxsb
+      numVgprG2LMXSBllocatedLocal = roundUp((kernel["NumLoadsCoalescedMXSB"] * kernel["NumLoadsPerpendicularMXSB"] * \
+          tpMXSBLocal) / (float)(self.states.bpr))
+
+      if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and (vwmxsb < self.states.bpr):
+        # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
+        # We should optimize the usage for better performance.
+        statesMXSBNumVgprG2LAllocated = statesMXSBNumVgprG2L * (int)(self.states.bpr/vwmxsb)
+      else:
+        statesMXSBNumVgprG2LAllocated = statesMXSBNumVgprG2L
+
+      if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]:
+        self.states.mxsb.numVgprG2L = statesMXSBNumVgprG2L
+        self.states.mxsb.numVgprG2LAllocated = statesMXSBNumVgprG2LAllocated
+        self.states.mxsb.numVgprG2LTailloopAllocated = self.states.mxsb.numVgprG2LAllocated
+      else:
+        self.states.mxsb.numVgprG2L = 0
+        self.states.mxsb.numVgprG2LAllocated = 0
+        self.states.mxsb.numVgprG2LTailloopAllocated = statesMXSBNumVgprG2LAllocated
       # using _ds_store_b8: need one more vgpr space to do lshr
       if tensorParametersMXSB["localWriteInstruction"].blockWidth == 0.25:
         self.states.mxsb.numVgprG2L = self.states.mxsb.numVgprG2L * 2
-        self.states.mxsb.numVgprG2LAllocated = self.states.mxsb.numVgprG2LAllocated * 2
+        self.states.mxsb.numVgprG2LAllocated += numVgprG2LMXSBllocatedLocal
+        self.states.mxsb.numVgprG2LTailloopAllocated += numVgprG2LMXSBllocatedLocal
       # double numVgprG2L if DirectToVgpr is enabled
-      if kernel["DirectToVgprB"]:
+      if kernel["DirectToVgprMXSB"]:
         self.states.mxsb.numVgprG2L *= 2
         self.states.mxsb.numVgprG2LAllocated *= 2
 
@@ -5623,6 +5657,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.m.numVgprLocalWriteSwapAddr = 0
     self.states.a.numVgprLocalWriteAddrTailLoop = 0 if not (kernel["DirectToLdsA"] and kernel["NonDTLTailLoopA"]) else 1 * self.states.rpla
     self.states.b.numVgprLocalWriteAddrTailLoop = 0 if not (kernel["DirectToLdsB"] and kernel["NonDTLTailLoopB"]) else 1 * self.states.rpla
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.states.mxsa.numVgprLocalWriteAddrTailLoop = 0 if not (kernel["DirectToLdsMXSA"] and kernel["NonDTLTailLoopMXSA"]) else 1 * self.states.rpla
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.states.mxsb.numVgprLocalWriteAddrTailLoop = 0 if not (kernel["DirectToLdsMXSB"] and kernel["NonDTLTailLoopMXSB"]) else 1 * self.states.rpla
 
     numVgprMultiplierA = 1
     numVgprMultiplierB = 1
@@ -5659,9 +5697,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numVgprLocalReadAddr *= numVgprMultiplierMXSA
       self.states.mxsa.numVgprLocalWriteAddr *= numVgprMultiplierMXSA
+      self.states.mxsa.numVgprLocalWriteAddrTailLoop *= numVgprMultiplierMXSA
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numVgprLocalReadAddr *= numVgprMultiplierMXSB
       self.states.mxsb.numVgprLocalWriteAddr *= numVgprMultiplierMXSB
+      self.states.mxsb.numVgprLocalWriteAddrTailLoop *= numVgprMultiplierMXSB
 
 
 

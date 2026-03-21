@@ -547,10 +547,18 @@ class Solution(collections.abc.Mapping):
     # tail loop optimization
     state["tailLoopOptA"] = True
     state["tailLoopOptB"] = True
+    if state["ProblemType"]["MXBlockA"]:
+      state["tailLoopOptMXSA"] = True
+    if state["ProblemType"]["MXBlockB"]:
+      state["tailLoopOptMXSB"] = True
 
     # Use nonDTL loads in DTL tail loop
     state["NonDTLTailLoopA"] = False
     state["NonDTLTailLoopB"] = False
+    if state["ProblemType"]["MXBlockA"]:
+      state["NonDTLTailLoopMXSA"] = False
+    if state["ProblemType"]["MXBlockB"]:
+      state["NonDTLTailLoopMXSB"] = False
 
     # Initialize DTLA, DTLB for tailLoopOpt/NonDTLTailLoop and initial calcLdsBlockSizePerPad() call
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
@@ -567,14 +575,21 @@ class Solution(collections.abc.Mapping):
     # TLU case, we check AF{0,1}EM instead of ASEM.
     # TLU + ShiftPtr case, we can use wider global read for TailLoop. Enable Tailloop opt for DTL
     # (ShiftPtr is default and not set to state["EdgeType"] yet here)
-    if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
+    # MX case, force enable NonDTLTailLoopA/B
+    if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]) or state["ProblemType"]["MXBlockA"]:
       if (not state["ProblemType"]["TLUA"]) and state["DirectToLdsA"] and not state["DirectToVgprA"]:
         state["NonDTLTailLoopA"] = True
         state["tailLoopOptA"] = False
-    if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
+        if state["ProblemType"]["MXBlockA"]:
+          state["NonDTLTailLoopMXSA"] = True
+          state["tailLoopOptMXSA"] = False
+    if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]) or state["ProblemType"]["MXBlockB"]:
       if (not state["ProblemType"]["TLUB"]) and state["DirectToLdsB"] and not state["DirectToVgprB"]:
         state["NonDTLTailLoopB"] = True
         state["tailLoopOptB"] = False
+        if state["ProblemType"]["MXBlockB"]:
+          state["NonDTLTailLoopMXSB"] = True
+          state["tailLoopOptMXSB"] = False
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
@@ -585,6 +600,14 @@ class Solution(collections.abc.Mapping):
       state["tailLoopOptA"] = False
     if (not state["ProblemType"]["TLUB"]) and (state["DirectToVgprB"]):
       state["tailLoopOptB"] = False
+
+    # so far, disable tailLoopOpt in MX case
+    # TODO: enable tailLoopOpt for MX
+    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+      state["tailLoopOptA"] = False
+      state["tailLoopOptB"] = False
+      state["tailLoopOptMXSA"] = False
+      state["tailLoopOptMXSB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
     if state["ScheduleIterAlg"] == 3:
