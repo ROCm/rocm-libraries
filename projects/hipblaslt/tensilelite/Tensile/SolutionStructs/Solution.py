@@ -3187,22 +3187,30 @@ class Solution(collections.abc.Mapping):
       # - NoTailLoop
       # - DepthU is not power of 2
       # - LocalSplitU > 1
+      # - MX case
       if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
          (state["PrefetchGlobalRead"] == 0) or \
          state["NoTailLoop"] or \
          (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
-         state["LocalSplitU"] > 1:
+         state["LocalSplitU"] > 1 or \
+         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
       if state["TailloopInNll"]:
+        # need to disable SuppressNoLoadLoop
+        state["SuppressNoLoadLoop"] = False
+
+      # disable StaggerUcode
+      # - TailloopInNll
+      # - MX + StreamK (not enough sgpr)
+      if state["TailloopInNll"] or \
+         (state["StreamK"] and state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
         # need to disable StaggerU
         state["StaggerU"] = 0
         state["StaggerUMapping"] = 0
         state["StaggerUStride"] = 0
-        # need to disable SuppressNoLoadLoop
-        state["SuppressNoLoadLoop"] = False
-        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
+        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for no StagggerU code
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
