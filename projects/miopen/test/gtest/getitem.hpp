@@ -43,8 +43,7 @@ void cpu_getitem_backward(tensor<T> dy,
                           uint32_t dimCount,
                           int32_t* dims,
                           uint32_t sliceCount,
-                          int32_t* slices,
-                          uint32_t offset)
+                          int32_t* slices)
 {
     auto dy_dims  = dy.desc.GetLengths();
     auto dy_numel = std::accumulate(dy_dims.begin(), dy_dims.end(), 1L, std::multiplies<int64_t>());
@@ -307,6 +306,7 @@ protected:
         dx_dev    = handle.Write(dx.data);
         error_dev = handle.Write(error.data);
     }
+
     void RunTest()
     {
         auto&& handle = get_handle();
@@ -318,8 +318,7 @@ protected:
                                 dims.size(),
                                 dims.data(),
                                 slices.size(),
-                                slices_flat.data(),
-                                offset);
+                                slices_flat.data());
 
         std::vector<miopen::TensorDescriptor*> indexDescs;
         std::vector<ConstData_t> indexData;

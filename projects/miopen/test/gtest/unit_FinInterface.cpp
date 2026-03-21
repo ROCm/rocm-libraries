@@ -44,7 +44,7 @@ namespace {
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams&)
     {
         os << "none";
         return os;
@@ -53,7 +53,7 @@ struct TestParams
 
 struct SolverInfo
 {
-    [[maybe_unused]] SolverInfo() = default;
+    // SolverInfo() = default;
 
     SolverInfo(uint64_t id_, bool dynamic_, bool tunable_)
         : id(id_), dynamic(dynamic_), tunable(tunable_)
@@ -118,7 +118,7 @@ struct ConvSolverConfig : SolverConfig, private miopen::unit_tests::ConvTestCase
     {
     }
 
-    [[maybe_unused]] auto GetProblemDescription() const { return GetProblemDescription(direction); }
+    // auto GetProblemDescription() const { return GetProblemDescription(direction); }
 
     friend std::ostream& operator<<(std::ostream& os, const ConvSolverConfig& config)
     {
@@ -146,12 +146,12 @@ private:
 struct BatchNormSolverConfig : SolverConfig
 {
     BatchNormSolverConfig(int dummy) : SolverConfig(false) { std::ignore = dummy; }
-
-    [[maybe_unused]] auto GetProblemDescription() const
+    /*
+    auto GetProblemDescription() const
     {
         return miopen::batchnorm::ProblemDescription{{}, {}, {}, {}, {}, {}, {}, {}};
     }
-
+    */
     friend std::ostream& operator<<(std::ostream& os, const BatchNormSolverConfig& config)
     {
         os << "(";
@@ -286,14 +286,8 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"GemmBwd1x1_stride2",                                  {95,    true,   false,  "miopenConvolutionFwdAlgoGEMM"}},
         {"GemmBwd1x1_stride1",                                  {96,    true,   false,  "miopenConvolutionFwdAlgoGEMM"}},
         {"GemmBwdRest",                                         {97,    true,   false,  "miopenConvolutionFwdAlgoGEMM"}},
-        {"ConvMlirIgemmFwd",                                    {98,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvMlirIgemmBwd",                                    {99,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvMlirIgemmWrW",                                    {100,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"GemmWrw1x1_stride1",                                  {101,   true,   false,  "miopenConvolutionFwdAlgoGEMM"}},
         {"GemmWrwUniversal",                                    {102,   true,   false,  "miopenConvolutionFwdAlgoGEMM"}},
-        {"ConvMlirIgemmFwdXdlops",                              {103,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvMlirIgemmBwdXdlops",                              {104,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvMlirIgemmWrWXdlops",                              {105,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",          {107,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC",          {108,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",          {110,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
@@ -371,6 +365,7 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
+#if MIOPEN_ENABLE_FIN_INTERFACE
 template <class SolverInfo>
 const auto& GetSolverNames()
 {
@@ -384,6 +379,7 @@ const auto& GetSolverNames()
     }();
     return names;
 }
+#endif
 
 template <class TestCase>
 const auto& GetTestCases()
@@ -620,9 +616,9 @@ using CPU_FinInterfaceTestGetAllConvSolvers_NONE = TestGetAllSolvers<ConvTestCas
 using CPU_FinInterfaceTestGetConvSolvers_NONE    = TestGetSolvers<ConvTestCase>;
 using GPU_FinInterfaceTestGetConvSolver_FP32     = TestGetSolver<ConvTestCase>;
 
-TEST_P(CPU_FinInterfaceTestGetAllConvSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(CPU_FinInterfaceTestGetConvSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(GPU_FinInterfaceTestGetConvSolver_FP32, FinInterface) { this->RunTest(); };
+TEST_P(CPU_FinInterfaceTestGetAllConvSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(CPU_FinInterfaceTestGetConvSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(GPU_FinInterfaceTestGetConvSolver_FP32, FinInterface) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_FinInterfaceTestGetAllConvSolvers_NONE,
@@ -642,9 +638,9 @@ using CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE = TestGetAllSolvers<BatchN
 using CPU_FinInterfaceTestGetBatchNormSolvers_NONE    = TestGetSolvers<BatchNormTestCase>;
 using GPU_FinInterfaceTestGetBatchNormSolver_FP32     = TestGetSolver<BatchNormTestCase>;
 
-TEST_P(CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(CPU_FinInterfaceTestGetBatchNormSolvers_NONE, FinInterface) { this->RunTest(); };
-TEST_P(GPU_FinInterfaceTestGetBatchNormSolver_FP32, FinInterface) { this->RunTest(); };
+TEST_P(CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(CPU_FinInterfaceTestGetBatchNormSolvers_NONE, FinInterface) { this->RunTest(); }
+TEST_P(GPU_FinInterfaceTestGetBatchNormSolver_FP32, FinInterface) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_FinInterfaceTestGetAllBatchNormSolvers_NONE,

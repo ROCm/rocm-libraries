@@ -101,8 +101,6 @@ protected:
                                                      multi_head_attention, // o_val
                                                      dO_val,
                                                      softmax,
-                                                     attn_max,
-                                                     z_sum,
                                                      dQ_val,
                                                      dK_val,
                                                      dV_val);
