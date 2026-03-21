@@ -75,6 +75,7 @@ add_dependencies(
     test_incomplete_api_plugin
     test_knobs_plugin
     test_knob_constraint_validation_plugin
+    test_incompatible_version_plugin
 )
 
 clang_tidy_check(public_hipdnn_backend_tests)
