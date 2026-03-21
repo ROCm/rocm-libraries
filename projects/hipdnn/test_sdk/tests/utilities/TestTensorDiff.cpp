@@ -17,7 +17,7 @@ using namespace hipdnn_data_sdk::utilities;
 
 TEST(TestComputeTensorDiff, IdenticalTensorsHaveNoMismatches)
 {
-    std::vector<int64_t> const dims = {4, 4};
+    const std::vector<int64_t> dims = {4, 4};
     Tensor<float> ref(dims);
     ref.fillTensorWithRandomValues(-1.0f, 1.0f);
 
@@ -39,7 +39,7 @@ TEST(TestComputeTensorDiff, IdenticalTensorsHaveNoMismatches)
 
 TEST(TestComputeTensorDiff, DetectsSingleMismatch)
 {
-    std::vector<int64_t> const dims = {2, 3};
+    const std::vector<int64_t> dims = {2, 3};
     Tensor<float> ref(dims);
     Tensor<float> impl(dims);
 
@@ -69,7 +69,7 @@ TEST(TestComputeTensorDiff, DetectsSingleMismatch)
 
 TEST(TestComputeTensorDiff, MismatchesWithinToleranceAreIgnored)
 {
-    std::vector<int64_t> const dims = {2, 2};
+    const std::vector<int64_t> dims = {2, 2};
     Tensor<float> ref(dims);
     Tensor<float> impl(dims);
 
@@ -100,7 +100,7 @@ TEST(TestComputeTensorDiff, ShapeMismatchReturnsEmptySummary)
 
 TEST(TestComputeTensorDiff, WorstMismatchesCappedAtMaxMismatches)
 {
-    std::vector<int64_t> const dims = {10};
+    const std::vector<int64_t> dims = {10};
     Tensor<float> ref(dims);
     Tensor<float> impl(dims);
 
@@ -111,7 +111,7 @@ TEST(TestComputeTensorDiff, WorstMismatchesCappedAtMaxMismatches)
         impl.setHostValue(static_cast<float>(i + 1), std::vector<int64_t>{i});
     }
 
-    size_t const maxMismatches = 3;
+    const size_t maxMismatches = 3;
     auto summary = computeTensorDiff<float>(ref, impl, 0.0f, 0.0f, maxMismatches);
 
     EXPECT_EQ(summary.mismatchCount, 10u);
@@ -125,7 +125,7 @@ TEST(TestComputeTensorDiff, WorstMismatchesCappedAtMaxMismatches)
 
 TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
 {
-    std::vector<int64_t> const dims = {4};
+    const std::vector<int64_t> dims = {4};
     Tensor<float> ref(dims);
     Tensor<float> impl(dims);
 
@@ -187,7 +187,7 @@ TEST(TestPrintTensorDiffSummary, NoMismatchesOmitsWorstSection)
 
 TEST(TestValidateAndReport, PassingValidationPrintsSuccessful)
 {
-    std::vector<int64_t> const dims = {3, 3};
+    const std::vector<int64_t> dims = {3, 3};
     Tensor<float> ref(dims);
     ref.fillTensorWithRandomValues(-1.0f, 1.0f);
 
@@ -208,7 +208,7 @@ TEST(TestValidateAndReport, PassingValidationPrintsSuccessful)
 
 TEST(TestValidateAndReport, FailingValidationPrintsDiff)
 {
-    std::vector<int64_t> const dims = {3, 3};
+    const std::vector<int64_t> dims = {3, 3};
     Tensor<float> ref(dims);
     Tensor<float> impl(dims);
 
