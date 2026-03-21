@@ -653,10 +653,7 @@ class LocalReadMFMA(LocalRead):
             useDirect32XEmulation = writer.states.a.useDirect32XEmulationThis if tc == "A" else writer.states.b.useDirect32XEmulationThis
         indexTranpose = lrvwTile > 1 and (not useTransposeCode)
 
-        # split Metadata when localread width > mi input
-        #TODO:
-        #numSplitMetadata = max(ceil((blockWidth * 4) // tP["bpeDS"]) - 1, 0) if tP["isM"] else 0
-        numSplitMetadata = max(ceil((blockWidth * 4) // (kernel["MIInputPerThread%s"%tc] * tP["bpeDS"])) - 1, 0) if tP["isM"] else 0
+        numSplitMetadata = max(ceil((blockWidth * 4) // tP["bpeDS"]) - 1, 0) if tP["isM"] else 0
 
         # caculate SMFMA layout
         blocksPerTGroupSMFMA = 1
@@ -1031,6 +1028,8 @@ class LocalReadMFMA(LocalRead):
                                                     vgprOffset = 0
                                                     for rIdx_ in range(0, numReadsPerUnroll*miInputGroup):
                                                         for elementIdx in range(0, numSplitMetadata+1):
+                                                            if elementIdx >= writer.states.bpr:
+                                                                break
                                                             # since the number of input thread is 4, so will alwasy be D0, D1, D2, D3
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), \
                                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 1, i+vIdx*numVgpr)), \
@@ -1051,6 +1050,8 @@ class LocalReadMFMA(LocalRead):
                                                     vgprOffset = 0
                                                     for rIdx_ in range(0, numReadsPerUnroll*miInputGroup):
                                                         for elementIdx in range(0, numSplitMetadata+1):
+                                                            if elementIdx >= writer.states.bpr:
+                                                                break
                                                             # since the number of input thread is 2, so will alwasy be D0 and D1
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), \
                                                                                     src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 1, i+vIdx*numVgpr)), \
@@ -1062,6 +1063,8 @@ class LocalReadMFMA(LocalRead):
                                                     vgprIdx_ = vgprIdx+vIdx*(numSplitMetadata+1)
                                                     packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_)), src=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr))))
                                                     for elementIdx in range(1, numSplitMetadata+1):
+                                                        if elementIdx >= writer.states.bpr:
+                                                            break
                                                         packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_ + elementIdx)), src=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr)), \
                                                                             comment="another VGPR storing lshr 8-bit value %d %d" %(vgprIdx, elementIdx)))
                                                         packCodeT.add(VLShiftRightB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_+elementIdx)), \
