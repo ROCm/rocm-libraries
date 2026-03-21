@@ -5402,7 +5402,6 @@ class KernelWriterAssembly(KernelWriter):
     numValuMXSA         = 0
     numVgprValuPackMXSA = 0
     if kernel["ProblemType"]["MXBlockA"]:
-      # 1024 vgpr: avoid cross pool usage
       valuVgprAlignment = 32 // kernel["ProblemType"]["MXBlockA"]
       if self.states.mxsa.numVgprValu > 0 and not kernel["DirectToVgprMXSA"]:
         numValuMXSA = self.states.mxsa.numVgprValu
