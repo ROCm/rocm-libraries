@@ -7,6 +7,8 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
+#include <algorithm>
+
 namespace hipdnn_backend
 {
 
@@ -116,6 +118,92 @@ void KnobDescriptor::finalize()
                       "KnobDescriptor::finalize() failed: "
                       "MINIMUM_VALUE (DOUBLE) > MAXIMUM_VALUE (DOUBLE).");
     }
+
+    // Validate that the default value satisfies declared constraints.
+    switch(_defaultValue.type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+    {
+        auto defaultVal = _defaultValue.AsIntValue()->value;
+        if(_minValueInt.has_value())
+        {
+            THROW_IF_TRUE(defaultVal < *_minValueInt,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "KnobDescriptor::finalize() failed: "
+                          "default value ("
+                              + std::to_string(defaultVal) + ") < MINIMUM_VALUE ("
+                              + std::to_string(*_minValueInt) + ").");
+            THROW_IF_TRUE(defaultVal > *_maxValueInt,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "KnobDescriptor::finalize() failed: "
+                          "default value ("
+                              + std::to_string(defaultVal) + ") > MAXIMUM_VALUE ("
+                              + std::to_string(*_maxValueInt) + ").");
+            if(_stride.has_value())
+            {
+                THROW_IF_TRUE((defaultVal - *_minValueInt) % *_stride != 0,
+                              HIPDNN_STATUS_BAD_PARAM,
+                              "KnobDescriptor::finalize() failed: "
+                              "default value ("
+                                  + std::to_string(defaultVal) + ") is not aligned to STRIDE ("
+                                  + std::to_string(*_stride) + ") from MINIMUM_VALUE ("
+                                  + std::to_string(*_minValueInt) + ").");
+            }
+        }
+        if(!_validValuesInt.empty())
+        {
+            THROW_IF_TRUE(std::find(_validValuesInt.begin(), _validValuesInt.end(), defaultVal)
+                              == _validValuesInt.end(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "KnobDescriptor::finalize() failed: "
+                          "default value ("
+                              + std::to_string(defaultVal) + ") is not in VALID_VALUES_INT.");
+        }
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+    {
+        auto defaultVal = _defaultValue.AsFloatValue()->value;
+        if(_minValueDouble.has_value())
+        {
+            THROW_IF_TRUE(defaultVal < *_minValueDouble,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "KnobDescriptor::finalize() failed: "
+                          "default value is less than MINIMUM_VALUE (DOUBLE).");
+            THROW_IF_TRUE(defaultVal > *_maxValueDouble,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "KnobDescriptor::finalize() failed: "
+                          "default value is greater than MAXIMUM_VALUE (DOUBLE).");
+        }
+        break;
+    }
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+    {
+        const auto& defaultVal = _defaultValue.AsStringValue()->value;
+        if(_stringMaxLength.has_value())
+        {
+            THROW_IF_TRUE(static_cast<int64_t>(defaultVal.size()) > *_stringMaxLength,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "KnobDescriptor::finalize() failed: "
+                          "default value length ("
+                              + std::to_string(defaultVal.size()) + ") exceeds STRING_MAX_LENGTH ("
+                              + std::to_string(*_stringMaxLength) + ").");
+        }
+        if(!_validValuesString.empty())
+        {
+            THROW_IF_TRUE(
+                std::find(_validValuesString.begin(), _validValuesString.end(), defaultVal)
+                    == _validValuesString.end(),
+                HIPDNN_STATUS_BAD_PARAM,
+                "KnobDescriptor::finalize() failed: "
+                "default value is not in VALID_VALUES_STRING.");
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
     HipdnnBackendDescriptorImpl<KnobDescriptor>::finalize();
 }
 
@@ -228,15 +316,16 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                       arrayOfElements);
         break;
     case HIPDNN_ATTR_KNOB_INFO_STRIDE_EXT:
-        setOptionalScalar<HIPDNN_TYPE_INT64>(_stride,
-                                             attributeType,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "KnobDescriptor::setAttribute()");
-        THROW_IF_TRUE(*_stride <= 0,
+    {
+        std::optional<int64_t> temp;
+        setOptionalScalar<HIPDNN_TYPE_INT64>(
+            temp, attributeType, elementCount, arrayOfElements, "KnobDescriptor::setAttribute()");
+        THROW_IF_TRUE(*temp <= 0,
                       HIPDNN_STATUS_BAD_PARAM,
                       "KnobDescriptor::setAttribute(): STRIDE must be positive (> 0).");
+        _stride = temp;
         break;
+    }
     case HIPDNN_ATTR_KNOB_INFO_DESCRIPTION_EXT:
         setBoundedString(_description,
                          attributeType,
@@ -273,12 +362,16 @@ void KnobDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         setValidValuesString(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH_EXT:
-        setOptionalScalar<HIPDNN_TYPE_INT32>(_stringMaxLength,
-                                             attributeType,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "KnobDescriptor::setAttribute()");
+    {
+        std::optional<int32_t> temp;
+        setOptionalScalar<HIPDNN_TYPE_INT32>(
+            temp, attributeType, elementCount, arrayOfElements, "KnobDescriptor::setAttribute()");
+        THROW_IF_TRUE(*temp <= 0,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "KnobDescriptor::setAttribute(): STRING_MAX_LENGTH must be positive (> 0).");
+        _stringMaxLength = temp;
         break;
+    }
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
