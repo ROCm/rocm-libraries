@@ -67,7 +67,6 @@ set(__clang_cxx_compile_options
     -Wno-shorten-64-to-32
     -Wno-sign-conversion
     -Wno-unknown-warning-option
-    -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
     -Wno-unused-result
@@ -89,7 +88,6 @@ set(__clang_cxx_compile_options
     -Wno-float-equal
     -Wno-redundant-parens
     -Wno-format-nonliteral
-    -Wno-unused-template
     -Wno-comma
     -Wno-suggest-destructor-override
     -Wno-switch-enum
@@ -103,7 +101,6 @@ set(__clang_cxx_compile_options
     -Wno-deprecated-builtins
     -Wno-enum-constexpr-conversion
     -Wno-unused-parameter
-    -Wmissing-noreturn
     -Wno-nrvo)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
