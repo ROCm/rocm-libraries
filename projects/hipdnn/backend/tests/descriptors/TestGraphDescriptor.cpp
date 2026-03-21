@@ -105,7 +105,7 @@ TEST_F(TestGraphDescriptor, FinalizeFailInvalidGraph)
 TEST_F(TestGraphDescriptor, GetAttributeWorksOnDeserializedUnfinalizedGraph)
 {
     auto builder = createValidGraph();
-    auto const serializedGraph = builder.Release();
+    const auto serializedGraph = builder.Release();
 
     GraphDescriptor descriptor;
     descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
@@ -131,11 +131,11 @@ TEST_F(TestGraphDescriptor, GetAttributeWorksOnDeserializedUnfinalizedGraph)
 TEST_F(TestGraphDescriptor, GetAttributeUnsupportedReturnsNotSupported)
 {
     auto builder = createValidGraph();
-    auto const serializedGraph = builder.Release();
+    const auto serializedGraph = builder.Release();
 
     GraphDescriptor descriptor;
     descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
-    auto const handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    const auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
     descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                             HIPDNN_TYPE_HANDLE,
                             1,

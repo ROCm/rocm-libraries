@@ -54,8 +54,11 @@ namespace hipdnn_frontend
  *
  * @code{.cpp}
  * // Get available knobs for an engine
- * auto engines = graph.get_available_engines(handle);
- * auto knobs = engines[0].getKnobs();
+ * std::vector<int64_t> engineIds;
+ * graph.get_ranked_engine_ids(engineIds);
+ *
+ * std::vector<Knob> knobs;
+ * graph.get_knobs_for_engine(engineIds[0], knobs);
  *
  * for(const auto& knob : knobs)
  * {
@@ -63,7 +66,7 @@ namespace hipdnn_frontend
  * }
  * @endcode
  *
- * @see KnobSetting, IConstraint, Graph::get_available_engines()
+ * @see KnobSetting, IConstraint, Graph::get_knobs_for_engine()
  */
 class Knob
 {
@@ -213,7 +216,7 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
         return {{ErrorCode::INVALID_VALUE, "Flatbuffer data is nullptr or has zero size"}, {}};
     }
 
-    hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper const knobWrapper(fbData.ptr, fbData.size);
+    const hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
 
     if(!knobWrapper.isValid())
     {
@@ -226,7 +229,7 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
     std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> knobT(fbKnob->UnPack());
 
     // Get knob_id for error messages
-    std::string const knobId = knobT->knob_id;
+    const std::string knobId = knobT->knob_id;
 
     // Extract default value from the union
     KnobValueVariant defaultValue;
@@ -293,7 +296,7 @@ inline std::pair<Error, Knob> Knob::tryFromFlatbuffer(hipdnnBackendFlatbufferDat
     // Validate that the default_value satisfies the constraint
     if(knob._constraint)
     {
-        KnobSetting const defaultSetting(knob._knobId, knob._defaultValue);
+        const KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
         auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
         if(validationError.code != ErrorCode::OK)
         {

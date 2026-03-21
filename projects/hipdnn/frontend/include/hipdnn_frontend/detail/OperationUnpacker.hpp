@@ -23,7 +23,7 @@
 // #include <hipdnn_frontend/node/LayerNormNode.hpp>
 // #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
-// #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/PointwiseNode.hpp>
 // #include <hipdnn_frontend/node/RMSNormNode.hpp>
 // #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 // #include <hipdnn_frontend/node/SdpaFpropNode.hpp>
@@ -113,9 +113,9 @@ namespace hipdnn_frontend::detail
     //             {}};
     // case HIPDNN_OPERATION_TYPE_MATMUL:
     //     return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
-    // case HIPDNN_OPERATION_TYPE_POINTWISE:
-    //     return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
-    //             {}};
+    case HIPDNN_OPERATION_TYPE_POINTWISE:
+        return {std::make_shared<graph::PointwiseNode>(graph::PointwiseAttributes{}, graphAttrs),
+                {}};
     // case HIPDNN_OPERATION_TYPE_RMSNORM:
     //     return {std::make_shared<graph::RMSNormNode>(graph::RMSNormAttributes{}, graphAttrs),
     //             {}};
