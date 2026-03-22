@@ -485,9 +485,9 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
         "pipeline": spec.pipeline,
         "scheduler": spec.scheduler,
         "epilogue": "cshuffle",
-        "pad_m": False,
-        "pad_n": False,
-        "pad_k": False,
+        "pad_m": True,  # Enable padding to support arbitrary M dimensions
+        "pad_n": True,  # Enable padding to support arbitrary N dimensions
+        "pad_k": True,  # Enable padding to support arbitrary K dimensions
         "persistent": False,
         "dtype": dtype,
         "layout": layout,
@@ -616,8 +616,21 @@ def run_single_gemm(
             result["actual_tflops"] = exec_result.tflops
             result["status"] = "SUCCESS"
         else:
+            # Decode status code for better error message
+            status_messages = {
+                0: "Success",
+                -1: "GPU/HIP error (check permissions, memory, or kernel validity)",
+                -2: "No suitable kernel found for this problem size",
+            }
+            error_msg = status_messages.get(exec_result.status, f"Unknown error (status={exec_result.status})")
             result["status"] = "RUN_FAIL"
-            result["error"] = "Kernel execution failed"
+            result["error"] = f"{error_msg} (status_code={exec_result.status})"
+
+            # Print detailed error for debugging
+            print(f"  ERROR: {error_msg}")
+            print(f"  Status code: {exec_result.status}")
+            print(f"  Time returned: {exec_result.time_ms}")
+            print(f"  Kernel: {exec_result.kernel_name}")
 
         cleanup_gemm()
 
