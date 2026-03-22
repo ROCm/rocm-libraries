@@ -10,6 +10,7 @@ target_include_directories(hipblaslt-clients-common
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
+        ${CBLAS_INCLUDE_DIRS}
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
@@ -24,6 +25,7 @@ target_link_libraries(hipblaslt-clients-common
         roc::hipblaslt
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
+        ${CBLAS_LIBRARIES}
     PRIVATE
         hip::device
 )

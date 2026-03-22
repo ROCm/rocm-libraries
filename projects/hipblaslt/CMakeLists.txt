@@ -148,6 +148,17 @@ if(HIPBLASLT_ENABLE_CLIENT)
 
     # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
+
+    # However find_package(BLAS) only adds the fortran libraries
+    # and not the required cblas C library.
+    # For BLAS implementations like OpenBLAS and MKL this is not a problem
+    # but using the netlib implementation will result in linker errors.
+    # CMake also does not offer any functionality to do so, so let's
+    # use PkgConfig on supported platoforms to find the library.
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+        pkg_search_module(CBLAS REQUIRED cblas)
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_OPENMP)
