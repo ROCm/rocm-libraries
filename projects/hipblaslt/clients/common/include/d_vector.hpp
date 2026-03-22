@@ -154,7 +154,8 @@ public:
         else
         {
             // Reserve some memory for the code object file(module) loading
-            size_t reserve_for_module = 10 * 1024 * 1024; // 10MB (largest code object file size can be 6MB)
+            // 15MB (largest code object file size can be 6MB + 6MB for helper kernels)
+            size_t reserve_for_module = 15 * 1024 * 1024;
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
             if(free_device_mem < (capacity + reserve_for_module) || hipMalloc(&d, capacity) != hipSuccess)
