@@ -30,11 +30,12 @@ enum class DataType : int8_t {
   FP8_E5M2 = 9,
   FP8_E8M0 = 10,
   FP4_E2M1 = 11,
+  INT4 = 12,
   MIN = UNSET,
-  MAX = FP4_E2M1
+  MAX = INT4
 };
 
-inline const DataType (&EnumValuesDataType())[12] {
+inline const DataType (&EnumValuesDataType())[13] {
   static const DataType values[] = {
     DataType::UNSET,
     DataType::FLOAT,
@@ -47,13 +48,14 @@ inline const DataType (&EnumValuesDataType())[12] {
     DataType::FP8_E4M3,
     DataType::FP8_E5M2,
     DataType::FP8_E8M0,
-    DataType::FP4_E2M1
+    DataType::FP4_E2M1,
+    DataType::INT4
   };
   return values;
 }
 
 inline const char * const *EnumNamesDataType() {
-  static const char * const names[13] = {
+  static const char * const names[14] = {
     "UNSET",
     "FLOAT",
     "HALF",
@@ -66,13 +68,14 @@ inline const char * const *EnumNamesDataType() {
     "FP8_E5M2",
     "FP8_E8M0",
     "FP4_E2M1",
+    "INT4",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameDataType(DataType e) {
-  if (::flatbuffers::IsOutRange(e, DataType::UNSET, DataType::FP4_E2M1)) return "";
+  if (::flatbuffers::IsOutRange(e, DataType::UNSET, DataType::INT4)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesDataType()[index];
 }

@@ -55,8 +55,10 @@
 namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e8m0;
 using hipdnn_data_sdk::types::half;
 
 /**
@@ -154,6 +156,9 @@ enum class DataType
     INT8 = 7, ///< 8-bit signed integer
     FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
     FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    FP8_E8M0 = 10, ///< 8-bit floating point (8 exponent, 0 mantissa bits)
+    FP4_E2M1 = 11, ///< 4-bit floating point (2 exponent, 1 mantissa bit)
+    INT4 = 12, ///< 4-bit signed integer
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -303,6 +308,14 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, fp8_e8m0>)
+    {
+        return DataType::FP8_E8M0;
+    }
+    else if constexpr(std::is_same_v<T, fp4_e2m1>)
+    {
+        return DataType::FP4_E2M1;
     }
     else
     {
@@ -589,6 +602,12 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP8_E4M3;
     case DataType::FP8_E5M2:
         return hipdnn_data_sdk::data_objects::DataType::FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return hipdnn_data_sdk::data_objects::DataType::FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return hipdnn_data_sdk::data_objects::DataType::FP4_E2M1;
+    case DataType::INT4:
+        return hipdnn_data_sdk::data_objects::DataType::INT4;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -617,6 +636,12 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E4M3;
     case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
         return hipdnn_frontend::DataType::FP8_E5M2;
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E8M0:
+        return hipdnn_frontend::DataType::FP8_E8M0;
+    case hipdnn_data_sdk::data_objects::DataType::FP4_E2M1:
+        return hipdnn_frontend::DataType::FP4_E2M1;
+    case hipdnn_data_sdk::data_objects::DataType::INT4:
+        return hipdnn_frontend::DataType::INT4;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -713,6 +738,12 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP8_E4M3;
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return HIPDNN_DATA_FP8_E8M0;
+    case DataType::FP4_E2M1:
+        return HIPDNN_DATA_FP4_E2M1;
+    case DataType::INT4:
+        return HIPDNN_DATA_INT4;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -749,6 +780,12 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::FP8_E4M3, {}};
     case HIPDNN_DATA_FP8_E5M2:
         return {DataType::FP8_E5M2, {}};
+    case HIPDNN_DATA_FP8_E8M0:
+        return {DataType::FP8_E8M0, {}};
+    case HIPDNN_DATA_FP4_E2M1:
+        return {DataType::FP4_E2M1, {}};
+    case HIPDNN_DATA_INT4:
+        return {DataType::INT4, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -1133,6 +1170,12 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3";
     case DataType::FP8_E5M2:
         return "fp8_e5m2";
+    case DataType::FP8_E8M0:
+        return "fp8_e8m0";
+    case DataType::FP4_E2M1:
+        return "fp4_e2m1";
+    case DataType::INT4:
+        return "int4";
     default:
         return "unknown";
     }
