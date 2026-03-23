@@ -34,8 +34,12 @@ ROCSPARSE_KERNEL(1) void init_kernel(){};
 
 /*******************************************************************************
  * constructor
+ *
+ * Uses function-try-block to ensure cleanup of partially-allocated GPU resources
+ * if an exception is thrown during initialization.
  ******************************************************************************/
 _rocsparse_handle::_rocsparse_handle()
+try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -143,6 +147,16 @@ _rocsparse_handle::_rocsparse_handle()
     {
         rocsparse::open_log_stream(&log_debug_os, &log_debug_ofs, "ROCSPARSE_LOG_DEBUG_PATH");
     }
+}
+catch(...)
+{
+    rocsparse_hipFree(buffer);
+    rocsparse_hipFree(alpha);
+    rocsparse_hipFree(beta);
+    rocsparse_hipFree(sone);
+    rocsparse_hipFree(done);
+    rocsparse::blas_destroy_handle(this->blas_handle);
+    throw;
 }
 
 /*******************************************************************************
