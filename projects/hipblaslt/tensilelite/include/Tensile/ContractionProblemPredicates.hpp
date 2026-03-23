@@ -1645,7 +1645,7 @@ namespace TensileLite
                 // The min operator is used to handle cases where size_N is smaller than the value(usually is MacroTile1)
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    const uint64_t TWO_POW_32 = 4294967296;
+                    const uint64_t TWO_POW_32 = 0xfffff000ULL;
                     return problem.d().strides()[1] * problem.d().elementBytes() * min(value, problem.d().sizes()[1])
                            < TWO_POW_32;
                 }
