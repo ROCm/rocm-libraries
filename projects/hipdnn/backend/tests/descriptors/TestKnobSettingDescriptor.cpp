@@ -22,7 +22,7 @@ public:
 
     void setKnobId(const std::string& knobId) const
     {
-        ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+        ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
                                                       HIPDNN_TYPE_CHAR,
                                                       static_cast<int64_t>(knobId.size()),
                                                       knobId.c_str()));
@@ -31,18 +31,18 @@ public:
     void setInt64Value(int64_t value) const
     {
         ASSERT_NO_THROW(getDescriptor()->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, &value));
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &value));
     }
 
     void setDoubleValue(double value) const
     {
         ASSERT_NO_THROW(getDescriptor()->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_DOUBLE, 1, &value));
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, &value));
     }
 
     void setStringValue(const std::string& value) const
     {
-        ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+        ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
                                                       HIPDNN_TYPE_CHAR,
                                                       static_cast<int64_t>(value.size()),
                                                       value.c_str()));
@@ -102,7 +102,7 @@ TEST_F(TestKnobSettingDescriptor, SetAttributeAfterFinalizeFails)
 {
     makeFinalized();
     const std::string knobId = "another_knob";
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
                                                              HIPDNN_TYPE_CHAR,
                                                              static_cast<int64_t>(knobId.size()),
                                                              knobId.c_str()),
@@ -119,7 +119,7 @@ TEST_F(TestKnobSettingDescriptor, SetAttributeUnsupportedAttribute)
 TEST_F(TestKnobSettingDescriptor, SetKnobIdAsChar)
 {
     const std::string knobId = "test_knob_id";
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(knobId.size()),
                                                   knobId.c_str()));
@@ -128,16 +128,18 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdAsChar)
 TEST_F(TestKnobSettingDescriptor, SetKnobIdWrongTypeFails)
 {
     int64_t val = 42;
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(
-                                   HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_INT64, 1, &val),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDescriptor()->setAttribute(
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_INT64, 1, &val),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestKnobSettingDescriptor, SetKnobIdNullFails)
 {
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(
-                                   HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, 5, nullptr),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDescriptor()->setAttribute(
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, 5, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST_F(TestKnobSettingDescriptor, GetKnobIdAfterFinalize)
@@ -150,13 +152,13 @@ TEST_F(TestKnobSettingDescriptor, GetKnobIdAfterFinalize)
     // Query size first
     int64_t count = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
     ASSERT_EQ(count, static_cast<int64_t>(expectedId.size() + 1));
 
     // Get the value
     std::vector<char> buffer(static_cast<size_t>(count));
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
     ASSERT_EQ(std::string(buffer.data()), expectedId);
 }
 
@@ -169,7 +171,7 @@ TEST_F(TestKnobSettingDescriptor, SetAndGetInt64Value)
 
     int64_t actualValue = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, nullptr, &actualValue));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, nullptr, &actualValue));
     ASSERT_EQ(actualValue, expectedValue);
 }
 
@@ -182,7 +184,7 @@ TEST_F(TestKnobSettingDescriptor, SetAndGetDoubleValue)
 
     double actualValue = 0.0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_DOUBLE, 1, nullptr, &actualValue));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, nullptr, &actualValue));
     ASSERT_DOUBLE_EQ(actualValue, expectedValue);
 }
 
@@ -196,37 +198,39 @@ TEST_F(TestKnobSettingDescriptor, SetAndGetStringValue)
     // Query size first (two-call pattern)
     int64_t count = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
     ASSERT_EQ(count, static_cast<int64_t>(expectedValue.size() + 1));
 
     // Get the value
     std::vector<char> buffer(static_cast<size_t>(count));
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
     ASSERT_EQ(std::string(buffer.data()), expectedValue);
 }
 
 TEST_F(TestKnobSettingDescriptor, SetKnobValueWrongElementCountFailsInt64)
 {
     int64_t val = 42;
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(
-                                   HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 2, &val),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDescriptor()->setAttribute(
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 2, &val),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestKnobSettingDescriptor, SetKnobValueWrongElementCountFailsDouble)
 {
     double val = 1.0;
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(
-                                   HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_DOUBLE, 2, &val),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDescriptor()->setAttribute(
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 2, &val),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestKnobSettingDescriptor, SetKnobValueNullPointerFails)
 {
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, nullptr),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -235,7 +239,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobValueUnsupportedTypeFails)
     bool val = true;
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &val),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -247,7 +251,7 @@ TEST_F(TestKnobSettingDescriptor, GetAttributeBeforeFinalizeFails)
     int64_t val = 0;
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, nullptr, &val),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, nullptr, &val),
         HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -267,7 +271,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobValueTypeMismatchFails)
     double val = 0.0;
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_DOUBLE, 1, nullptr, &val),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, nullptr, &val),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -316,7 +320,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobIdWithElementCount)
     int64_t count = 0;
     std::vector<char> buffer(64);
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, 64, &count, buffer.data()));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, 64, &count, buffer.data()));
     ASSERT_EQ(count, static_cast<int64_t>(expectedId.size() + 1));
     ASSERT_EQ(std::string(buffer.data()), expectedId);
 }
@@ -329,7 +333,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobValueWithElementCount)
     int64_t count = 0;
     int64_t actualValue = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, &count, &actualValue));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &count, &actualValue));
     ASSERT_EQ(count, 1);
     ASSERT_EQ(actualValue, expectedValue);
 }
@@ -345,7 +349,7 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueTruncatesToBufferSize)
     const int64_t smallBufferSize = 8;
     std::array<char, 8> buffer = {};
     int64_t count = 0;
-    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
                                                   HIPDNN_TYPE_CHAR,
                                                   smallBufferSize,
                                                   &count,
@@ -367,7 +371,7 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueSizeQueryWithNullBuffer)
 
     int64_t count = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
     ASSERT_EQ(count, static_cast<int64_t>(expectedValue.size() + 1));
 }
 
@@ -380,7 +384,7 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueSizeQueryNullElementCountFails)
 
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, 0, nullptr, nullptr),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, nullptr, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -408,7 +412,7 @@ TEST_F(TestKnobSettingDescriptor, SetEmptyKnobIdFails)
     const std::string emptyId;
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, 0, emptyId.c_str()),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, 0, emptyId.c_str()),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -416,7 +420,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdExceedsMaxLengthFails)
 {
     const std::string longId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH + 1),
                              'x');
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
                                                              HIPDNN_TYPE_CHAR,
                                                              static_cast<int64_t>(longId.size()),
                                                              longId.c_str()),
@@ -426,7 +430,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdExceedsMaxLengthFails)
 TEST_F(TestKnobSettingDescriptor, SetKnobIdAtMaxLengthSucceeds)
 {
     const std::string maxId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH), 'x');
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(maxId.size()),
                                                   maxId.c_str()));
@@ -436,7 +440,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobStringValueExceedsMaxLengthFails)
 {
     const std::string longValue(
         static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH + 1), 'y');
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
                                                              HIPDNN_TYPE_CHAR,
                                                              static_cast<int64_t>(longValue.size()),
                                                              longValue.c_str()),
@@ -447,7 +451,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobStringValueAtMaxLengthSucceeds)
 {
     const std::string maxValue(
         static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH), 'y');
-    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
+    ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(maxValue.size()),
                                                   maxValue.c_str()));
@@ -458,7 +462,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdNegativeElementCountFails)
     const std::string knobId = "test";
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, -1, knobId.c_str()),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, -1, knobId.c_str()),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -468,7 +472,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobIdNegativeRequestedCountFails)
     std::array<char, 16> buffer{};
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, -1, nullptr, buffer.data()),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, -1, nullptr, buffer.data()),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -481,7 +485,7 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueNegativeRequestedCountFails)
     std::array<char, 16> buffer{};
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->getAttribute(
-            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, -1, nullptr, buffer.data()),
+            HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, -1, nullptr, buffer.data()),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -499,12 +503,12 @@ TEST_F(TestKnobSettingDescriptor, OverwriteKnobIdBeforeFinalize)
     // Verify the second ID took effect
     int64_t count = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
     ASSERT_EQ(count, static_cast<int64_t>(std::string("second_id").size() + 1));
 
     std::vector<char> buffer(static_cast<size_t>(count));
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
     ASSERT_EQ(std::string(buffer.data()), "second_id");
 }
 
@@ -518,7 +522,7 @@ TEST_F(TestKnobSettingDescriptor, OverwriteKnobValueBeforeFinalize)
     // Verify the second value took effect
     int64_t actualValue = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, nullptr, &actualValue));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, nullptr, &actualValue));
     ASSERT_EQ(actualValue, 99);
 }
 
@@ -532,7 +536,7 @@ TEST_F(TestKnobSettingDescriptor, OverwriteKnobValueTypeBeforeFinalize)
     // Verify the value is now a double
     double actualValue = 0.0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_DOUBLE, 1, nullptr, &actualValue));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_DOUBLE, 1, nullptr, &actualValue));
     ASSERT_DOUBLE_EQ(actualValue, 3.14);
 }
 
@@ -546,11 +550,11 @@ TEST_F(TestKnobSettingDescriptor, OverwriteIntValueWithStringBeforeFinalize)
     // Verify the value is now a string
     int64_t count = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
     ASSERT_EQ(count, static_cast<int64_t>(std::string("overwritten").size() + 1));
 
     std::vector<char> buffer(static_cast<size_t>(count));
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
     ASSERT_EQ(std::string(buffer.data()), "overwritten");
 }
