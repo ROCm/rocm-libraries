@@ -138,7 +138,6 @@ jobs:
           python3 .github/scripts/notify_teams.py \
             --project miopen \
             --failure-stage build \
-            --platform linux \
             --log-path TheRock/build/logs \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
