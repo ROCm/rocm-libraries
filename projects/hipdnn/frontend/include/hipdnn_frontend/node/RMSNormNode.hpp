@@ -89,10 +89,11 @@ public:
                             "RMSNormNode forward_phase must be set to TRAINING or INFERENCE");
 
         // Validate inv_rms tensor based on forward_phase
+        // inv_rms has shape [N, 1, H, W] — one value per (batch, spatial) position
         if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
         {
-            HIPDNN_CHECK_ERROR(detail::validateChannelOnlyShapeIfSet(
-                attributes.get_inv_rms(), channels, "Inverse RMS tensor"));
+            HIPDNN_CHECK_ERROR(detail::validateNormStatsShapeIfSet(
+                attributes.get_inv_rms(), x, "Inverse RMS tensor"));
         }
 
         return {ErrorCode::OK, ""};
@@ -155,7 +156,29 @@ public:
             auto invRms = attributes.get_inv_rms();
             if(invRms)
             {
-                inferCTensor(invRms);
+                // inv_rms shape is [N, 1, H, W] — batch and spatial from input, channel = 1
+                if(invRms->get_dim().empty())
+                {
+                    auto invRmsDims = x->get_dim();
+                    invRmsDims[1] = 1;
+                    invRms->set_dim(invRmsDims);
+                }
+
+                if(invRms->get_stride().empty())
+                {
+                    if(!x->get_stride().empty())
+                    {
+                        auto strideOrder
+                            = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                        invRms->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                            invRms->get_dim(), strideOrder));
+                    }
+                    else
+                    {
+                        invRms->set_stride(
+                            hipdnn_data_sdk::utilities::generateStrides(invRms->get_dim()));
+                    }
+                }
             }
         }
 

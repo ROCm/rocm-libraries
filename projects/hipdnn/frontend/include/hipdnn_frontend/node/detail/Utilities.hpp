@@ -314,6 +314,64 @@ inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<graph::TensorAt
     return validateChannelOnlyTensorShape(tensor, expectedChannels, fallbackName);
 }
 
+// Validates normalization statistics tensor shape (e.g., inv_rms) matches input batch and spatial
+// dims with channel=1. Expected shape: [N, 1, H, W, ...] where N, H, W come from the input tensor.
+// Only validates if tensor dimensions are already set (same pattern as validateChannelOnlyShapeIfSet)
+inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                         const std::shared_ptr<graph::TensorAttributes>& input,
+                                         const std::string& fallbackName = "Tensor")
+{
+    if(!areTensorDimensionsSet(tensor))
+    {
+        return {ErrorCode::OK, ""}; // Dimensions not set yet, will be inferred
+    }
+
+    if(!input)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, "Input tensor is not set"};
+    }
+
+    const auto& dims = tensor->get_dim();
+    const auto& inputDims = input->get_dim();
+
+    HIPDNN_RETURN_IF_NE(
+        dims.size(),
+        inputDims.size(),
+        ErrorCode::INVALID_VALUE,
+        getTensorNameForError(tensor, fallbackName) + " must have the same rank as input, expected "
+            + std::to_string(inputDims.size()) + " but got " + std::to_string(dims.size()));
+
+    // Batch dimension must match input
+    HIPDNN_RETURN_IF_NE(dims[0],
+                        inputDims[0],
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(tensor, fallbackName)
+                            + " batch dimension (index 0) must match input ("
+                            + std::to_string(inputDims[0]) + "), got " + std::to_string(dims[0]));
+
+    // Channel dimension must be 1 (reduced dimension)
+    HIPDNN_RETURN_IF_NE(dims[1],
+                        1,
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(tensor, fallbackName)
+                            + " channel dimension (index 1) must be 1, got "
+                            + std::to_string(dims[1]));
+
+    // Spatial dimensions must match input
+    for(size_t i = 2; i < dims.size(); ++i)
+    {
+        HIPDNN_RETURN_IF_NE(dims[i],
+                            inputDims[i],
+                            ErrorCode::INVALID_VALUE,
+                            getTensorNameForError(tensor, fallbackName)
+                                + " spatial dimension at index " + std::to_string(i)
+                                + " must match input (" + std::to_string(inputDims[i]) + "), got "
+                                + std::to_string(dims[i]));
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
 // Validates scalar parameter tensor is properly configured
 // Uses param's name if set, otherwise uses fallbackName for error messages
 // Used for required scalar parameters (e.g., epsilon) that must have dimensions set

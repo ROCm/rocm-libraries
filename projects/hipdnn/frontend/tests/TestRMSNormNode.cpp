@@ -258,8 +258,8 @@ TEST(TestRMSNormNode, InferPropertiesNodeWithInvRms)
     EXPECT_EQ(outputTensor->get_dim(), (std::vector<int64_t>{2, 64, 8, 8}));
     EXPECT_EQ(outputTensor->get_stride(), (std::vector<int64_t>{4096, 64, 8, 1}));
 
-    // inv_rms should get channel-only shape [1, C, 1, 1]
-    EXPECT_EQ(invRmsTensor->get_dim(), (std::vector<int64_t>{1, 64, 1, 1}));
+    // inv_rms should get norm stats shape [N, 1, H, W]
+    EXPECT_EQ(invRmsTensor->get_dim(), (std::vector<int64_t>{2, 1, 8, 8}));
 }
 
 TEST(TestRMSNormNode, InferPropertiesNodeWithBias)
