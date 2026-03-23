@@ -46,6 +46,24 @@ TEST(TestError, CodeEqualityOperators)
     EXPECT_FALSE(error != hipdnn_frontend::ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestError, ToStringReturnsCorrectStringForAllErrorCodes)
+{
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::OK), "OK");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::INVALID_VALUE),
+              "INVALID_VALUE");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR),
+              "HIPDNN_BACKEND_ERROR");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::ATTRIBUTE_NOT_SET),
+              "ATTRIBUTE_NOT_SET");
+}
+
+TEST(TestError, ToStringReturnsUnknownForInvalidCode)
+{
+    // Cast an out-of-range value to ErrorCode to verify the default case
+    auto invalidCode = static_cast<hipdnn_frontend::ErrorCode>(999);
+    EXPECT_EQ(hipdnn_frontend::to_string(invalidCode), "UNKNOWN_ERROR");
+}
+
 TEST(TestError, CheckHipdnnErrorMacro)
 {
     auto successFunction
