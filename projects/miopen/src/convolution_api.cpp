@@ -227,7 +227,9 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
                                                    const miopenConvolutionDescriptor_t convDesc,
                                                    size_t* buffer_size)
 {
-    MIOPEN_LOG_FUNCTION(alpha_beta_case, inputTensorDesc, outputTensorDesc, weightsTensorDesc);
+    {
+        MIOPEN_LOG_FUNCTION(alpha_beta_case, inputTensorDesc, outputTensorDesc, weightsTensorDesc);
+    }
 
     return miopen::try_([&] {
         miopenDataType_t data_type = miopen::deref(outputTensorDesc).GetType();

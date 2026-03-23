@@ -375,12 +375,12 @@ template <class SolverInfo>
 const auto& GetSolverNames()
 {
     static const auto names = [] {
-        std::vector<std::string> names;
+        std::vector<std::string> names_;
         const auto& sinfo = GetSolversInfo<SolverInfo>();
-        names.reserve(sinfo.size());
+        names_.reserve(sinfo.size());
         for(const auto& s : sinfo)
-            names.push_back(s.first);
-        return names;
+            names_.push_back(s.first);
+        return names_;
     }();
     return names;
 }
@@ -389,19 +389,19 @@ template <class TestCase>
 const auto& GetTestCases()
 {
     static const auto test_cases = [] {
-        std::vector<TestCase> test_cases;
+        std::vector<TestCase> test_cases_;
         const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
         const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
-        test_cases.reserve(sinfo.size());
+        test_cases_.reserve(sinfo.size());
         for(const auto& s : sinfo)
         {
             const auto& config = configs.find(s.first);
             if(config == configs.end())
-                test_cases.emplace_back(TestCase{s.first, s.second, {}});
+                test_cases_.emplace_back(TestCase{s.first, s.second, {}});
             else
-                test_cases.emplace_back(TestCase{s.first, s.second, config->second});
+                test_cases_.emplace_back(TestCase{s.first, s.second, config->second});
         }
-        return test_cases;
+        return test_cases_;
     }();
     return test_cases;
 }
