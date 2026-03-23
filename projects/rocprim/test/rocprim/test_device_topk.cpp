@@ -45,7 +45,7 @@
 
 // Params for tests
 template<class KeyType,
-         class ValueType          = KeyType,
+         class ValueType          = size_t,
          bool Descending          = false,
          class Decomposer         = rocprim::identity_decomposer,
          class Config             = rocprim::default_config,
@@ -98,101 +98,126 @@ size_t get_current_free_mem_size(float coefficient)
     return static_cast<size_t>(static_cast<float>(free_mem) * coefficient);
 }
 
-namespace std
+namespace utils
 {
-template<>
-struct hash<rocprim::int128_t>
-{
-    ROCPRIM_FORCE_INLINE size_t operator()(const rocprim::int128_t& value) const
+    template<class T>
+ROCPRIM_FORCE_INLINE bool isnan(T h)
     {
-        rocprim::uint128_t v    = static_cast<rocprim::uint128_t>(value);
-        std::uint64_t      low  = static_cast<std::uint64_t>(v);
-        std::uint64_t      high = static_cast<std::uint64_t>(v >> 64);
-        return (hash<std::uint64_t>{}(low) * 31) + hash<std::uint64_t>{}(high);
+        return std::isnan(h);
     }
-};
-template<>
-struct hash<rocprim::uint128_t>
-{
-    ROCPRIM_FORCE_INLINE size_t operator()(const rocprim::uint128_t& value) const
+    template<>
+ROCPRIM_FORCE_INLINE bool isnan<rocprim::half>(rocprim::half h)
     {
-        auto          v    = value;
-        std::uint64_t low  = static_cast<std::uint64_t>(v);
-        std::uint64_t high = static_cast<std::uint64_t>(v >> 64);
-        return (hash<std::uint64_t>{}(low) * 31) + hash<std::uint64_t>{}(high);
+        const auto& bits = reinterpret_cast<const uint16_t&>(h);
+        return (bits & 0x7C00) == 0x7C00 && (bits & 0x03FF) != 0;
     }
-};
-
-template<>
-struct hash<rocprim::half>
-{
-    ROCPRIM_FORCE_INLINE size_t operator()(const rocprim::half& value) const
+    template<>
+ROCPRIM_FORCE_INLINE bool isnan<rocprim::bfloat16>(rocprim::bfloat16 h)
     {
-        if(value != value)
-            return 0; // NaN
-        uint16_t bits;
-        std::memcpy(&bits, &value, sizeof(value));
-        return static_cast<size_t>(bits);
+        const auto& bits = reinterpret_cast<const uint16_t&>(h);
+        return (bits & 0x7C00) == 0x7C00 && (bits & 0x03FF) != 0;
     }
-};
-
-} // namespace std
-
-struct pair_hash
-{
-    template<class T1, class T2>
-    ROCPRIM_FORCE_INLINE std::size_t operator()(const std::pair<T1, T2>& p) const
+    template<class T>
+ROCPRIM_FORCE_INLINE bool isinf(T h)
     {
-        std::size_t h1 = std::hash<T1>{}(p.first);
-        std::size_t h2 = std::hash<T2>{}(p.second);
-        return h1 ^ (h2 << 1);
+        return std::isinf(h);
     }
-};
-
-ROCPRIM_FORCE_INLINE bool isnan_half(const rocprim::half& h)
-{
-    const auto& bits = reinterpret_cast<const uint16_t&>(h);
-    return (bits & 0x7C00) == 0x7C00 && (bits & 0x03FF) != 0;
-}
-
-template<class T, class = void>
-struct custom_equal_to
-{
-    ROCPRIM_FORCE_INLINE bool operator()(const T& a, const T& b) const
+    template<>
+ROCPRIM_FORCE_INLINE bool isinf<rocprim::half>(rocprim::half h)
     {
-        return rocprim::equal_to<T>{}(a, b);
+        const auto& bits = reinterpret_cast<const uint16_t&>(h);
+        return (bits & 0x7C00) == 0x7C00 && (bits & 0x03FF) == 0;
     }
-};
-
-template<class T>
-struct custom_equal_to<
-    T,
-    std::enable_if_t<rocprim::is_floating_point<T>::value && !std::is_same_v<T, rocprim::half>>>
-{
-    ROCPRIM_FORCE_INLINE bool operator()(const T& a, const T& b) const
+    template<>
+ROCPRIM_FORCE_INLINE bool isinf<rocprim::bfloat16>(rocprim::bfloat16 h)
     {
-        return (std::isnan(a) && std::isnan(b)) || rocprim::equal_to<T>{}(a, b);
+        const auto& bits = reinterpret_cast<const uint16_t&>(h);
+        return (bits & 0x7C00) == 0x7C00 && (bits & 0x03FF) == 0;
     }
-};
 
-template<>
-struct custom_equal_to<rocprim::half, void>
-{
-    ROCPRIM_FORCE_INLINE bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    template<class T>
+    bool is_negative(T h)
     {
-        return (isnan_half(a) && isnan_half(b)) || rocprim::equal_to<rocprim::half>{}(a, b);
+        if constexpr(std::is_same_v<T, rocprim::bfloat16> || std::is_same_v<T, rocprim::half>)
+        {
+            const auto& bits = reinterpret_cast<const uint16_t&>(h);
+            return (bits & 0x8000) != 0;
+        }
+        else
+        {
+            return std::signbit(h);
+        }
     }
-};
 
-template<class Pair>
-struct pair_comp
-{
-    ROCPRIM_FORCE_INLINE bool operator()(const Pair& a, const Pair& b) const
+    template<class T>
+    auto less(T a, T b)
     {
-        return custom_equal_to<typename Pair::first_type>{}(a.first, b.first)
-               && custom_equal_to<typename Pair::second_type>{}(a.second, b.second);
+        if constexpr(rocprim::is_floating_point<T>::value)
+        {
+            if(utils::isnan(a))
+            {
+                return is_negative(a);
+            }
+            else if(utils::isnan(b))
+            {
+                return !is_negative(b);
+            }
+            if(utils::isinf(a))
+            {
+                return is_negative(a);
+            }
+            else if(utils::isinf(b))
+            {
+                return !is_negative(b);
+            }
+        }
+        return rocprim::less<T>{}(a, b);
     }
-};
+
+    template<class T>
+    auto greater(T a, T b)
+    {
+        if constexpr(rocprim::is_floating_point<T>::value)
+        {
+            if(utils::isnan(a))
+            {
+                return !is_negative(a);
+            }
+            else if(utils::isnan(b))
+            {
+                return is_negative(b);
+            }
+            if(utils::isinf(a))
+            {
+                return !is_negative(a);
+            }
+            else if(utils::isinf(b))
+            {
+                return is_negative(b);
+            }
+        }
+        return rocprim::greater<T>{}(a, b);
+    }
+
+    } // namespace utils
+
+    template<class OutIterable, class InIterable, class Predicate, class KType>
+    void host_nth_element(OutIterable&      h_output,
+                          InIterable const& h_input,
+                          KType             K,
+                          Predicate         predicate)
+    {
+        h_output.clear();
+        const auto N   = h_input.size();
+        using common_t = typename std::common_type<decltype(K), decltype(N)>::type;
+        ASSERT_GE(N, 0);
+        ASSERT_GE(K, 0);
+        ASSERT_GE(static_cast<common_t>(N), static_cast<common_t>(K));
+        InIterable sorted_input(h_input.cbegin(), h_input.cend());
+        // Sort the whole input
+        std::sort(sorted_input.begin(), sorted_input.end(), predicate);
+        h_output.insert(h_output.end(), sorted_input.begin(), sorted_input.begin() + K);
+    }
 
 template<bool Descending,
          class InputKeyVector,
@@ -233,7 +258,26 @@ ROCPRIM_FORCE_INLINE void compare_pairs_k(InputKeyVector    keys_input,
     std::stable_sort(sorted_output.begin(), sorted_output.end(), comparator());
 
     // Only check that first k coincide
-    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input, k));
+    if constexpr(rocprim::is_integral<key_type>::value)
+    {
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input, k));
+    }
+    else
+    {
+        for(decltype(k) i = 0; i < k; ++i)
+        {
+            const auto& out = sorted_output[i];
+            const auto& in  = sorted_input[i];
+            if(utils::isnan(out.first) && utils::isnan(in.first))
+            {
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(out.second, in.second));
+            }
+            else
+            {
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(out, in));
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------
@@ -261,15 +305,15 @@ template<class T>
 using grouped_params = ::testing::Types<
     // Non-ordered, non-deterministic, non-stable
     // Ascending
-    DeviceTopkParams<T, T, true>,
+    DeviceTopkParams<T, size_t, false>,
     // Descending
-    DeviceTopkParams<T, T, false>,
+    DeviceTopkParams<T, size_t, true>,
 
     // Non-ordered, non-deterministic, stable
     // Ascending
     DeviceTopkParams<T,
-                     T,
-                     true,
+                     size_t,
+                     false,
                      rocprim::identity_decomposer,
                      rocprim::default_config,
                      false,
@@ -277,8 +321,8 @@ using grouped_params = ::testing::Types<
                      true>,
     // Descending
     DeviceTopkParams<T,
-                     T,
-                     false,
+                     size_t,
+                     true,
                      rocprim::identity_decomposer,
                      rocprim::default_config,
                      false,
@@ -327,7 +371,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
         for(size_in_type size : test_utils::get_sizes(seed_value))
         {
             hipStream_t stream = 0; // default
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -391,7 +435,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
 
             test_utils::GraphHelper gHelper;
 
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 gHelper.startStreamCapture(stream);
             }
@@ -408,7 +452,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
                 stream,
                 debug_synchronous)));
 
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -423,7 +467,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
                 compare_k<descending>(input, output, k);
             }
 
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
@@ -439,7 +483,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type                       = typename TestFixture::key_type;
-    using value_type                     = typename TestFixture::key_type;
+    using value_type                     = typename TestFixture::value_type;
     constexpr bool descending            = TestFixture::descending;
     using decomposer_t                   = typename TestFixture::decomposer_t;
     using config                         = typename TestFixture::config;
@@ -461,7 +505,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
         for(size_in_type size : test_utils::get_sizes(seed_value))
         {
             hipStream_t stream = 0; // default
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -539,7 +583,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
 
             test_utils::GraphHelper gHelper;
 
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 gHelper.startStreamCapture(stream);
             }
@@ -558,30 +602,27 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
                 stream,
                 debug_synchronous)));
 
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
-            // Copy output to host
-            const auto keys_output   = d_keys_output.load();
-            const auto values_output = d_values_output.load();
-
-            if(use_graphs)
+            if constexpr(use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
             }
+
             if(size <= 0)
             {
                 continue;
             }
 
             if constexpr(stable)
-            {
+            { // For stable implementation, directly use compare_pairs_k
+                // Copy output to host
+                const auto keys_output   = d_keys_output.load();
+                const auto values_output = d_values_output.load();
                 compare_pairs_k<descending>(keys_input,
                                             values_input,
                                             keys_output,
@@ -590,26 +631,152 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
             }
             else
             {
-                // Create input pairs
-                std::unordered_multiset<std::pair<key_type, value_type>,
-                                        pair_hash,
-                                        pair_comp<std::pair<key_type, value_type>>>
-                    h_input_map;
-                for(size_t i = 0; i < keys_input.size(); ++i)
+                // For unstable implementation, using this device algorithm radix_sort_pairs makes
+                // it a faster.
+
+                // Verify ouput by using radix_sort_pairs
+                if constexpr(use_graphs)
                 {
-                    h_input_map.insert({keys_input[i], values_input[i]});
+                    HIP_CHECK(hipStreamCreate(&stream));
+                }
+                // Get size of temporary_storage
+                temp_storage_size_bytes = 0;
+
+                auto ret = rocprim::radix_sort_pairs(nullptr,
+                                                     temp_storage_size_bytes,
+                                                     d_keys_output.get(),
+                                                     d_keys_output.get(),
+                                                     d_values_output.get(),
+                                                     d_values_output.get(),
+                                                     k,
+                                                     0,
+                                                     8 * sizeof(key_type),
+                                                     stream);
+                HIP_CHECK(ret);
+                ASSERT_GT(temp_storage_size_bytes, 0);
+                if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
                 }
 
-                // Varify keys & values are matching each other
-                for(unsigned int i = 0; i < k; ++i)
+                ret = rocprim::radix_sort_pairs(d_temp_storage.get(),
+                                                temp_storage_size_bytes,
+                                                d_keys_output.get(),
+                                                d_keys_output.get(),
+                                                d_values_output.get(),
+                                                d_values_output.get(),
+                                                k,
+                                                0,
+                                                8 * sizeof(key_type),
+                                                stream);
+                HIP_CHECK(ret);
+                HIP_CHECK(hipGetLastError());
+                HIP_CHECK(hipDeviceSynchronize());
+
+                if(use_graphs)
                 {
-                    auto range = h_input_map.equal_range(
-                        std::pair<key_type, value_type>{keys_output[i], values_output[i]});
-                    ASSERT_NE(range.first, range.second);
+                    HIP_CHECK(hipStreamDestroy(stream));
                 }
 
-                // Check keys are correct
-                compare_k<descending>(keys_input, keys_output, k);
+                // Get output from device
+                auto h_output_keys   = d_keys_output.load();
+                auto h_output_values = d_values_output.load();
+                if(descending)
+                {
+                    std::reverse(h_output_keys.begin(), h_output_keys.end());
+                    std::reverse(h_output_values.begin(), h_output_values.end());
+                }
+                // Calculate expected output keys
+                std::vector<key_type> h_expected_keys{};
+                auto                  pred = [](auto _1, auto _2)
+                {
+                    if constexpr(!descending)
+                    {
+                        return utils::less<decltype(_1)>(_1, _2);
+                    }
+                    else
+                    {
+                        return utils::greater<decltype(_1)>(_1, _2);
+                    }
+                };
+                host_nth_element(h_expected_keys, keys_input, k, pred);
+                const auto output_size = k;
+                ASSERT_EQ(d_keys_output.size(), output_size);
+                ASSERT_EQ(h_output_values.size(), output_size);
+                ASSERT_EQ(h_expected_keys.size(), output_size);
+
+                if constexpr(rocprim::is_integral<key_type>::value)
+                {
+                    ASSERT_NO_FATAL_FAILURE(
+                        test_utils::assert_eq(h_output_keys, h_expected_keys, output_size));
+                }
+                else
+                {
+                    for(size_out_type i = 0; i < output_size; ++i)
+                    {
+                        const auto& out      = h_output_keys[i];
+                        const auto& expected = h_expected_keys[i];
+                        if(utils::isnan(out) && utils::isnan(expected))
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(out, expected));
+                        }
+                    }
+                }
+
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(h_output_keys, h_expected_keys, output_size));
+                // Check values
+                if constexpr(rocprim::is_integral<value_type>::value)
+                {
+                    // Integral types can be directly used as hash maps
+                    for(unsigned int i = 0; i < output_size; ++i)
+                    {
+                        const auto& expected = keys_input[h_output_values[i]];
+                        const auto& out      = h_output_keys[i];
+                        if constexpr(rocprim::is_floating_point<key_type>::value)
+                        {
+                            if(utils::isnan(expected) && utils::isnan(out))
+                            {
+                                continue;
+                            }
+                        }
+                        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(expected, out));
+                    }
+                }
+                else
+                {
+                    // Note: this code would not be compiled, because, we only test for integral value types
+                    // Using a hash map might be faster, but the creation of hash
+                    // map also takes time. So here for now, we directly iterate
+                    // over all items to see if the values can be found in the result.
+                    for(unsigned int i = 0; i < output_size; ++i)
+                    {
+                        const auto& key   = h_output_keys[i];
+                        const auto& val   = h_output_values[i];
+                        bool        found = false;
+                        for(unsigned int j = 0; j < size; ++j)
+                        {
+                            const auto& in_key = keys_input[j];
+                            const auto& in_val = values_input[j];
+                            if(in_val == val && in_key == key)
+                            {
+                                found = true;
+                                break;
+                            }
+                            if(val == in_val && utils::isnan(in_key) && utils::isnan(key))
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        ASSERT_TRUE(found);
+                    }
+                }
             }
         }
     }
@@ -641,7 +808,7 @@ void topk_large_sizes_test(bool debug_synchronous)
     for(auto size : sizes)
     {
         hipStream_t stream = 0; // default
-        if(use_graphs)
+        if constexpr(use_graphs)
         {
             // Default stream does not support hipGraph stream capture, so create one
             HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -649,7 +816,7 @@ void topk_large_sizes_test(bool debug_synchronous)
 
         // This test needs to allocate 2 buffers of size: sizeof(key_type) * size, plus temporary storage.
         // Check if there could be no enough memory space
-        if(2 * sizeof(key_type) * size > get_current_free_mem_size(0.9))
+        if((2 * sizeof(key_type) * size) > get_current_free_mem_size(0.7))
         {
             std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
             return;
@@ -707,7 +874,7 @@ void topk_large_sizes_test(bool debug_synchronous)
 
         test_utils::GraphHelper gHelper;
 
-        if(use_graphs)
+        if constexpr(use_graphs)
         {
             gHelper.startStreamCapture(stream);
         }
@@ -723,7 +890,7 @@ void topk_large_sizes_test(bool debug_synchronous)
                                                                            stream,
                                                                            debug_synchronous)));
 
-        if(use_graphs)
+        if constexpr(use_graphs)
         {
             gHelper.createAndLaunchGraph(stream);
         }
@@ -742,7 +909,7 @@ void topk_large_sizes_test(bool debug_synchronous)
             test_utils::assert_eq(output, size_in_type{0});
         }
 
-        if(use_graphs)
+        if constexpr(use_graphs)
         {
             gHelper.cleanupGraphHelper();
             HIP_CHECK(hipStreamDestroy(stream));
