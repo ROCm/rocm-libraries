@@ -176,6 +176,9 @@ struct ProcessImpl
         }
         if(!args.empty())
             cmd += " " + std::string{args};
+        // When capturing output, redirect stderr to stdout so we capture both
+        if(out != nullptr)
+            cmd += " 2>&1";
         if(!cwd.empty())
             cmd.insert(0, "cd " + std::string{cwd} + "; ");
 
