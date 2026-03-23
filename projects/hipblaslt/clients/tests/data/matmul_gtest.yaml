@@ -133,14 +133,14 @@ Tests:
   beta: 3
 
 - name: matmul_grid_limit_real
-  category: nightly
+  category: quick
   function:
     matmul: *real_precisions
-  matrix_size: *grid_limit_matrix_size_real
+  matrix_size: *grid_limit_matrix_size_real_mod
   transA_transB: *transA_transB_range
   alpha: 1
   beta: 0
-  gpu_arch: '120[0-1]'
+  gpu_arch: '1151'
 
 - name: matmul_grid_limit_real_1b
   category: nightly
