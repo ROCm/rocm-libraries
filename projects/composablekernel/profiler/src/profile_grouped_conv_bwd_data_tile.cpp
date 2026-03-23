@@ -65,7 +65,10 @@ namespace ckt = ck_tile::builder::test;
 namespace ckp = ck_tile::builder::profiling;
 
 template <auto SIGNATURE>
-int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, bool time_kernel, ck_tile::index_t instance_index)
+int call_profiler(const ckt::Args<SIGNATURE>& args,
+                  const std::string& split_k,
+                  bool time_kernel,
+                  ck_tile::index_t instance_index)
 {
     auto inputs  = ckt::alloc_inputs(args);
     auto outputs = ckt::alloc_outputs(args);
@@ -74,24 +77,24 @@ int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, 
     std::cout << args.make_input_descriptor() << std::endl;
     std::cout << args.make_weight_descriptor() << std::endl;
     std::cout << args.make_output_descriptor() << std::endl;
-    auto&& [valid, avg_time, op_name, best_split_k, best_instance_index] = ckp::run_grouped_conv_backward_data_tile_algs(
-        args,
-        split_k,
-        instance_index,
-        inputs.get(),
-        outputs.get(),
-        ck_tile::stream_config{nullptr,
-                               time_kernel,
-                               0 /*log_level*/,
-                               5 /*cold_iters*/,
-                               50 /*nrepeat_*/,
-                               true /*is_gpu_timer_*/});
+    auto&& [valid, avg_time, op_name, best_split_k, best_instance_index] =
+        ckp::run_grouped_conv_backward_data_tile_algs(
+            args,
+            split_k,
+            instance_index,
+            inputs.get(),
+            outputs.get(),
+            ck_tile::stream_config{nullptr,
+                                   time_kernel,
+                                   0 /*log_level*/,
+                                   5 /*cold_iters*/,
+                                   50 /*nrepeat_*/,
+                                   true /*is_gpu_timer_*/});
     if(time_kernel)
     {
-        std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name
-                  << " (instance " << best_instance_index << ")"
-                  << "\n\tavg_time: " << avg_time << ", SplitK " << best_split_k 
-                  << std::endl;
+        std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name << " (instance "
+                  << best_instance_index << ")" << "\n\tavg_time: " << avg_time << ", SplitK "
+                  << best_split_k << std::endl;
     }
     return !valid;
 }
