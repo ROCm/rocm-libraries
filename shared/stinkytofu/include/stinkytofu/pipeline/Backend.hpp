@@ -83,6 +83,10 @@ namespace stinkytofu
         /// Run the full pipeline sequence on the member module.
         bool runOptimization();
 
+        /// Run architecture-specific required passes on the member module.
+        /// These passes always run regardless of optimization level.
+        bool runRequiredPasses();
+
         /// Run a single PipelineConfig on the member module (e.g. for a specific group).
         bool runOptimizationWithConfig(const PipelineConfig& config,
                                        const std::string&    groupName = "");

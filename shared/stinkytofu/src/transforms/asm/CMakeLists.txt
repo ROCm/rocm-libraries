@@ -8,7 +8,6 @@ target_sources(stinkytofu PRIVATE
     PeepholeOptimizationPass.cpp
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
-    DelayAluInsertionPass.cpp
     LegalizationUtils.cpp
     ScheduleLastLRsPass.cpp
     StinkyDAGSchedulerPass.cpp
@@ -17,4 +16,5 @@ target_sources(stinkytofu PRIVATE
     StinkyWaitCntInsertionPass.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
+    InsertVgprMsbPass.cpp
 )

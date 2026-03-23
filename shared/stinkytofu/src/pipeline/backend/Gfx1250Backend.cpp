@@ -28,6 +28,7 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 
 #include <algorithm>
 
@@ -50,17 +51,18 @@ namespace stinkytofu
             const auto& moduleOptions = module.getModuleOptions();
 
             // Use waitcnt insertion
-            config.enableWaitCnt = moduleOptions.EnableWaitCntInsertion;
+            config.enableWaitCnt = true;
             config.waitCntMode   = PipelineConfig::WaitCntMode::Classical;
+            config.verbose       = true;
 
             // disable all optimzation passes
             config.enablePeephole         = false;
             config.enableDCE              = false;
             config.enableDuplicateElim    = false;
-            config.enableCFGBuilder       = false;
+            config.enableCFGBuilder       = true;
             config.enableDAGScheduler     = false;
             config.enableScheduleLastLRs  = false;
-            config.enableScheduleFirstLRs = false;
+            config.enableScheduleFirstLRs = true;
 
             // Configure GEMM-specific tile parameters
             config.withGemmTileConfig(GFX1250_ARCH,
@@ -119,11 +121,18 @@ namespace stinkytofu
                 /* groupName */ "noLoadLoopBody");
         }
 
+        void requiredPassesPopulator(const StinkyAsmModule&              module,
+                                     std::vector<std::unique_ptr<Pass>>& passes)
+        {
+            passes.push_back(createInsertVgprMsbPass());
+        }
+
         struct Gfx1250BackendRegistrar
         {
             Gfx1250BackendRegistrar()
             {
                 BackendRegistry::setArchPipeline(GFX1250_ARCH, pipelineSpecPopulator);
+                BackendRegistry::setArchRequiredPasses(GFX1250_ARCH, requiredPassesPopulator);
             }
         };
         static Gfx1250BackendRegistrar s_gfx1250BackendRegistrar;

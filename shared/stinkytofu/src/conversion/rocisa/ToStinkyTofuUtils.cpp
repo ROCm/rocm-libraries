@@ -698,181 +698,6 @@ namespace
         return getMsbFromStinkyVgpr(reg) * (-256);
     }
 
-    /// Map EncodeField to VGPR_OFF slot index: 0=SRC0, 1=SRC1, 2=SRC2, 3=DST.
-    /// Returns -1 for fields that don't participate in VGPR_OFF (SGPRs, immediates).
-    int encodeFieldToVgprOffSlot(EncodeField ef)
-    {
-        switch(ef)
-        {
-        // DST slot (bits [7:6])
-        case EncodeField::vdst:
-        case EncodeField::vdata:
-            return 3;
-        // SRC0 slot (bits [1:0])
-        case EncodeField::src0:
-        case EncodeField::addr:
-        case EncodeField::vaddr:
-        case EncodeField::vaddr0:
-            return 0;
-        // SRC1 slot (bits [3:2])
-        case EncodeField::src1:
-        case EncodeField::vsrc1:
-        case EncodeField::data0:
-        case EncodeField::vsrc:
-        case EncodeField::vaddr1:
-            return 1;
-        // SRC2 slot (bits [5:4])
-        case EncodeField::src2:
-        case EncodeField::data1:
-        case EncodeField::vaddr2:
-            return 2;
-        // Non-VGPR fields -- no VGPR_OFF slot
-        case EncodeField::None:
-        case EncodeField::rsrc:
-        case EncodeField::soffset:
-        case EncodeField::saddr:
-        case EncodeField::sdst:
-        case EncodeField::ssrc0:
-        case EncodeField::ssrc1:
-        case EncodeField::literal:
-        case EncodeField::sdata:
-        case EncodeField::sbase:
-        case EncodeField::simm16:
-        case EncodeField::simm32:
-        case EncodeField::scale_src0:
-        case EncodeField::scale_src1:
-        case EncodeField::vaddr3:
-            return -1;
-        default:
-            assert(false && "Unhandled EncodeField in VGPR_OFF slot mapping");
-            return -1;
-        }
-    }
-
-    /// Map StinkyInstruction operands to VGPR_OFF MSB slots using HwInstDesc::operandFields.
-    /// Fills msbSrc[3], msbDst and sets hasVgpr.
-    void collectVgprMsbFromStinkyInst(const StinkyInstruction* inst,
-                                      int                      msbSrc[3],
-                                      int&                     msbDst,
-                                      bool&                    hasVgpr)
-    {
-        const auto& fields   = inst->getHwInstDesc()->operandFields;
-        const auto& srcRegs  = inst->getSrcRegs();
-        const auto& destRegs = inst->getDestRegs();
-
-        int srcIdx = 0, dstIdx = 0;
-        for(const auto& field : fields)
-        {
-            const StinkyRegister* reg = nullptr;
-            if(field.isDest || field.isReadWrite)
-            {
-                if(dstIdx < static_cast<int>(destRegs.size()))
-                    reg = &destRegs[dstIdx++];
-            }
-            else
-            {
-                if(srcIdx < static_cast<int>(srcRegs.size()))
-                    reg = &srcRegs[srcIdx++];
-            }
-            if(!reg)
-                continue;
-
-            int slot = encodeFieldToVgprOffSlot(field.encodeField);
-            if(slot < 0)
-                continue;
-
-            int msb = getMsbFromStinkyVgpr(*reg);
-            if(msb < 0)
-                continue;
-
-            hasVgpr = true;
-            if(slot == 3)
-                msbDst = msb;
-            else
-                msbSrc[slot] = msb;
-        }
-    }
-
-    enum VgprMsbValue : int
-    {
-        NOT_REQUIRED = -1,
-        LABEL_BEGIN  = -2,
-    };
-
-    /// Compute required MSB setVal from StinkyInstruction's VGPR register usage.
-    /// Uses same encoding as rocisa: setVal = msbSrc[0] + (msbSrc[1]<<2) + (msbSrc[2]<<4) + (msbDst<<6)
-    /// \return (setVal, hasVgpr). setVal is -1 when hasVgpr is false.
-    std::pair<int, bool> computeRequiredMsbFromStinkyInst(const StinkyInstruction* inst,
-                                                          bool                     hasVgprMsb)
-    {
-        if(!hasVgprMsb)
-            return {-1, false};
-
-        // ignore any not vop instructions
-        if(inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad)
-           || inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic)
-           || inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Barrier)
-           || inst->is(InstFlag::IF_WaitCnt) || inst->is(InstFlag::IF_HasSideEffect))
-        {
-            return {VgprMsbValue::NOT_REQUIRED, false};
-        }
-
-        int  msbSrc[3] = {0, 0, 0};
-        int  msbDst    = 0;
-        bool hasVgpr   = false;
-
-        collectVgprMsbFromStinkyInst(inst, msbSrc, msbDst, hasVgpr);
-
-        if(!hasVgpr)
-            return {VgprMsbValue::NOT_REQUIRED, false};
-
-        int setVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
-        return {setVal, true};
-    }
-
-    /// Emit s_set_vgpr_msb instruction if required MSB differs from current.
-    /// \param insertBefore If valid, insert before this position; otherwise insert at end.
-    void emitVgprMsbIfNeeded(int           requiredSetVal,
-                             bool          hasVgpr,
-                             int&          currentVgprMsb,
-                             AsmIRBuilder& irBuilder,
-                             BasicBlock&   bb,
-                             GfxArchID     archId,
-                             IRBase*       insertBefore)
-    {
-        if(!hasVgpr || requiredSetVal == currentVgprMsb)
-        {
-            if(currentVgprMsb == VgprMsbValue::LABEL_BEGIN)
-                currentVgprMsb = VgprMsbValue::NOT_REQUIRED;
-            return;
-        }
-
-        if(currentVgprMsb == VgprMsbValue::LABEL_BEGIN)
-        {
-            StinkyInstruction* nopInst
-                = irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
-            nopInst->addSrcReg(StinkyRegister(0));
-        }
-
-        int combinedSetVal = requiredSetVal;
-        if(currentVgprMsb != VgprMsbValue::NOT_REQUIRED
-           && currentVgprMsb != VgprMsbValue::LABEL_BEGIN)
-            combinedSetVal += (currentVgprMsb << 8);
-
-        const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
-        assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
-        StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
-        msbInst->addSrcReg(StinkyRegister(combinedSetVal));
-
-        std::string msbComment
-            = std::string("src0: " + std::to_string(requiredSetVal & 0x3)
-                          + ", src1: " + std::to_string((requiredSetVal >> 2) & 0x3)
-                          + ", src2: " + std::to_string((requiredSetVal >> 4) & 0x3)
-                          + ", dst: " + std::to_string((requiredSetVal >> 6) & 0x3));
-        msbInst->addModifier<CommentData>(CommentData{msbComment});
-        currentVgprMsb = requiredSetVal;
-    }
-
     /// Convert a rocisa::Container to StinkyRegister
     ///
     /// This function takes a rocisa::Container pointer and converts it to a
@@ -1119,8 +944,7 @@ namespace stinkytofu
         std::map<std::string, int> archCaps = rocisa::rocIsa::getInstance().getArchCaps();
         bool hasVgprMsb = asmCaps.count("HasVgprMSB") && asmCaps.at("HasVgprMSB");
 
-        int  currentVgprMsb = VgprMsbValue::NOT_REQUIRED;
-        auto processItem    = [&](rocisa::Item*                          item,
+        auto processItem = [&](rocisa::Item*                          item,
                                   const std::vector<const std::string*>& moduleNames) {
             const auto instsCountBefore = currentBB->size();
 
@@ -1148,7 +972,6 @@ namespace stinkytofu
                 }
 
                 stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
-                currentVgprMsb = VgprMsbValue::LABEL_BEGIN;
                 return;
             }
 
@@ -1254,26 +1077,19 @@ namespace stinkytofu
             Legalized legalizedInsts = legalizeInstruction(
                 stinkyInst, inst, irBuilder, archId, asmCaps, archCaps, hasVgprMsb);
 
-            auto processStinkyInst = [&](StinkyInstruction* inst) {
-                auto [requiredMsb, hasVgpr] = computeRequiredMsbFromStinkyInst(inst, hasVgprMsb);
-                emitVgprMsbIfNeeded(
-                    requiredMsb, hasVgpr, currentVgprMsb, irBuilder, *currentBB, archId, inst);
-                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
-            };
-
             if(legalizedInsts.first != nullptr)
             {
                 StinkyInstruction* currentStinkyInst = legalizedInsts.first;
                 while(currentStinkyInst != legalizedInsts.last->getNext())
                 {
-                    processStinkyInst(currentStinkyInst);
+                    stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
                     currentStinkyInst
                         = static_cast<StinkyInstruction*>(currentStinkyInst->getNext());
                 }
             }
             else
             {
-                processStinkyInst(stinkyInst);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
             }
         };
 
@@ -1350,6 +1166,11 @@ void init_stinkytofu(nb::module_ m)
             module_->runOptimizationPipeline();
         }
 
+        void runRequiredPasses()
+        {
+            module_->runRequiredPasses();
+        }
+
         std::string getName() const
         {
             return module_->getName();
@@ -1377,6 +1198,7 @@ void init_stinkytofu(nb::module_ m)
     // Bind the wrapper class
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
+        .def("runRequiredPasses", &StinkyAsmModuleWithSignature::runRequiredPasses)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);

@@ -5238,11 +5238,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       print(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
       # Run optimizations on the instruction body
+      t1b_start = time.perf_counter()
       if stinky_opt_level > 0:
-        t1b_start = time.perf_counter()
         stModule.runOptimizationPipeline()
-        t1b_end = time.perf_counter()
-        print(f"StinkyTofu (1b) runOptimizationPipeline: {t1b_end - t1b_start:.4f}s")
+
+      # Run architecture-specific required passes (always, regardless of opt level)
+      stModule.runRequiredPasses()
+      t1b_end = time.perf_counter()
+      print(f"StinkyTofu (1b) pipeline + required passes: {t1b_end - t1b_start:.4f}s")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")

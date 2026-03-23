@@ -23,8 +23,11 @@
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
+#include <iostream>
 #include <memory>
 #include <queue>
+#include <string>
+#include <unordered_map>
 
 namespace
 {
@@ -85,6 +88,28 @@ namespace
         }
         return cycles;
     }
+
+    /// True when both \p lhs and \p rhs are null, or when both are \c s_set_vgpr_msb
+    /// with identical source operands (same encoding / MSB set value).
+    static bool compareVgprMsb(StinkyInstruction* lhs, StinkyInstruction* rhs)
+    {
+        if(lhs == nullptr && rhs == nullptr)
+            return true;
+        if(lhs == nullptr || rhs == nullptr)
+            return false;
+
+        const auto& srcL = lhs->getSrcRegs();
+        const auto& srcR = rhs->getSrcRegs();
+        if(srcL.size() != srcR.size())
+            return false;
+        for(size_t i = 0; i < srcL.size(); ++i)
+        {
+            if(srcL[i].getLiteralInt() != srcR[i].getLiteralInt())
+                return false;
+        }
+        return true;
+    }
+
     // Schedule the Final PGR in the given BasicBlock.
     // This will Move the PGR instructions to the suitable position to hide the latency.
     //
@@ -102,20 +127,57 @@ namespace
         BasicBlock::iterator endIt   = bb.end();
 
         BasicBlock::iterator regionStart = beginIt;
+        BasicBlock::iterator regionEnd = endIt;
 
         // 1. Find the last barrier
         BasicBlock::reverse_iterator revStartIt = bb.rbegin(), revEndIt = bb.rend();
 
-        for(auto rit = revStartIt; rit != revEndIt; ++rit)
+        for(BasicBlock::iterator rit = beginIt; rit != endIt; ++rit)
         {
             StinkyInstruction& inst = getStinkyInst(rit);
             if(isBarrier(inst))
             {
                 // Start a new region after the side-effect instruction.
                 regionStart = std::next(BasicBlock::iterator(rit.getNodePtr()));
-                break;
+            }
+            const LabelData* labelData = inst.getModifier<LabelData>();
+            if(labelData != nullptr)
+            {
+                const std::string& labelName = labelData->label;
+                auto pos = labelName.find("label_LoopBeginL");
+                if(pos != std::string::npos && pos == 0)
+                {
+                    regionEnd = rit;
+                    break;
+                }
             }
         }
+
+        std::unordered_map<StinkyInstruction*, StinkyInstruction*> mfmaMapVgprMsb;
+        std::unordered_map<StinkyInstruction*, StinkyInstruction*> lrMapVgprMsb;
+        StinkyInstruction*                                         currSetVgprMsb = nullptr;
+        for(BasicBlock::iterator it = regionStart; it != regionEnd; ++it)
+        {
+            StinkyInstruction& inst = getStinkyInst(it);
+            if(isBarrier(inst))
+            {
+                break;
+            }
+            if(isDSRead(inst))
+            {
+                lrMapVgprMsb[&inst] = currSetVgprMsb;
+            }
+            if(isMFMA(inst) || isWMMA(inst))
+            {
+                mfmaMapVgprMsb[&inst] = currSetVgprMsb;
+            }
+            const std::string& opcode = inst.getHwInstDesc()->mnemonic;
+            if(opcode.find("s_set_vgpr_msb") != std::string::npos)
+            {
+                currSetVgprMsb = &inst;
+            }
+        }
+
         // 2. Push the instructions before the barrier.
         for(BasicBlock::iterator it = beginIt; it != regionStart; ++it)
         {
@@ -138,13 +200,16 @@ namespace
             }
         };
 
-        for(BasicBlock::iterator it = regionStart; it != endIt; ++it)
+        for(BasicBlock::iterator it = regionStart; it != regionEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
+            //inst.dump(std::cout);
             if(isDSRead(inst))
             {
+                //std::cout<<numLR<<"th Local Read:";
                 numLR++;
                 auto dist = getLRDistance(it, endIt, beginIt, inst.getDestRegs());
+                //std::cout<<", distance: "<<dist<<std::endl;
                 if(dist < inst.latencyCycles)
                 {
                     // issue asap
@@ -156,7 +221,7 @@ namespace
                     scheLR.push(&inst);
                 }
             }
-            else if(isMFMA(inst) || isWMMA(inst))
+            else if(isWMMA(inst))
             {
                 numMFMA++;
                 scheduled.push_back(&inst);
@@ -180,13 +245,10 @@ namespace
 
         scheduleRemainingLRs();
 
-        if(endIt != bb.end())
+        for(BasicBlock::iterator it = regionEnd; it != endIt; ++it)
         {
-            for(BasicBlock::iterator it = endIt; it != bb.end(); ++it)
-            {
-                StinkyInstruction& inst = getStinkyInst(it);
-                scheduled.push_back(&inst);
-            }
+            StinkyInstruction& inst = getStinkyInst(it);
+            scheduled.push_back(&inst);
         }
 
         assert(scheduled.size() == bb.size()
@@ -198,6 +260,42 @@ namespace
         {
             bb.removeIR(inst);
             bb.appendIR(inst);
+        }
+
+        // Insert the s_set_vgpr_msb instructions if needed
+        currSetVgprMsb = nullptr;
+        for(BasicBlock::iterator it = regionStart; it != regionEnd; ++it)
+        {
+            StinkyInstruction& inst = getStinkyInst(it);
+            if(isBarrier(inst))
+            {
+                break;
+            }
+            if(isDSRead(inst))
+            {
+                auto lr = lrMapVgprMsb[&inst];
+                if(!compareVgprMsb(lr, currSetVgprMsb))
+                {
+                    StinkyInstruction* cloned = lr->clone();
+                    bb.insertIR(it, cloned);
+                    currSetVgprMsb = lr;
+                }
+            }
+            if(isMFMA(inst) || isWMMA(inst))
+            {
+                auto mfma = mfmaMapVgprMsb[&inst];
+                if(!compareVgprMsb(mfma, currSetVgprMsb))
+                {
+                    StinkyInstruction* cloned = mfma->clone();
+                    bb.insertIR(it, cloned);
+                    currSetVgprMsb = mfma;
+                }
+            }
+            const std::string& opcode = inst.getHwInstDesc()->mnemonic;
+            if(opcode.find("s_set_vgpr_msb") != std::string::npos)
+            {
+                currSetVgprMsb = &inst;
+            }
         }
     }
 

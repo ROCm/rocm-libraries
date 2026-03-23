@@ -291,7 +291,8 @@ namespace
             });
 
             // Handle tensor waits for DS reads.
-            handleTensorWaits(func, arch, passCtx);
+            // TODO: Currently don't handle the tensor waitcnt.
+            //handleTensorWaits(func, arch, passCtx);
 
             removePHIs(func, passCtx);
         }

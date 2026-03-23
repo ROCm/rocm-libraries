@@ -35,8 +35,11 @@ namespace
         {
             auto* stinkyInst = dyn_cast<StinkyInstruction>(it.getNodePtr());
 
-            // TODO: Currently don't handle the tensor waitcnt
-            if(stinkyInst && (isWaitCnt(*stinkyInst) || stinkyInst->is(InstFlag::IF_WaitTensorCnt)))
+            if(stinkyInst
+               && (isWaitCnt(*stinkyInst)
+                   // TODO: Currently don't handle the tensor waitcnt
+                   //|| stinkyInst->is(InstFlag::IF_WaitTensorCnt)
+                   ))
             {
                 it = bb.eraseIR(it);
             }

@@ -26,11 +26,13 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace stinkytofu
 {
+    class Pass;
     class StinkyAsmModule;
 
     /// Global registry of pipeline spec populators per architecture.
@@ -59,12 +61,27 @@ namespace stinkytofu
         using PipelineSpecPopulator
             = std::function<void(const StinkyAsmModule&, std::vector<PipelineSpec>&)>;
 
+        /// Function type: populate required (always-run) passes from a StinkyAsmModule.
+        /// FIXME: This is a temporary workaround. A cleaner mechanism for
+        /// registering arch-specific required passes is being designed.
+        using RequiredPassesPopulator
+            = std::function<void(const StinkyAsmModule&, std::vector<std::unique_ptr<Pass>>&)>;
+
         /// Set the pipeline spec populator for \p arch (one per arch).
         static void setArchPipeline(const std::array<int, 3>& arch,
                                     PipelineSpecPopulator     populator);
 
         /// Return the pipeline spec populator for \p arch, or empty if none registered.
         static PipelineSpecPopulator getArchPopulator(const std::array<int, 3>& arch);
+
+        /// Set the required passes populator for \p arch (one per arch).
+        /// FIXME: Workaround — will be replaced by a proper required-pass mechanism.
+        static void setArchRequiredPasses(const std::array<int, 3>& arch,
+                                          RequiredPassesPopulator   populator);
+
+        /// Return the required passes populator for \p arch, or empty if none registered.
+        /// FIXME: Workaround — will be replaced by a proper required-pass mechanism.
+        static RequiredPassesPopulator getArchRequiredPassesPopulator(const std::array<int, 3>& arch);
 
         /// True if a pipeline spec populator is registered for \p arch.
         static bool hasPipelines(const std::array<int, 3>& arch);
