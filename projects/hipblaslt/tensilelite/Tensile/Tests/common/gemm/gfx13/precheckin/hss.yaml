@@ -1,0 +1,501 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+GlobalParameters:
+  NumElementsToValidate: -1
+  KernelTime: True
+  NewClient: 2
+  BoundsCheck: False
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  # DataInitValueActivationArgs: [0.5, -1]
+  #Architecture: gfx1300
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBias: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeScaleAlphaVec: 1
+  PruneSparseMode: 1
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorC: 0
+  PrintTensorD: 0
+  PrintTensorRef: 0
+  # GenerateSourcesAndExit: True
+  #AMDGPUArchPath: rocm_agent_enumerator
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
+
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      # Sparse: 1
+      Batched: True
+      Activation: False
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 16, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 16, 1, 1, 1, 1, 2, 2]
+        - GlobalReadVectorWidthA: [1,8]
+        - GlobalReadVectorWidthB: [1,8]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1,8]
+        - VectorWidthB: [1,8]
+        # - StoreVectorWidth: [1]
+        - DepthU: [32,64] #[16,32,64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1] # [-1,0,1,2]
+        # - LDSTrInst: [True]
+        # - SourceSwap: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        # - LdsPadMetadata: [0]
+        # - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1]
+        - ClusterLocalRead: [0,1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        # - 1LDSBuffer: [0]
+        # - DirectToVgprSparseMetadata: [0]
+        # - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # basic size
+          - Exact: [16, 16, 1, 16]
+          # - Exact: [16, 16, 1, 32]
+          - Exact: [32, 32, 1, 32]
+          # - Exact: [32, 32, 1, 64]
+          - Exact: [64, 64, 1, 64]
+          # tail
+          - Exact: [16, 16, 1, 15]
+          # - Exact: [16, 16, 1, 17]
+          # - Exact: [16, 16, 1, 23]
+          - Exact: [16, 16, 1, 25]
+          # - Exact: [32, 32, 1, 31]
+          # - Exact: [32, 32, 1, 33]
+          - Exact: [32, 32, 1, 39]
+          # - Exact: [32, 32, 1, 41]
+          - Exact: [64, 64, 1, 63]
+          # - Exact: [64, 64, 1, 65]
+          # - Exact: [64, 64, 1, 71]
+          - Exact: [64, 64, 1, 73]
+          # edge
+          # # 16
+          # - Exact: [15, 16, 1, 16]
+          # - Exact: [16, 15, 1, 16]
+          - Exact: [15, 15, 1, 16]
+          # - Exact: [17, 16, 1, 16]
+          # - Exact: [16, 17, 1, 16]
+          - Exact: [17, 17, 1, 16]
+          # - Exact: [23, 16, 1, 16]
+          # - Exact: [16, 23, 1, 16]
+          - Exact: [23, 23, 1, 16]
+          # - Exact: [25, 16, 1, 16]
+          # - Exact: [16, 25, 1, 16]
+          - Exact: [25, 25, 1, 16]
+          # # # 32
+          # - Exact: [31, 32, 1, 32]
+          # - Exact: [32, 31, 1, 32]
+          # - Exact: [31, 31, 1, 32]
+          # - Exact: [33, 32, 1, 32]
+          # - Exact: [32, 33, 1, 32]
+          # - Exact: [33, 33, 1, 32]
+          # - Exact: [39, 32, 1, 32]
+          # - Exact: [32, 39, 1, 32]
+          # - Exact: [39, 39, 1, 32]
+          # - Exact: [41, 32, 1, 32]
+          # - Exact: [32, 41, 1, 32]
+          # - Exact: [41, 41, 1, 32]
+          # # # 64
+          # - Exact: [63, 64, 1, 64]
+          # - Exact: [64, 63, 1, 64]
+          - Exact: [63, 63, 1, 64]
+          # - Exact: [65, 64, 1, 64]
+          # - Exact: [64, 65, 1, 64]
+          - Exact: [65, 65, 1, 64]
+          # - Exact: [71, 64, 1, 64]
+          # - Exact: [64, 71, 1, 64]
+          - Exact: [71, 71, 1, 64]
+          # - Exact: [73, 64, 1, 64]
+          # - Exact: [64, 73, 1, 64]
+          - Exact: [73, 73, 1, 64]
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      # Sparse: 1
+      Batched: True
+      Activation: False
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 16, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 16, 1, 1, 1, 1, 2, 2]
+        - GlobalReadVectorWidthA: [1,8]
+        - GlobalReadVectorWidthB: [1,8]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1,8]
+        - VectorWidthB: [1,8]
+        # - StoreVectorWidth: [1]
+        - DepthU: [32,64] #[16,32,64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1] # [-1,0,1,2]
+        # - LDSTrInst: [True]
+        # - SourceSwap: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        # - LdsPadMetadata: [0]
+        # - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1]
+        - ClusterLocalRead: [0,1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        # - 1LDSBuffer: [0]
+        # - DirectToVgprSparseMetadata: [0]
+        # - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # basic size
+          - Exact: [16, 16, 1, 16]
+          # - Exact: [16, 16, 1, 32]
+          - Exact: [32, 32, 1, 32]
+          # - Exact: [32, 32, 1, 64]
+          - Exact: [64, 64, 1, 64]
+          # tail
+          - Exact: [16, 16, 1, 15]
+          # - Exact: [16, 16, 1, 17]
+          # - Exact: [16, 16, 1, 23]
+          - Exact: [16, 16, 1, 25]
+          # - Exact: [32, 32, 1, 31]
+          # - Exact: [32, 32, 1, 33]
+          - Exact: [32, 32, 1, 39]
+          # - Exact: [32, 32, 1, 41]
+          - Exact: [64, 64, 1, 63]
+          # - Exact: [64, 64, 1, 65]
+          # - Exact: [64, 64, 1, 71]
+          - Exact: [64, 64, 1, 73]
+          # edge
+          # # 16
+          # - Exact: [15, 16, 1, 16]
+          # - Exact: [16, 15, 1, 16]
+          - Exact: [15, 15, 1, 16]
+          # - Exact: [17, 16, 1, 16]
+          # - Exact: [16, 17, 1, 16]
+          - Exact: [17, 17, 1, 16]
+          # - Exact: [23, 16, 1, 16]
+          # - Exact: [16, 23, 1, 16]
+          - Exact: [23, 23, 1, 16]
+          # - Exact: [25, 16, 1, 16]
+          # - Exact: [16, 25, 1, 16]
+          - Exact: [25, 25, 1, 16]
+          # # # 32
+          # - Exact: [31, 32, 1, 32]
+          # - Exact: [32, 31, 1, 32]
+          # - Exact: [31, 31, 1, 32]
+          # - Exact: [33, 32, 1, 32]
+          # - Exact: [32, 33, 1, 32]
+          # - Exact: [33, 33, 1, 32]
+          # - Exact: [39, 32, 1, 32]
+          # - Exact: [32, 39, 1, 32]
+          # - Exact: [39, 39, 1, 32]
+          # - Exact: [41, 32, 1, 32]
+          # - Exact: [32, 41, 1, 32]
+          # - Exact: [41, 41, 1, 32]
+          # # # 64
+          # - Exact: [63, 64, 1, 64]
+          # - Exact: [64, 63, 1, 64]
+          - Exact: [63, 63, 1, 64]
+          # - Exact: [65, 64, 1, 64]
+          # - Exact: [64, 65, 1, 64]
+          - Exact: [65, 65, 1, 64]
+          # - Exact: [71, 64, 1, 64]
+          # - Exact: [64, 71, 1, 64]
+          - Exact: [71, 71, 1, 64]
+          # - Exact: [73, 64, 1, 64]
+          # - Exact: [64, 73, 1, 64]
+          - Exact: [73, 73, 1, 64]
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # NT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      # Sparse: 1
+      Batched: True
+      Activation: False
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 16, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 16, 1, 1, 1, 1, 2, 2]
+        - GlobalReadVectorWidthA: [1,8]
+        - GlobalReadVectorWidthB: [1,8]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1,8]
+        - VectorWidthB: [1,8]
+        # - StoreVectorWidth: [1]
+        - DepthU: [32,64] #[16,32,64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1] # [-1,0,1,2]
+        # - LDSTrInst: [True]
+        # - SourceSwap: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        # - LdsPadMetadata: [0]
+        # - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1]
+        - ClusterLocalRead: [0,1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        # - 1LDSBuffer: [0]
+        # - DirectToVgprSparseMetadata: [0]
+        # - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # basic size
+          - Exact: [16, 16, 1, 16]
+          # - Exact: [16, 16, 1, 32]
+          - Exact: [32, 32, 1, 32]
+          # - Exact: [32, 32, 1, 64]
+          - Exact: [64, 64, 1, 64]
+          # tail
+          - Exact: [16, 16, 1, 15]
+          # - Exact: [16, 16, 1, 17]
+          # - Exact: [16, 16, 1, 23]
+          - Exact: [16, 16, 1, 25]
+          # - Exact: [32, 32, 1, 31]
+          # - Exact: [32, 32, 1, 33]
+          - Exact: [32, 32, 1, 39]
+          # - Exact: [32, 32, 1, 41]
+          - Exact: [64, 64, 1, 63]
+          # - Exact: [64, 64, 1, 65]
+          # - Exact: [64, 64, 1, 71]
+          - Exact: [64, 64, 1, 73]
+          # edge
+          # # 16
+          # - Exact: [15, 16, 1, 16]
+          # - Exact: [16, 15, 1, 16]
+          - Exact: [15, 15, 1, 16]
+          # - Exact: [17, 16, 1, 16]
+          # - Exact: [16, 17, 1, 16]
+          - Exact: [17, 17, 1, 16]
+          # - Exact: [23, 16, 1, 16]
+          # - Exact: [16, 23, 1, 16]
+          - Exact: [23, 23, 1, 16]
+          # - Exact: [25, 16, 1, 16]
+          # - Exact: [16, 25, 1, 16]
+          - Exact: [25, 25, 1, 16]
+          # # # 32
+          # - Exact: [31, 32, 1, 32]
+          # - Exact: [32, 31, 1, 32]
+          # - Exact: [31, 31, 1, 32]
+          # - Exact: [33, 32, 1, 32]
+          # - Exact: [32, 33, 1, 32]
+          # - Exact: [33, 33, 1, 32]
+          # - Exact: [39, 32, 1, 32]
+          # - Exact: [32, 39, 1, 32]
+          # - Exact: [39, 39, 1, 32]
+          # - Exact: [41, 32, 1, 32]
+          # - Exact: [32, 41, 1, 32]
+          # - Exact: [41, 41, 1, 32]
+          # # # 64
+          # - Exact: [63, 64, 1, 64]
+          # - Exact: [64, 63, 1, 64]
+          - Exact: [63, 63, 1, 64]
+          # - Exact: [65, 64, 1, 64]
+          # - Exact: [64, 65, 1, 64]
+          - Exact: [65, 65, 1, 64]
+          # - Exact: [71, 64, 1, 64]
+          # - Exact: [64, 71, 1, 64]
+          - Exact: [71, 71, 1, 64]
+          # - Exact: [73, 64, 1, 64]
+          # - Exact: [64, 73, 1, 64]
+          - Exact: [73, 73, 1, 64]
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      # Sparse: 1
+      Batched: True
+      Activation: False
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 16, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 16, 1, 1, 1, 1, 2, 2]
+        - GlobalReadVectorWidthA: [1,8]
+        - GlobalReadVectorWidthB: [1,8]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1,8]
+        - VectorWidthB: [1,8]
+        # - StoreVectorWidth: [1]
+        - DepthU: [32,64] #[16,32,64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1] # [-1,0,1,2]
+        # - LDSTrInst: [True]
+        # - SourceSwap: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        # - LdsPadMetadata: [0]
+        # - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1]
+        - ClusterLocalRead: [0,1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        # - 1LDSBuffer: [0]
+        # - DirectToVgprSparseMetadata: [0]
+        # - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # basic size
+          - Exact: [16, 16, 1, 16]
+          # - Exact: [16, 16, 1, 32]
+          - Exact: [32, 32, 1, 32]
+          # - Exact: [32, 32, 1, 64]
+          - Exact: [64, 64, 1, 64]
+          # tail
+          - Exact: [16, 16, 1, 15]
+          # - Exact: [16, 16, 1, 17]
+          # - Exact: [16, 16, 1, 23]
+          - Exact: [16, 16, 1, 25]
+          # - Exact: [32, 32, 1, 31]
+          # - Exact: [32, 32, 1, 33]
+          - Exact: [32, 32, 1, 39]
+          # - Exact: [32, 32, 1, 41]
+          - Exact: [64, 64, 1, 63]
+          # - Exact: [64, 64, 1, 65]
+          # - Exact: [64, 64, 1, 71]
+          - Exact: [64, 64, 1, 73]
+          # edge
+          # # 16
+          # - Exact: [15, 16, 1, 16]
+          # - Exact: [16, 15, 1, 16]
+          - Exact: [15, 15, 1, 16]
+          # - Exact: [17, 16, 1, 16]
+          # - Exact: [16, 17, 1, 16]
+          - Exact: [17, 17, 1, 16]
+          # - Exact: [23, 16, 1, 16]
+          # - Exact: [16, 23, 1, 16]
+          - Exact: [23, 23, 1, 16]
+          # - Exact: [25, 16, 1, 16]
+          # - Exact: [16, 25, 1, 16]
+          - Exact: [25, 25, 1, 16]
+          # # # 32
+          # - Exact: [31, 32, 1, 32]
+          # - Exact: [32, 31, 1, 32]
+          # - Exact: [31, 31, 1, 32]
+          # - Exact: [33, 32, 1, 32]
+          # - Exact: [32, 33, 1, 32]
+          # - Exact: [33, 33, 1, 32]
+          # - Exact: [39, 32, 1, 32]
+          # - Exact: [32, 39, 1, 32]
+          # - Exact: [39, 39, 1, 32]
+          # - Exact: [41, 32, 1, 32]
+          # - Exact: [32, 41, 1, 32]
+          # - Exact: [41, 41, 1, 32]
+          # # # 64
+          # - Exact: [63, 64, 1, 64]
+          # - Exact: [64, 63, 1, 64]
+          - Exact: [63, 63, 1, 64]
+          # - Exact: [65, 64, 1, 64]
+          # - Exact: [64, 65, 1, 64]
+          - Exact: [65, 65, 1, 64]
+          # - Exact: [71, 64, 1, 64]
+          # - Exact: [64, 71, 1, 64]
+          - Exact: [71, 71, 1, 64]
+          # - Exact: [73, 64, 1, 64]
+          # - Exact: [64, 73, 1, 64]
+          - Exact: [73, 73, 1, 64]
+        - ActivationArgs:
+          - [Enum: none]
