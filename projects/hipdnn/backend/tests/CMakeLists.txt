@@ -36,6 +36,7 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnorm.cpp
     descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
+    descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
@@ -54,6 +55,7 @@ add_executable(
     descriptors/TestGraphDescriptorSdpaFprop.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp

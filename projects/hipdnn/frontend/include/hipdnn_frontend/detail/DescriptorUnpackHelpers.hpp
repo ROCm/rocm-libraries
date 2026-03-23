@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -365,6 +366,46 @@ template <typename T>
     // Register in map for future sharing
     tensorMap[uid] = outTensor;
 
+    return {};
+}
+
+/// Unpacks an optional tensor attribute. Returns nullptr if the attribute has no elements set.
+[[nodiscard]] inline Error unpackOptionalTensor(
+    hipdnnBackendDescriptor_t opDesc,
+    hipdnnBackendAttributeName_t tensorAttrName,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    std::shared_ptr<graph::TensorAttributes>& outTensor,
+    const std::string& errorContext)
+{
+    int64_t count = 0;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrCount(
+        opDesc, tensorAttrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, count, errorContext));
+    if(count == 0)
+    {
+        outTensor = nullptr;
+        return {};
+    }
+    return unpackAndRegisterTensor(opDesc, tensorAttrName, tensorMap, outTensor, errorContext);
+}
+
+/// Gets an optional scalar attribute. Returns std::nullopt if the attribute has no elements set.
+template <typename T>
+[[nodiscard]] inline Error getDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
+                                                           hipdnnBackendAttributeName_t attrName,
+                                                           hipdnnBackendAttributeType_t attrType,
+                                                           std::optional<T>& value,
+                                                           const std::string& errorContext)
+{
+    int64_t count = 0;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrCount(desc, attrName, attrType, count, errorContext));
+    if(count == 0)
+    {
+        value = std::nullopt;
+        return {};
+    }
+    T raw{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
+    value = raw;
     return {};
 }
 

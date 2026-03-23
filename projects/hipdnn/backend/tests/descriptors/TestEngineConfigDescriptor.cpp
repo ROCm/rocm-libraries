@@ -446,11 +446,11 @@ static std::unique_ptr<HipdnnBackendDescriptor>
 {
     auto wrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
     auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
-    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(knobId.size()),
                        knobId.c_str());
-    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, &value);
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &value);
     desc->finalize();
     return wrapper;
 }
