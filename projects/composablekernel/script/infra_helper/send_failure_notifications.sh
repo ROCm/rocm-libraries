@@ -28,6 +28,7 @@ PATTERNS=(
     'unauthorized: your account must log in with a Personal Access Token'
     'sccache: error: Server startup failed: Address in use'
     'No space left on device'
+    'Could not resolve host: github.com'
 )
 
 DESCRIPTIONS=(
@@ -40,10 +41,11 @@ DESCRIPTIONS=(
     "Docker login failed"
     "Sccache Error"
     "Device space error"
+    "Unable to access Github"
 )
 
 # Indices into PATTERNS/DESCRIPTIONS for which a node name lookup is performed.
-NODE_PATTERN_INDICES=(3 4 8)  # cat: No such file, GPU not found, No space left on device
+NODE_PATTERN_INDICES=(3 4 8 9) 
 
 # ---------------------------------------------------------------------------
 # Fetch and scan the log.
@@ -92,7 +94,7 @@ process_block() {
                 if [[ "$node_idx" == "$i" ]]; then
                     node_name=$(wget -q --no-check-certificate -O - "${BUILD_URL}consoleText" | awk '
                         /NODE_NAME[[:space:]]*=/ { node = $NF }
-                        /'"$pattern"'/ { print node; exit }
+                        index($0, "'"$pattern"'") { print node; exit }
                     ')
                     break
                 fi
