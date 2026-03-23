@@ -108,7 +108,6 @@ jobs:
           python3 .github/scripts/notify_teams.py \
             --project miopen \
             --failure-stage test \
-            --platform "${{ inputs.platform }}" \
             --log-path ./test_logs/test_output.log \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
