@@ -155,42 +155,22 @@ inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
 {
     hipError_t hip_err;
 
-    if(stream != nullptr)
+    // Perform async copy for all blocks
+    for(size_t i_block = 0; i_block < block_count; i_block++)
     {
-        // Use stream-aware async copy for multi-threaded contexts
-        for(size_t i_block = 0; i_block < block_count; i_block++)
-        {
-            hip_err = hipMemcpyAsync(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
-                                     hBuf.as<char>(),
-                                     dBuf.getNumBytes() / block_count,
-                                     dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
-                                     stream);
+        hip_err = hipMemcpyAsync(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
+                                 hBuf.as<char>(),
+                                 dBuf.getNumBytes() / block_count,
+                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+                                 stream);
 
-            if(hip_err != hipSuccess)
-            {
-                return hip_err;
-            }
-        }
-        // Synchronize the stream to ensure copy is complete
-        return hipStreamSynchronize(stream);
-    }
-    else
-    {
-        // Original synchronous path
-        for(size_t i_block = 0; i_block < block_count; i_block++)
+        if(hip_err != hipSuccess)
         {
-            hip_err = hipMemcpy(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
-                                hBuf.as<char>(),
-                                dBuf.getNumBytes() / block_count,
-                                dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice);
-
-            if(hip_err != hipSuccess)
-            {
-                return hip_err;
-            }
+            return hip_err;
         }
-        return hip_err;
     }
+
+    return hipStreamSynchronize(stream);
 }
 
 inline hipError_t broadcast(HipDeviceBuffer& dBuf, std::size_t repeats)
@@ -225,58 +205,33 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
         hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
     hipError_t hip_err;
 
-    if(stream != nullptr)
+    // Synchronize to ensure prior work is complete
+    hip_err = stream != nullptr ? hipStreamSynchronize(stream) : hipDeviceSynchronize();
+    if(hip_err != hipSuccess)
+        return hip_err;
+
+    if(!needSwizzle)
     {
-        // Use stream-aware async copy for multi-threaded contexts
-        // First synchronize stream to ensure prior work is complete
-        if(hipSuccess != (hip_err = hipStreamSynchronize(stream)))
+        hip_err = hipMemcpyAsync(
+            hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost, stream);
+        if(hip_err != hipSuccess)
             return hip_err;
-
-        if(!needSwizzle)
-        {
-            hip_err = hipMemcpyAsync(
-                hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost, stream);
-            if(hip_err != hipSuccess)
-                return hip_err;
-            return hipStreamSynchronize(stream);
-        }
-
-        for(size_t j = 0; j < batch * col; j++)
-        {
-            hip_err = hipMemcpyAsync(hBuf.as<char>() + (j * lda * elementSize),
-                                     dBuf.as<char>() + (j * row * elementSize),
-                                     row * elementSize,
-                                     hipMemcpyDeviceToHost,
-                                     stream);
-
-            if(hip_err != hipSuccess)
-                return hip_err;
-        }
-        return hipStreamSynchronize(stream);
+        return stream != nullptr ? hipStreamSynchronize(stream) : hipDeviceSynchronize();
     }
-    else
+
+    for(size_t j = 0; j < batch * col; j++)
     {
-        // Original synchronous path
-        if(hipSuccess != (hip_err = hipDeviceSynchronize()))
+        hip_err = hipMemcpyAsync(hBuf.as<char>() + (j * lda * elementSize),
+                                 dBuf.as<char>() + (j * row * elementSize),
+                                 row * elementSize,
+                                 hipMemcpyDeviceToHost,
+                                 stream);
+
+        if(hip_err != hipSuccess)
             return hip_err;
-
-        if(!needSwizzle)
-            return hipMemcpy(
-                hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost);
-
-        for(size_t j = 0; j < batch * col; j++)
-        {
-            hip_err = hipMemcpy(hBuf.as<char>() + (j * lda * elementSize),
-                                dBuf.as<char>() + (j * row * elementSize),
-                                row * elementSize,
-                                hipMemcpyDeviceToHost);
-
-            if(hip_err != hipSuccess)
-                return hip_err;
-        }
-
-        return hipSuccess;
     }
+
+    return hipStreamSynchronize(stream);
 }
 
 template <typename T1>
