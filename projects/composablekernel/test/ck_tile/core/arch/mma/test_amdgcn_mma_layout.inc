@@ -19,7 +19,7 @@ using namespace mma;
 
 using F16       = fp16_t;
 using F32       = fp32_t;
-using Target90a = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
+using Target908 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
 using Target950 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
 using Target11  = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
 using Target12  = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
@@ -200,13 +200,17 @@ void run_mma_layout_test()
 // List of intrinsics to test.
 // clang-format off
 using Gfx9Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target90a, MmaOpFamily::DENSE> // mfma_f32_16x16x16f16
->;
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_16x16x16f16
+    amdgcn_mma<F16, F16, F32, 64u, 32u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
+    amdgcn_mma<F16, F16, F32, 32u, 64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_32x32x4f16
+    amdgcn_mma<F16, F16, F32, 64u, 4u,  4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>, // mfma_f32_4x4x4f16
+    amdgcn_mma<F16, F16, F32, 4u,  64u, 4u,  DefaultMfmaCtrlFlags,                Target908, MmaOpFamily::DENSE>  // mfma_f32_4x4x4f16
+    >;
 using Gfx950Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE> // mfma_f32_16x16x32_f16
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 32u, DefaultMfmaCtrlFlags,                Target950, MmaOpFamily::DENSE>  // mfma_f32_16x16x32_f16
 >;
 using Gfx11Intrinsics = ::testing::Types<
-    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target11,  MmaOpFamily::DENSE> // wmma_f32_16x16x16_f16_w32
+    amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target11,  MmaOpFamily::DENSE>  // wmma_f32_16x16x16_f16_w32
 >;
 using Gfx12Intrinsics = ::testing::Types<
     amdgcn_mma<F16, F16, F32, 16u, 16u, 16u, DefaultWmmaCtrlFlags<F16, F16, F32>, Target12,  MmaOpFamily::DENSE>, // wmma_f32_16x16x16_f16_w32_gfx12
