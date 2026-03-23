@@ -103,14 +103,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION
         -Wno-nontrivial-memcall)
 endif()
 
-if(NOT WIN32)
-    list(APPEND __clang_cxx_compile_options
-        -Wno-return-std-move-in-c++11
-        -Wno-enum-constexpr-conversion
-        -Wno-nrvo
-        -Wno-unique-object-duplication)
-endif()
-
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions

@@ -812,7 +812,7 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                     const auto& dy        = invoke_params.tensors.dy;
                     const auto& dw        = invoke_params.tensors.dw;
                     const auto& workSpace = invoke_params.workSpace;
-                    auto elapsed          = 0.f;
+                    float elapsed{0.f};
 
                     if(invoke_params.type != InvokeType::AutoTune)
                     {
@@ -820,8 +820,7 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                                                               ss_kernel_infO.comp_options);
                         if(!ss_kernels.empty())
                         {
-                            auto kernel = ss_kernels.front();
-                            kernel(x, workSpace);
+                            ss_kernels.front()(x, workSpace);
                         }
                         else
                         {
@@ -837,7 +836,7 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                             elapsed += handle.GetKernelTime();
                     }
 
-                    int unused       = 0;
+                    int unused{0};
                     int* return_addr = nullptr;
                     main_kernel(
                         N, C, H, W, K, n_groups, unused, unused, workSpace, dw, dy, return_addr);

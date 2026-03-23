@@ -110,7 +110,7 @@ ConvSolution KthvalueFwd::GetSolution(const ExecutionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
+            decltype(auto) kerneL = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::kthvalue::FwdInvokeParams>();
             size_t dim_stride     = params.inputDesc->GetStrides()[params.dim];
 
@@ -120,7 +120,7 @@ ConvSolution KthvalueFwd::GetSolution(const ExecutionContext& context,
             auto output_tv  = get_inner_expanded_tv<5>(deref(params.outputDesc));
             auto indices_tv = get_inner_expanded_tv<5>(deref(params.indicesDesc));
 
-            kernel(params.input,
+            kerneL(params.input,
                    params.output,
                    params.indices,
                    params.k,

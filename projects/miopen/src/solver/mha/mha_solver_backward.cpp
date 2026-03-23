@@ -248,8 +248,8 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
             void* fp32_dSxK_ws      = getBuffPart(params.GetWorkspace(), 3);
             void* fp32_dSxQ_ws      = getBuffPart(params.GetWorkspace(), 4);
 
-            decltype(auto) dOxO_reduction_kernel = handle_.Run(kernels[0]);
-            dOxO_reduction_kernel(dataBwd.doData,
+            decltype(auto) dOxO_reduction_kerneL = handle_.Run(kernels[0]);
+            dOxO_reduction_kerneL(dataBwd.doData,
                                   dataBwd.oData,
                                   fp32_dOxO_SxdO_ws,
                                   dataBwd.descaleDOData,
@@ -314,8 +314,8 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
             waitSyncEvent(std::move(event_QxK));
             waitSyncEvent(std::move(event_dOxV));
 
-            decltype(auto) bwd_attention_kernel = handle_.Run(kernels[1]);
-            bwd_attention_kernel(fp32_QxK_S_ws,
+            decltype(auto) bwd_attention_kerneL = handle_.Run(kernels[1]);
+            bwd_attention_kerneL(fp32_QxK_S_ws,
                                  fp32_dOxV_ws,
                                  fp32_dS_ws,
                                  dataBwd.mData,

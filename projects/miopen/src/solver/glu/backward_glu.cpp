@@ -104,10 +104,10 @@ ConvSolution GLUBackward::GetSolution(const ExecutionContext& context,
 
     result.invoker_factory = [outgrad_numel](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
+            decltype(auto) kerneL = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::glu::BwdInvokeParams>();
 
-            kernel(params.input, params.outputGrad, params.inputGrad, outgrad_numel);
+            kerneL(params.input, params.outputGrad, params.inputGrad, outgrad_numel);
         };
     };
 

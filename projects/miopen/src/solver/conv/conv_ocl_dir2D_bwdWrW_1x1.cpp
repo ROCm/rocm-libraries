@@ -474,9 +474,9 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
 
         if(n_passes == 2)
         {
-            result.invoker_factory = [ws_sz, ss_kernel_info = std::move(ss_kernel_info)](
+            result.invoker_factory = [ws_sz, ss_kernel_info_ = std::move(ss_kernel_info)](
                                          const std::vector<Kernel>& kernels) mutable {
-                return [=, ss_kernel_info = std::move(ss_kernel_info)](
+                return [=, ss_kernel_infO = std::move(ss_kernel_info_)](
                            const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto main_kernel = handle.Run(kernels[0]);
                     const auto& invoke_params =
@@ -491,7 +491,7 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                     auto elapsed           = 0.f;
 
                     auto&& ss_kernels =
-                        handle.GetKernels(ss_kernel_info.kernel_name, ss_kernel_info.comp_options);
+                        handle.GetKernels(ss_kernel_infO.kernel_name, ss_kernel_infO.comp_options);
                     if(!ss_kernels.empty())
                     {
                         auto kernel = ss_kernels.front();
@@ -499,13 +499,13 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                     }
                     else
                     {
-                        handle.AddKernel(ss_kernel_info.kernel_name,
-                                         ss_kernel_info.comp_options,
-                                         ss_kernel_info.kernel_file,
-                                         ss_kernel_info.kernel_name,
-                                         ss_kernel_info.l_wk,
-                                         ss_kernel_info.g_wk,
-                                         ss_kernel_info.comp_options)(tensors.x, workSpace);
+                        handle.AddKernel(ss_kernel_infO.kernel_name,
+                                         ss_kernel_infO.comp_options,
+                                         ss_kernel_infO.kernel_file,
+                                         ss_kernel_infO.kernel_name,
+                                         ss_kernel_infO.l_wk,
+                                         ss_kernel_infO.g_wk,
+                                         ss_kernel_infO.comp_options)(tensors.x, workSpace);
                     }
 
                     if(handle.IsProfilingEnabled())

@@ -128,10 +128,10 @@ ConvSolution AttnSoftmax::GetSolution(const ExecutionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
+            decltype(auto) kerneL = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-            kernel(params.x,
+            kerneL(params.x,
                    params.forward_y,
                    nullptr, // attention related parameters
                    nullptr, // attention related parameters

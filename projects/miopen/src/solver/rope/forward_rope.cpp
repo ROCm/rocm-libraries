@@ -106,12 +106,12 @@ ConvSolution RoPEForward::GetSolution(const ExecutionContext&,
             auto ydims_  = params.yDesc->GetLengths();
             auto cosdims = params.cosDesc->GetLengths();
 
-            auto output_numel =
+            auto output_numel_ =
                 std::accumulate(ydims_.begin(), ydims_.end(), 1ULL, std::multiplies<size_t>());
             auto rotary_numel =
                 std::accumulate(cosdims.begin(), cosdims.end(), 1ULL, std::multiplies<size_t>());
 
-            kerneL(params.x, params.cos, params.sin, params.y, output_numel, rotary_numel);
+            kerneL(params.x, params.cos, params.sin, params.y, output_numel_, rotary_numel);
         };
     };
 
