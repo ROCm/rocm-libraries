@@ -1248,7 +1248,7 @@ class Solution(collections.abc.Mapping):
       return
 
     if state["StreamK"] != 0:
-      state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
+      #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm

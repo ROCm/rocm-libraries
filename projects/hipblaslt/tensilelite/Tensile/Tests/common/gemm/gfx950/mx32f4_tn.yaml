@@ -165,6 +165,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToLds: [0,1,2,3]
         - Use64bShadowLimitMX: [0,1]
+        - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

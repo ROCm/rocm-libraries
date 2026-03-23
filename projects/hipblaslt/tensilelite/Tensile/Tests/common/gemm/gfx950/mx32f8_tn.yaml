@@ -101,6 +101,7 @@ BenchmarkProblems:
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
+        - StreamK: [0,3]
 #        - NumElementsPerBatchStore: [0]
 #        - StorePriorityOpt: [0]
 #        - StaggerU: [0]
