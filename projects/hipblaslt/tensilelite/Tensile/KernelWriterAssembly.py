@@ -9101,6 +9101,9 @@ class KernelWriterAssembly(KernelWriter):
     numElementsPer4Bytes = int(4 / tP["bpeGR"])
     isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
 
+    # For example, it replaces buffer_load_b128 with 4 buffer_load_b32 if HasPartialOOB is false.
+    tailGRVW = kernel["GlobalReadVectorWidth%s"%tc] if self.states.asmCaps["HasPartialOOB"] else 1
+
     ########################################
     # Calculate Max Addr
     ########################################
@@ -9315,7 +9318,7 @@ class KernelWriterAssembly(KernelWriter):
                 # adjustment for {d,s}gemm + BufferLoad
                 # use same buffer_load instruction for tail loop as out of tail loop
                 # this is mandatory for DirectToLds case. Also, it improves tail loop performance.
-                numLoadVectorComp = numLoadVectorComp // kernel["GlobalReadVectorWidth%s"%tc]
+                numLoadVectorComp = numLoadVectorComp // tailGRVW
 
               if isLds or isTr:
                 numLoadVectorComp = 1
@@ -9342,10 +9345,10 @@ class KernelWriterAssembly(KernelWriter):
                   # elif self.states.archCaps["HasEccHalf"]:
                   #   destVgprHi = self.vgprPool.checkOut(1, 'destVgprHi')
                   if isTr:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
+                    numElementsPerLoad = tailGRVW
                   if (not tP["isM"]) and isLds:
                     if not kernel["NonDTLTailLoop%s"%tc]:
-                      numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
+                      numElementsPerLoad = tailGRVW
                     dataIsByte = False
                   else:
                     dataIsByte = True
@@ -9373,12 +9376,12 @@ class KernelWriterAssembly(KernelWriter):
                         glvw=tP["glvw"], idx=loopCnt, numVgprG2L=numVgprG2L)
                 elif dataType.isHalf() or dataType.isBFloat16():
                   if isTr:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
+                    numElementsPerLoad = tailGRVW
                   elif tP["glvw"]>1 and kernel["AssertSummationElementMultiple"] % 2 == 0 and not isLds:
                   # Pack two FP16 values into a single load dword x2
                     numElementsPerLoad = 2
                   elif isLds and not kernel["NonDTLTailLoop%s"%tc]:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
+                    numElementsPerLoad = tailGRVW
                   elif self.states.archCaps["HasEccHalf"]:
                     # In some cards, loading half types into register will zero out
                     # the other half. Therefore we need to load into a separate register
@@ -9410,12 +9413,12 @@ class KernelWriterAssembly(KernelWriter):
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
+                    numElementsPerLoad = tailGRVW
                   regIdx = r
                 elif dataType.isDouble():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc] # adjust numElementsPerLoad for DGEMM
+                    numElementsPerLoad = tailGRVW # adjust numElementsPerLoad for DGEMM
                   regIdx = r*2
                 elif dataType.isSingleComplex():
                   regIdx = r*2
@@ -9464,7 +9467,7 @@ class KernelWriterAssembly(KernelWriter):
                     # need to increment ldsInc only once per each loopCnt
                     # this is pre count up, so increment it at r == 0
                     if r == 0:
-                      ldsInc = int((self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%s"%tc] else kernel["NumThreads"]) * kernel["GlobalReadVectorWidth%s"%tc] * tP["bpeGR"])
+                      ldsInc = int((self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%s"%tc] else kernel["NumThreads"]) * tailGRVW * tP["bpeGR"])
                     else:
                       ldsInc = 0
                     if kernel["LdsBlockSizePerPad%s"%tc] != 0:

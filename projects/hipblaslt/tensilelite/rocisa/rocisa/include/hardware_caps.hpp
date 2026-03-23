@@ -92,6 +92,9 @@ inline std::map<std::string, int>
     // Determine assembler capabilities by testing short instructions sequences
     std::map<std::string, int> rv;
     rv["SupportedISA"] = tryAssembler(isaVersion, assemblerPath, "", isDebug);
+
+    rv["HasPartialOOB"] = checkNotInList(isaVersion, {{12,5,0}});
+
     rv["HasExplicitCO"]
         = tryAssembler(isaVersion, assemblerPath, "v_add_co_u32 v0,vcc,v0,1", isDebug)
           || tryAssembler(isaVersion, assemblerPath, "v_add_co_u32 v0,vcc_lo,v0,1", isDebug);
