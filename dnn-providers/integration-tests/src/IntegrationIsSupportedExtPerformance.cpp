@@ -12,14 +12,17 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
-namespace {
+namespace
+{
 
 constexpr int K_ITERATIONS = 1000;
 
-class IntegrationIsSupportedExtPerformance : public ::testing::Test {
-   protected:
-    static Graph createSimplePointwiseGraph() {
-        std::vector<int64_t> const dims = {2, 3, 4, 4};
+class IntegrationIsSupportedExtPerformance : public ::testing::Test
+{
+protected:
+    static Graph createSimplePointwiseGraph()
+    {
+        const std::vector<int64_t> dims = {2, 3, 4, 4};
 
         Graph graph;
         graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
@@ -43,19 +46,21 @@ class IntegrationIsSupportedExtPerformance : public ::testing::Test {
     hipdnnHandle_t _handle = hipdnn_integration_tests::getSharedHandle();
 };
 
-TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold) {
-    auto const start = std::chrono::steady_clock::now();
+TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
+{
+    const auto start = std::chrono::steady_clock::now();
 
-    for (int i = 0; i < K_ITERATIONS; ++i) {
+    for(int i = 0; i < K_ITERATIONS; ++i)
+    {
         Graph graph = createSimplePointwiseGraph();
         auto result = graph.is_supported_ext(_handle);
         ASSERT_TRUE(result.is_good()) << "Iteration " << i << ": " << result.get_message();
     }
 
-    auto const end = std::chrono::steady_clock::now();
-    auto const elapsed = std::chrono::duration<double>(end - start);
-    auto const avgUs =
-        std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / K_ITERATIONS;
+    const auto end = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration<double>(end - start);
+    const auto avgUs
+        = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / K_ITERATIONS;
 
     std::cout << "[  PERF   ] Cold is_supported_ext: " << elapsed.count() << "s total, " << avgUs
               << "us avg per call (" << K_ITERATIONS << " iterations)" << '\n';
@@ -64,7 +69,8 @@ TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold) {
                                      << K_ITERATIONS << " iterations (threshold: 10s)";
 }
 
-TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold) {
+TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold)
+{
     Graph graph = createSimplePointwiseGraph();
 
     auto result = graph.validate();
@@ -73,17 +79,18 @@ TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold) {
     result = graph.build_operation_graph(_handle);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
-    auto const start = std::chrono::steady_clock::now();
+    const auto start = std::chrono::steady_clock::now();
 
-    for (int i = 0; i < K_ITERATIONS; ++i) {
+    for(int i = 0; i < K_ITERATIONS; ++i)
+    {
         result = graph.is_supported_ext(_handle);
         ASSERT_TRUE(result.is_good()) << "Iteration " << i << ": " << result.get_message();
     }
 
-    auto const end = std::chrono::steady_clock::now();
-    auto const elapsed = std::chrono::duration<double>(end - start);
-    auto const avgNs =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / K_ITERATIONS;
+    const auto end = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration<double>(end - start);
+    const auto avgNs
+        = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / K_ITERATIONS;
 
     std::cout << "[  PERF   ] Hot is_supported_ext: " << elapsed.count() << "s total, " << avgNs
               << "ns avg per call (" << K_ITERATIONS << " iterations)" << '\n';
@@ -92,4 +99,4 @@ TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold) {
                                     << K_ITERATIONS << " iterations (threshold: 1s)";
 }
 
-}  // namespace
+} // namespace

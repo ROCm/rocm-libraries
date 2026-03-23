@@ -14,36 +14,58 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 
-namespace {
+namespace
+{
 
-std::set<std::string> getLoadedPluginNames(hipdnnHandle_t handle) {
+std::set<std::string> getLoadedPluginNames(hipdnnHandle_t handle)
+{
     size_t numEngines = 0;
-    if (hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS || numEngines == 0) {
+    if(hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS || numEngines == 0)
+    {
         return {};
     }
 
     std::set<std::string> pluginNames;
-    for (size_t i = 0; i < numEngines; ++i) {
+    for(size_t i = 0; i < numEngines; ++i)
+    {
         // Two-call pattern: query required buffer sizes
         size_t engineNameLen = 0;
         size_t pluginNameLen = 0;
         size_t versionLen = 0;
         size_t typeLen = 0;
         int64_t engineId = 0;
-        hipdnnGetEngineInfo_ext(handle, i, &engineId, nullptr, &engineNameLen, nullptr,
-                                &pluginNameLen, nullptr, &versionLen, nullptr, &typeLen);
+        hipdnnGetEngineInfo_ext(handle,
+                                i,
+                                &engineId,
+                                nullptr,
+                                &engineNameLen,
+                                nullptr,
+                                &pluginNameLen,
+                                nullptr,
+                                &versionLen,
+                                nullptr,
+                                &typeLen);
 
         // All four buffers required on second call
         std::string engineName(engineNameLen, '\0');
         std::string pluginName(pluginNameLen, '\0');
         std::string version(versionLen, '\0');
         std::string type(typeLen, '\0');
-        hipdnnGetEngineInfo_ext(handle, i, &engineId, engineName.data(), &engineNameLen,
-                                pluginName.data(), &pluginNameLen, version.data(), &versionLen,
-                                type.data(), &typeLen);
+        hipdnnGetEngineInfo_ext(handle,
+                                i,
+                                &engineId,
+                                engineName.data(),
+                                &engineNameLen,
+                                pluginName.data(),
+                                &pluginNameLen,
+                                version.data(),
+                                &versionLen,
+                                type.data(),
+                                &typeLen);
 
         // Trim null terminator
-        if (!pluginName.empty() && pluginName.back() == '\0') {
+        if(!pluginName.empty() && pluginName.back() == '\0')
+        {
             pluginName.pop_back();
         }
         pluginNames.insert(pluginName);
@@ -51,13 +73,18 @@ std::set<std::string> getLoadedPluginNames(hipdnnHandle_t handle) {
     return pluginNames;
 }
 
-std::string formatPluginSet(const std::set<std::string>& plugins) {
+std::string formatPluginSet(const std::set<std::string>& plugins)
+{
     std::string result = "[";
     bool first = true;
-    for (const auto& plugin : plugins) {
-        if (!first) {
+    for(const auto& plugin : plugins)
+    {
+        if(!first)
+        {
             result += ", ";
-        } else {
+        }
+        else
+        {
             first = false;
         }
         result += plugin;
@@ -66,10 +93,12 @@ std::string formatPluginSet(const std::set<std::string>& plugins) {
     return result;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char** argv) noexcept {
-    try {
+int main(int argc, char** argv) noexcept
+{
+    try
+    {
         ::testing::InitGoogleTest(&argc, argv);
 
         // Initialize test logging infrastructure to forward logs to std::cerr based
@@ -88,11 +117,13 @@ int main(int argc, char** argv) noexcept {
         // Set stream on shared handle
         auto handle = hipdnn_integration_tests::getSharedHandle();
         hipStream_t stream;
-        if (hipStreamCreate(&stream) != hipSuccess) {
+        if(hipStreamCreate(&stream) != hipSuccess)
+        {
             std::cerr << "Failed to create HIP stream\n";
             return 1;
         }
-        if (hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS) {
+        if(hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS)
+        {
             std::cerr << "Failed to set stream on shared handle\n";
             return 1;
         }
@@ -100,7 +131,8 @@ int main(int argc, char** argv) noexcept {
         // Verify loaded plugins match expected plugins
         auto expectedPlugins = hipdnn_integration_tests::TestConfig::get().getExpectedPluginNames();
         auto loadedPlugins = getLoadedPluginNames(handle);
-        if (expectedPlugins != loadedPlugins) {
+        if(expectedPlugins != loadedPlugins)
+        {
             std::cerr << "Plugin mismatch!\n"
                       << "  Expected: " << formatPluginSet(expectedPlugins) << "\n"
                       << "  Loaded:   " << formatPluginSet(loadedPlugins) << '\n';
@@ -113,7 +145,9 @@ int main(int argc, char** argv) noexcept {
         static_cast<void>(hipStreamDestroy(stream));
         hipdnnDestroy(handle);
         return result;
-    } catch (const std::exception& e) {
+    }
+    catch(const std::exception& e)
+    {
         std::cerr << "Fatal error: " << e.what() << '\n';
         return 1;
     }

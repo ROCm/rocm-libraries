@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+if(NOT ENABLE_CLANG_FORMAT)
+    message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
+endif()
+
 if(WIN32)
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
     if(ENABLE_CLANG_TIDY)
@@ -21,7 +26,13 @@ else()
     endif()
 endif()
 
+option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+
 include(ClangTidy)
+include(ClangCheck)
+include(Sanitizers)
+
+findandcheckllvmsymbolizer()
 
 list(
     PREPEND
@@ -55,19 +66,10 @@ endif()
 find_package(hip REQUIRED)
 find_package(hipdnn_test_sdk REQUIRED)
 find_package(hipdnn_plugin_sdk REQUIRED)
-find_package(GTest QUIET)
-if(NOT GTest_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(
-        googletest
-        URL https://github.com/google/googletest/archive/refs/tags/v1.16.0.zip
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    set(INSTALL_GTEST OFF)
-    FetchContent_MakeAvailable(googletest)
-endif()
 find_package(Threads REQUIRED)
 find_package(nlohmann_json REQUIRED)
+
+include(Dependencies)
 
 add_executable(hipdnn_integration_tests
     src/main.cpp
@@ -96,6 +98,12 @@ include(GNUInstallDirs)
 install(TARGETS hipdnn_integration_tests
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+enable_testing()
+add_test(NAME hipdnn_integration_tests COMMAND hipdnn_integration_tests)
+if(DEFINED TEST_ENVIRONMENT)
+    set_tests_properties(hipdnn_integration_tests PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+endif()
 
 # Generate CTestTestfile for installed tests (used by CI test runners).
 # We manually create this file with relative paths - CMake's CTest module
