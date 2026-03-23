@@ -36,6 +36,29 @@ concept CkTileConvInstance = requires(Conv&) {
     { Conv::BlockSize() };
 };
 
+template <auto SIGNATURE>
+std::size_t gemm_split_k_output_size(auto kargs)
+{
+    std::size_t zeroing_size = 0;
+    if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
+    {
+        zeroing_size = std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
+                                       std::end(kargs.wei_g_k_c_xs_lengths.data),
+                                       1,
+                                       std::multiplies<std::size_t>());
+    }
+
+    if constexpr(ConvDirectionIsBackwardData<SIGNATURE>)
+    {
+        zeroing_size = std::accumulate(std::begin(kargs.in_g_n_c_wis_lengths.data),
+                                       std::end(kargs.in_g_n_c_wis_lengths.data),
+                                       1,
+                                       std::multiplies<std::size_t>());
+    }
+
+    return zeroing_size;
+}
+
 template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename OutDataType>
 [[nodiscard]] RunResult run(CkTileConvInstance<SIGNATURE> auto& conv,
                             const Args<SIGNATURE>& args,
@@ -60,17 +83,13 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
 
     using Types = ck_tile::builder::factory::internal::TileConvTensorTypes<SIGNATURE.data_type>;
 
+    const std::size_t zeroing_size = gemm_split_k_output_size<SIGNATURE>(kargs);
+
     auto preprocess = [&]() {
         if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
         {
             if(kargs.k_batch > 1)
             {
-                const std::size_t zeroing_size =
-                    std::accumulate(std::begin(kargs.wei_g_k_c_xs_lengths.data),
-                                    std::end(kargs.wei_g_k_c_xs_lengths.data),
-                                    1,
-                                    std::multiplies<std::size_t>());
-
                 ck_tile::hip_check_error(
                     hipMemsetAsync(kargs.wei_ptr,
                                    0,
@@ -83,12 +102,6 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
         {
             if(kargs.k_batch > 1)
             {
-                const std::size_t zeroing_size =
-                    std::accumulate(std::begin(kargs.in_g_n_c_wis_lengths.data),
-                                    std::end(kargs.in_g_n_c_wis_lengths.data),
-                                    1,
-                                    std::multiplies<std::size_t>());
-
                 ck_tile::hip_check_error(
                     hipMemsetAsync(kargs.in_ptr,
                                    0,
