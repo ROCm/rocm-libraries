@@ -5,8 +5,6 @@
 #define MLO_NORMHOST_H_
 
 #include <cmath>
-#include <iomanip>
-#include <typeinfo>
 
 #include <miopen/ford.hpp>
 
@@ -249,8 +247,8 @@ int mloLRNForwardRunHost(bool do_scale,
                             }
                         }
 
-                        alphaoverarea = alpha / adj_area_size;
-                        scale         = K + accum * alphaoverarea;
+                        scale = K + accum * (alpha / adj_area_size);
+
                         if(do_scale)
                         {
                             scale_v_ptr[scale_v_ptr_base_idx_j + i] = scale;
@@ -321,14 +319,14 @@ int mloLRNBackwardRunHost(int norm_region,
     const size_t min_grain = multi_threaded ? 8 : n_batches;
 
     // Precompute constant values used by the subsequent loops
-    const Tcheck_ double_alpa_beta    = static_cast<Tcheck_>(2.) * alpha * beta;
+    const Tcheck_ double_alpha_beta   = static_cast<Tcheck_>(2.) * alpha * beta;
     const int top_height_plus_pre_pad = top_height + pre_pad;
     const int top_width_plus_pre_pad  = top_width + pre_pad;
     const int n_inputs_plus_pre_pad   = n_inputs + pre_pad;
 
     if(norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-        const Tcheck_ ratio_dta_bwd = double_alpa_beta / static_cast<Tcheck_>(local_area);
+        const Tcheck_ ratio_dta_bwd = double_alpha_beta / static_cast<Tcheck_>(local_area);
 
         miopen::par_for(n_batches, min_grain, [&](int b) {
             // Precompute constant values used by the subsequent loops
@@ -473,11 +471,11 @@ int mloLRNBackwardRunHost(int norm_region,
                         ++head;
                     }
 
-                    const int head_minus_local_area = head - local_area;
-
                     // subtract only
                     while(head < n_inputs_plus_pre_pad)
                     {
+                        const int head_minus_local_area = head - local_area;
+
                         if(head_minus_local_area >= 0 && head_minus_local_area < n_inputs)
                         {
                             Tcheck_ subs =
@@ -584,7 +582,7 @@ int mloLRNBackwardRunHost(int norm_region,
                         }
 
                         const Tcheck_ ratio_dta_bwd =
-                            double_alpa_beta / static_cast<Tcheck_>(adj_area_size);
+                            double_alpha_beta / static_cast<Tcheck_>(adj_area_size);
 
                         bot_df_v_ptr[bot_df_v_ptr_base_idx_j + i] =
                             static_cast<Tcheck_>(top_df_ptr[top_df_ptr_base_idx_j + i]) *
