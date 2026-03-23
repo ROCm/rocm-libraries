@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,15 +27,12 @@
 #include "rocsparse_csrilu0_kernel_hash.hpp"
 #include "rocsparse_utility.hpp"
 
-rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle, // 0
-                                                  rocsparse_csrilu0_info csrilu0_info, // 1
-                                                  rocsparse_spmat_descr  A, // 2
-                                                  int32_t                boost_enable, // 3
-                                                  size_t                 boost_tol_size, // 4
-                                                  const void*            boost_tol, // 5
-                                                  const void*            boost_val, // 6
-                                                  size_t                 buffer_size, // 7
-                                                  void*                  buffer) // 8
+rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          handle, // 0
+                                                  rocsparse_csrilu0_info    csrilu0_info, // 1
+                                                  rocsparse_spmat_descr     A, // 2
+                                                  rocsparse::numeric_boost* boost,
+                                                  size_t                    buffer_size, // 7
+                                                  void*                     buffer) // 8
 {
 
     ROCSPARSE_ROUTINE_TRACE;
@@ -82,19 +79,12 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle,
         launch = rocsparse::find_csrilu0_kernel_hash_launch(handle, csrilu0_info, A);
     }
 
+    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
     RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                        0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
+                                       sizeof(int32_t) * A->rows * A_batch_count,
                                        handle->stream));
 
-    RETURN_IF_ROCSPARSE_ERROR(launch(handle,
-                                     csrilu0_info,
-                                     A,
-                                     boost_enable,
-                                     boost_tol_size,
-                                     boost_tol,
-                                     boost_val,
-                                     buffer_size,
-                                     buffer));
+    RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrilu0_info, A, boost, buffer_size, buffer));
     return rocsparse_status_success;
 }

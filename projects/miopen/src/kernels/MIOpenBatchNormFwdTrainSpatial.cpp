@@ -415,9 +415,28 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         xhat[j]              = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                     }
 
+                    // Synchronization is not required for correctness but enhances performance.
+                    //
+                    // Loop is memory bound as it iterates across all the batches in the tensor,
+                    // and has memory access strides of CHW size once all the elements in a single
+                    // sample have been processed, which may be large.
+                    //
+                    // `__syncthreads()` helps to coalesce memory accesses as each work-item
+                    // accesses adjacent elements to its neighbours on the same loop iteration,
+                    // leading to contiguous memory access across all the waves in a workgroup. By
+                    // keeping all the waves on the same loop iteration it prevents waves on
+                    // different loop iterations from stalling as they wait for memory.
+                    //
+                    // This can be seen by profiling the kernel with rocprofv3 and comparing the
+                    // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+                    // compute viewer and seeing the impact on occupancy.
+                    //
+                    // TODO: This call is within the scope of an `if` condition, but it is not clear
+                    // that this control flow is guanteed to be uniform across all threads in a
+                    // workgroup, risking deadlock. Further investigation is needed.
                     __syncthreads();
 
-                    for(unsigned int j = 0; j < max_read; ++j) // This part takes 0.405
+                    for(unsigned int j = 0; j < max_read; ++j)
                     {
                         const unsigned int l = k + (max_read * lid) + j;
                         nidx                 = l / mio_bn_config::hw;
@@ -577,6 +596,8 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 };
 
 // these are the kernels for MIO_BN_VARIANT == 2
+#if(MIO_BN_VARIANT == 2)
+
 template <typename FpType,
           typename FpType_C,
           typename FpLsType,
@@ -704,7 +725,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             } // end for(n)
 
         } // end if(inImgIndex)
-    }     // end spatial norm
+    } // end spatial norm
 
     static constexpr __forceinline__ __device__ void
     FinalMeanVariance(FpType* __restrict__ meanvarbuff,
@@ -778,11 +799,14 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             }
         }
 
+        // Total workgroup size for final kernel - reused in condition and array declarations
+        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
-                     (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
+                     (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
+                     (grp_final_total < 64))
         {
-            __shared__ FpAccumCType
-                lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
+            __shared__ FpAccumCType lcl_data[2 * grp_final_total];
 
             miopen::reduction::lds_reduce2_2d(mean,
                                               variance,
@@ -795,11 +819,12 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         }
         else
         {
+            // C++17 idiomatic: ensure array size is never zero using constexpr ternary
+            constexpr auto lds_gcn_array_size = grp_final_total >= 64 ? grp_final_total / 64 : 1;
+
             commitID = 64;
-            __shared__ FpAccumCType
-                lcl_data_x[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL / 64];
-            __shared__ FpAccumCType
-                lcl_data_y[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL / 64];
+            __shared__ FpAccumCType lcl_data_x[lds_gcn_array_size];
+            __shared__ FpAccumCType lcl_data_y[lds_gcn_array_size];
             miopen::reduction::gcn_reduce2(
                 mean, variance, INHW, lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
         }
@@ -946,6 +971,8 @@ using MIOpenBNFwdTrainSpatialVar2 =
                                                               mio_bn_config::fp_accum_type,
                                                               mio_bn_config::fp_accum_c_type>;
 
+#endif // MIO_BN_VARIANT == 2
+
 } // namespace batchnorm
 } // namespace miopen
 
@@ -1004,14 +1031,17 @@ extern "C" __global__ void __launch_bounds__(
     {
 // TODO: this should also be removed, but using constexpr can lead compile error
 #if(MIO_RUNNING_RESULT == 1)
-        miopen::batchnorm::running_stash<fp_accum_type, fp_accum_c_type, fp_prec_c_type>(
+        using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;
+        StashUpdater updater(static_cast<fp_accum_c_type>(mean),
+                             static_cast<fp_accum_c_type>(variance),
+                             static_cast<fp_accum_c_type>(expAvgFactor));
+
+        miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
             prevResultRunningMean,
             prevResultRunningVariance,
             nextResultRunningMean,
             nextResultRunningVariance,
-            expAvgFactor,
-            mean,
-            variance,
+            updater,
             grpid);
 #endif
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -1065,8 +1095,8 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
 {
     // mean, variance, invVariance
 
-    using fp_prec_c_type = mio_bn_config::fp_prec_c_type;
-    using fp_accum_type = mio_bn_config::fp_accum_type;
+    using fp_prec_c_type  = mio_bn_config::fp_prec_c_type;
+    using fp_accum_type   = mio_bn_config::fp_accum_type;
     using fp_accum_c_type = mio_bn_config::fp_accum_c_type;
 
     fp_prec_c_type mean;
@@ -1084,14 +1114,17 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     if(ygid == commitID && zgid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        miopen::batchnorm::running_stash<fp_accum_type, fp_accum_c_type, fp_prec_c_type>(
+        using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;
+        StashUpdater updater(miopen::cast<fp_accum_c_type>(mean),
+                             miopen::cast<fp_accum_c_type>(variance),
+                             miopen::cast<fp_accum_c_type>(expAvgFactor));
+
+        miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
             (const mio_bn_config::fp_prec_c_type*)prevResultRunningMean,
             (const mio_bn_config::fp_prec_c_type*)prevResultRunningVariance,
             (mio_bn_config::fp_prec_c_type*)nextResultRunningMean,
             (mio_bn_config::fp_prec_c_type*)nextResultRunningVariance,
-            expAvgFactor,
-            mean,
-            variance,
+            updater,
             xgid);
 #endif
 

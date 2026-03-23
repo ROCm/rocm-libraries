@@ -1,4 +1,3 @@
-// Only include this in one translation unit
 #include "primbench.hpp"
 
 // All benchmarked types must be declared
@@ -32,7 +31,7 @@ struct copy_benchmark : public primbench::benchmark_interface
     void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
 
         // primbench::log() calls report progress in gray
         // They help with discovering slow setup steps
@@ -88,10 +87,7 @@ struct copy_benchmark : public primbench::benchmark_interface
 
 int main(int argc, char* argv[])
 {
-    // Sets the number of input bytes (128 MiB), available as state.bytes in run()
-    // The number can be overridden from the command line with `--bytes`
-    // The bytes/sec primbench reports isn't based on this number
-    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+    primbench::executor executor(argc, argv);
 
     executor.queue<copy_benchmark<char>>();
     executor.queue<copy_benchmark<long long>>();

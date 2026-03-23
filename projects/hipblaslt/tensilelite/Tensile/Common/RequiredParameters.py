@@ -43,6 +43,7 @@ def getRequiredParametersMin() -> set:
         'ConvertAfterDS',
         'DirectToVgprA',
         'DirectToVgprB',
+        'DirectToVgprSparseMetadata',
         'DirectToLdsA',
         'DirectToLdsB',
         'ExpandPointerSwap',
@@ -95,6 +96,7 @@ def getRequiredParametersMin() -> set:
         'SwapGlobalReadOrder',
         'TailloopInNll',
         'TransposeLDS',
+        'TransposeLDSMetadata',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
         'UseInstOffsetForGRO',
@@ -107,5 +109,6 @@ def getRequiredParametersMin() -> set:
         'WavefrontSize',
         'WorkGroup',
         'DtlPlusLdsBuf',
-        'MinGRIncPerMfma'
+        'MinGRIncPerMfma',
+        'UsePLRPack'
     })

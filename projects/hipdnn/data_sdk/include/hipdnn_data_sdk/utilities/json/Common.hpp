@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <flatbuffers/flatbuffer_builder.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
@@ -33,6 +35,17 @@ NLOHMANN_JSON_NAMESPACE_END
 
 namespace flatbuffers
 {
+
+inline void to_json(nlohmann::json& json, const String* str)
+{
+    if(str == nullptr)
+    {
+        return;
+    }
+
+    json = str->str();
+}
+
 template <class T>
 // NOLINTNEXTLINE(readability-identifier-naming)
 void to_json(nlohmann::json& vectorList, const Vector<T>* vec)
@@ -123,3 +136,5 @@ inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::js
 }
 
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB

@@ -34,6 +34,7 @@ struct TileOptimizations
     int num_groups_to_merge = 1;
     bool split_image        = false;
     bool explicit_gemm      = false;
+    bool two_stage          = false;
 };
 
 template <ConvAlgorithmDescriptor auto ALGORITHM>
@@ -60,21 +61,26 @@ template <>
 struct TilePipelineType<ck_tile::GemmPipeline::BASIC_V1>
 {
     template <typename PipelineProblem>
-    using GemmPipeline = ck_tile::GemmPipelineAGmemBGmemCRegV1<PipelineProblem>;
+    using GemmPipeline =
+        ck_tile::GemmPipelineAGmemBGmemCRegV1<PipelineProblem,
+                                              GroupedConvUniversalPipelineAgBgCrPolicy>;
 };
 
 template <>
 struct TilePipelineType<ck_tile::GemmPipeline::MEMORY>
 {
     template <typename PipelineProblem>
-    using GemmPipeline = ck_tile::GemmPipelineAgBgCrMem<PipelineProblem>;
+    using GemmPipeline =
+        ck_tile::GemmPipelineAgBgCrMem<PipelineProblem, GroupedConvUniversalPipelineAgBgCrPolicy>;
 };
 
 template <>
 struct TilePipelineType<ck_tile::GemmPipeline::COMPUTE_V3>
 {
     template <typename PipelineProblem>
-    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
+    using GemmPipeline =
+        ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem,
+                                          GroupedConvUniversalPipelineAgBgCrPolicy>;
 };
 
 template <>
@@ -98,6 +104,20 @@ struct TilePipelineType<ck_tile::GemmPipeline::COMPUTE_V6>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV6<PipelineProblem>;
 };
 
+template <>
+struct TilePipelineType<ck_tile::GemmPipeline::COMPUTE_ASYNC>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompAsync<PipelineProblem>;
+};
+
+template <>
+struct TilePipelineType<ck_tile::GemmPipeline::BASIC_ASYNC_V1>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::GemmPipelineAGmemBGmemCRegAsyncV1<PipelineProblem>;
+};
+
 template <ConvAlgorithmDescriptor auto ALGORITHM>
 consteval ck_tile::GemmPipeline SetTileBlockGemmPipelineVersion()
 {
@@ -111,6 +131,8 @@ consteval ck_tile::GemmPipeline SetTileBlockGemmPipelineVersion()
     case PipelineVersion::V4: return ck_tile_pipeline::COMPUTE_V4;
     case PipelineVersion::V5: return ck_tile_pipeline::COMPUTE_V5;
     case PipelineVersion::V6: return ck_tile_pipeline::COMPUTE_V6;
+    case PipelineVersion::ASYNC_V1: return ck_tile_pipeline::BASIC_ASYNC_V1;
+    case PipelineVersion::ASYNC_V4: return ck_tile_pipeline::COMPUTE_ASYNC;
     case PipelineVersion::WEIGHT_ONLY:
         throw "PipelineVersion::WEIGHT_ONLY is not supported for block GEMM pipeline version.";
     default: throw "Unknown block GEMM PipelineVersion";
@@ -160,7 +182,8 @@ consteval TileOptimizations SetTileOptimizations()
 
     return TileOptimizations{.num_groups_to_merge = OPT.num_groups_to_merge,
                              .split_image         = OPT.split_image,
-                             .explicit_gemm       = OPT.explicit_gemm};
+                             .explicit_gemm       = OPT.explicit_gemm,
+                             .two_stage           = OPT.two_stage};
 }
 
 } // namespace ck_tile::builder::factory::internal

@@ -26,7 +26,6 @@
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
-#include "ck/host_utility/flush_cache.hpp"
 #include "ck/host_utility/io.hpp"
 #ifdef CK_EXPERIMENTAL_BUILDER
 #include "ck_tile/builder/reflect/conv_describe.hpp"
@@ -382,7 +381,8 @@ template <index_t NDimSpatial,
                                                      // in tuple for MultiAB), unpack if tuple was
                                                      // passed
           typename BComputeDataType = AComputeDataType,
-          bool DirectLoad           = false>
+          bool DirectLoad           = false,
+          index_t NumGroupsToMerge  = 1>
 struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
     : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                              ALayout,
@@ -418,6 +418,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                        Wave32MaxMNPerXDL,
                        NXdlPerWave*(NPerXDL / Wave32MaxMNPerXDL)>();
 
+    static_assert(NumGroupsToMerge >= 1);
+
     static constexpr bool isMultiA   = is_detected<is_tuple, ADataType>::value;
     static constexpr bool isMultiB   = is_detected<is_tuple, BDataType>::value;
     static constexpr bool isMultiD   = DsDataType::Size() > 0;
@@ -447,7 +449,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                                                             ConvForwardSpecialization,
                                                             true /*SplitN*/,
                                                             ADataType,
-                                                            EDataType>;
+                                                            EDataType,
+                                                            NumGroupsToMerge>;
 
     using ComputePtrOffset = ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>;
 
@@ -784,8 +787,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
               cde_element_op_{cde_element_op}
         {
             // A/B/E Batch/N Stride
-            compute_ptr_offset_of_groups_.BatchStrideA_ = a_g_n_c_wis_strides_[0];
-            compute_ptr_offset_of_groups_.BatchStrideB_ = b_g_k_c_xs_strides_[0];
+            compute_ptr_offset_of_groups_.BatchStrideA_ =
+                a_g_n_c_wis_strides_[0] * NumGroupsToMerge;
+            compute_ptr_offset_of_groups_.BatchStrideB_ = b_g_k_c_xs_strides_[0] * NumGroupsToMerge;
             compute_ptr_offset_of_n_.BatchStrideA_ = a_g_n_c_wis_strides_[1] * conv_N_per_block_;
 
             // p_as and p_bs are pointers
@@ -796,7 +800,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             static_for<0, NumDTensor, 1>{}([&](auto i) {
                 using DLayout = remove_cvref_t<tuple_element_t<i.value, DsLayout>>;
                 // D batch stride
-                compute_ptr_offset_of_groups_.BatchStrideDs_(i) = ds_g_n_k_wos_strides_[i][0];
+                compute_ptr_offset_of_groups_.BatchStrideDs_(i) =
+                    ds_g_n_k_wos_strides_[i][0] * NumGroupsToMerge;
                 compute_ptr_offset_of_n_.BatchStrideDs_(i) =
                     ds_g_n_k_wos_strides_[i][1] * conv_N_per_block_;
 
@@ -816,7 +821,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     DeviceOp::MakeEGridDescriptor_M_N<DLayout>(conv_to_gemm_transformer_d);
             });
 
-            compute_ptr_offset_of_groups_.BatchStrideE_ = e_g_n_k_wos_strides_[0];
+            compute_ptr_offset_of_groups_.BatchStrideE_ =
+                e_g_n_k_wos_strides_[0] * NumGroupsToMerge;
             compute_ptr_offset_of_n_.BatchStrideE_ = e_g_n_k_wos_strides_[1] * conv_N_per_block_;
 
             if constexpr(is_NGCHW_GKCYX_NGKHW<ALayout, BLayout, ELayout>() ||
@@ -999,7 +1005,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             std::tie(gdx, gdy, gdz) =
                 GridwiseGemm::CalculateGridSize(GemmM, GemmN, I1 /*arg.KBatch*/);
 
-            gdy = arg.num_group_;
+            gdy = arg.num_group_ / NumGroupsToMerge;
             gdz = num_workgroups_per_Conv_N;
 
             index_t K_split                  = (GemmK + KPerBlock - 1) / KPerBlock * KPerBlock;
@@ -1042,35 +1048,19 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
                 {
-                    typename GridwiseGemm::Argument gemm_arg_ = gemm_arg;
-                    ck::utility::RotatingMemWrapper<typename GridwiseGemm::Argument> rotating_mem(
-                        gemm_arg_,
-                        stream_config.rotating_count,
-                        gemm_arg_.M * gemm_arg_.K * sizeof(ADataType),
-                        gemm_arg_.K * gemm_arg_.N * sizeof(BDataType));
-                    rotating_mem.Print();
-
-                    auto run_flush_cache = [&]() {
-                        // flush icache
-                        ck::utility::flush_icache();
-                        // rotating mem
-                        rotating_mem.Next();
-                    };
-
-                    ave_time += ck::utility::launch_and_time_kernel_with_preprocess<false>(
-                        stream_config,
-                        run_flush_cache,
-                        kernel,
-                        dim3(gdx, gdy, gdz),
-                        dim3(BlockSize),
-                        0,
-                        gemm_arg_,
-                        arg.a_grid_desc_ak0_m_ak1_,
-                        arg.b_grid_desc_bk0_n_bk1_,
-                        arg.ds_grid_desc_m_n_,
-                        arg.e_grid_desc_m_n_,
-                        arg.compute_ptr_offset_of_groups_,
-                        arg.compute_ptr_offset_of_n_);
+                    ave_time +=
+                        launch_and_time_kernel_flush_cache(stream_config,
+                                                           kernel,
+                                                           dim3(gdx, gdy, gdz),
+                                                           dim3(BlockSize),
+                                                           0,
+                                                           gemm_arg,
+                                                           arg.a_grid_desc_ak0_m_ak1_,
+                                                           arg.b_grid_desc_bk0_n_bk1_,
+                                                           arg.ds_grid_desc_m_n_,
+                                                           arg.e_grid_desc_m_n_,
+                                                           arg.compute_ptr_offset_of_groups_,
+                                                           arg.compute_ptr_offset_of_n_);
                 }
                 else
                 {
@@ -1499,6 +1489,19 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             }
         }
 
+        if constexpr(NumGroupsToMerge > 1)
+        {
+            if(G % NumGroupsToMerge != 0)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Unsupported! G % NumGroupsToMerge != 0: G=" << G
+                              << ", NumGroupsToMerge=" << NumGroupsToMerge << std::endl;
+                }
+                return false;
+            }
+        }
+
         if(get_device_name() == "gfx908")
         {
             // FIXME: re-enable fp64 when SWDEV-335738 is fixed
@@ -1591,6 +1594,22 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                             << " In " << __FILE__ << ":" << __LINE__
                             << ", in function: " << __func__ << std::endl;
                     }
+                    return false;
+                }
+            }
+        }
+        else if constexpr(ConvForwardSpecialization == ConvolutionForwardSpecialization::Filter3x3)
+        {
+            if(C != 1)
+            {
+                return false;
+            }
+            for(index_t i = 0; i < NDimSpatial; ++i)
+            {
+                const index_t filter_spatial_dim = arg.b_g_k_c_xs_lengths_[i + I3];
+
+                if(filter_spatial_dim != I3)
+                {
                     return false;
                 }
             }
@@ -2106,6 +2125,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         if constexpr(DirectLoad) {
             str << "_DirectLoad";
         }
+        if constexpr (NumGroupsToMerge > 1) {
+            str << "_MergedGroups";
+        }
 
         str << "<"
             << BlockSize << ", "
@@ -2125,8 +2147,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             << "BlkGemmPipelineScheduler: "
             << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
             << "BlkGemmPipelineVersion: "
-            << BlkGemmPipelineVersionToString[BlkGemmPipelineVer]
-            << ">";
+            << BlkGemmPipelineVersionToString[BlkGemmPipelineVer];
+            if constexpr (NumGroupsToMerge > 1) {
+                str   << ", " << NumGroupsToMerge;
+            }
+            str << ">";
         // clang-format on
 
         return str.str();

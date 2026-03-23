@@ -22,9 +22,9 @@ TEST(TestAttributes, FillFromContext)
     graphAttributes.set_intermediate_data_type(DataType::BFLOAT16);
     graphAttributes.set_io_data_type(DataType::HALF);
 
-    int nonVirtualId = 0;
-    int virtualId = 1;
-    int setTypeId = 2;
+    const int nonVirtualId = 0;
+    const int virtualId = 1;
+    const int setTypeId = 2;
 
     Dummy attributes;
 

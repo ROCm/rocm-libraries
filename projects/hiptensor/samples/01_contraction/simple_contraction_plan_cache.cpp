@@ -39,7 +39,7 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF32Supported() || !isF32MatrixCoreSupported())
+    if(!isF32F32MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);
@@ -163,7 +163,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            C[i] = (BDataType)(float(i) / 100);
+            C[i] = (CDataType)(float(i) / 100);
         }
     }
 

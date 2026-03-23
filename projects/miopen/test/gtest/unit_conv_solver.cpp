@@ -49,10 +49,10 @@ class ConvAttrFp16AltScopedSetter
 {
 public:
     ConvAttrFp16AltScopedSetter() noexcept {}
-    ConvAttrFp16AltScopedSetter(const ConvAttrFp16AltScopedSetter&) = delete;
-    ConvAttrFp16AltScopedSetter(ConvAttrFp16AltScopedSetter&&)      = delete;
+    ConvAttrFp16AltScopedSetter(const ConvAttrFp16AltScopedSetter&)            = delete;
+    ConvAttrFp16AltScopedSetter(ConvAttrFp16AltScopedSetter&&)                 = delete;
     ConvAttrFp16AltScopedSetter& operator=(const ConvAttrFp16AltScopedSetter&) = delete;
-    ConvAttrFp16AltScopedSetter& operator=(ConvAttrFp16AltScopedSetter&&) = delete;
+    ConvAttrFp16AltScopedSetter& operator=(ConvAttrFp16AltScopedSetter&&)      = delete;
 
     ~ConvAttrFp16AltScopedSetter()
     {

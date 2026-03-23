@@ -30,8 +30,8 @@ TEST(TestConvolutionDgradNode, PreValidateNode)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -59,8 +59,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeMissingDyTensor)
     convAttributes.set_dilation({1, 1});
 
     // Dy tensor is missing
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -88,8 +88,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeMissingWTensor)
     convAttributes.set_dilation({1, 1});
 
     // W tensor is missing
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -117,8 +117,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeMissingDxTensor)
     convAttributes.set_dilation({1, 1});
 
     // Dx tensor is missing
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -145,8 +145,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeMissingConvolutionParameters)
     convAttributes.set_dx(dxTensor);
 
     // Convolution parameters are missing
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
@@ -177,8 +177,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeAllValuesSet)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -187,7 +187,7 @@ TEST(TestConvolutionDgradNode, PreValidateNodeAllValuesSet)
 TEST(TestConvolutionDgradNode, InferPropertiesNodeMissingDyTensor)
 {
     ConvDgradAttributes convAttributes;
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -198,7 +198,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeMissingWTensor)
 {
     ConvDgradAttributes convAttributes;
     convAttributes.set_dy(std::make_shared<TensorAttributes>());
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -210,7 +210,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeMissingDxTensor)
     ConvDgradAttributes convAttributes;
     convAttributes.set_dy(std::make_shared<TensorAttributes>());
     convAttributes.set_w(std::make_shared<TensorAttributes>());
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -238,7 +238,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNode2DConvolutionSuccess)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -275,7 +275,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNode3DConvolutionSuccess)
     convAttributes.set_stride({1, 1, 1});
     convAttributes.set_dilation({1, 1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -314,7 +314,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeWithStride2x2)
     convAttributes.set_stride({2, 2}); // 2x2 stride
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -360,7 +360,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeWithDilation2x2)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({2, 2}); // 2x2 dilation
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -413,8 +413,8 @@ TEST(TestConvolutionDgradNode, PackNode)
     convAttributes.set_dilation({1, 1});
     convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode_t::CROSS_CORRELATION);
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -475,8 +475,8 @@ TEST(TestConvolutionDgradNode, GatherHipdnnTensors)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
@@ -511,7 +511,7 @@ TEST(TestConvolutionDgradNode, StrideInferenceNchwLayoutSuccess)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -548,7 +548,7 @@ TEST(TestConvolutionDgradNode, StrideInferenceNhwcLayoutSuccess)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -584,7 +584,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesGroupedConv2Groups)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -621,8 +621,8 @@ TEST(TestConvolutionDgradNode, PreValidateTensorDimsTooFew)
     convAttributes.set_stride({1});
     convAttributes.set_dilation({1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -651,8 +651,8 @@ TEST(TestConvolutionDgradNode, PreValidateWeightDimsMismatch)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -680,8 +680,8 @@ TEST(TestConvolutionDgradNode, PreValidateOutputChannelMismatch)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -710,8 +710,8 @@ TEST(TestConvolutionDgradNode, PreValidateSpatialParamMismatch)
     convAttributes.set_stride({1, 1, 1});
     convAttributes.set_dilation({1, 1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -739,8 +739,8 @@ TEST(TestConvolutionDgradNode, PreValidateNegativeStride)
     convAttributes.set_stride({1, -1}); // Negative stride
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -768,8 +768,8 @@ TEST(TestConvolutionDgradNode, PreValidateZeroDilation)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 0}); // Zero dilation
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -797,8 +797,8 @@ TEST(TestConvolutionDgradNode, PreValidateNegativePrePadding)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -825,7 +825,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesWithLargeStride)
     convAttributes.set_stride({3, 3}); // Large stride
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -862,7 +862,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesZeroPadding)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -899,7 +899,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesAsymmetricPadding)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -940,8 +940,8 @@ TEST(TestConvolutionDgradNode, PreValidateGroupedConvInvalidOutputChannels)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     // wDims[0] % groupCount (63 % 2) will fail
@@ -974,8 +974,8 @@ TEST(TestConvolutionDgradNode, PreValidateGroupedConv2GroupsWithDxSet)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -1007,8 +1007,8 @@ TEST(TestConvolutionDgradNode, PreValidateGroupedConv4GroupsWithDxSet)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -1039,8 +1039,8 @@ TEST(TestConvolutionDgradNode, PreValidateGroupedConvInvalidInputChannels)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -1070,7 +1070,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConvStrideInferenceNchwLayout)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -1108,7 +1108,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConvStrideInferenceNhwcLayout)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -1146,7 +1146,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConvWithDilation)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({2, 2}); // 2x2 dilation
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -1185,7 +1185,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConvWithLargeStride)
     convAttributes.set_stride({3, 3}); // Large stride
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -1223,7 +1223,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConv3D)
     convAttributes.set_stride({1, 1, 1});
     convAttributes.set_dilation({1, 1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -1263,7 +1263,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConvDepthwiseSeparable)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -1301,8 +1301,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeInvalidSpatialDimensions)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
@@ -1334,8 +1334,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeWithDroppedPixels)
     convAttributes.set_stride({2, 2});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
@@ -1365,9 +1365,16 @@ TEST(TestConvolutionDgradNode, PreValidateNodeInputTooSmall)
     convAttributes.set_stride({1, 1});
     convAttributes.set_dilation({1, 1});
 
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionDgradNode, GetNodeTypeReturnsConvolutionDgrad)
+{
+    const GraphAttributes graphAttrs;
+    const ConvolutionDgradNode node(ConvDgradAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::CONVOLUTION_DGRAD);
 }

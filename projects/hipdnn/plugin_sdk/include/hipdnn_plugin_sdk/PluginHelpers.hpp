@@ -3,17 +3,19 @@
 
 #pragma once
 
+#include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 
 #include <iostream>
 
-#define LOG_API_ENTRY(format, ...) \
-    HIPDNN_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
-
-#define LOG_API_SUCCESS(func_name, format, ...) \
-    HIPDNN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
+// Logging macros for plugin API entry/exit (stream-style)
+// NOLINTBEGIN(bugprone-macro-parentheses) msg and func_name are stream expression args
+#define LOG_API_ENTRY(msg) HIPDNN_PLUGIN_LOG_INFO("API called: [" << __func__ << "] " << msg)
+#define LOG_API_SUCCESS(func_name, msg) \
+    HIPDNN_PLUGIN_LOG_INFO("API success: [" << func_name << "] " << msg)
+// NOLINTEND(bugprone-macro-parentheses)
 
 namespace hipdnn_plugin_sdk
 {
@@ -24,7 +26,8 @@ void throwIfNull(T* value)
     if(value == nullptr)
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                    std::string(typeid(T).name()) + " is nullptr");
+                                    "Null pointer provided to "
+                                        + std::string(HIPDNN_FUNCTION_NAME));
     }
 }
 

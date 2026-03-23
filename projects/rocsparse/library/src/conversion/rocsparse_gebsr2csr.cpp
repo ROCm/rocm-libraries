@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -153,10 +153,12 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(256, 2, 128, 2, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
         else if(row_block_dim <= 4)
         {
@@ -188,10 +190,12 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(1024, 4, 128, 4, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
         else if(row_block_dim <= 8)
         {
@@ -223,10 +227,12 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(1024, 8, 128, 8, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
         else if(row_block_dim <= 16)
         {
@@ -258,10 +264,12 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(1024, 16, 128, 16, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
         else if(row_block_dim <= 32)
         {
@@ -293,10 +301,12 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(1024, 32, 128, 32, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
         else if(row_block_dim <= 64)
         {
@@ -328,10 +338,12 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(1024, 64, 128, 32, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
         else if(row_block_dim <= 128)
         {
@@ -363,15 +375,19 @@ namespace rocsparse
             {
                 launch_gebsr2csr_block_per_row_33_128_kernel(1024, 128, 128, 32, 32);
             }
+            // LCOV_EXCL_START
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
+            // LCOV_EXCL_STOP
         }
+        // LCOV_EXCL_START
         else
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+        // LCOV_EXCL_STOP
 
         return rocsparse_status_success;
     }

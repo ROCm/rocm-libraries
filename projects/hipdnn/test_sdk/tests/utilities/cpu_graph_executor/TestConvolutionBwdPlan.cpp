@@ -9,14 +9,16 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -37,15 +39,15 @@ protected:
 
 TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 {
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilation = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
-    unsigned int seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     ConvolutionBwdTensorBundle<float> planTensorBundle(
         dxDims, wDims, dyDims, seed, TensorLayout::NHWC);
     ConvolutionBwdTensorBundle<float> directTensorBundle(
@@ -76,8 +78,15 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceBwd<float>(),
-                                                           conv::getToleranceBwd<float>());
+    // Calculate dynamic tolerance for conv dgrad
+    // ConvolutionBwdTensorBundle initializes dy and w with range [-1.0, 1.0]
+    auto tolerance = conv::calculateConvDgradTolerance<float, float, float>(-1.0,
+                                                                            1.0, // dyMin, dyMax
+                                                                            -1.0,
+                                                                            1.0, // wMin, wMax
+                                                                            wDims); // wDims
+
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
@@ -85,9 +94,9 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 
 TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
     ConvolutionBwdTensorBundle<float> tensorBundle(dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -96,24 +105,27 @@ TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result
+    const bool result
         = dynamic_cast<ConvolutionBwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> dxDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dxDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
 
     ConvolutionBwdTensorBundle<float> tensorBundle(dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
@@ -122,17 +134,23 @@ TEST(TestConvolutionBwdPlanBuilder, IsApplicable)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    ConvolutionBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
+    const ConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::HALF,
+                                    DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }

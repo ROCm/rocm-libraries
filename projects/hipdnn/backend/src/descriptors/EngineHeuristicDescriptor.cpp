@@ -10,6 +10,7 @@
 #include "HipdnnException.hpp"
 #include "ScopedDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "utilities/EngineOrdering.hpp"
 
 namespace hipdnn_backend
 {
@@ -31,9 +32,12 @@ void EngineHeuristicDescriptor::finalize()
     auto handle = _graph->getHandle();
     auto pluginResourceManager = handle->getPluginResourceManager();
 
-    // TODO - For now we are going to return the engine IDs we get from the plugin resource manager.
-    // In the future, we will need to implement a plugin system for engine heuristics that allows plugins to determine sort order of the returned engines.
     _engineIds = pluginResourceManager->getApplicableEngineIds(_graph.get());
+
+    // Sort engine IDs to prioritize MIOPEN_ENGINE and deprioritize MIOPEN_ENGINE_DETERMINISTIC
+    // In the future, we will need to implement a plugin system for engine heuristics that allows
+    // plugins to determine sort order of the returned engines.
+    utilities::sortEngineIds(_engineIds);
 
     HipdnnBackendDescriptorImpl<EngineHeuristicDescriptor>::finalize();
 }
@@ -231,14 +235,14 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
             engine->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                  1,
-                                 graphDesc.getPtr());
+                                 static_cast<const void*>(graphDesc.getPtr()));
             engine->finalize();
 
             ScopedDescriptor engineDesc(HipdnnBackendDescriptor::packDescriptor(engine));
             config->setAttribute(HIPDNN_ATTR_ENGINECFG_ENGINE,
                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                  1,
-                                 engineDesc.getPtr());
+                                 static_cast<const void*>(engineDesc.getPtr()));
         }
 
         *elementCount = std::min(requestedElementCount, static_cast<int64_t>(_engineIds.size()));
