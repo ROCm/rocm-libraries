@@ -105,6 +105,7 @@ endif()
 
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
+        -Wno-unique-object-duplication
         -fms-extensions
         -fms-compatibility)
 endif()

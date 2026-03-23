@@ -35,15 +35,15 @@ void cpu_cat_forward(std::vector<tensor<T>> inputs, tensor<T>& ref_output, int32
     size_t output_dim_size = dims[dim];
     size_t outer_size      = 1;
     size_t inner_size      = 1;
-    size_t i               = 0;
-    for(; i < dim; i++)
+    size_t k               = 0;
+    for(; k < dim; k++)
     {
-        outer_size *= dims[i];
+        outer_size *= dims[k];
     }
 
-    for(; i < dims.size(); i++)
+    for(; k < dims.size(); k++)
     {
-        inner_size *= dims[i];
+        inner_size *= dims[k];
     }
 
     size_t output_start_offset = 0;
