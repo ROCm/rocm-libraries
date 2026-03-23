@@ -140,6 +140,12 @@ namespace stinkytofu
         backend.runOptimization();
     }
 
+    void StinkyAsmModule::runRequiredPasses()
+    {
+        Backend backend(*this);
+        backend.runRequiredPasses();
+    }
+
     void StinkyAsmModule::addGroup(const std::string& name)
     {
         if(pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end())

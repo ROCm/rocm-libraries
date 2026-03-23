@@ -1067,6 +1067,11 @@ namespace stinkytofu
         return inst.is(InstFlag::IF_HasSideEffect);
     }
 
+    inline bool isLabel(const StinkyInstruction& inst)
+    {
+        return inst.getUnifiedOpcode() == GFX::LABEL;
+    }
+
     /// Determines if an instruction must be preserved and cannot be eliminated.
     ///
     /// This is a comprehensive check that covers all instructions with observable effects,

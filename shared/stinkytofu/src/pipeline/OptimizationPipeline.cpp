@@ -30,6 +30,7 @@
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
@@ -259,6 +260,8 @@ namespace stinkytofu
         {
             if(config.verbose)
                 std::cout << "\nPhase 3: Instruction Scheduling" << std::endl;
+
+            passManager.addPass(createStinkyBuildImplicitDependencyPass());
 
             if(config.enableScheduleFirstLRs)
             {

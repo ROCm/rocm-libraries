@@ -26,29 +26,18 @@
 
 namespace stinkytofu
 {
-    struct Pass;
+    class Pass;
 
-    /// Creates a DelayAluInsertionPass for RDNA3 (gfx11xx) architectures
+    /// Creates a pass that inserts s_set_vgpr_msb instructions before VOP instructions
+    /// whose VGPR operands require MSB configuration.
     ///
-    /// This pass inserts s_delay_alu instructions to handle ALU instruction
-    /// dependencies on RDNA3 (gfx11xx) architectures where ALU pipelines
-    /// are non-blocking.
+    /// For architectures with HasVgprMSB (e.g. gfx1250), VGPRs above index 255 require
+    /// the hardware VGPR_OFF register to be configured via s_set_vgpr_msb. This pass
+    /// scans instructions, computes the required MSB value per operand slot, and inserts
+    /// s_set_vgpr_msb when the required value differs from the current state.
     ///
-    /// Example:
-    ///   v_mul_f32 v0, v1, v2
-    ///   s_delay_alu instid0(VALU_DEP_1)  <-- inserted by this pass
-    ///   v_add_f32 v3, v0, v4             # uses v0, needs delay
-    ///
-    /// The pass:
-    /// - Classifies instructions as VALU, SALU, or TRANS
-    /// - Tracks register def-use chains (up to 5 instructions back)
-    /// - Computes minimal wait counts based on dependency distance
-    /// - Inserts s_delay_alu with proper encoding:
-    ///   * VALU: max 4 instructions lookback
-    ///   * SALU: max 1 instruction lookback
-    ///   * TRANS: max 3 instructions lookback
-    ///
-    /// Architecture gating: Only runs for gfx11xx (RDNA3: gfx1100, gfx1150, gfx1151, etc.)
-    std::unique_ptr<Pass> createDelayAluInsertionPass();
+    /// After a label (branch target), the pass conservatively resets MSB state and
+    /// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
+    std::unique_ptr<Pass> createInsertVgprMsbPass();
 
 } // namespace stinkytofu

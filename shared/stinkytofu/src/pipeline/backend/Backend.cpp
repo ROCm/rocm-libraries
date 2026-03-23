@@ -105,6 +105,34 @@ namespace stinkytofu
         return success;
     }
 
+    // FIXME: This is a temporary workaround for running arch-specific required
+    // passes (e.g. InsertVgprMsb). A cleaner mechanism is being designed.
+    bool Backend::runRequiredPasses()
+    {
+        auto populator = BackendRegistry::getArchRequiredPassesPopulator(module.getArch());
+        if(!populator)
+            return true;
+
+        std::vector<std::unique_ptr<Pass>> passes;
+        populator(module, passes);
+
+        if(passes.empty())
+            return true;
+
+        PassManager    passManager;
+        GemmTileConfig gemmTileConfig;
+        gemmTileConfig.arch = module.getArch();
+        passManager.setGemmTileConfig(gemmTileConfig);
+
+        for(auto& pass : passes)
+        {
+            passManager.addPass(std::move(pass));
+        }
+
+        passManager.run(module.getFunction());
+        return true;
+    }
+
     bool Backend::runOptimizationWithConfig(const PipelineConfig& config,
                                             const std::string&    groupName)
     {

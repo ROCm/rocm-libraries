@@ -32,6 +32,9 @@ namespace stinkytofu
     {
         // Map from arch key to single pipeline spec populator per arch
         std::unordered_map<std::string, PipelineSpecPopulator> populators;
+
+        // Map from arch key to required passes populator per arch
+        std::unordered_map<std::string, RequiredPassesPopulator> requiredPassesPopulators;
     };
 
     BackendRegistry::Registry& BackendRegistry::getRegistry()
@@ -59,6 +62,25 @@ namespace stinkytofu
         return {};
     }
 
+    void BackendRegistry::setArchRequiredPasses(const std::array<int, 3>& arch,
+                                                RequiredPassesPopulator   populator)
+    {
+        auto& reg                                       = getRegistry();
+        reg.requiredPassesPopulators[makeArchKey(arch)] = std::move(populator);
+    }
+
+    BackendRegistry::RequiredPassesPopulator
+        BackendRegistry::getArchRequiredPassesPopulator(const std::array<int, 3>& arch)
+    {
+        auto& reg = getRegistry();
+        auto  it  = reg.requiredPassesPopulators.find(makeArchKey(arch));
+        if(it != reg.requiredPassesPopulators.end())
+        {
+            return it->second;
+        }
+        return {};
+    }
+
     bool BackendRegistry::hasPipelines(const std::array<int, 3>& arch)
     {
         auto& reg = getRegistry();
@@ -70,12 +92,15 @@ namespace stinkytofu
     {
         auto& reg = getRegistry();
         reg.populators.clear();
+        reg.requiredPassesPopulators.clear();
     }
 
     void BackendRegistry::clearArch(const std::array<int, 3>& arch)
     {
         auto& reg = getRegistry();
-        reg.populators.erase(makeArchKey(arch));
+        auto  key = makeArchKey(arch);
+        reg.populators.erase(key);
+        reg.requiredPassesPopulators.erase(key);
     }
 
     std::string BackendRegistry::makeArchKey(const std::array<int, 3>& arch)

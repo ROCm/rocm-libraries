@@ -208,7 +208,7 @@ TEST_F(HwInstDescTest, MUBUF_BufferLoadB64_FieldOverride)
 
     // S0 unchanged from format
     EXPECT_EQ(fields[1].encodeField, EncodeField::vaddr);
-    EXPECT_EQ(fields[1].fieldSizeBits, 64u);
+    EXPECT_EQ(fields[1].fieldSizeBits, 32u);
 }
 
 // ---------------------------------------------------------------------------

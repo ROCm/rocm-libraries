@@ -149,6 +149,12 @@ namespace stinkytofu
         void runOptimizationPipeline();
 
         /**
+         * @brief Run architecture-specific required passes on the module.
+         * These passes always run regardless of optimization level.
+         */
+        void runRequiredPasses();
+
+        /**
          * @brief Get the underlying Function
          *
          * This provides access to the internal Function representation.
