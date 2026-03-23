@@ -1629,3 +1629,210 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   // Should use more specific rule
   REQUIRE(result.weight_epilogue == 5.55);
 }
+
+TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - returns zero when splitting_factor <= 1") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 1024);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx(problem, hardware, config);
+      ctx.splitting_factor    = 1;
+      ctx.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      REQUIRE(latency == 0.0);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - returns zero for non-parallel reduction") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 1024);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx(problem, hardware, config);
+      ctx.splitting_factor    = 4;
+      ctx.reduction_strategy  = origami::reduction_t::none;
+
+      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      REQUIRE(latency == 0.0);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - positive latency for parallel split") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 8192);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx(problem, hardware, config);
+      ctx.splitting_factor    = 4;
+      ctx.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      REQUIRE(latency > 0.0);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - higher split factor increases latency") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 8192);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx_lo(problem, hardware, config);
+      ctx_lo.splitting_factor    = 2;
+      ctx_lo.reduction_strategy  = origami::reduction_t::parallel;
+
+      origami::context_t ctx_hi(problem, hardware, config);
+      ctx_hi.splitting_factor    = 8;
+      ctx_hi.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto lat_lo = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx_lo);
+      auto lat_hi = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx_hi);
+      REQUIRE(lat_hi > lat_lo);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - larger output increases latency") {
+      auto hardware      = make_hardware(gpu_arch);
+      auto problem_small = make_problem(1024, 1024, 8192);
+      auto problem_large = make_problem(8192, 8192, 8192);
+      auto config        = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx_small(problem_small, hardware, config);
+      ctx_small.splitting_factor    = 4;
+      ctx_small.reduction_strategy  = origami::reduction_t::parallel;
+
+      origami::context_t ctx_large(problem_large, hardware, config);
+      ctx_large.splitting_factor    = 4;
+      ctx_large.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto lat_small = origami::compute_parallel_reduction_latency(
+          problem_small, hardware, config, ctx_small);
+      auto lat_large = origami::compute_parallel_reduction_latency(
+          problem_large, hardware, config, ctx_large);
+      REQUIRE(lat_large > lat_small);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - batched problem scales latency") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem1 = make_problem(2048, 2048, 4096, origami::transpose_t::T, origami::transpose_t::N, 1);
+      auto problem4 = make_problem(2048, 2048, 4096, origami::transpose_t::T, origami::transpose_t::N, 4);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx1(problem1, hardware, config);
+      ctx1.splitting_factor    = 4;
+      ctx1.reduction_strategy  = origami::reduction_t::parallel;
+
+      origami::context_t ctx4(problem4, hardware, config);
+      ctx4.splitting_factor    = 4;
+      ctx4.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto lat1 = origami::compute_parallel_reduction_latency(problem1, hardware, config, ctx1);
+      auto lat4 = origami::compute_parallel_reduction_latency(problem4, hardware, config, ctx4);
+      REQUIRE(lat4 > lat1);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - includes kernel launch overhead") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(64, 64, 4096);
+      auto config   = make_config(64, 64, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx(problem, hardware, config);
+      ctx.splitting_factor    = 2;
+      ctx.reduction_strategy  = origami::reduction_t::parallel;
+
+      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      REQUIRE(latency >= ctx.heuristic.postgsu_kernel_launch_overhead);
+    }
+  }
+}
+
+TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - positive for aligned interior tiles") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 1024);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx(problem, hardware, config);
+      auto latency = origami::compute_epilogue_latency(problem, hardware, config, ctx);
+      REQUIRE(latency > 0.0);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - edge tiles cost more than interior") {
+      auto hardware = make_hardware(gpu_arch);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      auto problem_aligned = make_problem(4096, 4096, 1024);
+      origami::context_t ctx_aligned(problem_aligned, hardware, config);
+      auto lat_aligned =
+          origami::compute_epilogue_latency(problem_aligned, hardware, config, ctx_aligned);
+
+      auto problem_edge = make_problem(4097, 4097, 1024);
+      origami::context_t ctx_edge(problem_edge, hardware, config);
+      auto lat_edge = origami::compute_epilogue_latency(problem_edge, hardware, config, ctx_edge);
+
+      REQUIRE(lat_edge > lat_aligned);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - larger tiles have higher epilogue cost") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 1024);
+
+      auto config_small = make_config(64, 64, 64, 32, 32, 8, false, 1);
+      auto config_large = make_config(256, 256, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx_small(problem, hardware, config_small);
+      origami::context_t ctx_large(problem, hardware, config_large);
+
+      auto lat_small = origami::compute_epilogue_latency(problem, hardware, config_small, ctx_small);
+      auto lat_large = origami::compute_epilogue_latency(problem, hardware, config_large, ctx_large);
+      REQUIRE(lat_large > lat_small);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - serial split-K adds reduction cost") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 8192);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx_nosplit(problem, hardware, config);
+      ctx_nosplit.splitting_factor   = 1;
+      ctx_nosplit.reduction_strategy = origami::reduction_t::none;
+
+      origami::context_t ctx_spinlock(problem, hardware, config);
+      ctx_spinlock.splitting_factor   = 4;
+      ctx_spinlock.reduction_strategy = origami::reduction_t::spinlock;
+
+      auto lat_nosplit  = origami::compute_epilogue_latency(problem, hardware, config, ctx_nosplit);
+      auto lat_spinlock = origami::compute_epilogue_latency(problem, hardware, config, ctx_spinlock);
+      REQUIRE(lat_spinlock > lat_nosplit);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - parallel reduction skips in-kernel reduce") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 8192);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx_spinlock(problem, hardware, config);
+      ctx_spinlock.splitting_factor   = 4;
+      ctx_spinlock.reduction_strategy = origami::reduction_t::spinlock;
+
+      origami::context_t ctx_parallel(problem, hardware, config);
+      ctx_parallel.splitting_factor   = 4;
+      ctx_parallel.reduction_strategy = origami::reduction_t::parallel;
+
+      auto lat_spinlock = origami::compute_epilogue_latency(problem, hardware, config, ctx_spinlock);
+      auto lat_parallel = origami::compute_epilogue_latency(problem, hardware, config, ctx_parallel);
+      REQUIRE(lat_spinlock > lat_parallel);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - returns zero when d_bytes is zero") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 1024);
+      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
+
+      origami::context_t ctx(problem, hardware, config);
+      ctx.d_bytes = 0;
+
+      auto latency = origami::compute_epilogue_latency(problem, hardware, config, ctx);
+      REQUIRE(latency == 0.0);
+    }
+  }
+}

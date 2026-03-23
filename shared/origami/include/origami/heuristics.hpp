@@ -63,13 +63,15 @@ struct heuristic_defaults_t {
   static constexpr double L2_POLLUTION_PENALTY             = 0.7;
   static constexpr double L2_AMP_CEILING_BATCHED           = 0.9;
   static constexpr double L2_AMP_CEILING_K_SPLIT           = 0.4;
+  static constexpr double L2_AMP_CEILING_SKINNY            = 0.6;
+  static constexpr double L2_DEPTH_PENALTY                 = 0.9;
+  static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.7;
   static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 8.0;
   static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.9;
   static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 6.0;
   static constexpr double EPILOGUE_SCALAR_STORE_PENALTY    = 1.1;
   static constexpr size_t EPILOGUE_THREADS_PER_WAVE        = 64;
-  static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE =
-      16;  // buffer_store_dwordx4 = 16 bytes
+  static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE = 16;  // buffer_store_dwordx4
   static constexpr size_t EPILOGUE_CACHE_LINE_BYTES         = 128;
   static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
   static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
@@ -117,6 +119,9 @@ struct heuristic_params_t {
   double l2_pollution_penalty             = heuristic_defaults_t::L2_POLLUTION_PENALTY;
   double l2_amp_ceiling_batched           = heuristic_defaults_t::L2_AMP_CEILING_BATCHED;
   double l2_amp_ceiling_k_split           = heuristic_defaults_t::L2_AMP_CEILING_K_SPLIT;
+  double l2_amp_ceiling_skinny            = heuristic_defaults_t::L2_AMP_CEILING_SKINNY;
+  double l2_depth_penalty                 = heuristic_defaults_t::L2_DEPTH_PENALTY;
+  double l1_hit_rate_ceiling_skinny       = heuristic_defaults_t::L1_HIT_RATE_CEILING_SKINNY;
   double epilogue_cycles_per_acc_read     = heuristic_defaults_t::EPILOGUE_CYCLES_PER_ACC_READ;
   double epilogue_acc_read_parallelism    = heuristic_defaults_t::EPILOGUE_ACC_READ_PARALLELISM;
   double epilogue_cycles_per_bounds_check = heuristic_defaults_t::EPILOGUE_CYCLES_PER_BOUNDS_CHECK;

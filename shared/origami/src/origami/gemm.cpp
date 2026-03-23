@@ -946,7 +946,7 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
       static_cast<double>(config.mt.m) * split_K * data_type_to_bytes(problem.a_dtype);
   const double b_bytes =
       static_cast<double>(config.mt.n) * split_K * data_type_to_bytes(problem.b_dtype);
-  const double l2_cap = 0.99 * static_cast<double>(hardware.L2_capacity);
+  const double l2_cap = static_cast<double>(hardware.L2_capacity);
 
   size_t l2_m = mall_m;
   size_t l2_n = mall_n;
@@ -1219,14 +1219,13 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   double pollution_rate_a = 1.0;
   double pollution_rate_b = 1.0;
   if (a_temporal && b_temporal) {
-    constexpr double pollution_penalty = 0.7;
     if (l2_residency_a < 1.0 && effective_load_a > 0.0) {
       const double interference_frac_a = a_interference / effective_load_a;
-      pollution_rate_a                 = 1.0 - (1.0 - pollution_penalty) * interference_frac_a;
+      pollution_rate_a = 1.0 - (1.0 - heuristic.l2_pollution_penalty) * interference_frac_a;
     }
     if (l2_residency_b < 1.0 && effective_load_b > 0.0) {
       const double interference_frac_b = b_interference / effective_load_b;
-      pollution_rate_b                 = 1.0 - (1.0 - pollution_penalty) * interference_frac_b;
+      pollution_rate_b = 1.0 - (1.0 - heuristic.l2_pollution_penalty) * interference_frac_b;
     }
   }
 
@@ -1236,7 +1235,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   double depth_penalty = 1.0;
   {
     const double depth_ref = cl / std::max(a_bytes, b_bytes);
-    if (context.splitting_factor > 1 && config.mt.k > depth_ref) depth_penalty = 0.9;
+    if (context.splitting_factor > 1 && config.mt.k > depth_ref)
+      depth_penalty = heuristic.l2_depth_penalty;
   }
 
   // L2 hit rate
@@ -1286,22 +1286,20 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
     if (single_stream && skinny_m && a_temporal && !b_temporal) {
       if (a_iter <= l1_capacity) {
         const double headroom = 1.0 - a_iter / l1_capacity;
-        H_mem_l1_A            = 0.7 * clamp01(headroom);
+        H_mem_l1_A            = heuristic.l1_hit_rate_ceiling_skinny * clamp01(headroom);
       } else if (concurrent_load < l2_cap) {
-        constexpr double amp_ceiling = 0.6;
-        const double headroom        = 1.0 - concurrent_load / l2_cap;
-        l2_rate_a += headroom * std::max(amp_ceiling - l2_rate_a, 0.0);
+        const double headroom = 1.0 - concurrent_load / l2_cap;
+        l2_rate_a += headroom * std::max(heuristic.l2_amp_ceiling_skinny - l2_rate_a, 0.0);
       }
     }
 
     if (single_stream && skinny_n && b_temporal && !a_temporal) {
       if (b_iter <= l1_capacity) {
         const double headroom = 1.0 - b_iter / l1_capacity;
-        H_mem_l1_B            = 0.7 * clamp01(headroom);
+        H_mem_l1_B            = heuristic.l1_hit_rate_ceiling_skinny * clamp01(headroom);
       } else if (concurrent_load < l2_cap) {
-        constexpr double amp_ceiling = 0.6;
-        const double headroom        = 1.0 - concurrent_load / l2_cap;
-        l2_rate_b += headroom * std::max(amp_ceiling - l2_rate_b, 0.0);
+        const double headroom = 1.0 - concurrent_load / l2_cap;
+        l2_rate_b += headroom * std::max(heuristic.l2_amp_ceiling_skinny - l2_rate_b, 0.0);
       }
     }
   }

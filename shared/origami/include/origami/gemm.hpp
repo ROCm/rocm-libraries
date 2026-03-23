@@ -422,6 +422,24 @@ double compute_memory_latency(const problem_t& problem,
                               const context_t& context);
 
 /**
+ * @brief Compute the epilogue latency for a single tile.
+ *
+ * Models the cost of writing output (or workspace partials) after the main loop:
+ * ACC->VGPR transfer, edge-tile bounds checking, global memory stores, and
+ * in-kernel serial reduction (if applicable).
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Epilogue latency in cycles.
+ */
+double compute_epilogue_latency(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config,
+                                const context_t& context);
+
+/**
  * @brief Computes the latency to compute a K-COMPLETE tile.
  *
  * @param problem Problem description (M, N, K, etc.)
