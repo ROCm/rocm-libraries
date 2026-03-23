@@ -218,18 +218,7 @@ struct CoreLoopScheduler : CoreLoopSchedulerImpl<PipelineProblem,
 };
 
 namespace detail {
-CK_TILE_DEVICE float fma_impl_vsv(float a, float b, float c)
-{
-#if CK_TILE_DISABLE_PACKED_FP32
-    return a * b + c;
-#else
-    float result;
-    asm volatile("v_fma_f32 %[result], %[a], %[b], %[c]"
-                 : [result] "=v"(result)
-                 : [a] "v"(a), [b] "s"(b), [c] "v"(c));
-    return result;
-#endif
-}
+CK_TILE_DEVICE float fma_impl_vsv(float a, float b, float c) { return a * b + c; }
 
 CK_TILE_DEVICE float add_impl_vv(float lhs, float rhs)
 {
