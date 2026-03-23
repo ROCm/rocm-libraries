@@ -46,8 +46,14 @@ protected:
     hipdnnHandle_t _handle = hipdnn_integration_tests::getSharedHandle();
 };
 
+// TODO: Remove this once the integration tests are easily runnable
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunreachable-code"
+
 TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
 {
+    GTEST_SKIP() << "Skipping until we can add an easier test run mechanism";
+
     const auto start = std::chrono::steady_clock::now();
 
     for(int i = 0; i < K_ITERATIONS; ++i)
@@ -71,6 +77,8 @@ TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
 
 TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold)
 {
+    GTEST_SKIP() << "Skipping until we can add an easier test run mechanism";
+
     Graph graph = createSimplePointwiseGraph();
 
     auto result = graph.validate();
@@ -98,5 +106,7 @@ TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold)
     EXPECT_LT(elapsed.count(), 1.0) << "Hot is_supported_ext took " << elapsed.count() << "s for "
                                     << K_ITERATIONS << " iterations (threshold: 1s)";
 }
+
+#pragma clang diagnostic pop
 
 } // namespace
