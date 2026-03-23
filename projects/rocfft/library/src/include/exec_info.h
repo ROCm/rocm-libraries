@@ -22,6 +22,7 @@
 #define ROCFFT_EXEC_INFO_H
 
 #include "../../../shared/gpubuf.h"
+#include <cstddef>
 #include <hip/hip_runtime_api.h>
 #include <vector>
 
@@ -35,8 +36,7 @@ struct rocfft_execution_info_t
 
     // Vectors here have one element per visible HIP device
 
-    // gpubufs are expected to be non-owned if they come from the
-    // user, and owned if we allocate them at execute time.
+    // gpubufs are non-owned as they come from the user
     std::vector<gpubuf>      workBuffers;
     std::vector<hipStream_t> rocfft_streams;
 
@@ -54,20 +54,37 @@ struct rocfft_execution_info_t
 // Internal execution info that we create after we know which plan we
 // are executing.  Stores additional details that are only knowable
 // by that time, and which the user can't directly specify.
-struct rocfft_execution_info_internal : public rocfft_execution_info_t
+struct rocfft_execution_info_internal
 {
-    // construct from a user-specified info, which is expected to
-    // live longer than this struct if specified
+    // construct from a user-specified info, which must live longer
+    // than this struct if specified
     rocfft_execution_info_internal(const rocfft_execution_info_t* user_info);
 
-    // these can be copied, but we need to ensure that the original
-    // continues to own any allocations
-    rocfft_execution_info_internal(const rocfft_execution_info_internal& other);
+    // Ensure that we have a work buffer of the specified size for
+    // the specified device.  If the user specified one that's big
+    // enough, use that.  If the user specified one that's not big
+    // enough, throw invalid work buffer exception.  Otherwise
+    // allocate one.
+    void ensure_work_buffer_size(const std::vector<size_t> sizes_bytes_per_device);
+    // Get the work buffer for the specified device.
+    const gpubuf& get_work_buffer(int device) const;
+
+    // accessors for data that may be provided by user-specified exec info
+    void** get_load_cb_fns() const;
+    void** get_load_cb_data() const;
+    size_t get_load_cb_lds_bytes() const;
+    void** get_store_cb_fns() const;
+    void** get_store_cb_data() const;
+    size_t get_store_cb_lds_bytes() const;
+    // get user-specified stream
+    hipStream_t get_user_stream(int device) const;
 
 private:
-    // copy the work buffer pointers from another struct but make them
-    // nonowned here
-    void init_nonowned_work_buffers(const rocfft_execution_info_t& other);
+    // pointer to user-specified info - may be null if user never specified one
+    const rocfft_execution_info_t* user_info = nullptr;
+
+    // gpubufs that we own and allocate during execution
+    std::vector<gpubuf> execWorkBuffers;
 };
 
 #endif

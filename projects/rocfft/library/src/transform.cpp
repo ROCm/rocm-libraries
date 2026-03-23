@@ -430,6 +430,7 @@ try
     try
     {
         rocfft_execution_info_internal info_internal(info);
+        info_internal.ensure_work_buffer_size(plan->WorkBufBytesPerDevice());
         plan->Execute(in_buffer, out_buffer, info_internal);
     }
     catch(std::exception& e)
@@ -450,19 +451,19 @@ catch(...)
 void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
                             void*                                   in_buffer[],
                             void*                                   out_buffer[],
-                            const rocfft_execution_info_internal&   info_in,
+                            const rocfft_execution_info_internal&   exec_info,
                             size_t                                  multiPlanIdx,
                             const std::map<int, device_callback_t>& callbacks)
 {
     rocfft_scoped_device dev(location.device);
 
-    // create local exec info since we may want to modify streams on the info
-    rocfft_execution_info_internal exec_info(info_in);
-
-    // use the local stream if user didn't provide one
-    if(mgpuPlan && !exec_info.rocfft_streams[location.device])
+    // get stream for async launch during multi-GPU transforms - use
+    // the user-specified stream if present, otherwise use the plan's
+    // stream
+    hipStream_t execStream = exec_info.get_user_stream(location.device);
+    if(mgpuPlan && !execStream)
     {
-        exec_info.rocfft_streams[location.device] = this->stream;
+        execStream = this->stream;
     }
 
     // TransformPowX below needs in_buffer, out_buffer to work with.
@@ -500,28 +501,9 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
     auto in_transform_ptrs  = mgpuPlan ? in_buffer_copy.data() : in_buffer;
     auto out_transform_ptrs = mgpuPlan ? out_buffer_copy.data() : out_buffer;
 
-    if(workBufSize > 0)
-    {
-        auto requiredWorkBufBytes = WorkBufBytes(real_type_size(rootPlan->precision));
-        if(!exec_info.workBuffers[location.device])
-        {
-            // user didn't provide a buffer, alloc one now
-            if(exec_info.workBuffers[location.device].alloc(requiredWorkBufBytes) != hipSuccess)
-                throw std::runtime_error("work buffer allocation failure");
-        }
-        // otherwise user provided a buffer, but complain if it's too small
-        else if(exec_info.workBuffers[location.device].size() < requiredWorkBufBytes)
-        {
-            if(LOG_TRACE_ENABLED())
-                (*LogSingleton::GetInstance().GetTraceOS())
-                    << "user work buffer too small" << std::endl;
-            throw rocfft_status_invalid_work_buffer;
-        }
-    }
-
     // Callbacks do not currently support planar format
     if((array_type_is_planar(rootPlan->inArrayType) || array_type_is_planar(rootPlan->outArrayType))
-       && (exec_info.load_cb_fns || exec_info.store_cb_fns))
+       && (exec_info.get_load_cb_fns() || exec_info.get_store_cb_fns()))
         throw std::runtime_error("callbacks not supported with planar format");
 
     try
@@ -537,7 +519,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
         // the stream. Not needed for single-device plans.
         if(mgpuPlan)
         {
-            if(hipEventRecord(event, exec_info.rocfft_streams[location.device]) != hipSuccess)
+            if(hipEventRecord(event, execStream) != hipSuccess)
                 throw std::runtime_error("hipEventRecord failed");
         }
     }

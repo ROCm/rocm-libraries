@@ -274,7 +274,7 @@ struct rocfft_plan_t
     // Execute the multi-GPU plan.
     void Execute(void* in_buffer[], void* out_buffer[], const rocfft_execution_info_internal& info);
 
-    size_t WorkBufBytes() const;
+    std::vector<size_t> WorkBufBytesPerDevice() const;
 
     // Insert core execPlan into multi-item plan, surrounding it with
     // sufficient items to gather/scatter to/from a single device if

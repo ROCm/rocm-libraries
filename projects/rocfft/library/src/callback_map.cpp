@@ -86,34 +86,39 @@ std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_i
         }
     };
 
+    auto load_cb_fns   = exec_info.get_load_cb_fns();
+    auto load_cb_data  = exec_info.get_load_cb_data();
+    auto store_cb_fns  = exec_info.get_store_cb_fns();
+    auto store_cb_data = exec_info.get_store_cb_data();
+
     if(desc.inFields.empty())
     {
         // we have at most one load callback
-        if(exec_info.load_cb_fns)
+        if(load_cb_fns)
         {
-            callbacks[local_device].load_fn = exec_info.load_cb_fns[0];
-            if(exec_info.load_cb_data)
-                callbacks[local_device].load_data = exec_info.load_cb_data[0];
+            callbacks[local_device].load_fn = load_cb_fns[0];
+            if(load_cb_data)
+                callbacks[local_device].load_data = load_cb_data[0];
         }
     }
     else
     {
-        set_field_callback(desc.inFields, exec_info.load_cb_fns, exec_info.load_cb_data, true);
+        set_field_callback(desc.inFields, load_cb_fns, load_cb_data, true);
     }
 
     if(desc.outFields.empty())
     {
         // we have at most one store callback
-        if(exec_info.store_cb_fns)
+        if(store_cb_fns)
         {
-            callbacks[local_device].store_fn = exec_info.store_cb_fns[0];
-            if(exec_info.store_cb_data)
-                callbacks[local_device].store_data = exec_info.store_cb_data[0];
+            callbacks[local_device].store_fn = store_cb_fns[0];
+            if(store_cb_data)
+                callbacks[local_device].store_data = store_cb_data[0];
         }
     }
     else
     {
-        set_field_callback(desc.outFields, exec_info.store_cb_fns, exec_info.store_cb_data, false);
+        set_field_callback(desc.outFields, store_cb_fns, store_cb_data, false);
     }
 
     return callbacks;

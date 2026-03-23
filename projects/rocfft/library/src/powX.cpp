@@ -534,12 +534,16 @@ void TransformPowX(const ExecPlan&                         execPlan,
 {
     assert(execPlan.execSeq.size() == execPlan.gridParam.size());
 
+    // use user-specified stream if present, and plan's stream otherwise
+    hipStream_t execStream = info.get_user_stream(execPlan.location.device);
+    if(!execStream)
+        execStream = execPlan.get_local_stream();
+
     bool processing_tuning = TuningBenchmarker::GetSingleton().IsProcessingTuning();
     auto tuningPacket      = TuningBenchmarker::GetSingleton().GetPacket();
     // we can log profile information if we're on the null stream,
     // since we will be able to wait for the transform to finish
-    bool emit_profile_log = (processing_tuning || LOG_PROFILE_ENABLED())
-                            && !info.rocfft_streams[execPlan.location.device];
+    bool emit_profile_log  = (processing_tuning || LOG_PROFILE_ENABLED()) && !execStream;
     bool emit_kernelio_log = LOG_KERNELIO_ENABLED();
 
     rocfft_ostream*    kernelio_stream = nullptr;
@@ -565,14 +569,14 @@ void TransformPowX(const ExecPlan&                         execPlan,
         {
             load_node->callbacks.load_cb_fn        = it->second.load_fn;
             load_node->callbacks.load_cb_data      = it->second.load_data;
-            load_node->callbacks.load_cb_lds_bytes = info.load_cb_lds_bytes;
+            load_node->callbacks.load_cb_lds_bytes = info.get_load_cb_lds_bytes();
         }
 
         if(execPlan.rootPlan->storeOps)
         {
             store_node->callbacks.store_cb_fn        = it->second.store_fn;
             store_node->callbacks.store_cb_data      = it->second.store_data;
-            store_node->callbacks.store_cb_lds_bytes = info.store_cb_lds_bytes;
+            store_node->callbacks.store_cb_lds_bytes = info.get_store_cb_lds_bytes();
         }
     }
 
@@ -580,10 +584,11 @@ void TransformPowX(const ExecPlan&                         execPlan,
     {
         DeviceCallIn data;
         data.node          = execPlan.execSeq[i];
-        data.rocfft_stream = info.rocfft_streams[execPlan.location.device];
-        data.deviceProp    = execPlan.deviceProp;
+        data.rocfft_stream = execStream;
+        //
+        data.deviceProp = execPlan.deviceProp;
 
-        auto& local_work_buffer = info.workBuffers[execPlan.location.device];
+        auto& local_work_buffer = info.get_work_buffer(execPlan.location.device);
 
         // Size of complex type
         const size_t complexTSize = complex_type_size(data.node->precision);
