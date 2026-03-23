@@ -26,147 +26,111 @@ include: rocsparse_common.yaml
 
 
 Tests:
+# Quick
 - name: gtsv_no_pivot
   category: quick
   function: gtsv_no_pivot
-  precision: *single_only_precisions
-  M: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
-  N: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
-  denseld: [17]
+  precision: *single_double_precisions_complex_real
+  M: [2, 3]
+  N: [8, 1]
+  denseld: [64, 512, 1024]
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_no_pivot
   category: quick
   function: gtsv_no_pivot
-  precision: *single_only_precisions
-  M: [33, 47, 89, 110, 145, 202, 340, 447, 580, 667, 812, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000]
-  N: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
-  denseld: [17]
+  precision: *single_double_precisions_complex_real
+  M: [2, 4]
+  N: [2, 4]
+  denseld: [4, 8, 16, 32, 64]
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_no_pivot
   category: quick
   function: gtsv_no_pivot
-  precision: *single_only_precisions
-  M: [20000, 30000, 40000, 50000, 60000, 65536]
-  N: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
-  denseld: [17]
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [1, 2]
+  denseld: [131072, 424576, 1048576]
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_no_pivot
   category: quick
   function: gtsv_no_pivot
-  precision: *single_only_precisions
-  M: [20000, 30000, 40000, 50000, 60000, 65536]
-  N: [1000, 2000, 4000]
-  denseld: [17]
+  precision: *single_double_precisions_complex_real
+  M: [3, 7, 12, 20, 34, 50, 77, 150, 300]
+  N: [1, 2]
+  denseld: [1000]
   matrix: [rocsparse_matrix_random]
 
-# # Quick
-# - name: gtsv_no_pivot
-#   category: quick
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [2, 3]
-#   N: [8, 1]
-#   denseld: [64, 512, 1024]
-#   matrix: [rocsparse_matrix_random]
+# Pre-checkin
+- name: gtsv_no_pivot_bad_arg
+  category: pre_checkin
+  function: gtsv_no_pivot_bad_arg
+  precision: *single_double_precisions_complex_real
 
-# - name: gtsv_no_pivot
-#   category: quick
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [2, 4]
-#   N: [2, 4]
-#   denseld: [4, 8, 16, 32, 64]
-#   matrix: [rocsparse_matrix_random]
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [256, 456]
+  N: [1, 27]
+  denseld: [800, 1600]
+  matrix: [rocsparse_matrix_random]
 
-# - name: gtsv_no_pivot
-#   category: quick
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [300]
-#   N: [1, 2]
-#   denseld: [131072, 424576, 1048576]
-#   matrix: [rocsparse_matrix_random]
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [8, 16, 32, 64, 128, 256, 512]
+  N: [32, 45]
+  denseld: [512, 1024]
+  matrix: [rocsparse_matrix_random]
 
-# - name: gtsv_no_pivot
-#   category: quick
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [3, 7, 12, 20, 34, 50, 77, 150, 300]
-#   N: [1, 2]
-#   denseld: [1000]
-#   matrix: [rocsparse_matrix_random]
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [2000, 2048]
+  N: [32]
+  denseld: [231772, 262144, 1143576]
+  matrix: [rocsparse_matrix_random]
 
-# # Pre-checkin
-# - name: gtsv_no_pivot_bad_arg
-#   category: pre_checkin
-#   function: gtsv_no_pivot_bad_arg
-#   precision: *single_double_precisions_complex_real
+- name: gtsv_no_pivot_graph_test
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [2000, 75000, 131072]
+  N: [1, 2]
+  denseld: [131072, 424576, 1048576]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
 
-# - name: gtsv_no_pivot
-#   category: pre_checkin
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [256, 456]
-#   N: [1, 27]
-#   denseld: [800, 1600]
-#   matrix: [rocsparse_matrix_random]
+# Nightly
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [2411, 3456]
+  N: [12, 15]
+  denseld: [20000, 40000, 80000]
+  matrix: [rocsparse_matrix_random]
 
-# - name: gtsv_no_pivot
-#   category: pre_checkin
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [8, 16, 32, 64, 128, 256, 512]
-#   N: [32, 45]
-#   denseld: [512, 1024]
-#   matrix: [rocsparse_matrix_random]
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [1024, 2048]
+  N: [256, 512]
+  denseld: [2048, 4096, 8192, 16384]
+  matrix: [rocsparse_matrix_random]
 
-# - name: gtsv_no_pivot
-#   category: pre_checkin
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions
-#   M: [2000, 2048]
-#   N: [32]
-#   denseld: [231772, 262144, 1143576]
-#   matrix: [rocsparse_matrix_random]
-
-# - name: gtsv_no_pivot_graph_test
-#   category: pre_checkin
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [2000, 75000, 131072]
-#   N: [1, 2]
-#   denseld: [131072, 424576, 1048576]
-#   matrix: [rocsparse_matrix_random]
-#   graph_test: true
-
-# # Nightly
-# - name: gtsv_no_pivot
-#   category: nightly
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions_complex_real
-#   M: [2411, 3456]
-#   N: [12, 15]
-#   denseld: [20000, 40000, 80000]
-#   matrix: [rocsparse_matrix_random]
-
-# - name: gtsv_no_pivot
-#   category: nightly
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions
-#   M: [1024, 2048]
-#   N: [256, 512]
-#   denseld: [2048, 4096, 8192, 16384]
-#   matrix: [rocsparse_matrix_random]
-
-# - name: gtsv_no_pivot
-#   category: nightly
-#   function: gtsv_no_pivot
-#   precision: *single_double_precisions
-#   M: [419430]
-#   N: [7]
-#   denseld: [4194304]
-#   matrix: [rocsparse_matrix_random]
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [419430]
+  N: [7]
+  denseld: [4194304]
+  matrix: [rocsparse_matrix_random]
 

@@ -26,8 +26,6 @@
 
 #include "rocsparse_common.hpp"
 
-#include <vector>
-
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
@@ -47,20 +45,21 @@ namespace rocsparse
                                                 T* __restrict__ dl_spike,
                                                 T* __restrict__ d_spike,
                                                 T* __restrict__ du_spike,
-                                                T* __restrict__ spike_B)
+                                                T* __restrict__ B_spike)
     {
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
         const int gid = bid * BLOCKSIZE + tid;
 
-        T a = (gid < m) ? dl[gid] : static_cast<T>(0);
+        T a = (gid < m && gid != 0) ? dl[gid] : static_cast<T>(0);
         T b = (gid < m) ? d[gid] : static_cast<T>(1);
-        T c = (gid < m) ? du[gid] : static_cast<T>(0);
+        T c = (gid < m && gid != (m - 1)) ? du[gid] : static_cast<T>(0);
+
         T x[NUM_RHS];
         for(int rhs = 0; rhs < NUM_RHS; ++rhs)
         {
             x[rhs] = (gid < m && (NUM_RHS * hipBlockIdx_y + rhs) < n)
-                         ? B[m * (NUM_RHS * hipBlockIdx_y + rhs) + gid]
+                         ? B[ldb * (NUM_RHS * hipBlockIdx_y + rhs) + gid]
                          : static_cast<T>(0);
         }
 
@@ -99,6 +98,16 @@ namespace rocsparse
             const T b_new = b + alpha * c_left + gamma * a_right;
             const T c_new = (right < BLOCKSIZE) ? gamma * c_right : c;
 
+            T d_new[NUM_RHS];
+            for(int rhs = 0; rhs < NUM_RHS; rhs++)
+            {
+                const T d_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
+                const T d_right
+                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+
+                d_new[rhs] = x[rhs] + alpha * d_left + gamma * d_right;
+            }
+
             __syncthreads();
 
             a_shared[tid] = a_new;
@@ -111,18 +120,12 @@ namespace rocsparse
 
             for(int rhs = 0; rhs < NUM_RHS; rhs++)
             {
-                const T d_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
-                const T d_right
-                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+                x_shared[BLOCKSIZE * rhs + tid] = d_new[rhs];
 
-                const T d_new = x[rhs] + alpha * d_left + gamma * d_right;
-
-                __syncthreads();
-                x_shared[BLOCKSIZE * rhs + tid] = d_new;
-
-                x[rhs] = d_new;
-                __syncthreads();
+                x[rhs] = d_new[rhs];
             }
+
+            __syncthreads();
         }
 
         // Write modified coefficients back to Global Memory
@@ -189,7 +192,7 @@ namespace rocsparse
                 // if(gid < m && (NUM_RHS * hipBlockIdx_y + rhs) < n)
                 if((NUM_RHS * hipBlockIdx_y + rhs) < n)
                 {
-                    spike_B[num_spikes * (NUM_RHS * hipBlockIdx_y + rhs) + row]
+                    B_spike[num_spikes * (NUM_RHS * hipBlockIdx_y + rhs) + row]
                         = x_shared[tid + rhs * BLOCKSIZE];
                 }
             }
@@ -200,17 +203,17 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_no_pivot_spike_solver_pcr_kernel(rocsparse_int num_spikes,
                                                rocsparse_int n,
-                                               const T* __restrict__ l_spike,
-                                               const T* __restrict__ m_spike,
-                                               const T* __restrict__ u_spike,
+                                               const T* __restrict__ dl_spike,
+                                               const T* __restrict__ d_spike,
+                                               const T* __restrict__ du_spike,
                                                T* __restrict__ B_spike)
     {
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
 
-        T a = (tid < num_spikes) ? l_spike[tid] : static_cast<T>(0);
-        T b = (tid < num_spikes) ? m_spike[tid] : static_cast<T>(1);
-        T c = (tid < num_spikes) ? u_spike[tid] : static_cast<T>(0);
+        T a = (tid < num_spikes) ? dl_spike[tid] : static_cast<T>(0);
+        T b = (tid < num_spikes) ? d_spike[tid] : static_cast<T>(1);
+        T c = (tid < num_spikes) ? du_spike[tid] : static_cast<T>(0);
         T x[NUM_RHS];
         for(int rhs = 0; rhs < NUM_RHS; ++rhs)
         {
@@ -254,6 +257,16 @@ namespace rocsparse
             const T b_new = b - k1 * c_left - k2 * a_right;
             const T c_new = -k2 * c_right;
 
+            T d_new[NUM_RHS];
+            for(int rhs = 0; rhs < NUM_RHS; rhs++)
+            {
+                const T d_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
+                const T d_right
+                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+
+                d_new[rhs] = x[rhs] - d_left * k1 - d_right * k2;
+            }
+
             __syncthreads();
 
             a_shared[tid] = a_new;
@@ -266,18 +279,12 @@ namespace rocsparse
 
             for(int rhs = 0; rhs < NUM_RHS; rhs++)
             {
-                const T d_left = (left >= 0) ? x_shared[left + rhs * BLOCKSIZE] : static_cast<T>(0);
-                const T d_right
-                    = (right < BLOCKSIZE) ? x_shared[right + rhs * BLOCKSIZE] : static_cast<T>(0);
+                x_shared[tid + rhs * BLOCKSIZE] = d_new[rhs];
 
-                const T d_new = x[rhs] - d_left * k1 - d_right * k2;
-
-                __syncthreads();
-                x_shared[tid + rhs * BLOCKSIZE] = d_new;
-
-                x[rhs] = d_new;
-                __syncthreads();
+                x[rhs] = d_new[rhs];
             }
+
+            __syncthreads();
         }
 
         // Final Solution
@@ -338,7 +345,7 @@ namespace rocsparse
                     = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
 
                 // Store result to global memory
-                B[m * (NUM_RHS * hipBlockIdx_y + rhs) + gid] = x_final;
+                B[ldb * (NUM_RHS * hipBlockIdx_y + rhs) + gid] = x_final;
             }
         }
     }
