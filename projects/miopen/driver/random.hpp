@@ -46,8 +46,8 @@ inline std::random_device::result_type get_default_seed()
         auto external_seed = env::value(MIOPEN_DEBUG_DRIVER_PRNG_SEED);
 
         auto seed_ = external_seed == 0
-                        ? std::random_device{}()
-                        : static_cast<std::random_device::result_type>(external_seed);
+                         ? std::random_device{}()
+                         : static_cast<std::random_device::result_type>(external_seed);
         std::cout << "PRNG seed: " << seed_ << "\n";
         return seed_;
     }()};

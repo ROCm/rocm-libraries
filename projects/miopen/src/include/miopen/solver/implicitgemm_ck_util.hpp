@@ -1208,7 +1208,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 output_tr_inst2      = std::move(output_tr_inst_),
                 output_init_tr_inst2 = std::move(output_init_tr_inst_),
                 ck_buff_des2         = ck_buff_des_](const Handle& handle,
-                                           const AnyInvokeParams& primitive_parameters) mutable {
+                                             const AnyInvokeParams& primitive_parameters) mutable {
             handle.ResetKernelTime();
 
             const auto& data_ctx = primitive_parameters.CastTo<CastType>();
@@ -1377,7 +1377,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 // "lambda capture is not used" since this variable is only used in assert.
                 (void)should_allocated_wrw_buffer2;
                 assert((should_allocated_wrw_buffer2 && data_ctx.workSpace != nullptr) ||
-                      !(should_allocated_wrw_buffer2 && data_ctx.workSpace == nullptr));
+                       !(should_allocated_wrw_buffer2 && data_ctx.workSpace == nullptr));
                 if(data_ctx.workSpace)
                 {
                     sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), data_ctx.workSpace);

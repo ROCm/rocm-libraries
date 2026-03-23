@@ -547,10 +547,8 @@ ConvDepthwiseFwd2D::GetSolution(const ExecutionContext&,
                         ck_args](const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto& fwd_ctx = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
                     auto invoker        = convPtr->MakeInvoker();
-                    auto argument       = ck_args.MakeArgument(*convPtr.get(),
-                                                         fwd_ctx.tensors.in,
-                                                         fwd_ctx.tensors.w,
-                                                         fwd_ctx.tensors.out);
+                    auto argument       = ck_args.MakeArgument(
+                        *convPtr.get(), fwd_ctx.tensors.in, fwd_ctx.tensors.w, fwd_ctx.tensors.out);
 
                     {
                         {

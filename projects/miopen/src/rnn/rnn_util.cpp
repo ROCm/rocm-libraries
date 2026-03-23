@@ -381,7 +381,7 @@ void ReorderTensorGPUData(const Handle& handle,
 
     auto get_single_samlpe_lens = [](const std::vector<size_t>& lens, int reordering_dim_) {
         std::vector<size_t> new_lens = lens;
-        new_lens[reordering_dim_]     = 1;
+        new_lens[reordering_dim_]    = 1;
         return new_lens;
     };
 

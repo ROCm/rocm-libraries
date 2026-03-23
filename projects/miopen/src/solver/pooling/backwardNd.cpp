@@ -163,7 +163,7 @@ ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
         return std::make_tuple(strides_[0], // N stride
                                strides_[1], // C stride
                                strides_[2], // D stride. Same as H_stride in 3D converted from 2D.
-                               is2d        //
+                               is2d         //
                                    ? strides_[2] // 2D H stride
                                    : strides_[3] // 3D H stride
         );
