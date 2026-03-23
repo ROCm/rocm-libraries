@@ -30,7 +30,7 @@ protected:
 
     static void loadPlugins(std::initializer_list<const char*> pluginPaths)
     {
-        std::vector<const char*> const paths(pluginPaths);
+        const std::vector<const char*> paths(pluginPaths);
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
@@ -47,7 +47,7 @@ protected:
 
     static Graph createSimplePointwiseGraph()
     {
-        std::vector<int64_t> const dims = {2, 3, 4, 4};
+        const std::vector<int64_t> dims = {2, 3, 4, 4};
 
         Graph graph;
         graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
