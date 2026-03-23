@@ -241,9 +241,9 @@ void test_segmented_topk_air_keys(std::vector<typename Params::key_type> const& 
         HIP_CHECK(hipStreamDestroy(stream));
     }
 
-    const auto                               h_output = d_output.load();
-    std::vector<key_type>                    h_expected{};
-    auto                                     pred = [](auto _1, auto _2)
+    const auto            h_output = d_output.load();
+    std::vector<key_type> h_expected{};
+    auto                  pred = [](auto _1, auto _2)
     {
         if constexpr(select_min)
         {
@@ -433,10 +433,10 @@ void test_segmented_topk_air_pairs_unstable(
         HIP_CHECK(hipStreamDestroy(stream));
     }
 
-    const auto                                    h_output_keys   = d_output_keys.load();
-    const auto                                    h_output_values = d_output_values.load();
-    std::vector<key_type>                         h_expected_keys{};
-    auto                                          pred = [](auto _1, auto _2)
+    const auto            h_output_keys   = d_output_keys.load();
+    const auto            h_output_values = d_output_values.load();
+    std::vector<key_type> h_expected_keys{};
+    auto                  pred = [](auto _1, auto _2)
     {
         if constexpr(select_min)
         {
@@ -460,7 +460,7 @@ void test_segmented_topk_air_pairs_unstable(
     {
         for(unsigned int i = 0; i < output_size; ++i)
         {
-            ASSERT_EQ(h_input_keys[h_output_values[i]], h_output_keys[i]);
+            test_utils::assert_eq(h_input_keys[h_output_values[i]], h_output_keys[i]);
         }
     }
     else
@@ -480,7 +480,9 @@ void test_segmented_topk_air_pairs_unstable(
                     found = true;
                     break;
                 }
-                if(in_key == key && isnan(val) && isnan(in_val))
+                if((in_key == key && isnan(val) && isnan(in_val))
+                   || (val == in_val && isnan(in_key) && isnan(key))
+                   || (isnan(val) && isnan(in_val) && isnan(in_key) && isnan(key)))
                 {
                     found = true;
                     break;
