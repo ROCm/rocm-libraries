@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdexcept>
+
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 
@@ -93,8 +95,9 @@ inline PointwiseErrorClass classifyPointwiseOp(hipdnn_data_sdk::data_objects::Po
     case PointwiseMode::GELU_APPROX_TANH_BWD:
     case PointwiseMode::SOFTPLUS_BWD:
     case PointwiseMode::SWISH_BWD:
-    default:
         return PointwiseErrorClass::COMPOSITE_BWD;
+    default:
+        throw std::logic_error("Unclassified PointwiseMode — add it to classifyPointwiseOp");
     }
 }
 
