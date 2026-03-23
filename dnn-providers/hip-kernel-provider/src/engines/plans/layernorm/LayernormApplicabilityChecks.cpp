@@ -138,7 +138,7 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Layernorm implementatino only supports NCHW and NHWC layouts for 4D tensors.");
+                "Layernorm implementation only supports NCHW and NHWC layouts for 4D tensors.");
         }
     }
     else if(numDims == 5)
@@ -150,7 +150,7 @@ void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t num
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Layernorm implementatino only supports NCDHW and NDHWC layouts for 5D tensors.");
+                "Layernorm implementation only supports NCDHW and NDHWC layouts for 5D tensors.");
         }
     }
 }

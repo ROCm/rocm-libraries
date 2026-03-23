@@ -53,13 +53,13 @@ size_t
     const std::vector<int64_t> affineDims(affineAttr->dims()->begin(), affineAttr->dims()->end());
 
     auto affineNormalizedDimMax = affineDims.size();
-    for(auto i = affineDims.size() - 1; i >= 0; --i)
+    for(auto i = static_cast<int>(affineDims.size()) - 1; i >= 0; --i)
     {
-        if(affineDims[i] > 1 && ioDims[i] > 1)
+        if(affineDims[static_cast<size_t>(i)] > 1 && ioDims[static_cast<size_t>(i)] > 1)
         {
-            affineNormalizedDimMax = i;
+            affineNormalizedDimMax = static_cast<size_t>(i);
         }
-        else if(affineDims[i] == 1 && ioDims[i] > 1)
+        else if(affineDims[static_cast<size_t>(i)] == 1 && ioDims[static_cast<size_t>(i)] > 1)
         {
             break;
         }
@@ -130,13 +130,13 @@ size_t getMaxNormalizedDimFromStat(const hipdnn_data_sdk::data_objects::TensorAt
     const std::vector<int64_t> statDims(statAttr->dims()->begin(), statAttr->dims()->end());
 
     auto statNormalizedDimMax = statDims.size();
-    for(size_t i = statDims.size() - 1; i >= 0; --i)
+    for(auto i = static_cast<int>(statDims.size()) - 1; i >= 0; --i)
     {
-        if(statDims[i] == 1 && ioDims[i] > 1)
+        if(statDims[static_cast<size_t>(i)] == 1 && ioDims[static_cast<size_t>(i)] > 1)
         {
-            statNormalizedDimMax = i;
+            statNormalizedDimMax = static_cast<size_t>(i);
         }
-        else if(statDims[i] > 1)
+        else if(statDims[static_cast<size_t>(i)] > 1)
         {
             break;
         }
@@ -189,11 +189,11 @@ size_t guessNormalizedDim(
     const std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> affineAttr
         = affineTensorId.has_value() ? std::optional(&hip_kernel_utils::findTensorAttributes(
                                            tensorMap, affineTensorId.value()))
-                                     : nullptr;
+                                     : std::nullopt;
     const std::optional<const hipdnn_data_sdk::data_objects::TensorAttributes*> statAttr
         = statTensorId.has_value() ? std::optional(&hip_kernel_utils::findTensorAttributes(
                                          tensorMap, statTensorId.value()))
-                                   : nullptr;
+                                   : std::nullopt;
 
     return guessNormalizedDim(ioAttr, affineAttr, statAttr);
 }

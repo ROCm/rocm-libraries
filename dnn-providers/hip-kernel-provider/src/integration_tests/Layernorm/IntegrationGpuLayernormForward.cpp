@@ -68,20 +68,34 @@ protected:
 
         graph::LayernormAttributes lnAttrs;
         lnAttrs.set_epsilon(std::move(epsilonTensorAttr));
-        lnAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+        lnAttrs.set_forward_phase(testCase.weightBias ? NormFwdPhase::TRAINING
+                                                      : NormFwdPhase::INFERENCE);
 
         auto results = graphObj.layernorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, lnAttrs);
         const auto& yTensorAttr = results[0];
         const auto& meanTensorAttr = results[1];
         const auto& invVarianceTensorAttr = results[2];
 
+        if(!testCase.weightBias)
+        {
+            EXPECT_EQ(meanTensorAttr, nullptr) << "Mean tensor should be null for inference";
+            EXPECT_EQ(invVarianceTensorAttr, nullptr)
+                << "Inverse variance tensor should be null for inference";
+        }
+
         yTensorAttr->set_output(true);
-        meanTensorAttr->set_output(true);
-        invVarianceTensorAttr->set_output(true);
+        if(testCase.weightBias)
+        {
+            meanTensorAttr->set_output(true);
+            invVarianceTensorAttr->set_output(true);
+        }
 
         this->registerValidator(yTensorAttr, tolerance);
-        this->registerValidator(meanTensorAttr, tolerance);
-        this->registerValidator(invVarianceTensorAttr, tolerance);
+        if(testCase.weightBias)
+        {
+            this->registerValidator(meanTensorAttr, tolerance);
+            this->registerValidator(invVarianceTensorAttr, tolerance);
+        }
 
         this->verifyGraph(graphObj, testCase.seed);
     }

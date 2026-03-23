@@ -13,13 +13,6 @@
 namespace hip_kernel_provider::layernorm::test::common
 {
 
-using namespace hipdnn_data_sdk::utilities;
-
-namespace
-{
-
-} // namespace
-
 struct LayernormTestCase
 {
     std::vector<int64_t> dims;
@@ -46,7 +39,7 @@ struct LayernormTestCase
     friend std::ostream& operator<<(std::ostream& ss, const LayernormTestCase& testCase)
     {
         ss << "(dims:";
-        vecToStream(ss, testCase.dims);
+        hipdnn_data_sdk::utilities::vecToStream(ss, testCase.dims);
         ss << " normalizedDim:" << testCase.normalizedDim;
         ss << " seed:" << testCase.seed;
         ss << ")";

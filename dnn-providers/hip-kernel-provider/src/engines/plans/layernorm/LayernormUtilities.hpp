@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
 
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>

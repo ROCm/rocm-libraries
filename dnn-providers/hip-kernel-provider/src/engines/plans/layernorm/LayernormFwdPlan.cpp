@@ -13,6 +13,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::layernorm
@@ -188,10 +189,15 @@ void LayernormFwdPlan::execute(const HipKernelHandle& handle,
         _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
     auto biasBuffer = hip_kernel_utils::findDeviceBuffer(
         _params.bias()->uid(), deviceBuffers, numDeviceBuffers);
-    auto meanBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.mean()->uid(), deviceBuffers, numDeviceBuffers);
-    auto invVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
+    auto meanBuffer = _params.mean() != nullptr
+                          ? hip_kernel_utils::findDeviceBuffer(
+                                _params.mean()->uid(), deviceBuffers, numDeviceBuffers)
+                          : hipdnnPluginDeviceBuffer_t{-1, nullptr};
+    auto invVarianceBuffer = _params.invVariance() != nullptr
+                                 ? hip_kernel_utils::findDeviceBuffer(_params.invVariance()->uid(),
+                                                                      deviceBuffers,
+                                                                      numDeviceBuffers)
+                                 : hipdnnPluginDeviceBuffer_t{-1, nullptr};
 
     hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
     _params.epsilon()->UnPackTo(&epsilonTensor);
