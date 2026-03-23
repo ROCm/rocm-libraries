@@ -2113,7 +2113,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '(9(42|50)|1250)'
 
 - name: matmul_gemm_f32_fast_bf16
   category: pre_checkin

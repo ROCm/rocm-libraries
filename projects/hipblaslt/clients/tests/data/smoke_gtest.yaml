@@ -337,7 +337,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '942'
+  gpu_arch: '(942|1250)'
 
 - name: matmul_gemm_double_smoke
   category: smoke
