@@ -61,13 +61,128 @@
 #include "Profiler.hpp"
 #endif
 
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+#include "race-emulator/Emulator.h"
+#endif
+
 #include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace
+{
+
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+    namespace fs = std::filesystem;
+
+    std::string getAsmFilename(const std::string& yamlFilename, const std::string& kernelName)
+    {
+        fs::path yamlPath(yamlFilename);
+        // From: .../source/library/TensileLibrary.yaml
+        // To:   .../source/build_tmp/SOURCE/assembly/
+        if(!yamlPath.has_parent_path())
+        {
+            throw std::runtime_error("Invalid filename path structure: " + yamlFilename);
+        }
+
+        // yamlPath.parent_path() -> .../source/library
+        // .parent_path()         -> .../source
+        auto sourceDir = yamlPath.parent_path().parent_path();
+        auto searchDir = sourceDir / "build_tmp" / "SOURCE" / "assembly";
+        if(!fs::exists(searchDir) || !fs::is_directory(searchDir))
+        {
+            throw std::runtime_error("Assembly directory not found at: " + searchDir.string());
+        }
+
+        // Iterate through .s files and search for kernelName (mangled filenames make this a requirement).
+        for(const auto& entry : fs::directory_iterator(searchDir))
+        {
+            if(entry.is_regular_file() && entry.path().extension() == ".s")
+            {
+
+                std::ifstream file(entry.path());
+                if(!file.is_open())
+                {
+                    continue; // Skip files we can't read
+                }
+
+                std::string line;
+                size_t      lineCount = 0;
+
+                // Search first 100 lines only (we expect to find kernel name at start of file).
+                while(std::getline(file, line) && lineCount < 100)
+                {
+                    if(line.find(kernelName) != std::string::npos)
+                    {
+                        return entry.path().string();
+                    }
+                    lineCount++;
+                }
+            }
+        }
+
+        // 4. Throw if not found after checking all files
+        throw std::runtime_error("No assembly file found containing kernel: " + kernelName);
+    };
+
+    // Return true if the kernel passed the check, and false if it could not be checked. An exception will be thrown if the check falied.
+    bool checkForRaces(const std::vector<std::vector<TensileLite::KernelInvocation>>& kernels,
+                       const std::string&                                             filename,
+                       const std::string&                                             archName)
+    {
+
+        if(kernels.size() != 1)
+        {
+            return false;
+        }
+        const auto& kernelInvocations = kernels[0];
+        if(kernelInvocations.empty())
+        {
+            return false;
+        }
+        const auto& kernel        = kernelInvocations[0];
+        std::string kernelName    = kernel.kernelName;
+        auto        workGroupSize = kernel.workGroupSize;
+        auto        numWorkGroups = kernel.numWorkGroups;
+        auto        numWorkItems  = kernel.numWorkItems;
+        auto        wgs           = kernel.workGroupSize;
+
+        auto asmFilename = getAsmFilename(filename, kernelName);
+
+        // Load the assembly file into a string. We will use C++ filesystem and other modern C++ for this.
+        std::ifstream asmFile(asmFilename);
+        if(!asmFile.is_open())
+        {
+            throw std::runtime_error("Failed to open assembly file: " + asmFilename);
+        }
+        std::string asmString_((std::istreambuf_iterator<char>(asmFile)),
+                               std::istreambuf_iterator<char>());
+
+        // To manually introduce a race for testing, replace `s_waitcnt` with `; s_waitcnt` in the loaded string, for example.
+
+        auto emulator = raceemulator::Emulator(asmString_,
+                                                raceemulator::architectureFromTarget(archName));
+        emulator.addAllKernargs(kernel.args.data());
+        const int  waveSize             = emulator.getArch().waveSize();
+        const auto numWavesPerWorkGroup = (wgs.x * wgs.y * wgs.z) / waveSize;
+        emulator.enableRaceChecks(true);
+        emulator.enableCompleteEmulation(false);
+        emulator.run({0, 0, 0},
+                     {static_cast<int>(waveSize * numWavesPerWorkGroup), 1, 1});
+        std::cout << "No races detected in kernel: " << kernelName << std::endl;
+
+        return true;
+    }
+#endif // HIPBLASLT_HAS_RACE_EMULATOR
+}
 
 namespace TensileLite
 {
@@ -254,6 +369,9 @@ namespace TensileLite
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
+                ("check-for-races",          po::value<int>()->default_value(0), "If 0, do not check, otherwise do check")
+                ("print-kernel-args",        po::value<bool>()->default_value(false), "Print kernel arguments and exit without running on GPU.")
+                ("target-arch",              po::value<std::string>()->default_value(""), "Target GPU architecture (e.g. gfx1151). When set, bypasses GPU hardware detection.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
@@ -864,7 +982,6 @@ namespace TensileLite
             parse_activation_enum_args(args, "activation-enum-args");
             parse_arg_double(args, "activation-additional-args");
             parse_arg_bools(args, "icache-flush-args");
-            // std::cout << "Pasring parse_arg_ints_map()" << std::endl;
             parse_arg_ints_map(args, "prob-sol-map");
             return args;
         }
@@ -893,8 +1010,95 @@ int main(int argc, const char* argv[])
 
     ClientProblemFactory problemFactory(args);
 
+    // --print-kernel-args mode: compute and print kernel arguments without GPU.
+    // Requires --target-arch (e.g. gfx1151) and a library-file.
+    if(args["print-kernel-args"].as<bool>())
+    {
+        auto targetArch = args["target-arch"].as<std::string>();
+        if(targetArch.empty())
+            throw std::runtime_error("--print-kernel-args requires --target-arch");
+
+        auto processor = AMDGPU::toProcessor(targetArch);
+
+        int cuCount = 0;
+        if(processor == AMDGPU::Processor::gfx942)
+        {
+            cuCount = 304; // MI300X: 8 XCDs × 38 CUs
+        }
+        else if(processor == AMDGPU::Processor::gfx1151)
+        {
+            // TODO: verify correct CU count for gfx1151
+            cuCount = 20;
+        }
+        else
+        {
+            throw std::runtime_error(
+                "--print-kernel-args: no default CU count for " + targetArch
+                + ". Add it to the lookup in main.cpp.");
+        }
+
+        auto hardware = std::make_shared<AMDGPU>(processor, cuCount, targetArch);
+        auto library  = LoadSolutionLibrary(args);
+        if(!library)
+            throw std::runtime_error("Failed to load solution library");
+
+        auto problems = problemFactory.problems();
+        for(size_t pi = 0; pi < problems.size(); ++pi)
+        {
+            auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(problems[pi]);
+            if(!problem)
+            {
+                std::cerr << "Problem " << pi << " is not a GEMM problem" << std::endl;
+                continue;
+            }
+            auto solution = library->findBestSolution(*problem, *hardware);
+            if(!solution)
+            {
+                std::cerr << "No solution found for problem " << pi << std::endl;
+                continue;
+            }
+
+            // Create inputs with dummy non-null pointers (not dereferenced).
+            // solve() validates that pointers are non-null when alpha != 0.
+            static char dummy[1];
+            ContractionInputs inputs;
+            inputs.a     = dummy;
+            inputs.b     = dummy;
+            inputs.c     = dummy;
+            inputs.d     = dummy;
+            inputs.alpha = static_cast<float>(1.0);
+            inputs.beta  = static_cast<float>(0.0);
+
+            auto kernels
+                = solution->solve(*problem, inputs, *hardware, nullptr, 0, nullptr);
+
+            std::cout << "Problem " << pi << ":" << std::endl;
+            for(size_t ki = 0; ki < kernels.size(); ++ki)
+            {
+                auto& k = kernels[ki];
+                std::cout << "  Kernel " << ki << ": " << k.kernelName << std::endl;
+                std::cout << "    workGroupSize: (" << k.workGroupSize.x << ", "
+                          << k.workGroupSize.y << ", " << k.workGroupSize.z << ")"
+                          << std::endl;
+                std::cout << "    numWorkGroups: (" << k.numWorkGroups.x << ", "
+                          << k.numWorkGroups.y << ", " << k.numWorkGroups.z << ")"
+                          << std::endl;
+                std::cout << "    numWorkItems:  (" << k.numWorkItems.x << ", "
+                          << k.numWorkItems.y << ", " << k.numWorkItems.z << ")"
+                          << std::endl;
+                std::cout << "    args (" << k.args.size() << " bytes):" << std::endl;
+                std::cout << k.args;
+                std::cout << "    NOTE: pointer values (d, c, a, b) are placeholders"
+                             " (no GPU memory allocated)." << std::endl;
+                std::cout << "    NOTE: WGMXCCG (bits [31:22] of internalArgs1) is"
+                             " approximate (CU count unknown without GPU)." << std::endl;
+            }
+        }
+        return 0;
+    }
+
     std::shared_ptr<Hardware> hardware;
-    hipStream_t              stream;
+    hipStream_t               stream;
     {
         ScopedTimer timer("hip_initialization");
         hardware = GetHardware(args);
@@ -921,8 +1125,7 @@ int main(int argc, const char* argv[])
     RocProfiler::getInstance().stop();
 #endif
 
-    auto filename = args["library-file"].as<std::string>();
-
+    auto        filename         = args["library-file"].as<std::string>();
     size_t      directoryPos     = filename.rfind('/');
     std::string libraryDirectory = filename;
     if(directoryPos != std::string::npos)
@@ -932,7 +1135,7 @@ int main(int argc, const char* argv[])
 
     {
         ScopedTimer timer("lazy_loading_init");
-        auto result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
+        auto        result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
         if(result != hipSuccess)
         {
             std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
@@ -984,7 +1187,7 @@ int main(int argc, const char* argv[])
         solutionIterator = SolutionIterator::Default(library, hardware, args);
     }
 
-    MetaRunListener listeners;
+    MetaRunListener                 listeners;
     std::shared_ptr<BenchmarkTimer> benchmarkTimer;
     float                           flushTimeMs{};
 
@@ -996,8 +1199,8 @@ int main(int argc, const char* argv[])
 
         if(runKernels)
         {
-            bool hasIcacheFlush
-                = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
+            bool hasIcacheFlush = std::any_of(
+                begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
             listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
@@ -1026,7 +1229,8 @@ int main(int argc, const char* argv[])
         {
             std::string filename = args["log-file"].as<std::string>();
             auto        logFile  = std::make_shared<std::ofstream>(
-                filename.c_str(), args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
+                filename.c_str(),
+                args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
 
             reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
         }
@@ -1112,8 +1316,8 @@ int main(int argc, const char* argv[])
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    auto inputs = dataInit->prepareGPUInputs(problem);
-                                    inputArr[0] = inputs;
+                                    auto        inputs = dataInit->prepareGPUInputs(problem);
+                                    inputArr[0]        = inputs;
                                 }
                                 resetInput = true;
 
@@ -1162,16 +1366,40 @@ int main(int argc, const char* argv[])
                                         listeners.validateWarmups(
                                             inputs, warmupStartEvents, warmupStopEvents);
                                     }
+                                    {
+
+                                        ScopedTimer timer("check_for_races");
+                                        // If race checks are enabled, do race checking after first warmup
+                                        if(args["check-for-races"].as<int>() != 0)
+                                        {
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+                                            bool ran = checkForRaces(
+                                                kernels, filename, hardware->archName());
+                                            if(!ran)
+                                            {
+                                                throw std::runtime_error(
+                                                    "Failed to run race checks (multi-kernel "
+                                                    "GEMM?)");
+                                            }
+#else
+                                            throw std::runtime_error(
+                                                "Race checking requested (--check-for-races) "
+                                                "but this build was compiled without "
+                                                "HIPBLASLT_ENABLE_RACE_EMULATOR");
+#endif
+                                        }
+                                    }
 
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         for(int i = 1; i < warmupInvocations; i++)
                                         {
                                             size_t kIdx = i % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                stream,
-                                                                                warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
+                                            HIP_CHECK_EXC(
+                                                adapter.launchKernels(kernels[kIdx],
+                                                                      stream,
+                                                                      warmupStartEvents[i],
+                                                                      warmupStopEvents[i]));
                                         }
                                         listeners.postWarmup(
                                             warmupStartEvents, warmupStopEvents, stream);
@@ -1218,7 +1446,8 @@ int main(int argc, const char* argv[])
                                             }
 
                                             listeners.postEnqueues(startEvents, stopEvents, stream);
-                                            listeners.validateEnqueues(inputs, startEvents, stopEvents);
+                                            listeners.validateEnqueues(
+                                                inputs, startEvents, stopEvents);
                                         }
 
                                     listeners.postSyncs();

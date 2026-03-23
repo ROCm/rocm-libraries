@@ -1,0 +1,20 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-misplaced-widening-cast,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-throwing-static-initialization,
+  readability-braces-around-statements
+
+# These exclusions may be worth re-enabling as the codebase matures.
+# They are currently disabled to reduce noise from the emulator's
+# register-width integer conversions and multi-parameter functions.
+
+WarningsAsErrors: '*'
+
+# Only analyze project code, not system or third-party headers.
+HeaderFilterRegex: 'src/|include/'

@@ -1,0 +1,47 @@
+# gfx942 MFMA bf16 GEMM, batched, MI16x16x16.
+# Generates: tensilelite_mm_bf16_mi300x.s
+#
+# To regenerate the .s:
+#   source <venv>/bin/activate
+#   Tensile.sh tensilelite_mm_bf16_mi300x.yaml <outputdir> --build-only \
+#       --prebuilt-client=<builddir>/tensilelite/client/tensilelite-client
+#   Copy the .s from <outputdir>/.../SOURCE/assembly/*.s
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - TransposeLDS: [0]
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+        - WorkGroup:
+          - [8, 8, 1]
+        - DepthU: [32]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [True]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+           - Exact: [16, 32, 2, 128]

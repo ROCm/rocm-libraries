@@ -1,0 +1,58 @@
+# gfx1151 WMMA f16 TN GEMM. Largest square macro tile feasible on gfx1151
+# (limited by 256 VGPRs and 64KB LDS).
+#
+# Kernel tile: MT128x128, DepthU=16, 4 waves/WG (128 threads, wave32).
+# The kernel is K-agnostic: the e2e test runs it with K=8192 (512 iterations).
+# The ProblemSizes below (K=4096) are for Tensile.sh HW validation only.
+#
+# MatrixInstruction 9-element mapping:
+#   [16,16,16, 1,1, 4,4, 2,2]
+#    MI_M,N,K  B,BN TT0,TT1/N  WG0_factor, waves_factor
+#   -> waves=2*2=4, TT=[4,64], WG=[32,4] -> 128 threads
+#   -> MIWaveGroup=[2,2], MIWaveTile=[4,4]
+#   -> MT0 = 16*4*2 = 128, MT1 = 16*4*2 = 128
+#
+# To regenerate the assembly:
+#   source <venv>/bin/activate
+#   Tensile.sh <this_yaml> <outdir> --build-only \
+#       --prebuilt-client=<build>/tensilelite/client/tensilelite-client
+#   cp <outdir>/.../SOURCE/assembly/*.s tests/asm/gfx1151/tensilelite_mm_f16_wmma_tn_128x128.s
+#
+# To HW-validate (requires gfx1151 GPU):
+#   Tensile.sh <this_yaml> <outdir> \
+#       --prebuilt-client=<build>/tensilelite/client/tensilelite-client
+GlobalParameters:
+  NumElementsToValidate: -1
+  Device: 0
+  ISA:
+    - [11, 5, 1]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 4, 2, 2]
+        - WorkGroup:
+          - [32, 4, 1]
+        - DepthU: [16]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [False]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 4096]

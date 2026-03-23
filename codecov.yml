@@ -1,3 +1,8 @@
+ignore:
+  # DirectAssembly integration requires GPU + HIP runtime; not testable in
+  # standalone or CPU-only CI.
+  - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/tensile_host.cpp"
+
 flag_management:
   default_rules:
     carryforward: true # compare reports between projects or flags, not just the latest commit
@@ -68,4 +73,7 @@ coverage:
         target: 80%
       rocSOLVER:
         flags: [rocSOLVER]
+        target: 80%
+      race-emulator:
+        flags: [race-emulator]
         target: 80%

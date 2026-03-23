@@ -1,0 +1,408 @@
+#pragma once
+#include "CommonRegister.h"
+#include "Profiler.h"
+#include "Util.h"
+#include "Workgroup.h"
+#include <array>
+#include <bit>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <ostream>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace raceemulator {
+
+class Macro {
+public:
+  Macro() = default;
+  Macro(int startLine, int endLine, const std::vector<std::string> &argNames)
+      : startLine(startLine), endLine(endLine), argNames(argNames) {}
+
+  int getStartLine() const { return startLine; }
+  int getEndLine() const { return endLine; }
+  const std::vector<std::string> &getArgNames() const { return argNames; }
+
+  std::string str() const;
+
+private:
+  int startLine;
+  int endLine;
+  std::vector<std::string> argNames;
+};
+
+// An operand that knows if it is a Literal or a Register
+template <typename T> struct Operand {
+  bool isLiteral;
+  CommonRegister reg;
+  T literalValue;
+
+  void appendStr(std::ostream &os) const {
+    if (isLiteral) {
+      os << "Literal(" << literalValue << ")";
+    } else {
+      os << "Register";
+    }
+  }
+};
+
+class Macro;
+
+class Wave {
+
+public:
+  // vgprCount:  total number of vector and accumulator registers.
+  //
+  // agprOffset: starting index of accumulator registers.
+  //
+  // sgprCount:  total number of scalar registers.
+  //
+  // waveSize:   number of lanes in the wave (32 or 64).
+  //
+  // waveId:     the id of this wave within the workgroup.
+  //
+  // workgroup:  workgroup state (LDS memory, event registry).
+  //
+  // labels:     optional pointer to the label map for the assembly.
+  //             If null, no branching to labels is allowed.
+  Wave(int vgprCount, int agprOffset, int sgprCount, int waveSize,
+       WaveId waveId, Workgroup &workgroup,
+       const std::map<std::string, int> *labels,
+       const std::map<std::string, Macro> *macros);
+
+  // Construct a wave without accumulator registers, labels, or macros.
+  // The waveId is set to zero.
+  Wave(int vgprCount, int sgprCount, int waveSize, Workgroup &workgroup);
+
+  // Example s17      -> SGPR 17
+  //         s[16:17] -> SGPR 16
+  //         v5       -> VGPR 5
+  //         v[4:7]   -> VGPR 4
+  //
+  // Also supports 'acc', 'm0', 'vcc', 'exec', mapping them to specific
+  // scalar register assigned for emulation.
+  CommonRegister getFirstRegister(std::string_view regStr) const;
+
+  // Number of outstanding events of a given type on a register (across all
+  // lanes). Used by getVgprs() to skip per-lane checks when zero.
+  int getRegEventCount(MemoryEventType type, int reg) const {
+    return regEventCount[static_cast<int>(type)][reg];
+  }
+
+  // Return the value in the given register. If race checks are enabled, will
+  // raise an exception if an outstanding to-VGPR event (load) exists on this
+  // slot.
+  uint32_t getVgpr(int reg, int lane) const {
+    int32_t index = reg * waveSize + lane;
+    assert(index < static_cast<int64_t>(vgprs.size()));
+    if (raceChecks) {
+      for (EventId eid : vgprMemoryEvents[reg]) {
+        if (isToVgpr(workgroup->getEventType(eid)) &&
+            (workgroup->getEventByteMask(eid) & 0xF) != 0 &&
+            workgroup->isEventActiveForLane(eid, lane)) {
+          throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+        }
+      }
+    }
+    return vgprs[index];
+  }
+
+  // Read all lanes of a single VGPR into out[0..waveSize-1].
+  //
+  // Race checking is O(1) per register: regEventCount tracks whether any
+  // to-VGPR events (loads) are outstanding. Only when events exist does it
+  // fall back to per-lane checking.
+  void getVgprs(int reg, uint32_t *out) const {
+    assert(reg >= 0);
+    assert((reg + 1) * waveSize <= static_cast<int>(vgprs.size()));
+    if (raceChecks) {
+      if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
+          getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
+        for (EventId eid : vgprMemoryEvents[reg]) {
+          if (isToVgpr(workgroup->getEventType(eid)) &&
+              (workgroup->getEventByteMask(eid) & 0xF) != 0) {
+            // Find a lane this event applies to for the error message.
+            int lane = std::countr_zero(workgroup->getEventExecMask(eid));
+            throw RaceConditionException::Vgpr(reg, waveId.value, lane, false);
+          }
+        }
+      }
+    }
+    std::memcpy(out, vgprs.data() + reg * waveSize,
+                waveSize * sizeof(uint32_t));
+  }
+
+  // Return a single byte from a VGPR. Race-checks only that byte.
+  // byteIdx 0 = bits [7:0], 3 = bits [31:24].
+  uint8_t getVgprByte(int id, int lane, int byteIdx) const;
+
+  // Return 16 bits from a VGPR. Race-checks only the relevant 2 bytes.
+  // hi=false: bits [15:0], hi=true: bits [31:16].
+  uint16_t getHalfVgpr(int id, int lane, bool hi) const;
+
+  // Write 16 bits directly to VGPR storage without reading.
+  // Matches ISA d16 semantics: "writes only 16 bits".
+  void setVgprHalf(int id, int lane, bool hi, uint16_t value);
+
+  // TODO(newling) implement race checks for scalar registers.
+
+  // Return the value in the given register.
+  uint32_t getSgpr(int id) const;
+
+  void setVgpr(int reg, int lane, uint32_t value) {
+    assert((getExecU64() & (1ULL << lane)) != 0 &&
+           "Writing to VGPR of inactive lane");
+    auto index = reg * waveSize + lane;
+    assert(index < static_cast<int64_t>(vgprs.size()));
+    vgprs[index] = value;
+  }
+  void setSgpr(int id, uint32_t value);
+
+  // Get a pair of consecutively numbered 32-bit registers.
+  uint64_t getSgpr64(int id) const;
+  uint64_t getVgpr64(int id, int lane) const;
+
+  // Set a pair of consecutively numbered 32-bit registers.
+  void setSgpr64(int id, uint64_t value);
+  void setVgpr64(int id, int lane, uint64_t value);
+
+  int getWaveSize() const { return waveSize; }
+
+  int getSgprCount() const { return sgprCount; }
+
+  void tryExecute(const std::string &line, bool enableLineCaching);
+
+  void setScc(bool value);
+  bool getScc() const;
+
+  void setM0(uint32_t value);
+  uint32_t getM0() const;
+
+  void setVccU32(uint32_t value);
+  uint32_t getVccU32() const;
+  void setVccU64(uint64_t value);
+  uint64_t getVccU64() const;
+
+  void setExecU32(uint32_t value);
+  uint32_t getExecU32() const;
+
+  // Exec mask as uint64_t. Safe for both wave-32 and wave-64: on wave-32
+  // the upper 32 bits are always zero because (1) the exec mask is
+  // initialized to ~0ULL then masked by runExecConditionedForLanes using
+  // fullMask = (1ULL << waveSize) - 1, and (2) no instruction sets bits
+  // beyond waveSize. Unlike VCC (which has distinct vcc/vcc_lo naming in
+  // assembly), exec mask operations use the same accessor regardless of
+  // wave size.
+  void setExecU64(uint64_t value);
+  uint64_t getExecU64() const;
+
+  Workgroup &getWorkgroup();
+
+  // Validated LDS read: auto-supplies waveId and delegates to Workgroup.
+  template <typename T> T readLds(int addr, int lane) const {
+    return workgroup->readLds<T>(addr, waveId, lane);
+  }
+
+  // Validated bulk LDS read: validates the full range once, then copies
+  // count elements of type T.
+  template <typename T>
+  void readLds(int addr, int lane, T *out, int count) const {
+    workgroup->readLds<T>(addr, waveId, lane, out, count);
+  }
+
+  // Validated LDS write: auto-supplies waveId and delegates to Workgroup.
+  template <typename T> void writeLds(int addr, int lane, T value) {
+    workgroup->writeLds<T>(addr, waveId, lane, value);
+  }
+
+  // Called by instructions like global load.
+  // byteMask: which bytes of each register this event covers (default 0xF =
+  // all).
+  void registerGlobalToVgprEvent(int pc, const std::vector<uint32_t> &registers,
+                                 uint8_t byteMask = 0xF);
+
+  // Called by instructions like global store.
+  void registerVgprToGlobalEvent(int pc,
+                                 const std::vector<uint32_t> &registers);
+
+  // Called by instructions like lds read.
+  void registerLdsToVgprEvent(int pc, const std::vector<uint32_t> &registers,
+                              const IntervalSet &ldsIntervals,
+                              uint8_t byteMask = 0xF);
+
+  // Called by instructions like lds write.
+  void registerVgprToLdsEvent(int pc, const std::vector<uint32_t> &registers,
+                              const IntervalSet &ldsIntervals);
+
+  // Check if there are any outstanding memory events FROM a specific vgpr, and
+  // in a specific lane.
+  bool isOutstandingFromVgpr(int lane, int reg) const;
+
+  void setRaceChecks(bool enable) { raceChecks = enable; }
+  void setCompleteEmulation(bool enable) { completeEmulation = enable; }
+
+  bool isCompleteEmulation() const { return completeEmulation; }
+
+  // Reduce the number of outstanding memory events down to `vmcnt` for global
+  // memory operations.
+  void sWaitCntVmcnt(int vmcnt);
+
+  // Reduce the number of outstanding memory events down to `lgkmcnt` for
+  // LDS memory operations.
+  void sWaitCntLgkmcnt(int lgkmcnt);
+
+  std::vector<EventId> &getVgprMemoryEvents(int reg) {
+    assert(reg < static_cast<int>(vgprMemoryEvents.size()));
+    return vgprMemoryEvents[reg];
+  }
+
+  const std::vector<EventId> &getWaveMemoryEvents() const {
+    return waveMemoryEvents;
+  }
+
+  const std::vector<EventId> &getWaveCompleteMemoryEvents() const {
+    return waveCompleteMemoryEvents;
+  }
+
+  WaveId getWaveId() const { return waveId; }
+
+  void setProfiler(Profiler *p) { profiler = p; }
+  Profiler::ScopedStopwatch profileScope(std::string_view key);
+
+  // s_barrier operation
+  void flushWaveCompleteMemoryEvents();
+
+  template <typename T> T getValue(const Operand<T> &operand, int lane) const;
+  template <typename T>
+  T getSgprOrLiteralValue(const Operand<T> &operand) const;
+  template <typename T> Operand<T> parseOperand(std::string_view token) const;
+
+  void setPc(int newPc) { pc = newPc; }
+  int getPc() const { return pc; }
+
+  // Get the label map:
+  const std::map<std::string, int> &getLabels() const {
+    assert(labels != nullptr && "Labels map is null");
+    return *labels;
+  }
+
+  void setDsPreserve(bool preserve) { dsPreserve = preserve; }
+  bool getDsPreserve() const { return dsPreserve; }
+
+private:
+  // When a macro is called, its arguments are stored here. E.g., for
+  // `.macro FOO arg0:req, arg1:req` called as `FOO 14, 17`, the map
+  // holds {"arg0": 14, "arg1": 17}.
+  std::map<std::string, uint32_t> macroArguments;
+
+  // When inside a macro, this is the program counter (PC) to return to.
+  int macroReturnPc;
+
+  // The current program counter (the current line in the assembly).
+  int pc{0};
+
+  // accumulator and vector general purpose registers.
+  std::vector<uint32_t> vgprs;
+
+  // scalar general purpose registers.
+  std::vector<uint32_t> sgprs;
+
+  // Per register: outstanding event IDs involving that VGPR.
+  // Indexed as [reg]. Each event's exec mask (in the workgroup registry)
+  // records which lanes it applies to. Race checks test the lane bit
+  // when needed. This avoids 32x per-lane push/pop during event
+  // registration and retirement.
+  std::vector<std::vector<EventId>> vgprMemoryEvents;
+
+  // Per-register event counts, partitioned by event type, summed across lanes.
+  // regEventCount[eventType][reg] == 0 means no lane of that register has
+  // any outstanding events of that type. Enables O(1) per-register checks:
+  // getVgprs() only inspects lanes when GLOBAL_TO_VGPR or LDS_TO_VGPR
+  // counts are nonzero.
+  static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);
+  std::array<std::vector<int>, kNumEventTypes> regEventCount;
+
+  void regEventCountInc(MemoryEventType type, int reg) {
+    regEventCount[static_cast<int>(type)][reg]++;
+  }
+  void regEventCountDec(MemoryEventType type, int reg) {
+    regEventCount[static_cast<int>(type)][reg]--;
+  }
+
+  // All the outstanding event IDs for this wave.
+  std::vector<EventId> waveMemoryEvents;
+
+  // Event IDs that have completed (due to s_waitcnt) for this wave, but are
+  // not complete for the entire workgroup because s_barrier has not yet
+  // occurred.
+  std::vector<EventId> waveCompleteMemoryEvents;
+
+  int agprOffset;
+  int sgprCount;
+  int waveSize;
+
+  // D16 LDS reads: whether to preserve the non-targeted half of the VGPR.
+  // RDNA (wave-32) preserves, CDNA (wave-64) does not (hardware-verified).
+  bool dsPreserve;
+
+  // The id of this wave within the workgroup.
+  WaveId waveId{0};
+
+  // Pointer to the workgroup state (LDS memory, event registry).
+  Workgroup *workgroup;
+
+  // Pointer to the label map for the assembly.
+  const std::map<std::string, int> *labels;
+
+  // Point to the macro map for the assembly.
+  const std::map<std::string, Macro> *macros;
+
+  std::vector<std::function<int()>> instructionCache;
+
+  bool raceChecks{false};
+  bool completeEmulation{true};
+
+  Profiler *profiler = nullptr;
+
+  void retireEventRegisters(EventId eventId);
+
+  void resolveWaitCnt(int limit,
+                      std::function<bool(MemoryEventType)> isTargetType,
+                      std::function<void(EventId)> extraCleanup);
+
+  std::function<int()> compileLine(const std::string &line,
+                                   const std::map<std::string, Macro> &macros);
+
+public:
+  template <typename F> void runExecConditionedForLanes(F func) {
+
+    int waveSize = getWaveSize();
+
+    uint64_t execMask = getExecU64();
+
+    // 1. Calculate the 'all active'
+    uint64_t fullMask = (waveSize == 64) ? ~0ULL : ((1ULL << waveSize) - 1);
+
+    // 2. Fast path: All lanes enabled
+    if ((execMask & fullMask) == fullMask) {
+      for (int lane = 0; lane < waveSize; ++lane) {
+        func(lane);
+      }
+    }
+    // 3. Slow path: Check bits
+    else {
+      for (int lane = 0; lane < waveSize; ++lane) {
+        if ((execMask >> lane) & 1) {
+          func(lane);
+        }
+      }
+    }
+  }
+};
+
+} // namespace raceemulator

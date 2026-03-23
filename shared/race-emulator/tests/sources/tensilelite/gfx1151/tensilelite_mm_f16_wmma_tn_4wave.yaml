@@ -1,0 +1,38 @@
+# gfx1151 WMMA f16, TN, M=16 N=128 K=4096. 4 waves per workgroup.
+# Each wave covers 16x32 (2 WMMA tiles in N), 4 waves cover 16x128.
+# K=4096/DepthU=16 -> 256 inner-loop iterations.
+GlobalParameters:
+  NumElementsToValidate: -1
+  Device: 0
+  ISA:
+    - [11, 5, 1]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 2, 1, 1, 4]
+        - WorkGroup:
+          - [32, 1, 1]
+        - DepthU: [16]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [False]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 128, 1, 4096]

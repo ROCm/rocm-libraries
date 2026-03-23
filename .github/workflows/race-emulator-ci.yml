@@ -1,0 +1,204 @@
+# CI for the race-emulator library (shared/race-emulator).
+#
+# Runs on PRs and pushes that touch shared/race-emulator/**, plus manual
+# dispatch. All jobs use sparse checkout so only race-emulator sources
+# are fetched (fast, even in the monorepo).
+#
+# Jobs:
+#   linux       - gcc (Release, -Werror), clang+ASan (Debug), clang+UBSan (Debug)
+#   coverage    - clang with LLVM source-based coverage, HTML artifact
+#   clang-tidy  - static analysis (bugprone + clang-analyzer checks)
+#   windows     - MSVC (Release, Ninja)
+
+name: race-emulator CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "shared/race-emulator/**"
+  push:
+    branches: [develop]
+    paths:
+      - "shared/race-emulator/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc
+            cc: gcc
+            cxx: g++
+            build_type: Release
+            extra_cxx_flags: ""
+            extra_link_flags: ""
+          - name: clang-asan
+            cc: clang
+            cxx: clang++
+            build_type: Debug
+            extra_cxx_flags: "-fsanitize=address"
+            extra_link_flags: "-fsanitize=address"
+          - name: clang-ubsan
+            cc: clang
+            cxx: clang++
+            build_type: Debug
+            extra_cxx_flags: "-fsanitize=undefined -fno-sanitize-recover=all"
+            extra_link_flags: "-fsanitize=undefined"
+    steps:
+      - name: Checkout race-emulator sources
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: shared/race-emulator
+          sparse-checkout-cone-mode: true
+
+      - name: Install dependencies
+        run: sudo apt-get install -y ninja-build
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -B build -G Ninja
+          -DRACE_EMULATOR_BUILD_TESTING=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_FLAGS="-Werror ${{ matrix.extra_cxx_flags }}"
+          -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.extra_link_flags }}"
+          shared/race-emulator
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    name: Linux (coverage)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout race-emulator sources
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: shared/race-emulator
+          sparse-checkout-cone-mode: true
+
+      - name: Install dependencies
+        run: sudo apt-get install -y ninja-build
+
+      # Build as a static library so that all instrumented code ends up in
+      # the test executable. With a shared library, llvm-cov would only see
+      # coverage for inlined header code, not the .cpp files in the .so.
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -B build -G Ninja
+          -DRACE_EMULATOR_BUILD_TESTING=ON
+          -DRACE_EMULATOR_BUILD_SHARED_LIBS=OFF
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fprofile-instr-generate -fcoverage-mapping"
+          -DCMAKE_EXE_LINKER_FLAGS="-fprofile-instr-generate"
+          shared/race-emulator
+
+      - name: Build
+        run: cmake --build build
+
+      # LLVM_PROFILE_FILE tells the instrumented binary where to write
+      # raw profile data. The %p placeholder is replaced by the process ID.
+      - name: Test
+        env:
+          LLVM_PROFILE_FILE: "${{ github.workspace }}/race-emulator-%p.profraw"
+        run: ctest --test-dir build --output-on-failure
+
+      # Merge raw profiles, print a per-file summary, and generate an HTML
+      # report with line-by-line coverage annotations (green=hit, red=missed).
+      - name: Collect coverage
+        run: |
+          llvm-profdata-18 merge -sparse ${{ github.workspace }}/*.profraw -o coverage.profdata
+          llvm-cov-18 report build/tests/race-emulator-tests \
+            -instr-profile=coverage.profdata \
+            -ignore-filename-regex='tests/|googletest|gtest'
+          llvm-cov-18 show build/tests/race-emulator-tests \
+            -instr-profile=coverage.profdata \
+            -format=html \
+            -output-dir=coverage-html \
+            -ignore-filename-regex='tests/|googletest|gtest'
+
+      # TODO(newling) Codecov or PR comment integration. Both are blocked for fork
+      # PRs (Codecov needs CODECOV_TOKEN, PR comments need write access).
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-html/
+
+  clang-tidy:
+    name: Linux (clang-tidy)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout race-emulator sources
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: shared/race-emulator
+          sparse-checkout-cone-mode: true
+
+      - name: Install dependencies
+        run: sudo apt-get install -y ninja-build clang-tidy
+
+      # CMAKE_CXX_CLANG_TIDY integrates clang-tidy into the build: each
+      # source file is analyzed as it compiles. Findings are controlled by
+      # shared/race-emulator/.clang-tidy (WarningsAsErrors is enabled).
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_CXX_CLANG_TIDY="clang-tidy"
+          shared/race-emulator
+
+      - name: Build (with clang-tidy)
+        run: cmake --build build
+
+  windows:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout race-emulator sources
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: shared/race-emulator
+          sparse-checkout-cone-mode: true
+
+      # Set up MSVC compiler environment (cl.exe, link.exe, etc. in PATH).
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      # Static library because MSVC shared libraries need dllexport/dllimport
+      # annotations to generate the .lib import library. On Linux the default
+      # shared build is used instead. /EHsc enables C++ exception handling
+      # (required by MSVC standard library headers).
+      - name: Configure
+        run: >
+          cmake -B build -G Ninja
+          -DRACE_EMULATOR_BUILD_TESTING=ON
+          -DRACE_EMULATOR_BUILD_SHARED_LIBS=OFF
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="/EHsc"
+          shared/race-emulator
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

@@ -498,6 +498,9 @@ def Tensile(userArgs):
             help="Generate and compile kernels but skip benchmarking. "
                  "Useful for splitting compilation and benchmarking across runs/nodes. "
                  "First run using this flag, then rerun with --use-cache.")
+    argParser.add_argument("--print-kernel-args", dest="printKernelArgs", action="store_true",
+            help="After building, print the kernel arguments without running on GPU. "
+                 "Implies --build-only. Requires ISA to be set in the YAML config.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
 
@@ -506,7 +509,8 @@ def Tensile(userArgs):
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
-    buildOnly = args.buildOnly
+    printKernelArgs = args.printKernelArgs
+    buildOnly = args.buildOnly or printKernelArgs
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
 
@@ -643,6 +647,33 @@ def Tensile(userArgs):
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
     executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
+
+    if printKernelArgs:
+        import glob
+        import subprocess
+        clientExe = ClientWriter.getClientExecutablePath()
+        iniFiles = glob.glob(str(outputPath / "**" / "ClientParameters.ini"), recursive=True)
+        if not iniFiles:
+            printWarning("No ClientParameters.ini found for --print-kernel-args")
+        else:
+            # Determine target arch from the ISA in the config
+            isaList = globalParameters["ISA"]
+            if isaList:
+                isa = isaList[0]
+                targetArch = f"gfx{isa[0]*100 + isa[1]*10 + isa[2]}"
+            else:
+                printExit("--print-kernel-args requires ISA to be set (e.g. ISA: [[11, 5, 1]])")
+            for iniFile in iniFiles:
+                clientArgs = [
+                    clientExe,
+                    "--print-kernel-args",
+                    "--target-arch", targetArch,
+                    "--config-file", iniFile,
+                ]
+                env = os.environ.copy()
+                env["TENSILE_DB"] = hex(int(env.get("TENSILE_DB", "0"), 0) | 0x40)
+                print1(f"# Printing kernel args for {iniFile}")
+                subprocess.run(clientArgs, env=env)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

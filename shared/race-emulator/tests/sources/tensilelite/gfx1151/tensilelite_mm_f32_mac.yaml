@@ -1,0 +1,43 @@
+# Minimal YAML to generate a gfx1151 TensileLite assembly kernel.
+# Uses --build-only so no GPU hardware is needed.
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  Device: 0
+  PrintSolutionRejectionReason: True
+  ISA:
+    - [11, 5, 1]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - ThreadTile:
+          - [2, 2]
+        - WorkGroup:
+          - [8, 8, 1]
+        - DepthU: [8]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [1]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 16]

@@ -1,0 +1,33 @@
+# gfx1151 WMMA f16 TN, M=16 N=64 K=16. 4 WGs x 1 wave, each 16x16.
+GlobalParameters:
+  NumElementsToValidate: -1
+  Device: 0
+  ISA:
+    - [11, 5, 1]
+BenchmarkProblems:
+  -
+    - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      Batched: True
+    - BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+        - WorkGroup:
+          - [32, 1, 1]
+        - DepthU: [16]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [False]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 64, 1, 16]

@@ -1,0 +1,57 @@
+# Demo: race detection on a custom gfx1151 kernel from PR 4576.
+# This file is not intended to land — it exists to demonstrate that
+# the race emulator can check custom kernels for sync errors.
+#
+# To run locally (from a TensileLite build directory):
+#   ./Tensile.sh <path-to-this-yaml> <output-dir> \
+#       --prebuilt-client=./tensilelite/client/tensilelite-client
+#
+# To verify race checking works, edit Custom_PullRequest_4576.s and
+# comment out an s_barrier or change an s_waitcnt count, e.g.:
+#   s_barrier        ->  ; s_barrier
+#   s_waitcnt X(10)  ->  s_waitcnt X(11)
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  NumBenchmarks: 1
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeBias: 0
+  DataInitTypeScaleAlphaVec: 1
+  CheckForRaces: 1
+  Device: 0
+  ISA: [[11, 5, 1]]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasTypeList: [H]
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup
+      CustomKernels:
+        ["Custom_PullRequest_4576"]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 128, 1, 4096]
+        - BiasTypeArgs: ['h']

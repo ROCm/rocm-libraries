@@ -92,6 +92,7 @@ def setGlobalParams(versionString: dict, problemTypeState: dict) -> dict:
     res["SleepPercent"] = 0
     res["KernelTime"] = True
     res["NumElementsToValidate"] = 0
+    res["CheckForRaces"] = 0
     res["DataInitTypeBeta"] = 1
     res["DataInitTypeAlpha"] = 1
     res["DataInitTypeA"] = 12 if problemTypeState["DataType"] != "I8" else 3
