@@ -5,5 +5,5 @@
 
 #include <tuple>
 
-#include "../../experimental/grouped_convolution_tile_instances/instances/signatures.hpp"
+#include "../../experimental/grouped_convolution_tile_instances/include/signatures.hpp"
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"

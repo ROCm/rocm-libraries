@@ -54,10 +54,9 @@ static void print_helper_msg()
         << "arg6: print tensor value (0: no; 1: yes)\n"
         << "arg7: time kernel (0: no, 1: yes)\n"
         << ck::utils::conv::get_conv_param_parser_helper_msg() << std::endl
-        << "arg8: split-K (0: internally computed split-K value; 1, 2, 4, 8, 16, 32, 64, 128: set k batches explicitly)\n"
+        << "Last argument: split-K (0: internally computed split-K value; 1, 2, 4, 8, 16, 32, 64, 128: set k batches explicitly)\n"
         << "\nOptional arguments:\n"
-        << "  --instance <id>      Run only the specified instance (0-indexed among valid instances)\n"
-        << "  --list-instances     List all valid instances without running\n";
+        << "  --instance <id>      Run only the specified instance (0-indexed among valid instances)\n";
     // clang-format on
 }
 
@@ -66,7 +65,10 @@ namespace ckt = ck_tile::builder::test;
 namespace ckp = ck_tile::builder::profiling;
 
 template <auto SIGNATURE>
-int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, bool time_kernel)
+int call_profiler(const ckt::Args<SIGNATURE>& args,
+                  const std::string& split_k,
+                  bool time_kernel,
+                  ck_tile::index_t instance_index)
 {
     auto inputs  = ckt::alloc_inputs(args);
     auto outputs = ckt::alloc_outputs(args);
@@ -75,21 +77,24 @@ int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, 
     std::cout << args.make_input_descriptor() << std::endl;
     std::cout << args.make_weight_descriptor() << std::endl;
     std::cout << args.make_output_descriptor() << std::endl;
-    auto&& [valid, avg_time, op_name, best_split_k] = ckp::run_grouped_conv_backward_data_tile_algs(
-        args,
-        split_k,
-        inputs.get(),
-        outputs.get(),
-        ck_tile::stream_config{nullptr,
-                               time_kernel,
-                               0 /*log_level*/,
-                               5 /*cold_iters*/,
-                               50 /*nrepeat_*/,
-                               true /*is_gpu_timer_*/});
+    auto&& [valid, avg_time, op_name, best_split_k, best_instance_index] =
+        ckp::run_grouped_conv_backward_data_tile_algs(
+            args,
+            split_k,
+            instance_index,
+            inputs.get(),
+            outputs.get(),
+            ck_tile::stream_config{nullptr,
+                                   time_kernel,
+                                   0 /*log_level*/,
+                                   5 /*cold_iters*/,
+                                   50 /*nrepeat_*/,
+                                   true /*is_gpu_timer_*/});
     if(time_kernel)
     {
-        std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name
-                  << "\n\tavg_time: " << avg_time << ", SplitK " << best_split_k << std::endl;
+        std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name << " (instance "
+                  << best_instance_index << ")" << "\n\tavg_time: " << avg_time << ", SplitK "
+                  << best_split_k << std::endl;
     }
     return !valid;
 }
@@ -100,8 +105,8 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
 {
     // Parse optional named arguments first
     ck_tile::index_t instance_index = -1;
-    bool list_instances             = false;
-    ck::profiler::parse_named_args(argc, argv, instance_index, list_instances);
+    bool dummy;
+    ck::profiler::parse_named_args(argc, argv, instance_index, dummy);
     const int named_arg_count = ck::profiler::count_named_args(argc, argv);
 
     // Adjust argc for positional argument checking
@@ -151,7 +156,8 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
-                    time_kernel);
+                    time_kernel,
+                    instance_index);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
@@ -159,7 +165,17 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
-                    time_kernel);
+                    time_kernel,
+                    instance_index);
+            }
+            else if(data_type == ConvDataType::F32_F32_F32)
+            {
+                constexpr auto SIGNATURE = ckp::SIGNATURE_NHWGC_FP32_BWD_DATA;
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
+                    split_k,
+                    time_kernel,
+                    instance_index);
             }
         }
         else if(num_dim_spatial == 3)
@@ -170,7 +186,8 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
-                    time_kernel);
+                    time_kernel,
+                    instance_index);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
             {
@@ -178,7 +195,17 @@ int profile_grouped_conv_bwd_data_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
-                    time_kernel);
+                    time_kernel,
+                    instance_index);
+            }
+            else if(data_type == ConvDataType::F32_F32_F32)
+            {
+                constexpr auto SIGNATURE = ckp::SIGNATURE_NDHWGC_FP32_BWD_DATA;
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
+                    split_k,
+                    time_kernel,
+                    instance_index);
             }
         }
     }
