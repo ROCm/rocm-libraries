@@ -110,6 +110,9 @@ class Predictor:
         """Predict all available targets for a single (problem, kernel) pair.
 
         Returns dict with keys 'tflops', 'latency_ms', 'bandwidth_gb_s' (if models exist).
+
+        Note: Applies inverse log transform for targets in log_targets and clamps
+        negatives to 0.0, consistent with _predict_single().
         """
         features = self._feature_engine.extract(problem, kernel_config).reshape(1, -1)
         result = {}
@@ -120,7 +123,13 @@ class Predictor:
         ]:
             model = self._load_model(target)
             if model is not None:
-                result[key] = float(model.predict(features)[0])
+                raw = float(model.predict(features)[0])
+                # Apply inverse log transform if model was trained in log-space
+                if target in self._log_targets:
+                    result[key] = float(np.expm1(raw))
+                else:
+                    # Clamp to non-negative even for non-log models
+                    result[key] = float(max(0.0, raw))
         return result
 
     def rank_kernels(

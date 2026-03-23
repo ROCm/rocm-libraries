@@ -336,7 +336,7 @@ class MLHeuristic
     {
         if(!b_ || !registry_)
             return {};
-        auto insts = registry_->get_all_instances();
+        auto insts = registry_->get_all();
         struct C
         {
             std::string id;

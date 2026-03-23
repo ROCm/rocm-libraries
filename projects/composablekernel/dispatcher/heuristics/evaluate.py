@@ -89,7 +89,13 @@ def evaluate_model(
     if model is None:
         raise FileNotFoundError("No TFLOPS model found")
 
-    valid["pred_tflops"] = model.predict(X)
+    # Predict and apply inverse log transform if model was trained in log-space
+    raw_pred = model.predict(X)
+    if "tflops" in predictor._log_targets:
+        valid["pred_tflops"] = np.expm1(raw_pred)
+    else:
+        # Clamp to non-negative even for non-log models
+        valid["pred_tflops"] = np.maximum(0.0, raw_pred)
 
     y_true = valid["measured_tflops"].values
     y_pred = valid["pred_tflops"].values
