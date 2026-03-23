@@ -80,7 +80,14 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
 
     bool failed = false;
 
-    // load A to registers
+    /* -----------------------------------------------------------
+    Load PANEL_SIZE x PANEL_SIZE blocks of A into registers. Where
+    each thread in a workgroup has a corresponding element in the
+    matrix block.
+    If uplo == rocblas_fill_upper then only the upper triangular
+    blocks are stored, otherwise only the lower triangular blocks
+    are stored.
+    ----------------------------------------------------------- */
     T Arg[(NB * (NB + 1)) / 2] = {0};
 
     I arg_idx = 0;
@@ -113,11 +120,17 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
         }
     }
 
-    // Panel Cholesky decomposition
+    /* ---------------------------------------------------------
+    Panel Cholesky decomposition: iterate through each panel and
+    decompose in LDS. Update the trailing matrix in register.
+    --------------------------------------------------------- */
     arg_idx = 0;
     for(I kb = 0; kb < NB; kb++)
     {
-        // write panel to lds
+        /* --------------------------------------------------------
+        Write panel A(kb:kb+PANEL_SIZE, kb:N)^T to LDS if upper,
+        or A(kb:N, kb:kb+PANEL_SIZE) otherwise. (N = NB*PANEL_SIZE)
+        -------------------------------------------------------- */
         for(I i = 0; i < NB - kb; i++)
         {
             // write to lds as lower and compute as lower
@@ -139,7 +152,9 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
 
         I nn = n - kb * PANEL_SIZE;
 
-        // factorize panel
+        /* ----------------------------
+        Factor panel matrix Ash in LDS.
+        ---------------------------- */
         for(I kcol = 0; kcol < PANEL_SIZE; kcol++)
         {
             if(kcol >= nn)
@@ -165,6 +180,10 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                 break;
             }
 
+            // -----------------------------------------------------
+            //   (1) |l11|^2 = a11 =>  l11 = sqrt(a11), get diagonal
+            // -----------------------------------------------------
+
             auto const lkk = std::sqrt(akk);
             if(tid == 0)
             {
@@ -185,11 +204,11 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
 
             __syncthreads();
 
-            // ------------------------------------------------------------
-            //   (3a) A22 = A22 - vl21 * vl21',  symmetric rank-1 update
+            // --------------------------------------------------------------
+            //   (3a) A22 = A22 - vl21 * vl21(0:PANEL_SIZE)', update trailing
             //
-            //   note: update lower triangular part
-            // ------------------------------------------------------------
+            //   note: only update elements below the diagonal
+            // --------------------------------------------------------------
 
             for(I j = (kcol + 1) + tidy; j < PANEL_SIZE; j += hipBlockDim_y)
             {
@@ -205,7 +224,9 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
             __syncthreads();
         }
 
-        // update trailing matrix
+        /* ------------------------------------
+        Update the trailing matrix in register.
+        ------------------------------------ */
         I upd_arg_idx = arg_idx + NB - kb;
         for(I j = kb + 1; j < NB; j++)
         {
@@ -213,6 +234,13 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
             {
                 if(is_upper)
                 {
+                    // ---------------------------------------------------------------------------------
+                    // formulate gemm problem:
+                    //    A22 = A(kb+PANEL_SIZE:N, kb+PANEL_SIZE:N)
+                    //    A12 = Ash(PANEL_SIZE:N, 0:PANEL_SIZE)^T = A(kb:kb+PANEL_SIZE, kb+PANEL_SIZE:N)
+                    //
+                    //    operation: A22 = A12' * A12
+                    // ---------------------------------------------------------------------------------
                     const auto col = (i - kb) * PANEL_SIZE + tidy;
                     const auto row = (j - kb) * PANEL_SIZE + tidx;
 
@@ -223,6 +251,13 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                 }
                 else
                 {
+                    // -------------------------------------------------------------------------------
+                    // formulate gemm problem:
+                    //    A22 = A(kb+PANEL_SIZE:N, kb+PANEL_SIZE:N)
+                    //    A21 = Ash(PANEL_SIZE:N, 0:PANEL_SIZE) = A(kb+PANEL_SIZE:N, kb:kb+PANEL_SIZE)
+                    //
+                    //    operation: A22 = A21 * A21'
+                    // -------------------------------------------------------------------------------
                     const auto col = (j - kb) * PANEL_SIZE + tidy;
                     const auto row = (i - kb) * PANEL_SIZE + tidx;
 
@@ -235,7 +270,9 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
             upd_arg_idx += NB - j;
         }
 
-        // load panel back to registers
+        /* ---------------------------------
+        Load panel in LDS back to registers.
+        --------------------------------- */
         for(I i = 0; i < NB - kb; i++)
         {
             if(is_upper)
@@ -259,7 +296,9 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
             break;
     }
 
-    // write A from registers
+    /* ----------------------------------------------------
+    Write blocks of the matrix in registers back to memory.
+    ---------------------------------------------------- */
     arg_idx = 0;
     for(I jb = 0; jb < NB; jb++)
     {

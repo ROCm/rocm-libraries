@@ -281,7 +281,7 @@
 
 /************************** potf2/potrf ***************************************
 *******************************************************************************/
-/*! \brief Determines the maximum size at which rocSOLVER can use POTF2
+/*! \brief Determines the maximum size at which rocSOLVER can use POTF2 small-size kernel.
     \details
     POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
     within the LDS shared memory using compact storage.
