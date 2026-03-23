@@ -98,7 +98,12 @@ KERNEL_POOL = [
 
 
 def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
-    """Convert a KernelSpec to the dict format the feature engine expects."""
+    """Convert a KernelSpec to the dict format the feature engine expects.
+
+    Note: pad_m/n/k default to True to match KernelConfig defaults and actual
+    compiled kernels. This ensures the ML model receives the correct padding
+    flags that will be used during JIT compilation.
+    """
     return {
         "kernel_name": spec.name,
         "tile_m": spec.tile_m,
@@ -113,9 +118,9 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
         "pipeline": spec.pipeline,
         "scheduler": spec.scheduler,
         "epilogue": "cshuffle",
-        "pad_m": False,
-        "pad_n": False,
-        "pad_k": False,
+        "pad_m": True,  # Match KernelConfig default
+        "pad_n": True,  # Match KernelConfig default
+        "pad_k": True,  # Match KernelConfig default
         "persistent": False,
         "dtype": dtype,
         "layout": layout,

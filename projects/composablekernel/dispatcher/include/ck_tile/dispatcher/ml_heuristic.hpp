@@ -133,11 +133,10 @@ extract_features(const Problem& prob, const KernelKey& key, const HardwareProfil
     double scheduler = (double)encode_scheduler(key.algorithm.scheduler);
     double epilogue = (double)encode_epilogue(key.algorithm.epilogue);
 
-    // Padding flags (TODO: extract from KernelKey if available)
-    // For now, assume padding is enabled (matching Python default)
-    double pad_m = 1.0;
-    double pad_n = 1.0;
-    double pad_k = 1.0;
+    // Padding flags - read from KernelKey
+    double pad_m = key.algorithm.pad_m ? 1.0 : 0.0;
+    double pad_n = key.algorithm.pad_n ? 1.0 : 0.0;
+    double pad_k = key.algorithm.pad_k ? 1.0 : 0.0;
 
     // Persistent kernel flag
     double persistent = key.algorithm.persistent ? 1.0 : 0.0;
