@@ -113,7 +113,7 @@ Op2dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
     result.invoker_factory = [data_type, fit_into_int, blens, clens, astrides, bstrides, cstrides](
                                  const std::vector<Kernel> kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
+            decltype(auto) kerneL = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
             visit_float(data_type, [&](auto as_float) {
@@ -123,7 +123,7 @@ Op2dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
 
                 if(fit_into_int)
                 {
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            params.BTensor,
                            params.CTensor,
                            static_cast<uint64_t>(params.Aoffset),
@@ -145,7 +145,7 @@ Op2dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
                 }
                 else
                 {
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            params.BTensor,
                            params.CTensor,
                            static_cast<uint64_t>(params.Aoffset),

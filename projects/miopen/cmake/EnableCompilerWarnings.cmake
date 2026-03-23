@@ -23,10 +23,6 @@
 # SOFTWARE.
 #
 ################################################################################
-# - Enable warning all for gcc/clang or use /W4 for visual studio
-
-## Strict warning level
-set(__msvc_cxx_compile_options /W4)
 
 set(__default_cxx_compile_options
     -Wall
@@ -63,17 +59,14 @@ set(__clang_cxx_compile_options
     -Wno-nested-anon-types
     -Wno-option-ignored
     -Wno-padded
-    -Wno-return-std-move-in-c++11
     -Wno-shorten-64-to-32
     -Wno-sign-conversion
-    -Wno-unknown-warning-option
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
     -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
-    -Wno-shadow-uncaptured-local
     -Wno-global-constructors
     -Wno-reserved-identifier
     -Wno-zero-as-null-pointer-constant
@@ -101,33 +94,32 @@ set(__clang_cxx_compile_options
     -Wno-incompatible-pointer-types
     -Wno-documentation
     -Wno-deprecated-builtins
-    -Wno-enum-constexpr-conversion
     -Wno-unused-parameter
-    -Wmissing-noreturn
-    -Wno-nrvo)
+    -Wmissing-noreturn)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
-        -Wno-unique-object-duplication
         -Wno-switch-default
         -Wno-nontrivial-memcall)
 endif()
+
+if(NOT WIN32)
+    list(APPEND __clang_cxx_compile_options
+        -Wno-return-std-move-in-c++11
+        -Wno-enum-constexpr-conversion
+        -Wno-nrvo
+        -Wno-unique-object-duplication)
+endif()
+
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions
         -fms-compatibility)
 endif()
 
-set(__gnu_cxx_compile_options
-    -Wno-missing-field-initializers
-)
-
 add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:${__msvc_cxx_compile_options}>"
     "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:${__default_cxx_compile_options};${__gnu_cxx_compile_options}>"
 )
 
-unset(__msvc_cxx_compile_options)
 unset(__default_cxx_compile_options)
-unset(__gnu_cxx_compile_options)
 unset(__clang_cxx_compile_options)

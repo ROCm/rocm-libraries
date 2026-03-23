@@ -1083,7 +1083,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     }
 
     std::vector<Solution> find_results = [&]() {
-        std::vector<Solution> find_results;
+        //std::vector<Solution> find_results;
 
         auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))

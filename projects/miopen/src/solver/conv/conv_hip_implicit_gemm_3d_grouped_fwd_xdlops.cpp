@@ -593,13 +593,13 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
 
         auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
                                const std::size_t& expected_index,
-                               const std::string& kernel_id) -> std::optional<std::size_t> {
-            if(expected_index < valid_kernels.size() && valid_kernels[expected_index] == kernel_id)
+                               const std::string& kernel_id_) -> std::optional<std::size_t> {
+            if(expected_index < valid_kernels.size() && valid_kernels[expected_index] == kernel_id_)
                 return expected_index;
-            auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
+            auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id_);
             if(it != valid_kernels.end())
                 return static_cast<std::size_t>(it - valid_kernels.begin());
-            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id);
+            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id_);
             return std::nullopt;
         };
 

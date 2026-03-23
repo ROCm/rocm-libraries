@@ -166,7 +166,7 @@ OpTensorLeadingOnes::GetSolution([[maybe_unused]] const ExecutionContext& contex
                               bitmap,
                               packed_tensor](const std::vector<Kernel> kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
+            decltype(auto) kerneL = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
             visit_float(data_type, [&](auto as_float) {
@@ -176,7 +176,7 @@ OpTensorLeadingOnes::GetSolution([[maybe_unused]] const ExecutionContext& contex
 
                 if(packed_tensor)
                 { // OpTensorLeadingOnes
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            params.BTensor,
                            params.CTensor,
                            static_cast<int>(clens[1]),
@@ -196,7 +196,7 @@ OpTensorLeadingOnes::GetSolution([[maybe_unused]] const ExecutionContext& contex
                 }
                 else
                 { // OpTensorLeadingOnesGeneric
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            static_cast<int>(astrides[0]),
                            static_cast<int>(astrides[1]),
                            static_cast<int>(astrides[2]),

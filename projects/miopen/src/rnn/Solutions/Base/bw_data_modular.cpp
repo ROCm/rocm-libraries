@@ -174,13 +174,13 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
 {
 
     const auto [cur_batch, dcy_use_batch, cx_use_batch] =
-        [](const auto& seq, const BatchController& batch_c, const SequenceDirection dir) {
-            auto current_batch = batch_c.getBatchSize(seq.getPhisVal());
+        [](const auto& seq_, const BatchController& batch_c, const SequenceDirection dir) {
+            auto current_batch = batch_c.getBatchSize(seq_.getPhisVal());
             if(dir == SequenceDirection::Forward)
             {
-                const auto dcy_batch = seq.isFirst()
+                const auto dcy_batch = seq_.isFirst()
                                            ? current_batch
-                                           : batch_c.getBatchSize(seq.getPrev().getPhisVal());
+                                           : batch_c.getBatchSize(seq_.getPrev().getPhisVal());
                 const auto cx_batch  = current_batch;
                 return std::make_tuple(current_batch, dcy_batch, cx_batch);
             }
@@ -188,7 +188,7 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
             {
                 const auto dcy_batch = current_batch;
                 const auto cx_batch =
-                    seq.isLast() ? current_batch : batch_c.getBatchSize(seq.getNext().getPhisVal());
+                    seq_.isLast() ? current_batch : batch_c.getBatchSize(seq_.getNext().getPhisVal());
                 return std::make_tuple(current_batch, dcy_batch, cx_batch);
             }
         }(seq, batchController, direction);
@@ -312,7 +312,7 @@ void RNNBackwardDataModularAlgo::PropDy(const Handle& handle,
     // bwd concat
     // currently supported only one type, but should be more
     auto [dy_src_desc, dy_data_ptr] =
-        [](const IOBufferDescriptor& dyInfo, const RNNDescriptor& rnnD, ConstData_t dy) {
+        [](const IOBufferDescriptor& dyInfo, const RNNDescriptor& rnnD, ConstData_t dy_) {
             const auto& dy_raw_size   = dyInfo.getFullSeqMajorSize();
             const auto& dy_raw_stride = dyInfo.getFullSeqMajorStrides();
 
@@ -330,7 +330,7 @@ void RNNBackwardDataModularAlgo::PropDy(const Handle& handle,
             auto dy_desc =
                 miopen::TensorDescriptor(rnnD.dataType, dy_normalized_size, dy_normalized_stride);
 
-            return std::make_tuple(dy_desc, dy);
+            return std::make_tuple(dy_desc, dy_);
         }(yInfo, rnnDesc, dy);
 
     const std::vector<size_t> ws_dst_strides = [](const auto& full_stride_ref) {
@@ -749,13 +749,13 @@ void RNNBackwardModuleAlgoDynamic::realUpdateHStatePerTimeSeq(const Handle& hand
     // Inited
 
     const auto [cur_batch, dcy_use_batch, cx_use_batch] =
-        [](const auto& seq, const BatchController& batch_c, const SequenceDirection dir) {
-            auto current_batch = batch_c.getBatchSize(seq.getPhisVal());
+        [](const auto& seq_, const BatchController& batch_c, const SequenceDirection dir) {
+            auto current_batch = batch_c.getBatchSize(seq_.getPhisVal());
             if(dir == SequenceDirection::Forward)
             {
-                const auto dcy_batch = seq.isFirst()
+                const auto dcy_batch = seq_.isFirst()
                                            ? current_batch
-                                           : batch_c.getBatchSize(seq.getPrev().getPhisVal());
+                                           : batch_c.getBatchSize(seq_.getPrev().getPhisVal());
                 const auto cx_batch  = current_batch;
                 return std::make_tuple(current_batch, dcy_batch, cx_batch);
             }
@@ -763,7 +763,7 @@ void RNNBackwardModuleAlgoDynamic::realUpdateHStatePerTimeSeq(const Handle& hand
             {
                 const auto dcy_batch = current_batch;
                 const auto cx_batch =
-                    seq.isLast() ? current_batch : batch_c.getBatchSize(seq.getNext().getPhisVal());
+                    seq_.isLast() ? current_batch : batch_c.getBatchSize(seq_.getNext().getPhisVal());
                 return std::make_tuple(current_batch, dcy_batch, cx_batch);
             }
         }(seq, realBatchController, direction);

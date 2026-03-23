@@ -379,9 +379,9 @@ void ReorderTensorGPUData(const Handle& handle,
     if(tensor_lens[reordering_dim] != sample_order.size())
         MIOPEN_THROW(miopenStatusInternalError, "Wrong tensor lens");
 
-    auto get_single_samlpe_lens = [](const std::vector<size_t>& lens, int reordering_dim) {
+    auto get_single_samlpe_lens = [](const std::vector<size_t>& lens, int reordering_dim_) {
         std::vector<size_t> new_lens = lens;
-        new_lens[reordering_dim]     = 1;
+        new_lens[reordering_dim_]     = 1;
         return new_lens;
     };
 

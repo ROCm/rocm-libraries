@@ -115,7 +115,7 @@ Op4dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
         [data_type, blens, clens, astrides, bstrides, cstrides, work_per_wg, num_wg_orig, bitmap](
             const std::vector<Kernel> kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
+                decltype(auto) kerneL = handle_.Run(kernels.front());
                 decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
                 visit_float(data_type, [&](auto as_float) {
@@ -123,7 +123,7 @@ Op4dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
                     auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
                     auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            static_cast<int>(astrides[0]), // a_nstride,
                            static_cast<int>(astrides[1]), // a_cstride,
                            static_cast<int>(astrides[2]), // a_hstride,

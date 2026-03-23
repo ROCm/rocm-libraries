@@ -152,7 +152,7 @@ ConvSolution OpTensorFwdBias::GetSolution([[maybe_unused]] const ExecutionContex
                               incr_wg,
                               packed_tensor](const std::vector<Kernel> kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
+            decltype(auto) kerneL = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
             visit_float(data_type, [&](auto as_float) {
@@ -162,7 +162,7 @@ ConvSolution OpTensorFwdBias::GetSolution([[maybe_unused]] const ExecutionContex
 
                 if(packed_tensor)
                 { // OpTensorFwdBias
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            params.BTensor,
                            static_cast<int>(blens[1]),
                            params.CTensor,
@@ -181,7 +181,7 @@ ConvSolution OpTensorFwdBias::GetSolution([[maybe_unused]] const ExecutionContex
                 }
                 else
                 { // OpTensorFwdBiasGeneric
-                    kernel(params.ATensor,
+                    kerneL(params.ATensor,
                            static_cast<int>(astrides[0]),
                            static_cast<int>(astrides[1]),
                            static_cast<int>(astrides[2]),
