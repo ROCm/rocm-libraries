@@ -142,9 +142,9 @@ struct KernelKey
         std::uint8_t num_wave_groups; // NumWaveGroups
 
         // Padding support flags (kPadM, kPadN, kPadK in generated kernels)
-        bool pad_m = true;  // Support arbitrary M dimensions via padding
-        bool pad_n = true;  // Support arbitrary N dimensions via padding
-        bool pad_k = true;  // Support arbitrary K dimensions via padding
+        bool pad_m = true; // Support arbitrary M dimensions via padding
+        bool pad_n = true; // Support arbitrary N dimensions via padding
+        bool pad_k = true; // Support arbitrary K dimensions via padding
     } algorithm;
 
     std::string gfx_arch; // e.g. "gfx942", "gfx90a", "gfx908"
