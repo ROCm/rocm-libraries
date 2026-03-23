@@ -34,9 +34,10 @@
 
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/tuple.hpp>
-#include <data_types.hpp>
-#include <hiptensor/internal/types.hpp>
-#include <logger.hpp>
+
+#include "data_types.hpp"
+#include "hiptensor/internal/types.hpp"
+#include "logger.hpp"
 #include "platform.hpp"
 
 namespace hiptensor
@@ -137,6 +138,24 @@ namespace hiptensor
                  hiptensorGetErrorString(errorCode));
         logger.logError("hiptensorPermute", msg);
     };
+
+    inline bool checkEnvironmentVariableEnabled(const char* name)
+    {
+        auto var = getEnvironmentVariable(name);
+        if(!var.has_value())
+        {
+            return false;
+        }
+
+        std::string upper = var.value();
+        std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+        if((upper.compare("ON") == 0) || (upper.compare("1") == 0))
+        {
+            return true;
+        }
+
+        return false;
+    }
 
     /** @name static_for
      *  @{
