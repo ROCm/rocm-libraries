@@ -9,6 +9,7 @@
 #include <miopen/solver/gemm_common.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/util.hpp>
+#include <miopen/solver/problem_description_interpreter.hpp>
 
 #include <ranges>
 #include <set>
@@ -18,6 +19,7 @@ namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
+using ProblemInterpreter = solver::ProblemInterpreter;
 
 bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
@@ -134,9 +136,11 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                  = problem.GetBatchSize();
-    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                  = problem.GetInChannels() + problem.GetOutChannels();
+    auto b = problem.GetBatchSize();
+    auto s = ProblemInterpreter::GetOutputHeightHo(problem) *
+             ProblemInterpreter::GetOutputWidthWo(problem);
+    auto c =
+        problem.GetInChannels() + problem.GetOutChannels(); // getting both, don't need interpreter
     auto g                  = problem.GetGroupCount();
     auto spatial_per_batch  = s / b;
     auto channels_per_group = c / g;
@@ -374,8 +378,9 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                 = problem.GetBatchSize();
-    auto s                 = problem.GetOutHeight() * problem.GetOutWidth();
+    auto b = problem.GetBatchSize();
+    auto s = ProblemInterpreter::GetOutputHeightHo(problem) *
+             ProblemInterpreter::GetOutputWidthWo(problem);
     auto spatial_per_batch = s / b;
 
     if(is_gfx11 || is_gfx12)

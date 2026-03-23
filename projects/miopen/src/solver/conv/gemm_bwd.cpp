@@ -12,6 +12,7 @@
 #include <miopen/util.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
+#include <miopen/solver/problem_description_interpreter.hpp>
 
 #include <ranges>
 #include <set>
@@ -21,6 +22,7 @@ namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
+using ProblemInterpreter = solver::ProblemInterpreter;
 
 bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
@@ -183,8 +185,10 @@ bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto s = ProblemInterpreter::GetOutputHeightHo(problem) *
+             ProblemInterpreter::GetOutputWidthWo(problem);
+    auto c =
+        problem.GetInChannels() + problem.GetOutChannels(); // getting both, don't need interpreter
     auto g                      = problem.GetGroupCount();
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
@@ -418,8 +422,10 @@ bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto s = ProblemInterpreter::GetOutputHeightHo(problem) *
+             ProblemInterpreter::GetOutputWidthWo(problem);
+    auto c =
+        problem.GetInChannels() + problem.GetOutChannels(); // getting both, don't need interpreter
     auto g                      = problem.GetGroupCount();
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
@@ -637,9 +643,11 @@ bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     const bool is_gfx11            = StartsWith(arch, "gfx11");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
-    auto b                      = problem.GetBatchSize();
-    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
-    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto b = problem.GetBatchSize();
+    auto s = ProblemInterpreter::GetOutputHeightHo(problem) *
+             ProblemInterpreter::GetOutputWidthWo(problem);
+    auto c =
+        problem.GetInChannels() + problem.GetOutChannels(); // getting both, don't need interpreter
     auto g                      = problem.GetGroupCount();
     auto spatial_per_batch      = s / b;
     auto channels_per_group     = c / g;
