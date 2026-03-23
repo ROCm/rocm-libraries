@@ -164,7 +164,22 @@ def removeDuplicatedSolutions(oriData, prefix=""):
 
 from Tensile import LibraryIO
 
-# for dict format files this function can be discarded
+# FIXME: For dict format files this function can be discarded
+# Move baseName, KernelNameMin, SolutionNameMin to the top of all
+# solutions as well as removing unnecessary null CUCount field
+def reorderSolutionsParams(data):
+    keys = ["SolutionIndex", "BaseName", "KernelNameMin", "SolutionNameMin"]
+    vals = {}
+    for sol_idx in range(len(data["Solutions"])):
+        for key in keys:
+            if key in data["Solutions"][sol_idx].keys():
+                vals[key] = data["Solutions"][sol_idx].pop(key)
+            else:
+                vals[key] = ""
+        data["Solutions"][sol_idx] = {**vals, **data["Solutions"][sol_idx]}
+
+
+# FIXME: For dict format files this function can be discarded
 def convertToDict(data: list | dict, filename) -> dict:
     if isinstance(data, list):
         rv = LibraryIO.parseLibraryLogicList(data, filename)
@@ -177,7 +192,7 @@ def convertToDict(data: list | dict, filename) -> dict:
                 if k in defaultSolution.keys():
                     if v == defaultSolution[k]:
                         del kernel[k]
-
+        reorderSolutionsParams(rv)
         LibraryIO.writeYAML(filename, rv, explicit_start=False, explicit_end=False)
         data = rv
 
@@ -263,14 +278,15 @@ def syncDefaultParams(origData, origDefaultValues, incDefaultValues):
 # as well as CUCount which is part of Architecture
 def removeDefaultInitParams(data):
     defaultSolution = data["DefaultSolution"]
-    defaultSolution["CUCount"] = None
 
     for soln in data["Solutions"]:
         solnParams = list(soln.keys())
         for param in solnParams:
             if param in defaultSolution.keys() and soln[param] == defaultSolution[param]:
                 del soln[param]
-    defaultSolution.pop("CUCount")
+    # FIXME: When all libs are in dict format this can be discarded
+    if "CUCount" in defaultSolution.keys():
+        defaultSolution.pop("CUCount")
 
 def findSolutionWithIndex(solutionData, solIndex):
     # Check solution at the index corresponding to solIndex first
@@ -418,7 +434,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         msg(stats[0], "size(s) and", stats[1], "solution(s) added,", stats[2], "solution(s) removed.", \
             len(mergedData["ExactLogic"]), "sizes and", len(mergedData["Solutions"]), "solutions")
 
-        # final check of default init parameters, before writing to yaml
+        # remove Default params from solutions
         removeDefaultInitParams(mergedData)
 
         # make sure same datatype to avoid longer output

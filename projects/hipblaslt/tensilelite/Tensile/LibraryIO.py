@@ -645,14 +645,15 @@ def parseLibraryLogicList(data, srcFile="?"):
     rv["MinimumRequiredVersion"] = data[0]["MinimumRequiredVersion"]
     rv["ScheduleName"] = data[1]
 
-    if type(data[2]) is dict:
+    if isinstance(data[2], dict):
         rv["ArchitectureName"] = data[2]["Architecture"]
         rv["CUCount"] = data[2]["CUCount"]
     else:
         rv["ArchitectureName"] = data[2]
-        rv["CUCount"] = None
+        rv["CUCount"] = getCUCount()
 
     rv["DeviceNames"] = data[3]
+    rv["ProblemType"] = data[4]
 
     # DefaultSolution Field
     if len(data) > 12 and data[12]:
@@ -660,7 +661,6 @@ def parseLibraryLogicList(data, srcFile="?"):
     else:
         rv["DefaultSolution"] = dict(sorted(defaultSolution.items()))
 
-    rv["ProblemType"] = data[4]
     rv["Solutions"] = data[5]
 
     # TODOBEN: figure out what to do with these...
