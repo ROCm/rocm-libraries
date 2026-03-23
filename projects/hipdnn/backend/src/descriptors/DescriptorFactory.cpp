@@ -18,6 +18,7 @@
 #include "ExecutionPlanDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
+#include "KnobDescriptor.hpp"
 #include "KnobSettingDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
@@ -75,6 +76,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
         privateDesc = std::make_shared<KnobSettingDescriptor>();
+        break;
+    case HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR:
+        privateDesc = std::make_shared<KnobDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
         privateDesc = std::make_shared<PointwiseOperationDescriptor>();

@@ -82,9 +82,10 @@ std::string getSystemInfo()
 {
     // Get Windows version using RtlGetVersion (more reliable than deprecated GetVersionEx)
     typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-    RTL_OSVERSIONINFOW versionInfo;
+    RTL_OSVERSIONINFOW versionInfo = {};
     versionInfo.dwOSVersionInfoSize = sizeof(versionInfo);
 
+    bool versionInfoValid = false;
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if(ntdll != nullptr)
     {
@@ -92,7 +93,7 @@ std::string getSystemInfo()
             = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
         if(rtlGetVersion != nullptr)
         {
-            rtlGetVersion(&versionInfo);
+            versionInfoValid = (rtlGetVersion(&versionInfo) == 0);
         }
     }
 
@@ -124,13 +125,23 @@ std::string getSystemInfo()
         architecture = "Unknown";
     }
 
-    return fmt::format("System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
-                       "Version: {}, Machine: {}}}",
-                       computerName.data(),
-                       versionInfo.dwMajorVersion,
-                       versionInfo.dwMinorVersion,
-                       versionInfo.dwBuildNumber,
-                       architecture);
+    if(versionInfoValid)
+    {
+        return fmt::format(
+            "System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
+            "Version: {}, Machine: {}}}",
+            computerName.data(),
+            versionInfo.dwMajorVersion,
+            versionInfo.dwMinorVersion,
+            versionInfo.dwBuildNumber,
+            architecture);
+    }
+
+    return fmt::format(
+        "System Information: {{System Name: Windows, Node Name: {}, Release: unknown, "
+        "Version: unknown, Machine: {}}}",
+        computerName.data(),
+        architecture);
 }
 
 }

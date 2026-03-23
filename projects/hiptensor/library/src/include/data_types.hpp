@@ -28,6 +28,7 @@
 
 // clang-format off
 // Include order needs to be preserved
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -110,6 +111,15 @@ struct hiptensorPlan
     uint64_t                       mRequiredWorkspace;
     hiptensorOperationDescriptor_t mOpDesc;
     hiptensorPlanPreference_t      mPref;
+
+    // Owned deep copies so the plan is self-contained and does not hold
+    // dangling pointers when the caller destroys the original objects.
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescA;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescB;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescC;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescD;
+    std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
+    std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
 };
 
 struct hiptensorPlanPreference
