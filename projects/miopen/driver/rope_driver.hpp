@@ -31,6 +31,7 @@
 #include "timer.hpp"
 #include "../test/verify.hpp"
 
+#include <memory>
 #include <numeric>
 #include <vector>
 

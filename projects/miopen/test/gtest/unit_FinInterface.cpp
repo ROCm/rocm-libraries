@@ -53,8 +53,6 @@ struct TestParams
 
 struct SolverInfo
 {
-    // SolverInfo() = default;
-
     SolverInfo(uint64_t id_, bool dynamic_, bool tunable_)
         : id(id_), dynamic(dynamic_), tunable(tunable_)
     {
