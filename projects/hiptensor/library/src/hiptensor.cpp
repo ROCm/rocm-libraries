@@ -653,41 +653,41 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       uint64_t                             workspaceSizeLimit)
 {
     (*plan)                     = new hiptensorPlan();
-    (*plan)->mRequiredWorkspace = workspaceSizeLimit;
+    hiptensorPlan_t             newPlan = *plan;
+    newPlan->mRequiredWorkspace = workspaceSizeLimit;
 
     // Deep-copy the tensor descriptors referenced by the operation descriptor
-    auto& p = *plan;
     if(desc->mDescA)
     {
-        p->mOwnedDescA = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescA);
+        newPlan->mOwnedDescA = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescA);
     }
     if(desc->mDescB)
     {
-        p->mOwnedDescB = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescB);
+        newPlan->mOwnedDescB = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescB);
     }
     if(desc->mDescC)
     {
-        p->mOwnedDescC = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescC);
+        newPlan->mOwnedDescC = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescC);
     }
     if(desc->mDescD)
     {
-        p->mOwnedDescD = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescD);
+        newPlan->mOwnedDescD = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescD);
     }
 
-    p->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
-    p->mOwnedOpDesc->mDescA = p->mOwnedDescA.get();
-    p->mOwnedOpDesc->mDescB = p->mOwnedDescB.get();
-    p->mOwnedOpDesc->mDescC = p->mOwnedDescC.get();
-    p->mOwnedOpDesc->mDescD = p->mOwnedDescD.get();
+    newPlan->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
+    newPlan->mOwnedOpDesc->mDescA = newPlan->mOwnedDescA.get();
+    newPlan->mOwnedOpDesc->mDescB = newPlan->mOwnedDescB.get();
+    newPlan->mOwnedOpDesc->mDescC = newPlan->mOwnedDescC.get();
+    newPlan->mOwnedOpDesc->mDescD = newPlan->mOwnedDescD.get();
 
-    p->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
+    newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
 
-    p->mOpDesc = p->mOwnedOpDesc.get();
-    p->mPref   = p->mOwnedPref.get();
+    newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
+    newPlan->mPref   = newPlan->mOwnedPref.get();
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
-        return contractionInitPlan(handle, *plan, p->mOpDesc, p->mPref, workspaceSizeLimit);
+        return contractionInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     return HIPTENSOR_STATUS_SUCCESS;
 }
