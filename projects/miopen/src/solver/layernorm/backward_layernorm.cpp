@@ -250,8 +250,8 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
 
                 auto reqd_work_item_count = get_reqd_work_item_cnt(
                     handle_, PerformanceConfigLayernorm::max_parallel_local_size);
-                auto parallelism_size =
-                    get_parallelism_size(reqd_work_item_count, params.inner_size, params.outer_size);
+                auto parallelism_size = get_parallelism_size(
+                    reqd_work_item_count, params.inner_size, params.outer_size);
 
                 auto elapsed = 0.f;
                 HipEventPtr start;
