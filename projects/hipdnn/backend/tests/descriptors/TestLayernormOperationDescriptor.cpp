@@ -759,7 +759,7 @@ TEST_F(TestLayernormOperationDescriptor, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("LayernormOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_LAYERNORM_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_LAYERNORM_TENSOR_SCALE_UID)),
@@ -778,7 +778,7 @@ TEST_F(TestLayernormOperationDescriptor, ToStringContainsExpectedInfo)
 TEST_F(TestLayernormOperationDescriptor, ToStringIncludesOptionalTensorsWhenSet)
 {
     makeFinalized();
-    std::string str = getDescriptor()->toString();
+    const std::string str = getDescriptor()->toString();
     ASSERT_NE(str.find("mean_uid=" + std::to_string(K_LAYERNORM_TENSOR_MEAN_UID)),
               std::string::npos);
     ASSERT_NE(str.find("inv_variance_uid=" + std::to_string(K_LAYERNORM_TENSOR_INV_VARIANCE_UID)),

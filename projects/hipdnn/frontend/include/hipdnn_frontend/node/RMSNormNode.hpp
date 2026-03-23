@@ -28,13 +28,12 @@ public:
     {
         // ====================================================================
         // RMS NORMALIZATION FORWARD VALIDATION
-        // (Per-channel normalization without mean subtraction)
+        // (Normalization across channels without mean subtraction)
         // ====================================================================
         // Algorithm Overview:
-        // For each channel c, RMSNorm computes the root mean square:
-        //   rms_c = sqrt((1/m) * sum_{n,h,w} x[n,c,h,w]^2 + epsilon)
-        //
-        //   y[n,c,h,w] = (x[n,c,h,w] / rms_c) * scale_c + bias_c
+        // For each (batch, spatial) position, RMSNorm computes:
+        //   rms[n,h,w]  = sqrt((1/C) * sum_c x[n,c,h,w]^2 + epsilon)
+        //   y[n,c,h,w]  = scale[c] * (x[n,c,h,w] / rms[n,h,w]) + bias[c]
         // ====================================================================
 
         // SECTION 1: Validate Required Tensor Pointers
@@ -75,7 +74,7 @@ public:
         // SECTION 4: Validate Channel Dimensions and Scale Tensor Shape
         // Scale is per-channel with shape [1, C, 1, 1, ...]
         auto& xDims = x->get_dim();
-        int64_t channels = xDims[1];
+        const int64_t channels = xDims[1];
 
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 

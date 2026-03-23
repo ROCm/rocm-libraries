@@ -43,7 +43,7 @@ TEST(TestCpuTypeUtilities, CastNonFiniteFloatSourceThrows)
 
 TEST(TestCpuTypeUtilities, CastFp8SourceAndCheckTargetBounds)
 {
-    fp8_e4m3 src(10.0f);
+    const fp8_e4m3 src(10.0f);
     EXPECT_EQ(safeTestTypeCast<int8_t>(src), static_cast<int8_t>(10));
 
     // E4M3 max finite is 448.0f; values above should fail bounds checks.
@@ -52,11 +52,11 @@ TEST(TestCpuTypeUtilities, CastFp8SourceAndCheckTargetBounds)
 
 TEST(TestCpuTypeUtilities, CastInt64BoundaryToInt32)
 {
-    int64_t vLowest = std::numeric_limits<int32_t>::lowest();
+    const int64_t vLowest = std::numeric_limits<int32_t>::lowest();
     EXPECT_EQ(safeTestTypeCast<int32_t>(vLowest), std::numeric_limits<int32_t>::lowest());
     EXPECT_THROW(safeTestTypeCast<int32_t>(vLowest - 1), std::out_of_range);
 
-    int64_t vMax = std::numeric_limits<int32_t>::max();
+    const int64_t vMax = std::numeric_limits<int32_t>::max();
     EXPECT_EQ(safeTestTypeCast<int32_t>(vMax), std::numeric_limits<int32_t>::max());
     EXPECT_THROW(safeTestTypeCast<int32_t>(vMax + 1), std::out_of_range);
 }

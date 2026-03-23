@@ -313,21 +313,22 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
                               const HipdnnMiopenSettings& executionSettings,
                               bool deterministicEnabled)
 {
-    if(executionSettings.workspaceSizeLimit().has_value())
-    {
-        return executionSettings.workspaceSizeLimit().value();
-    }
+    size_t workSpaceSize = executionSettings.selectedWorkspaceSize();
 
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
-    size_t workSpaceSize;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
-                                                                     params.w().tensorDescriptor(),
-                                                                     params.x().tensorDescriptor(),
-                                                                     params.conv().convDescriptor(),
-                                                                     params.y().tensorDescriptor(),
-                                                                     &workSpaceSize));
+    if(workSpaceSize == 0)
+    {
+        const auto& attr
+            = opGraph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
+        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        THROW_ON_MIOPEN_FAILURE(
+            miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+                                                     params.w().tensorDescriptor(),
+                                                     params.x().tensorDescriptor(),
+                                                     params.conv().convDescriptor(),
+                                                     params.y().tensorDescriptor(),
+                                                     &workSpaceSize));
+    }
 
     return workSpaceSize;
 }
@@ -337,23 +338,23 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
                               const HipdnnMiopenSettings& executionSettings,
                               bool deterministicEnabled)
 {
-    if(executionSettings.workspaceSizeLimit().has_value())
+    size_t workSpaceSize = executionSettings.selectedWorkspaceSize();
+
+    if(workSpaceSize == 0)
     {
-        return executionSettings.workspaceSizeLimit().value();
+        const auto& attr
+            = opGraph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
+        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+        THROW_ON_MIOPEN_FAILURE(
+            miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+                                                          params.dy().tensorDescriptor(),
+                                                          params.w().tensorDescriptor(),
+                                                          params.conv().convDescriptor(),
+                                                          params.dx().tensorDescriptor(),
+                                                          &workSpaceSize));
     }
-
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
-    size_t workSpaceSize;
-
-    THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
-                                                      params.dy().tensorDescriptor(),
-                                                      params.w().tensorDescriptor(),
-                                                      params.conv().convDescriptor(),
-                                                      params.dx().tensorDescriptor(),
-                                                      &workSpaceSize));
 
     return workSpaceSize;
 }
@@ -363,23 +364,23 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
                               const HipdnnMiopenSettings& executionSettings,
                               bool deterministicEnabled)
 {
-    if(executionSettings.workspaceSizeLimit().has_value())
+    size_t workSpaceSize = executionSettings.selectedWorkspaceSize();
+
+    if(workSpaceSize == 0)
     {
-        return executionSettings.workspaceSizeLimit().value();
+        const auto& attr
+            = opGraph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
+        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+
+        THROW_ON_MIOPEN_FAILURE(
+            miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+                                                             params.dy().tensorDescriptor(),
+                                                             params.x().tensorDescriptor(),
+                                                             params.conv().convDescriptor(),
+                                                             params.dw().tensorDescriptor(),
+                                                             &workSpaceSize));
     }
-
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
-    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
-    size_t workSpaceSize;
-
-    THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
-                                                         params.dy().tensorDescriptor(),
-                                                         params.x().tensorDescriptor(),
-                                                         params.conv().convDescriptor(),
-                                                         params.dw().tensorDescriptor(),
-                                                         &workSpaceSize));
 
     return workSpaceSize;
 }
@@ -574,6 +575,13 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
         }
 
         executionSettings.setWorkspaceSizeLimit(static_cast<size_t>(value));
+        executionSettings.setDefaultWorkspaceSize(range.max);
+    }
+
+    if(!executionSettings.workspaceSizeLimit().has_value())
+    {
+        const auto maxWs = getMaxWorkspaceSize(handle, opGraph, executionSettings);
+        executionSettings.setDefaultWorkspaceSize(maxWs);
     }
 }
 

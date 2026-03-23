@@ -28,49 +28,49 @@ protected:
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToHalf)
 {
-    bfloat16 a(2.5f);
-    half b(a);
+    const bfloat16 a(2.5f);
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp4E2M1)
 {
-    bfloat16 a(2.0f);
-    fp4_e2m1 b(a);
+    const bfloat16 a(2.0f);
+    const fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 2.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E4M3)
 {
-    bfloat16 a(4.0f);
-    fp8_e4m3 b(a);
+    const bfloat16 a(4.0f);
+    const fp8_e4m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E5M2)
 {
-    bfloat16 a(4.0f);
-    fp8_e5m2 b(a);
+    const bfloat16 a(4.0f);
+    const fp8_e5m2 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFp8E8M0)
 {
-    bfloat16 a(4.0f);
-    fp8_e8m0 b(a);
+    const bfloat16 a(4.0f);
+    const fp8_e8m0 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToFloat)
 {
-    bfloat16 a(3.14159f);
+    const bfloat16 a(3.14159f);
     auto b = static_cast<float>(a);
     EXPECT_TRUE(nearEqual(b, 3.14159f, 0.02f));
 }
 
 TEST_F(TestCrossTypeConversion, Bfloat16ToDouble)
 {
-    bfloat16 a(2.71828f);
+    const bfloat16 a(2.71828f);
     auto b = static_cast<double>(a);
     EXPECT_TRUE(nearEqual(static_cast<float>(b), 2.71828f, 0.02f));
 }
@@ -81,49 +81,49 @@ TEST_F(TestCrossTypeConversion, Bfloat16ToDouble)
 
 TEST_F(TestCrossTypeConversion, HalfToBfloat16)
 {
-    half a(2.5f);
-    bfloat16 b(a);
+    const half a(2.5f);
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, HalfToFp4E2M1)
 {
-    half a(4.0f);
-    fp4_e2m1 b(a);
+    const half a(4.0f);
+    const fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, HalfToFp8E4M3)
 {
-    half a(4.0f);
-    fp8_e4m3 b(a);
+    const half a(4.0f);
+    const fp8_e4m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, HalfToFp8E5M2)
 {
-    half a(4.0f);
-    fp8_e5m2 b(a);
+    const half a(4.0f);
+    const fp8_e5m2 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, HalfToFp8E8M0)
 {
-    half a(8.0f);
-    fp8_e8m0 b(a);
+    const half a(8.0f);
+    const fp8_e8m0 b(a);
     EXPECT_EQ(static_cast<float>(b), 8.0f);
 }
 
 TEST_F(TestCrossTypeConversion, HalfToFloat)
 {
-    half a(3.14159f);
+    const half a(3.14159f);
     auto b = static_cast<float>(a);
     EXPECT_TRUE(nearEqual(b, 3.14159f, 0.002f));
 }
 
 TEST_F(TestCrossTypeConversion, HalfToDouble)
 {
-    half a(2.71828f);
+    const half a(2.71828f);
     auto b = static_cast<double>(a);
     EXPECT_TRUE(nearEqual(static_cast<float>(b), 2.71828f, 0.002f));
 }
@@ -134,28 +134,28 @@ TEST_F(TestCrossTypeConversion, HalfToDouble)
 
 TEST_F(TestCrossTypeConversion, Fp4E2M1ToBfloat16)
 {
-    fp4_e2m1 a(3.0f);
-    bfloat16 b(a);
+    const fp4_e2m1 a(3.0f);
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 3.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp4E2M1ToHalf)
 {
-    fp4_e2m1 a(4.0f);
-    half b(a);
+    const fp4_e2m1 a(4.0f);
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp4E2M1ToFloat)
 {
-    fp4_e2m1 a(3.0f);
+    const fp4_e2m1 a(3.0f);
     auto b = static_cast<float>(a);
     EXPECT_EQ(b, 3.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp4E2M1ToDouble)
 {
-    fp4_e2m1 a(4.0f);
+    const fp4_e2m1 a(4.0f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 4.0);
 }
@@ -166,35 +166,35 @@ TEST_F(TestCrossTypeConversion, Fp4E2M1ToDouble)
 
 TEST_F(TestCrossTypeConversion, Fp8E4M3ToBfloat16)
 {
-    fp8_e4m3 a(4.0f);
-    bfloat16 b(a);
+    const fp8_e4m3 a(4.0f);
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E4M3ToHalf)
 {
-    fp8_e4m3 a(4.0f);
-    half b(a);
+    const fp8_e4m3 a(4.0f);
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E4M3ToFp8E5M2)
 {
-    fp8_e4m3 a(4.0f);
-    fp8_e5m2 b(a);
+    const fp8_e4m3 a(4.0f);
+    const fp8_e5m2 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E4M3ToFloat)
 {
-    fp8_e4m3 a(8.0f);
+    const fp8_e4m3 a(8.0f);
     auto b = static_cast<float>(a);
     EXPECT_EQ(b, 8.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E4M3ToDouble)
 {
-    fp8_e4m3 a(16.0f);
+    const fp8_e4m3 a(16.0f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 16.0);
 }
@@ -205,35 +205,35 @@ TEST_F(TestCrossTypeConversion, Fp8E4M3ToDouble)
 
 TEST_F(TestCrossTypeConversion, Fp8E5M2ToBfloat16)
 {
-    fp8_e5m2 a(4.0f);
-    bfloat16 b(a);
+    const fp8_e5m2 a(4.0f);
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E5M2ToHalf)
 {
-    fp8_e5m2 a(4.0f);
-    half b(a);
+    const fp8_e5m2 a(4.0f);
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E5M2ToFp8E4M3)
 {
-    fp8_e5m2 a(4.0f);
-    fp8_e4m3 b(a);
+    const fp8_e5m2 a(4.0f);
+    const fp8_e4m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E5M2ToFloat)
 {
-    fp8_e5m2 a(8.0f);
+    const fp8_e5m2 a(8.0f);
     auto b = static_cast<float>(a);
     EXPECT_EQ(b, 8.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E5M2ToDouble)
 {
-    fp8_e5m2 a(16.0f);
+    const fp8_e5m2 a(16.0f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 16.0);
 }
@@ -244,28 +244,28 @@ TEST_F(TestCrossTypeConversion, Fp8E5M2ToDouble)
 
 TEST_F(TestCrossTypeConversion, Fp8E8M0ToBfloat16)
 {
-    fp8_e8m0 a(4.0f);
-    bfloat16 b(a);
+    const fp8_e8m0 a(4.0f);
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E8M0ToHalf)
 {
-    fp8_e8m0 a(8.0f);
-    half b(a);
+    const fp8_e8m0 a(8.0f);
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 8.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E8M0ToFloat)
 {
-    fp8_e8m0 a(16.0f);
+    const fp8_e8m0 a(16.0f);
     auto b = static_cast<float>(a);
     EXPECT_EQ(b, 16.0f);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E8M0ToDouble)
 {
-    fp8_e8m0 a(32.0f);
+    const fp8_e8m0 a(32.0f);
     auto b = static_cast<double>(a);
     EXPECT_EQ(b, 32.0);
 }
@@ -276,43 +276,43 @@ TEST_F(TestCrossTypeConversion, Fp8E8M0ToDouble)
 
 TEST_F(TestCrossTypeConversion, FloatToBfloat16)
 {
-    float a = 2.5f;
-    bfloat16 b(a);
+    const float a = 2.5f;
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, FloatToHalf)
 {
-    float a = 2.5f;
-    half b(a);
+    const float a = 2.5f;
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, FloatToFp4E2M1)
 {
-    float a = 6.0f;
-    fp4_e2m1 b(a);
+    const float a = 6.0f;
+    const fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 6.0f);
 }
 
 TEST_F(TestCrossTypeConversion, FloatToFp8E4M3)
 {
-    float a = 4.0f;
-    fp8_e4m3 b(a);
+    const float a = 4.0f;
+    const fp8_e4m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, FloatToFp8E5M2)
 {
-    float a = 4.0f;
-    fp8_e5m2 b(a);
+    const float a = 4.0f;
+    const fp8_e5m2 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, FloatToFp8E8M0)
 {
-    float a = 16.0f;
-    fp8_e8m0 b(a);
+    const float a = 16.0f;
+    const fp8_e8m0 b(a);
     EXPECT_EQ(static_cast<float>(b), 16.0f);
 }
 
@@ -322,43 +322,43 @@ TEST_F(TestCrossTypeConversion, FloatToFp8E8M0)
 
 TEST_F(TestCrossTypeConversion, DoubleToBfloat16)
 {
-    double a = 2.5;
-    bfloat16 b(a);
+    const double a = 2.5;
+    const bfloat16 b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, DoubleToHalf)
 {
-    double a = 2.5;
-    half b(a);
+    const double a = 2.5;
+    const half b(a);
     EXPECT_EQ(static_cast<float>(b), 2.5f);
 }
 
 TEST_F(TestCrossTypeConversion, DoubleToFp4E2M1)
 {
-    double a = 0.5;
-    fp4_e2m1 b(a);
+    const double a = 0.5;
+    const fp4_e2m1 b(a);
     EXPECT_EQ(static_cast<float>(b), 0.5f);
 }
 
 TEST_F(TestCrossTypeConversion, DoubleToFp8E4M3)
 {
-    double a = 4.0;
-    fp8_e4m3 b(a);
+    const double a = 4.0;
+    const fp8_e4m3 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, DoubleToFp8E5M2)
 {
-    double a = 4.0;
-    fp8_e5m2 b(a);
+    const double a = 4.0;
+    const fp8_e5m2 b(a);
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 }
 
 TEST_F(TestCrossTypeConversion, DoubleToFp8E8M0)
 {
-    double a = 64.0;
-    fp8_e8m0 b(a);
+    const double a = 64.0;
+    const fp8_e8m0 b(a);
     EXPECT_EQ(static_cast<float>(b), 64.0f);
 }
 
@@ -368,49 +368,49 @@ TEST_F(TestCrossTypeConversion, DoubleToFp8E8M0)
 
 TEST_F(TestCrossTypeConversion, Bfloat16RoundtripViaFloat)
 {
-    bfloat16 a(3.5f);
+    const bfloat16 a(3.5f);
     auto f = static_cast<float>(a);
-    bfloat16 b(f);
+    const bfloat16 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST_F(TestCrossTypeConversion, HalfRoundtripViaFloat)
 {
-    half a(3.5f);
+    const half a(3.5f);
     auto f = static_cast<float>(a);
-    half b(f);
+    const half b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST_F(TestCrossTypeConversion, Fp4E2M1RoundtripViaFloat)
 {
-    fp4_e2m1 a(4.0f);
+    const fp4_e2m1 a(4.0f);
     auto f = static_cast<float>(a);
-    fp4_e2m1 b(f);
+    const fp4_e2m1 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E4M3RoundtripViaFloat)
 {
-    fp8_e4m3 a(4.0f);
+    const fp8_e4m3 a(4.0f);
     auto f = static_cast<float>(a);
-    fp8_e4m3 b(f);
+    const fp8_e4m3 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E5M2RoundtripViaFloat)
 {
-    fp8_e5m2 a(4.0f);
+    const fp8_e5m2 a(4.0f);
     auto f = static_cast<float>(a);
-    fp8_e5m2 b(f);
+    const fp8_e5m2 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
 TEST_F(TestCrossTypeConversion, Fp8E8M0RoundtripViaFloat)
 {
-    fp8_e8m0 a(8.0f);
+    const fp8_e8m0 a(8.0f);
     auto f = static_cast<float>(a);
-    fp8_e8m0 b(f);
+    const fp8_e8m0 b(f);
     EXPECT_EQ(a.data, b.data);
 }
 
@@ -421,40 +421,40 @@ TEST_F(TestCrossTypeConversion, Fp8E8M0RoundtripViaFloat)
 TEST_F(TestCrossTypeConversion, InfinityConversion)
 {
     // half infinity -> bfloat16
-    half hInf = std::numeric_limits<half>::infinity();
-    bfloat16 bfInf(hInf);
+    const half hInf = std::numeric_limits<half>::infinity();
+    const bfloat16 bfInf(hInf);
     EXPECT_TRUE(isinf(bfInf));
 
     // bfloat16 infinity -> half
-    bfloat16 bfInf2 = std::numeric_limits<bfloat16>::infinity();
-    half hInf2(bfInf2);
+    const bfloat16 bfInf2 = std::numeric_limits<bfloat16>::infinity();
+    const half hInf2(bfInf2);
     EXPECT_TRUE(isinf(hInf2));
 }
 
 TEST_F(TestCrossTypeConversion, NaNConversion)
 {
     // half NaN -> bfloat16
-    half hNan = std::numeric_limits<half>::quiet_NaN();
-    bfloat16 bfNan(hNan);
+    const half hNan = std::numeric_limits<half>::quiet_NaN();
+    const bfloat16 bfNan(hNan);
     EXPECT_TRUE(isnan(bfNan));
 
     // bfloat16 NaN -> half
-    bfloat16 bfNan2 = std::numeric_limits<bfloat16>::quiet_NaN();
-    half hNan2(bfNan2);
+    const bfloat16 bfNan2 = std::numeric_limits<bfloat16>::quiet_NaN();
+    const half hNan2(bfNan2);
     EXPECT_TRUE(isnan(hNan2));
 }
 
 TEST_F(TestCrossTypeConversion, ZeroConversion)
 {
     // Positive zero
-    half hZero(0.0f);
-    bfloat16 bfZero(hZero);
+    const half hZero(0.0f);
+    const bfloat16 bfZero(hZero);
     EXPECT_EQ(static_cast<float>(bfZero), 0.0f);
     EXPECT_FALSE(signbit(bfZero));
 
     // Negative zero
-    half hNegZero = half::from_bits(0x8000);
-    bfloat16 bfNegZero(hNegZero);
+    const half hNegZero = half::from_bits(0x8000);
+    const bfloat16 bfNegZero(hNegZero);
     EXPECT_EQ(static_cast<float>(bfNegZero), -0.0f);
     EXPECT_TRUE(signbit(bfNegZero));
 }
