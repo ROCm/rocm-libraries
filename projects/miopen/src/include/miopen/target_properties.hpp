@@ -26,6 +26,7 @@
 #ifndef GUARD_TARGET_PROPERTIES_HPP
 #define GUARD_TARGET_PROPERTIES_HPP
 
+#include <miopen/config.hpp>
 #include <string>
 #include <tuple>
 #include <stdexcept>
@@ -181,7 +182,7 @@ public:
     static std::size_t GetMaxWaveScratchSize() { return MaxWaveScratchSize; }
     static std::size_t GetMaxLocalMemorySize() { return MaxLocalMemorySize; }
 
-    void Init(const Handle*);
+    MIOPEN_INTERNALS_EXPORT void Init(const Handle*);
 };
 
 } // namespace miopen

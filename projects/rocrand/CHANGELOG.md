@@ -5,15 +5,13 @@ Documentation for rocRAND is available at
 
 ## rocRAND 4.3.0 for ROCm 7.12
 
-### Added
+### Resolved issue
 
-* Occupancy-based tooling for `benchmark_rocrand_device_api` workload increase.
-* New `provision` command-line parameter for `benchmark_rocrand_device_api` - a multiplier for automatic block computation.
+* Fixed dynamic ordering support for threefry generators.
 
 ### Changed
 
-* Updated `benchmark_rocrand_device_api` to use occupancy-based tooling to increase benchmark workloads.
-* Changed input size for `benchmark_rocrand_host_api` to increase it's workload.
+* Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
 
 ## rocRAND 4.2.0 for ROCm 7.2
 

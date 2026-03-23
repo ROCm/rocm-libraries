@@ -606,5 +606,6 @@ size_t calculate_flush_batch_count(size_t arg_flush_batch_count,
                                    size_t cached_size);
 
 void print_reference_lib_warning();
+void print_asan_kernel_warning(const char* program_name);
 
 hipError_t limit_device_count(int& device_count, int max_limit);

@@ -1080,7 +1080,7 @@ TEST_F(TestTensorDescriptor, ToStringContainsExpectedInfo)
     desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
     setRequiredAttributes();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("TensorDescriptor"), std::string::npos);
     ASSERT_NE(str.find("999"), std::string::npos);
 }

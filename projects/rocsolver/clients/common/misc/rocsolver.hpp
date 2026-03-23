@@ -46,6 +46,50 @@
 extern "C" {
 #endif
 
+rocblas_status rocsolver_slatrd_forsytrd(rocblas_handle handle,
+                                         rocblas_fill uplo,
+                                         rocblas_int n,
+                                         rocblas_int k,
+                                         float* A,
+                                         rocblas_int lda,
+                                         float* E,
+                                         float* tau,
+                                         float* W,
+                                         rocblas_int ldw);
+
+rocblas_status rocsolver_dlatrd_forsytrd(rocblas_handle handle,
+                                         rocblas_fill uplo,
+                                         rocblas_int n,
+                                         rocblas_int k,
+                                         double* A,
+                                         rocblas_int lda,
+                                         double* E,
+                                         double* tau,
+                                         double* W,
+                                         rocblas_int ldw);
+
+rocblas_status rocsolver_clatrd_forsytrd(rocblas_handle handle,
+                                         rocblas_fill uplo,
+                                         rocblas_int n,
+                                         rocblas_int k,
+                                         rocblas_float_complex* A,
+                                         rocblas_int lda,
+                                         float* E,
+                                         rocblas_float_complex* tau,
+                                         rocblas_float_complex* W,
+                                         rocblas_int ldw);
+
+rocblas_status rocsolver_zlatrd_forsytrd(rocblas_handle handle,
+                                         rocblas_fill uplo,
+                                         rocblas_int n,
+                                         rocblas_int k,
+                                         rocblas_double_complex* A,
+                                         rocblas_int lda,
+                                         double* E,
+                                         rocblas_double_complex* tau,
+                                         rocblas_double_complex* W,
+                                         rocblas_int ldw);
+
 rocblas_status rocsolver_sgemm(rocblas_handle handle,
                                rocblas_operation transA,
                                rocblas_operation transB,
@@ -1171,6 +1215,96 @@ inline rocblas_status rocsolver_gemm(bool STRIDED,
 }
 /*****************************************************/
 
+/******************** GECON ********************/
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      rocblas_int n,
+                                      float* A,
+                                      rocblas_int lda,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_sgecon(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      rocblas_int n,
+                                      double* A,
+                                      rocblas_int lda,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_dgecon(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      rocblas_int n,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_cgecon(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      rocblas_int n,
+                                      rocblas_double_complex* A,
+                                      rocblas_int lda,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_zgecon(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      int64_t n,
+                                      float* A,
+                                      int64_t lda,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_sgecon_64(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      int64_t n,
+                                      double* A,
+                                      int64_t lda,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_dgecon_64(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      int64_t n,
+                                      rocblas_float_complex* A,
+                                      int64_t lda,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_cgecon_64(handle, norm_type, n, A, lda, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_gecon(rocblas_handle handle,
+                                      rocsolver_norm_type norm_type,
+                                      int64_t n,
+                                      rocblas_double_complex* A,
+                                      int64_t lda,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_zgecon_64(handle, norm_type, n, A, lda, anorm, rcond);
+}
+/*****************************************************/
+
 /******************** LACGV ********************/
 inline rocblas_status
     rocsolver_lacgv(rocblas_handle handle, rocblas_int n, rocblas_float_complex* x, rocblas_int incx)
@@ -1880,6 +2014,64 @@ inline rocblas_status rocsolver_latrd(rocblas_handle handle,
                                       rocblas_int ldw)
 {
     return rocsolver_zlatrd(handle, uplo, n, k, A, lda, E, tau, W, ldw);
+}
+/***************************************************************/
+
+/******************** LATRD_FORSYTRD ********************/
+inline rocblas_status rocsolver_latrd_forsytrd(rocblas_handle handle,
+                                               rocblas_fill uplo,
+                                               rocblas_int n,
+                                               rocblas_int k,
+                                               float* A,
+                                               rocblas_int lda,
+                                               float* E,
+                                               float* tau,
+                                               float* W,
+                                               rocblas_int ldw)
+{
+    return rocsolver_slatrd_forsytrd(handle, uplo, n, k, A, lda, E, tau, W, ldw);
+}
+
+inline rocblas_status rocsolver_latrd_forsytrd(rocblas_handle handle,
+                                               rocblas_fill uplo,
+                                               rocblas_int n,
+                                               rocblas_int k,
+                                               double* A,
+                                               rocblas_int lda,
+                                               double* E,
+                                               double* tau,
+                                               double* W,
+                                               rocblas_int ldw)
+{
+    return rocsolver_dlatrd_forsytrd(handle, uplo, n, k, A, lda, E, tau, W, ldw);
+}
+
+inline rocblas_status rocsolver_latrd_forsytrd(rocblas_handle handle,
+                                               rocblas_fill uplo,
+                                               rocblas_int n,
+                                               rocblas_int k,
+                                               rocblas_float_complex* A,
+                                               rocblas_int lda,
+                                               float* E,
+                                               rocblas_float_complex* tau,
+                                               rocblas_float_complex* W,
+                                               rocblas_int ldw)
+{
+    return rocsolver_clatrd_forsytrd(handle, uplo, n, k, A, lda, E, tau, W, ldw);
+}
+
+inline rocblas_status rocsolver_latrd_forsytrd(rocblas_handle handle,
+                                               rocblas_fill uplo,
+                                               rocblas_int n,
+                                               rocblas_int k,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               double* E,
+                                               rocblas_double_complex* tau,
+                                               rocblas_double_complex* W,
+                                               rocblas_int ldw)
+{
+    return rocsolver_zlatrd_forsytrd(handle, uplo, n, k, A, lda, E, tau, W, ldw);
 }
 /***************************************************************/
 
