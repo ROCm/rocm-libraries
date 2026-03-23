@@ -542,7 +542,7 @@ def parse_bwd_data_instances(instances, problem_name):
         if block_gemm_pipeline_scheduler == "Default":
             block_gemm_pipeline_scheduler = "Intrawave"
 
-        blk_gemm_pipeline_version = "v3"
+        blk_gemm_pipeline_version = "v1"
         if block_gemm_pipeline_scheduler == "Interwave":
             blk_gemm_pipeline_version = "v1"
 
@@ -558,7 +558,7 @@ def parse_bwd_data_instances(instances, problem_name):
         scheduler = block_gemm_pipeline_scheduler
         pipeline_version = blk_gemm_pipeline_version.upper()
 
-        # OLd CK pipeline version V5 maps to V6 for CK Tile
+        # Old CK pipeline version V5 maps to V6 for CK Tile
         if pipeline_version == "V5":
             pipeline_version = "V6"
 

@@ -4,6 +4,12 @@
 #pragma once
 
 #include <vector>
+#include <algorithm>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
 #include "../../experimental/builder/test/utils/conv_algorithm_type_utils.hpp"
 
 namespace ck_tile::builder::profiling {

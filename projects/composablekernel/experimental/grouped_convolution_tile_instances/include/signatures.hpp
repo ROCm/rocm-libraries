@@ -8,10 +8,10 @@
 #include "../../builder/test/impl/conv_signature_types.hpp"
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 
+namespace ck_tile::builder::profiling {
+
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
-
-namespace ck_tile::builder::profiling {
 
 constexpr auto SIGNATURE_NHWGC_FP32_FWD =
     ckt::ConvSignature{.spatial_dim            = 2,

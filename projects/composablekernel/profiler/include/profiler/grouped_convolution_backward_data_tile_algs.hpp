@@ -57,17 +57,19 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
 ///
 /// @see run_grouped_conv_backward_data_tile_algs()
 template <auto SIGNATURE>
-std::tuple<bool, float, std::string, int>
+std::tuple<bool, float, std::string, int, int>
 run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                          const std::string& split_k,
+                                         const index_t instance_index ,
                                          const ckt::Inputs<SIGNATURE>& inputs,
                                          const ckt::Outputs<SIGNATURE>& outputs,
                                          const ck_tile::stream_config& s_conf)
 {
     float best_avg_time = std::numeric_limits<float>::max();
     std::string best_op_name, op_name;
-    int best_split_k;
-    bool is_supported;
+    int best_split_k = 0;
+    ck::index_t best_instance_index = -1;
+    bool is_supported = false;
     float avg_time;
     bool all_instances_valid = true;
 
@@ -93,18 +95,26 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
         hipMemcpy(&ref.data()[0], reference.get().input, input_bytes_num, hipMemcpyDeviceToHost));
     const float max_accumulated_value = *std::max_element(ref.begin(), ref.end());
 
-    // TODO: Is this correct?
-    const index_t num_accums = std::accumulate(std::begin(conv_param.output_spatial_lengths_),
-                                               std::end(conv_param.output_spatial_lengths_),
-                                               static_cast<std::size_t>(1),
-                                               std::multiplies<std::size_t>()) *
-                               conv_param.N_;
+    const index_t num_accums = conv_param.K_;
 
-    // BWD data doesn't suport split-K autodeduce value -1
+    // BWD data doesn't support split-K autodeduce value -1
     auto split_k_values = get_split_k_values(split_k);
-    std::remove(split_k_values.begin(), split_k_values.end(), -1);
+    split_k_values.erase(
+        std::remove(split_k_values.begin(), split_k_values.end(), -1),
+        split_k_values.end());
 
+    index_t num_kernel      = 0;
     auto run_alg = [&](auto&& run_alg_func) {
+
+        num_kernel++;
+        // Skip if a specific instance was requested and this isn't it
+        const bool running_specific_instance = (instance_index != -1);
+        const bool current_is_target         = (num_kernel - 1 == instance_index);
+        if(running_specific_instance && !current_is_target)
+        {
+            return;
+        }
+
         for(auto& k_batch : split_k_values)
         {
             ckt::Args<SIGNATURE> args_k_batch = args;
@@ -127,11 +137,15 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                 const bool valid = report.get_errors().empty();
                 if(valid)
                 {
+                    if (avg_time < best_avg_time)
+                    {
+                        best_instance_index = num_kernel - 1;
+                    }
                     best_avg_time = std::min(best_avg_time, avg_time);
                     best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
                     best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
                     std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
-                              << op_name << ", SplitK " << k_batch << std::endl;
+                              << op_name << " (instance " << num_kernel-1 << "), SplitK " << k_batch << std::endl;
                 }
                 else
                 {
@@ -181,9 +195,9 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
     else
     {
         std::cout << "Signature not supported" << std::endl;
-        return std::make_tuple(false, best_avg_time, best_op_name, best_split_k);
+        return std::make_tuple(false, best_avg_time, best_op_name, best_split_k, best_instance_index);
     }
-    return std::make_tuple(all_instances_valid, best_avg_time, best_op_name, best_split_k);
+    return std::make_tuple(all_instances_valid, best_avg_time, best_op_name, best_split_k, best_instance_index);
 }
 
 } // namespace ck_tile::builder::profiling
