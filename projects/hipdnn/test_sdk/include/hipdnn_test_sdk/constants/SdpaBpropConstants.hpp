@@ -70,4 +70,16 @@ constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_SCALAR_STRIDES = {1, 1, 1, 
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_ATTN_MASK_DIMS = {2, 4, 128, 128};
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_ATTN_MASK_STRIDES = {65536, 16384, 128, 1};
 
+// Sequence length tensors: [batch=2, 1, 1, 1]
+constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_SEQ_LEN_DIMS = {2, 1, 1, 1};
+constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_SEQ_LEN_STRIDES = {1, 1, 1, 1};
+
+// Dropout mask: same shape as attention weights [batch=2, num_heads=4, seq_q=128, seq_kv=128]
+constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DROPOUT_MASK_DIMS = {2, 4, 128, 128};
+constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DROPOUT_MASK_STRIDES = {65536, 16384, 128, 1};
+
+// dBias output: [batch=2, num_heads=4, seq_q=128, seq_kv=128]
+constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DBIAS_DIMS = {2, 4, 128, 128};
+constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_DBIAS_STRIDES = {65536, 16384, 128, 1};
+
 } // namespace hipdnn_tests::constants

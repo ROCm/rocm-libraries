@@ -37,6 +37,7 @@ add_executable(
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaBpropDescriptorLowering.cpp
+    IntegrationSdpaBpropLifting.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
 

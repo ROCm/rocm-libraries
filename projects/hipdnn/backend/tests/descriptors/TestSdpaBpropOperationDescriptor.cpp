@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -845,87 +846,27 @@ TEST_F(TestSdpaBpropOperationDescriptor, GetOptionalTensorUnsetReturnsCount0)
         HIPDNN_ATTR_SDPA_BPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    // Scale tensor should be unset => elementCount == 0
-    int64_t count = 99;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &count,
-                                       nullptr));
-    ASSERT_EQ(count, 0);
+    const std::vector<hipdnnBackendAttributeName_t> optionalTensorAttrs = {
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_SCALE_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT,
+        HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT,
+    };
 
-    // Verify other optional tensors also return 0
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_ATTN_MASK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_Q_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEQ_LEN_KV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_SEED_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_OFFSET_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_MASK_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DROPOUT_SCALE_INV_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
-
-    count = 99;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_BPROP_DBIAS_EXT,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &count,
-                       nullptr);
-    ASSERT_EQ(count, 0);
+    for(const auto attr : optionalTensorAttrs)
+    {
+        int64_t count = 99;
+        ASSERT_NO_THROW(
+            desc->getAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, nullptr))
+            << "getAttribute failed for attr " << attr;
+        EXPECT_EQ(count, 0) << "Expected count 0 for unset optional attr " << attr;
+    }
 }
 
 // =============================================================================
@@ -1339,6 +1280,77 @@ TEST_F(TestSdpaBpropOperationDescriptor, GetTensorDescriptors)
 
     // 9 required + 10 optional tensors
     ASSERT_EQ(tensors.size(), 19u);
+
+    // Build UID->tensor map and verify every expected UID is present
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> tensorByUid;
+    std::unordered_set<int64_t> uids;
+    for(const auto& t : tensors)
+    {
+        ASSERT_NE(t, nullptr);
+        const auto uid = t->getData().uid;
+        uids.insert(uid);
+        tensorByUid[uid] = t;
+    }
+
+    // Required tensors with dims and strides verification
+    const std::vector<std::tuple<int64_t, std::vector<int64_t>, std::vector<int64_t>>>
+        requiredTensorsWithDims = {
+            {K_SDPA_BPROP_TENSOR_Q_UID,
+             toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_K_UID,
+             toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_K_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_V_UID,
+             toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_V_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_O_UID,
+             toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_O_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DO_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_STATS_UID,
+             toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DQ_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DK_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DV_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES)},
+        };
+
+    for(const auto& [uid, expectedDims, expectedStrides] : requiredTensorsWithDims)
+    {
+        EXPECT_NE(uids.count(uid), 0u) << "Missing required tensor UID " << uid;
+        ASSERT_NE(tensorByUid.count(uid), 0u) << "UID " << uid << " not in map";
+        const auto& tensor = tensorByUid[uid];
+        EXPECT_EQ(tensor->getData().dims, expectedDims) << "UID " << uid << " has mismatched dims";
+        EXPECT_EQ(tensor->getData().strides, expectedStrides)
+            << "UID " << uid << " has mismatched strides";
+    }
+
+    // Optional tensors (only verify UID presence, no dims/strides)
+    const std::vector<int64_t> optionalUids = {
+        K_SDPA_BPROP_TENSOR_SCALE_UID,
+        K_SDPA_BPROP_TENSOR_ATTN_MASK_UID,
+        K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID,
+        K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID,
+        K_SDPA_BPROP_TENSOR_SEED_UID,
+        K_SDPA_BPROP_TENSOR_OFFSET_UID,
+        K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID,
+        K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID,
+        K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID,
+        K_SDPA_BPROP_TENSOR_DBIAS_UID,
+    };
+    for(const auto uid : optionalUids)
+    {
+        EXPECT_NE(uids.count(uid), 0u) << "Missing optional tensor UID " << uid;
+    }
 }
 
 TEST_F(TestSdpaBpropOperationDescriptor, GetTensorDescriptorsRequiredOnly)
@@ -1369,6 +1381,77 @@ TEST_F(TestSdpaBpropOperationDescriptor, GetTensorDescriptorsRequiredOnly)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 9u);
+
+    // Build UID->tensor map and verify dims/strides for each required tensor
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> tensorByUid;
+    std::unordered_set<int64_t> uids;
+    for(const auto& t : tensors)
+    {
+        ASSERT_NE(t, nullptr);
+        const auto uid = t->getData().uid;
+        uids.insert(uid);
+        tensorByUid[uid] = t;
+    }
+
+    // Required tensors with dims and strides verification
+    const std::vector<std::tuple<int64_t, std::vector<int64_t>, std::vector<int64_t>>>
+        requiredTensorsWithDims = {
+            {K_SDPA_BPROP_TENSOR_Q_UID,
+             toVec(K_SDPA_BPROP_TENSOR_Q_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_K_UID,
+             toVec(K_SDPA_BPROP_TENSOR_K_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_K_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_V_UID,
+             toVec(K_SDPA_BPROP_TENSOR_V_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_V_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_O_UID,
+             toVec(K_SDPA_BPROP_TENSOR_O_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_O_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DO_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DO_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_STATS_UID,
+             toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DQ_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DQ_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DK_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DK_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DK_STRIDES)},
+            {K_SDPA_BPROP_TENSOR_DV_UID,
+             toVec(K_SDPA_BPROP_TENSOR_DV_DIMS),
+             toVec(K_SDPA_BPROP_TENSOR_DV_STRIDES)},
+        };
+
+    for(const auto& [uid, expectedDims, expectedStrides] : requiredTensorsWithDims)
+    {
+        EXPECT_NE(uids.count(uid), 0u) << "Missing required tensor UID " << uid;
+        ASSERT_NE(tensorByUid.count(uid), 0u) << "UID " << uid << " not in map";
+        const auto& tensor = tensorByUid[uid];
+        EXPECT_EQ(tensor->getData().dims, expectedDims) << "UID " << uid << " has mismatched dims";
+        EXPECT_EQ(tensor->getData().strides, expectedStrides)
+            << "UID " << uid << " has mismatched strides";
+    }
+
+    // No optional UIDs should be present
+    const std::vector<int64_t> optionalUids = {
+        K_SDPA_BPROP_TENSOR_SCALE_UID,
+        K_SDPA_BPROP_TENSOR_ATTN_MASK_UID,
+        K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID,
+        K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID,
+        K_SDPA_BPROP_TENSOR_SEED_UID,
+        K_SDPA_BPROP_TENSOR_OFFSET_UID,
+        K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID,
+        K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID,
+        K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID,
+        K_SDPA_BPROP_TENSOR_DBIAS_UID,
+    };
+    for(const auto uid : optionalUids)
+    {
+        EXPECT_EQ(uids.count(uid), 0u) << "Unexpected optional tensor UID " << uid;
+    }
 }
 
 TEST_F(TestSdpaBpropOperationDescriptor, GetTensorDescriptorsOrder)
