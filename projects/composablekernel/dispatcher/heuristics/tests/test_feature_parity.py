@@ -78,62 +78,108 @@ def _compute_features_manually(
         r = d % t
         return r / t if r > 0 else 1.0
 
+    # Problem-to-tile ratios
+    ratio_M_to_tile_m = M / max(tile_m, 1)
+    ratio_N_to_tile_n = N / max(tile_n, 1)
+    ratio_K_to_tile_k = K / max(tile_k, 1)
+
+    # Binary features: problem smaller than tile
+    problem_smaller_than_tile_m = float(M < tile_m)
+    problem_smaller_than_tile_n = float(N < tile_n)
+    problem_smaller_than_tile_k = float(K < tile_k)
+    any_dim_too_small = float((M < tile_m) or (N < tile_n) or (K < tile_k))
+
+    # Padding requirement features
+    needs_padding_m = float(tile_m > 0 and M % tile_m != 0)
+    needs_padding_n = float(tile_n > 0 and N % tile_n != 0)
+    needs_padding_k = float(tile_k > 0 and K % tile_k != 0)
+
+    # Interaction features
+    has_padding_when_needed_m = float(needs_padding_m and pad_m)
+    has_padding_when_needed_n = float(needs_padding_n and pad_n)
+    has_padding_when_needed_k = float(needs_padding_k and pad_k)
+
+    # Missing padding features
+    missing_required_padding_m = float(needs_padding_m and not pad_m)
+    missing_required_padding_n = float(needs_padding_n and not pad_n)
+    missing_required_padding_k = float(needs_padding_k and not pad_k)
+    missing_any_required_padding = float(
+        missing_required_padding_m or missing_required_padding_n or missing_required_padding_k
+    )
+
     return [
-        M,
-        N,
-        K,
-        split_k,
-        log2_M,
-        log2_N,
-        log2_K,
-        log2_MNK,
-        ai,
-        M / max(N, 1),
-        M / max(K, 1),
-        N / max(K, 1),
-        LAYOUT_MAP.get(layout, 0),
-        tile_m,
-        tile_n,
-        tile_k,
-        warp_m,
-        warp_n,
-        warp_k,
-        warp_tile_m,
-        warp_tile_n,
-        warp_tile_k,
-        PIPELINE_MAP.get(pipeline, 0),
-        SCHEDULER_MAP.get(scheduler, 0),
-        EPILOGUE_MAP.get(epilogue, 0),
-        float(pad_m),
-        float(pad_n),
-        float(pad_k),
-        float(persistent),
-        warp_m * warp_n * warp_k,
-        tile_m * tile_n * tile_k,
-        tile_m * tile_n,
-        lds_est,
-        lds_est / max(lds_cap, 1),
-        ntm,
-        ntn,
-        ntk,
-        ntm * ntn,
-        eff(M, tile_m),
-        eff(N, tile_n),
-        eff(K, tile_k),
-        eff(M, tile_m) * eff(N, tile_n) * eff(K, tile_k),
-        ntm * ntn / max(hw["num_cus"], 1),
-        hw["num_cus"],
-        hw["simds_per_cu"],
-        hw["num_cus"] * hw["simds_per_cu"],
-        hw["shader_engines"],
-        hw["max_clock_mhz"],
-        hw["max_waves_per_cu"],
-        hw["wavefront_size"],
-        hw["lds_capacity"],
-        hw["l1_cache_kb"],
-        hw["l2_cache_kb"],
-        hw["l3_cache_kb"],
-        hw["num_xcd"],
+        M,                                      # 0
+        N,                                      # 1
+        K,                                      # 2
+        split_k,                                # 3
+        log2_M,                                 # 4
+        log2_N,                                 # 5
+        log2_K,                                 # 6
+        log2_MNK,                               # 7
+        ai,                                     # 8
+        M / max(N, 1),                          # 9 (aspect_ratio_mn)
+        M / max(K, 1),                          # 10 (aspect_ratio_mk)
+        N / max(K, 1),                          # 11 (aspect_ratio_nk)
+        LAYOUT_MAP.get(layout, 0),              # 12
+        tile_m,                                 # 13
+        tile_n,                                 # 14
+        tile_k,                                 # 15
+        warp_m,                                 # 16
+        warp_n,                                 # 17
+        warp_k,                                 # 18
+        warp_tile_m,                            # 19
+        warp_tile_n,                            # 20
+        warp_tile_k,                            # 21
+        PIPELINE_MAP.get(pipeline, 0),          # 22
+        SCHEDULER_MAP.get(scheduler, 0),        # 23
+        EPILOGUE_MAP.get(epilogue, 0),          # 24
+        float(pad_m),                           # 25
+        float(pad_n),                           # 26
+        float(pad_k),                           # 27
+        float(persistent),                      # 28
+        warp_m * warp_n * warp_k,               # 29 (num_warps)
+        tile_m * tile_n * tile_k,               # 30 (tile_volume)
+        tile_m * tile_n,                        # 31 (tile_mn)
+        lds_est,                                # 32 (lds_usage_estimate)
+        lds_est / max(lds_cap, 1),              # 33 (lds_usage_ratio)
+        ntm,                                    # 34 (num_tiles_m)
+        ntn,                                    # 35 (num_tiles_n)
+        ntk,                                    # 36 (num_tiles_k)
+        ntm * ntn,                              # 37 (total_output_tiles)
+        eff(M, tile_m),                         # 38 (tile_eff_m)
+        eff(N, tile_n),                         # 39 (tile_eff_n)
+        eff(K, tile_k),                         # 40 (tile_eff_k)
+        eff(M, tile_m) * eff(N, tile_n) * eff(K, tile_k),  # 41 (overall_tile_efficiency)
+        ntm * ntn / max(hw["num_cus"], 1),      # 42 (cu_utilization)
+        ratio_M_to_tile_m,                      # 43
+        ratio_N_to_tile_n,                      # 44
+        ratio_K_to_tile_k,                      # 45
+        problem_smaller_than_tile_m,            # 46
+        problem_smaller_than_tile_n,            # 47
+        problem_smaller_than_tile_k,            # 48
+        any_dim_too_small,                      # 49
+        needs_padding_m,                        # 50
+        needs_padding_n,                        # 51
+        needs_padding_k,                        # 52
+        has_padding_when_needed_m,              # 53
+        has_padding_when_needed_n,              # 54
+        has_padding_when_needed_k,              # 55
+        missing_required_padding_m,             # 56
+        missing_required_padding_n,             # 57
+        missing_required_padding_k,             # 58
+        missing_any_required_padding,           # 59
+        hw["num_cus"],                          # 60
+        hw["simds_per_cu"],                     # 61
+        hw["num_cus"] * hw["simds_per_cu"],     # 62 (total_simds)
+        hw["shader_engines"],                   # 63
+        hw["max_clock_mhz"],                    # 64
+        hw["max_waves_per_cu"],                 # 65
+        hw["wavefront_size"],                   # 66
+        hw["lds_capacity"],                     # 67
+        hw["l1_cache_kb"],                      # 68
+        hw["l2_cache_kb"],                      # 69
+        hw["l3_cache_kb"],                      # 70
+        hw["num_xcd"],                          # 71
     ]
 
 
@@ -281,9 +327,9 @@ class TestFeatureParity:
         )
 
         manual_arr = np.array(manual, dtype=np.float64)
-        assert len(py_features) == len(manual_arr) == 55
+        assert len(py_features) == len(manual_arr) == 72
 
-        for i in range(55):
+        for i in range(72):
             assert py_features[i] == pytest.approx(
                 manual_arr[i], rel=1e-10, abs=1e-15
             ), (
@@ -291,7 +337,7 @@ class TestFeatureParity:
             )
 
     def test_feature_count(self, fe):
-        assert len(fe.get_feature_names()) == 55
+        assert len(fe.get_feature_names()) == 72
 
     def test_encoding_maps_match_cpp(self):
         """The C++ encode_* functions must use the same mapping as Python."""
