@@ -32,15 +32,15 @@ namespace pooling2d_gtest {
 // - Dataset 1: Intended for testing of asymmetric configs (tested in pooling2d_asymmetric.cpp)
 // - Dataset 2: Intended for testing of configs with wide window (tested in pooling2d_wide.cpp)
 
-// Unified test case structure for both 2D and 3D pooling
-// For 2D: input_dims is [N, C, H, W], lens/pads/strides are [H, W]
-// For 3D: input_dims is [N, C, D, H, W], lens/pads/strides are [D, H, W]
+// Unified test case structure for both 2D and 3D pooling (matches ctest pooling_driver names)
+// For 2D: in_shape is [N, C, H, W], lens/pads/strides are [H, W]
+// For 3D: in_shape is [N, C, D, H, W], lens/pads/strides are [D, H, W]
 struct PoolingTestCase
 {
-    std::vector<int> input_dims; // [N, C, ...] - size depends on spatial dims (4 for 2D, 5 for 3D)
-    std::vector<int> lens;       // Spatial dimensions (2 for 2D, 3 for 3D)
-    std::vector<int> pads;       // Spatial dimensions (2 for 2D, 3 for 3D)
-    std::vector<int> strides;    // Spatial dimensions (2 for 2D, 3 for 3D)
+    std::vector<int> in_shape; // [N, C, ...] - matches ctest in_shape
+    std::vector<int> lens;     // Spatial dimensions (2 for 2D, 3 for 3D)
+    std::vector<int> pads;     // Spatial dimensions (2 for 2D, 3 for 3D)
+    std::vector<int> strides;  // Spatial dimensions (2 for 2D, 3 for 3D)
     miopenIndexType_t index_type;
     miopenPoolingMode_t mode;
     int wsidx;
@@ -49,8 +49,8 @@ struct PoolingTestCase
 
     friend std::ostream& operator<<(std::ostream& os, const PoolingTestCase& tc)
     {
-        os << "input_dims: ";
-        miopen::LogRange(os << "[", tc.input_dims, ",") << "] ";
+        os << "in_shape: ";
+        miopen::LogRange(os << "[", tc.in_shape, ",") << "] ";
         os << "lens: ";
         miopen::LogRange(os << "[", tc.lens, ",") << "] ";
         os << "pads: ";
@@ -64,21 +64,21 @@ struct PoolingTestCase
 };
 
 // Helper function to calculate output spatial dimensions for pooling
-// Works for both 2D and 3D pooling based on input_dims size
-inline std::vector<int> CalculateOutputDims(const std::vector<int>& input_dims,
+// Works for both 2D and 3D pooling based on in_shape size
+inline std::vector<int> CalculateOutputDims(const std::vector<int>& in_shape,
                                             const std::vector<int>& lens,
                                             const std::vector<int>& strides,
                                             const std::vector<int>& pads)
 {
-    // input_dims is [N, C, ...] where ... are spatial dims
+    // in_shape is [N, C, ...] where ... are spatial dims
     // Returns [N, C, ...] with calculated output spatial dims
     std::vector<int> output_dims;
-    output_dims.reserve(input_dims.size());
-    output_dims.push_back(input_dims[0]); // N
-    output_dims.push_back(input_dims[1]); // C
+    output_dims.reserve(in_shape.size());
+    output_dims.push_back(in_shape[0]); // N
+    output_dims.push_back(in_shape[1]); // C
     for(size_t i = 0; i < lens.size(); i++)
     {
-        int input_size  = input_dims[i + 2];
+        int input_size  = in_shape[i + 2];
         int output_size = (input_size + 2 * pads[i] - lens[i]) / strides[i] + 1;
         output_dims.push_back(output_size);
     }
@@ -99,7 +99,7 @@ inline size_t GetIndexMax(miopenIndexType_t index_type)
 }
 
 // Filtering function matching ctest's run() method exactly
-// This copies the exact logic from pooling_gtest_common.hpp pooling_harness::run()
+// This copies the exact logic from test/pooling_common.hpp pooling_driver::run()
 // Matching variable names: idx_typ, idx_sz, spt_dim, wide_dataset
 inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
                                   int& num_uint16_case,
@@ -114,7 +114,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
     // Match ctest variable names exactly
     auto idx_typ = test_case.index_type;
     auto idx_sz  = sizeof(uint8_t);
-    int spt_dim  = static_cast<int>(test_case.input_dims.size()) - 2;
+    int spt_dim  = static_cast<int>(test_case.in_shape.size()) - 2;
     const bool skip_many_configs_with_non_int8_index =
         apply_index_type_limits;               // dataset_id == 0 behavior
     const bool wide_dataset = is_wide_dataset; // dataset_id == 2 behavior
@@ -229,7 +229,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
     }
 
     // 6. lens[i] > (input + 2*pads[i])
-    miopen::TensorDescriptor input_desc(miopenFloat, test_case.input_dims);
+    miopen::TensorDescriptor input_desc(miopenFloat, test_case.in_shape);
     for(int i = 0; i < spt_dim; i++)
     {
         if(test_case.lens[i] >
@@ -284,7 +284,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
 // in ctest, matching the behavior where the test harness processes cases sequentially.
 // These counters are NOT reset per input shape - they accumulate to limit the total number
 // of non-uint8 index type test cases when apply_index_type_limits is true.
-inline void AddTestCasesForInput(const std::vector<int>& input_dims,
+inline void AddTestCasesForInput(const std::vector<int>& in_shape,
                                  const std::vector<std::vector<int>>& lens_list,
                                  const std::vector<std::vector<int>>& strides_list,
                                  const std::vector<std::vector<int>>& pads_list,
@@ -297,9 +297,9 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                  int& num_uint32_case_imgidx,
                                  int& num_uint64_case,
                                  int& num_uint64_case_imgidx,
-                                 bool skip_wide_check         = false,
-                                 bool apply_index_type_limits = true,
-                                 bool is_wide_dataset         = false,
+                                 bool skip_wide_check          = false,
+                                 bool apply_index_type_limits  = true,
+                                 bool is_wide_dataset          = false,
                                  const std::string& in_layout  = "NCHW",
                                  const std::string& out_layout = "NCHW")
 {
@@ -316,9 +316,15 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                     {
                         for(int wsidx : wsidx_values)
                         {
-                            PoolingTestCase test_case = {
-                                input_dims, lens, pads, strides, index_type, mode, wsidx,
-                                in_layout, out_layout};
+                            PoolingTestCase test_case = {in_shape,
+                                                         lens,
+                                                         pads,
+                                                         strides,
+                                                         index_type,
+                                                         mode,
+                                                         wsidx,
+                                                         in_layout,
+                                                         out_layout};
 
                             if(ShouldIncludeTestCase(test_case,
                                                      num_uint16_case,
@@ -341,7 +347,7 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
 }
 
 // Overload for when apply_index_type_limits is false: counters are not needed.
-inline void AddTestCasesForInput(const std::vector<int>& input_dims,
+inline void AddTestCasesForInput(const std::vector<int>& in_shape,
                                  const std::vector<std::vector<int>>& lens_list,
                                  const std::vector<std::vector<int>>& strides_list,
                                  const std::vector<std::vector<int>>& pads_list,
@@ -356,7 +362,7 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
 {
     int num_uint16_case = 0, num_uint32_case = 0, num_uint32_case_imgidx = 0;
     int num_uint64_case = 0, num_uint64_case_imgidx = 0;
-    AddTestCasesForInput(input_dims,
+    AddTestCasesForInput(in_shape,
                          lens_list,
                          strides_list,
                          pads_list,
@@ -379,9 +385,8 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
 template <typename T, typename Index>
 void RunPooling2dTestWithIndexType(const PoolingTestCase& test_case)
 {
-    // Create input tensor for 2D pooling
-    // input_dims should be [N, C, H, W] for 2D
-    tensor<T> input{test_case.input_dims};
+    // Create input tensor for 2D pooling (in_shape matches ctest)
+    tensor<T> input{test_case.in_shape};
     input.generate(tensor_elem_gen_integer{
         (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
 
@@ -390,11 +395,10 @@ void RunPooling2dTestWithIndexType(const PoolingTestCase& test_case)
     {
         const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
         std::vector<std::size_t> dim_strides;
-        miopen::tensor_layout_to_strides(
-            dim_lens,
-            miopen::tensor_layout_get_default(input.desc.GetNumDims()),
-            test_case.in_layout,
-            dim_strides);
+        miopen::tensor_layout_to_strides(dim_lens,
+                                         miopen::tensor_layout_get_default(input.desc.GetNumDims()),
+                                         test_case.in_layout,
+                                         dim_strides);
         input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
     }
 

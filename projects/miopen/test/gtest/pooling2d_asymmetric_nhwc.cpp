@@ -20,7 +20,7 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricNHWCTestCase
 
     std::vector<pooling2d_gtest::PoolingTestCase> test_cases;
 
-    std::vector<std::vector<int>> dataset1_inputs = {{1, 4, 4, 4}};
+    std::vector<std::vector<int>> dataset1_inputs  = {{1, 4, 4, 4}};
     std::vector<std::vector<int>> dataset1_lens    = {{2, 2}, {1, 2}, {2, 1}};
     std::vector<std::vector<int>> dataset1_strides = {{1, 1}, {2, 1}, {1, 2}, {2, 2}};
 #if WORKAROUND_ISSUE_1670
@@ -30,13 +30,13 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricNHWCTestCase
 #endif
 
     std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint32};
-    std::vector<miopenPoolingMode_t> modes = {
-        miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+    std::vector<miopenPoolingMode_t> modes              = {
+                     miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
-    for(const auto& input_dims : dataset1_inputs)
+    for(const auto& in_shape : dataset1_inputs)
     {
-        pooling2d_gtest::AddTestCasesForInput(input_dims,
+        pooling2d_gtest::AddTestCasesForInput(in_shape,
                                               dataset1_lens,
                                               dataset1_strides,
                                               dataset1_pads,
@@ -44,8 +44,8 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricNHWCTestCase
                                               modes,
                                               wsidx_values,
                                               test_cases,
-                                              true,   // skip_wide_check
-                                              false,  // is_wide_dataset
+                                              true,  // skip_wide_check
+                                              false, // is_wide_dataset
                                               "NHWC",
                                               "NHWC");
     }

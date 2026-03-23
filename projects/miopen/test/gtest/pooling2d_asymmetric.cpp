@@ -45,12 +45,12 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricTestCases()
     // Match ctest: Dataset 1 only uses miopenIndexUint32
     std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint32};
     std::vector<miopenPoolingMode_t> modes              = {
-        miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+                     miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
-    for(const auto& input_dims : dataset1_inputs)
+    for(const auto& in_shape : dataset1_inputs)
     {
-        pooling2d_gtest::AddTestCasesForInput(input_dims,
+        pooling2d_gtest::AddTestCasesForInput(in_shape,
                                               dataset1_lens,
                                               dataset1_strides,
                                               dataset1_pads,

@@ -66,9 +66,9 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
     int num_uint64_case        = 0;
     int num_uint64_case_imgidx = 0;
 
-    for(const auto& input_dims : dataset0_inputs)
+    for(const auto& in_shape : dataset0_inputs)
     {
-        AddTestCasesForInput(input_dims,
+        AddTestCasesForInput(in_shape,
                              dataset0_lens,
                              dataset0_strides,
                              dataset0_pads,

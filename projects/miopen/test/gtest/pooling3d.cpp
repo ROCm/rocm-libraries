@@ -59,9 +59,9 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
     int num_uint64_case        = 0;
     int num_uint64_case_imgidx = 0;
 
-    for(const auto& input_dims : dataset0_inputs)
+    for(const auto& in_shape : dataset0_inputs)
     {
-        pooling2d_gtest::AddTestCasesForInput(input_dims,
+        pooling2d_gtest::AddTestCasesForInput(in_shape,
                                               dataset0_lens,
                                               dataset0_strides,
                                               dataset0_pads,
@@ -91,8 +91,8 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
 template <typename T, typename Index>
 void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
 {
-    // Create input tensor
-    tensor<T> input{test_case.input_dims};
+    // Create input tensor (in_shape matches ctest)
+    tensor<T> input{test_case.in_shape};
     input.generate(tensor_elem_gen_integer{
         (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
 
@@ -101,11 +101,10 @@ void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
     {
         const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
         std::vector<std::size_t> dim_strides;
-        miopen::tensor_layout_to_strides(
-            dim_lens,
-            miopen::tensor_layout_get_default(input.desc.GetNumDims()),
-            test_case.in_layout,
-            dim_strides);
+        miopen::tensor_layout_to_strides(dim_lens,
+                                         miopen::tensor_layout_get_default(input.desc.GetNumDims()),
+                                         test_case.in_layout,
+                                         dim_strides);
         input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
     }
 
