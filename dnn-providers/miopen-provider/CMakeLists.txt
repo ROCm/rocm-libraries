@@ -169,6 +169,7 @@ add_library(
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
+target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden

@@ -43,8 +43,8 @@ ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 | `hipdnn_data_sdk_tests` | Data SDK unit tests | Flatbuffer objects, utilities |
 | `hipdnn_plugin_sdk_tests` | Plugin SDK unit tests | Plugin interface utilities |
 | `hipdnn_test_sdk_tests` | Test SDK unit tests | Test utility functions |
-| `public_hipdnn_backend_tests` | Backend API tests | Public C API black-box tests |
-| `public_hipdnn_frontend_tests` | Frontend integration tests | E2E frontend tests |
+| `hipdnn_public_backend_tests` | Backend API tests | Public C API black-box tests |
+| `hipdnn_public_frontend_tests` | Frontend integration tests | E2E frontend tests |
 | `miopen_plugin_tests` | MIOpen plugin unit tests | Plugin-specific tests |
 | `miopen_plugin_integration_tests` | MIOpen integration tests | GPU-required E2E tests |
 
