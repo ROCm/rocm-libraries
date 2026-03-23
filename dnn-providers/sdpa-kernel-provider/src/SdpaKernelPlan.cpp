@@ -10,34 +10,34 @@
 namespace sdpa_kernel_provider
 {
 
-SdpaKernelPlan::SdpaKernelPlan(hipModule_t module,
+SdpaKernelPlan::SdpaKernelPlan(hipModule_t kernelModule,
                                hipFunction_t function,
                                int64_t qUid,
                                int64_t kUid,
                                int64_t vUid,
                                int64_t oUid,
-                               size_t batchSize,
-                               size_t numHeadsQ,
-                               size_t numHeadsKv,
-                               size_t seqLenQ,
-                               size_t seqLenKv,
-                               size_t headDimQk,
-                               size_t headDimV,
-                               size_t qStrideSeq,
-                               size_t qStrideRow,
-                               size_t qStrideHead,
-                               size_t qStrideBatch,
-                               size_t kStrideSeq,
-                               size_t kStrideHead,
-                               size_t kStrideBatch,
-                               size_t vStrideSeq,
-                               size_t vStrideHead,
-                               size_t vStrideBatch,
-                               size_t oStrideSeq,
-                               size_t oStrideHead,
-                               size_t oStrideBatch,
+                               unsigned int batchSize,
+                               unsigned int numHeadsQ,
+                               unsigned int numHeadsKv,
+                               unsigned int seqLenQ,
+                               unsigned int seqLenKv,
+                               unsigned int headDimQk,
+                               unsigned int headDimV,
+                               unsigned int qStrideSeq,
+                               unsigned int qStrideRow,
+                               unsigned int qStrideHead,
+                               unsigned int qStrideBatch,
+                               unsigned int kStrideSeq,
+                               unsigned int kStrideHead,
+                               unsigned int kStrideBatch,
+                               unsigned int vStrideSeq,
+                               unsigned int vStrideHead,
+                               unsigned int vStrideBatch,
+                               unsigned int oStrideSeq,
+                               unsigned int oStrideHead,
+                               unsigned int oStrideBatch,
                                float attnScale)
-    : _module(module)
+    : _module(kernelModule)
     , _function(function)
     , _qUid(qUid)
     , _kUid(kUid)
@@ -80,6 +80,92 @@ SdpaKernelPlan::~SdpaKernelPlan()
     }
 }
 
+SdpaKernelPlan::SdpaKernelPlan(SdpaKernelPlan&& other) noexcept
+    : _module(other._module)
+    , _function(other._function)
+    , _qUid(other._qUid)
+    , _kUid(other._kUid)
+    , _vUid(other._vUid)
+    , _oUid(other._oUid)
+    , _batchSize(other._batchSize)
+    , _numHeadsQ(other._numHeadsQ)
+    , _numHeadsKv(other._numHeadsKv)
+    , _seqLenQ(other._seqLenQ)
+    , _seqLenKv(other._seqLenKv)
+    , _headDimQk(other._headDimQk)
+    , _headDimV(other._headDimV)
+    , _qStrideSeq(other._qStrideSeq)
+    , _qStrideRow(other._qStrideRow)
+    , _qStrideHead(other._qStrideHead)
+    , _qStrideBatch(other._qStrideBatch)
+    , _kStrideSeq(other._kStrideSeq)
+    , _kStrideHead(other._kStrideHead)
+    , _kStrideBatch(other._kStrideBatch)
+    , _vStrideSeq(other._vStrideSeq)
+    , _vStrideHead(other._vStrideHead)
+    , _vStrideBatch(other._vStrideBatch)
+    , _oStrideSeq(other._oStrideSeq)
+    , _oStrideHead(other._oStrideHead)
+    , _oStrideBatch(other._oStrideBatch)
+    , _attnScale(other._attnScale)
+{
+    // Transfer ownership - set source to nullptr to prevent double-free
+    other._module = nullptr;
+    other._function = nullptr;
+}
+
+SdpaKernelPlan& SdpaKernelPlan::operator=(SdpaKernelPlan&& other) noexcept
+{
+    if(this != &other)
+    {
+        // Clean up existing resource
+        if(_module != nullptr)
+        {
+            hipError_t err = hipModuleUnload(_module);
+            if(err != hipSuccess)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR(
+                    "Failed to unload kernel module during move assignment, error: "
+                    << hipGetErrorString(err));
+            }
+        }
+
+        // Transfer ownership
+        _module = other._module;
+        _function = other._function;
+        _qUid = other._qUid;
+        _kUid = other._kUid;
+        _vUid = other._vUid;
+        _oUid = other._oUid;
+        _batchSize = other._batchSize;
+        _numHeadsQ = other._numHeadsQ;
+        _numHeadsKv = other._numHeadsKv;
+        _seqLenQ = other._seqLenQ;
+        _seqLenKv = other._seqLenKv;
+        _headDimQk = other._headDimQk;
+        _headDimV = other._headDimV;
+        _qStrideSeq = other._qStrideSeq;
+        _qStrideRow = other._qStrideRow;
+        _qStrideHead = other._qStrideHead;
+        _qStrideBatch = other._qStrideBatch;
+        _kStrideSeq = other._kStrideSeq;
+        _kStrideHead = other._kStrideHead;
+        _kStrideBatch = other._kStrideBatch;
+        _vStrideSeq = other._vStrideSeq;
+        _vStrideHead = other._vStrideHead;
+        _vStrideBatch = other._vStrideBatch;
+        _oStrideSeq = other._oStrideSeq;
+        _oStrideHead = other._oStrideHead;
+        _oStrideBatch = other._oStrideBatch;
+        _attnScale = other._attnScale;
+
+        // Set source to nullptr to prevent double-free
+        other._module = nullptr;
+        other._function = nullptr;
+    }
+    return *this;
+}
+
 size_t SdpaKernelPlan::getWorkspaceSize(const SdpaKernelHandle& /*handle*/) const
 {
     // Forward-only kernel requires no workspace (uses 64KB LDS internally)
@@ -118,40 +204,40 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
     args.scalar = _attnScale;
 
     // Q dimensions and strides (convert to bytes: stride * sizeof(bfloat16))
-    constexpr size_t bf16_size = 2;
-    args.s_seq_len = static_cast<unsigned int>(_seqLenQ);
-    args.s_Seqs = static_cast<unsigned int>(_qStrideSeq * bf16_size);
-    args.s_Ts = static_cast<unsigned int>(_qStrideRow * bf16_size);
-    args.s_Hs = static_cast<unsigned int>(_qStrideHead * bf16_size);
-    args.s_Bs = static_cast<unsigned int>(_qStrideBatch * bf16_size);
+    constexpr unsigned int K_BF16_SIZE = 2;
+    args.s_seq_len = _seqLenQ;
+    args.s_Seqs = _qStrideSeq * K_BF16_SIZE;
+    args.s_Ts = _qStrideRow * K_BF16_SIZE;
+    args.s_Hs = _qStrideHead * K_BF16_SIZE;
+    args.s_Bs = _qStrideBatch * K_BF16_SIZE;
 
     // GQA ratio
-    args.s_gqa = static_cast<unsigned int>(_numHeadsQ / _numHeadsKv);
+    args.s_gqa = _numHeadsQ / _numHeadsKv;
 
     // K strides (in bytes)
-    args.s_k_Seqs = static_cast<unsigned int>(_kStrideSeq * bf16_size);
-    args.s_k_Hs = static_cast<unsigned int>(_kStrideHead * bf16_size);
-    args.s_k_Bs = static_cast<unsigned int>(_kStrideBatch * bf16_size);
+    args.s_k_Seqs = _kStrideSeq * K_BF16_SIZE;
+    args.s_k_Hs = _kStrideHead * K_BF16_SIZE;
+    args.s_k_Bs = _kStrideBatch * K_BF16_SIZE;
 
     // Options
     args.s_opt = 0; // Default: no special options (RTNE rounding)
     args.s_lse = 0; // POC: don't compute LSE
 
     // KV dimensions
-    args.s_kv_seq_len = static_cast<unsigned int>(_seqLenKv);
-    args.s_qk_head_dim = static_cast<unsigned int>(_headDimQk);
-    args.s_v_head_dim = static_cast<unsigned int>(_headDimV);
-    args.s_q_head_num = static_cast<unsigned int>(_numHeadsQ);
+    args.s_kv_seq_len = _seqLenKv;
+    args.s_qk_head_dim = _headDimQk;
+    args.s_v_head_dim = _headDimV;
+    args.s_q_head_num = _numHeadsQ;
 
     // V strides (in bytes)
-    args.s_v_Seqs = static_cast<unsigned int>(_vStrideSeq * bf16_size);
-    args.s_v_Hs = static_cast<unsigned int>(_vStrideHead * bf16_size);
-    args.s_v_Bs = static_cast<unsigned int>(_vStrideBatch * bf16_size);
+    args.s_v_Seqs = _vStrideSeq * K_BF16_SIZE;
+    args.s_v_Hs = _vStrideHead * K_BF16_SIZE;
+    args.s_v_Bs = _vStrideBatch * K_BF16_SIZE;
 
     // O strides (in bytes)
-    args.s_o_Seqs = static_cast<unsigned int>(_oStrideSeq * bf16_size);
-    args.s_o_Hs = static_cast<unsigned int>(_oStrideHead * bf16_size);
-    args.s_o_Bs = static_cast<unsigned int>(_oStrideBatch * bf16_size);
+    args.s_o_Seqs = _oStrideSeq * K_BF16_SIZE;
+    args.s_o_Hs = _oStrideHead * K_BF16_SIZE;
+    args.s_o_Bs = _oStrideBatch * K_BF16_SIZE;
 
     // Variable-length sequence pointers (nullptr for batch mode)
     args.ptr_qseq = nullptr;
@@ -179,19 +265,20 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
 
     // Compute grid dimensions
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
-    constexpr size_t ts_qo = 256;
-    unsigned int gdx = static_cast<unsigned int>((_seqLenQ + ts_qo - 1) / ts_qo);
-    unsigned int gdy = static_cast<unsigned int>(_numHeadsQ);
-    unsigned int gdz = static_cast<unsigned int>(_batchSize);
+    constexpr unsigned int K_TS_QO = 256;
+    unsigned int gridDimX = (_seqLenQ + K_TS_QO - 1) / K_TS_QO;
+    unsigned int gridDimY = _numHeadsQ;
+    unsigned int gridDimZ = _batchSize;
 
     // Block dimensions (fixed for this kernel)
-    constexpr unsigned int bdx = 512;
-    constexpr unsigned int bdy = 1;
-    constexpr unsigned int bdz = 1;
+    constexpr unsigned int K_BLOCK_DIM_X = 512;
+    constexpr unsigned int K_BLOCK_DIM_Y = 1;
+    constexpr unsigned int K_BLOCK_DIM_Z = 1;
 
     // Launch kernel using HIP_LAUNCH_PARAM mechanism
     // This is required for passing large argument structures(656 bytes) to ASM kernels
     size_t argSize = sizeof(args);
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) - HIP API requires C-style array
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
                       &args,
                       HIP_LAUNCH_PARAM_BUFFER_SIZE,
@@ -199,12 +286,12 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
                       HIP_LAUNCH_PARAM_END};
 
     hipError_t err = hipModuleLaunchKernel(_function,
-                                           gdx,
-                                           gdy,
-                                           gdz, // grid dimensions
-                                           bdx,
-                                           bdy,
-                                           bdz, // block dimensions
+                                           gridDimX,
+                                           gridDimY,
+                                           gridDimZ, // grid dimensions
+                                           K_BLOCK_DIM_X,
+                                           K_BLOCK_DIM_Y,
+                                           K_BLOCK_DIM_Z, // block dimensions
                                            0, // shared memory bytes (kernel uses LDS internally)
                                            nullptr, // stream (use default)
                                            nullptr, // kernel arguments (not used with config)
@@ -216,9 +303,9 @@ void SdpaKernelPlan::execute(const SdpaKernelHandle& /*handle*/,
         return;
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("SDPA kernel launched: grid=[" << gdx << "," << gdy << "," << gdz
-                                                          << "] block=[" << bdx << "," << bdy << ","
-                                                          << bdz << "]");
+    HIPDNN_PLUGIN_LOG_INFO("SDPA kernel launched: grid=["
+                           << gridDimX << "," << gridDimY << "," << gridDimZ << "] block=["
+                           << K_BLOCK_DIM_X << "," << K_BLOCK_DIM_Y << "," << K_BLOCK_DIM_Z << "]");
 }
 
 }

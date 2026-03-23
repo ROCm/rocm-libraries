@@ -101,44 +101,44 @@ void SdpaKernelPlanBuilder::buildPlan(
 
     // Extract dimensions from Q tensor: [B, H_q, S_q, D_qk]
     auto* qDims = qTensor->dims();
-    size_t batchSize = static_cast<size_t>(qDims->Get(0));
-    size_t numHeadsQ = static_cast<size_t>(qDims->Get(1));
-    size_t seqLenQ = static_cast<size_t>(qDims->Get(2));
-    size_t headDimQk = static_cast<size_t>(qDims->Get(3));
+    auto batchSize = static_cast<unsigned int>(qDims->Get(0));
+    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
+    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
     // Extract dimensions from K tensor: [B, H_kv, S_kv, D_qk]
     auto* kDims = kTensor->dims();
-    size_t numHeadsKv = static_cast<size_t>(kDims->Get(1));
-    size_t seqLenKv = static_cast<size_t>(kDims->Get(2));
+    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(1));
+    auto seqLenKv = static_cast<unsigned int>(kDims->Get(2));
 
     // Extract dimensions from V tensor: [B, H_kv, S_kv, D_v]
     auto* vDims = vTensor->dims();
-    size_t headDimV = static_cast<size_t>(vDims->Get(3));
+    auto headDimV = static_cast<unsigned int>(vDims->Get(3));
 
     // Extract strides (in elements) - Q: [B, H_q, S_q, D_qk]
     auto* qStrides = qTensor->strides();
-    size_t qStrideBatch = static_cast<size_t>(qStrides->Get(0));
-    size_t qStrideHead = static_cast<size_t>(qStrides->Get(1));
-    size_t qStrideSeq = static_cast<size_t>(qStrides->Get(2));
-    size_t qStrideRow = qStrideSeq; // Same as sequence stride
+    auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
+    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
+    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+    auto qStrideRow = qStrideSeq; // Same as sequence stride
 
     // Extract strides - K: [B, H_kv, S_kv, D_qk]
     auto* kStrides = kTensor->strides();
-    size_t kStrideBatch = static_cast<size_t>(kStrides->Get(0));
-    size_t kStrideHead = static_cast<size_t>(kStrides->Get(1));
-    size_t kStrideSeq = static_cast<size_t>(kStrides->Get(2));
+    auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
+    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
+    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
 
     // Extract strides - V: [B, H_kv, S_kv, D_v]
     auto* vStrides = vTensor->strides();
-    size_t vStrideBatch = static_cast<size_t>(vStrides->Get(0));
-    size_t vStrideHead = static_cast<size_t>(vStrides->Get(1));
-    size_t vStrideSeq = static_cast<size_t>(vStrides->Get(2));
+    auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
+    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
+    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
 
     // Extract strides - O: [B, H_q, S_q, D_v]
     auto* oStrides = oTensor->strides();
-    size_t oStrideBatch = static_cast<size_t>(oStrides->Get(0));
-    size_t oStrideHead = static_cast<size_t>(oStrides->Get(1));
-    size_t oStrideSeq = static_cast<size_t>(oStrides->Get(2));
+    auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
+    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
+    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
 
     // Get attention scale (default: 1/sqrt(D_qk) if not provided)
     float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
