@@ -288,7 +288,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
     const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid());
+    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph via fromBackendDescriptor
     auto liftedGraph = std::make_shared<TestableGraph>();
@@ -752,7 +752,7 @@ TEST_F(IntegrationGraphLifting, PointwiseLiftWithoutFinalization)
 
     // Create backend descriptor from bytes (no handle, no finalize)
     const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid());
+    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph
     auto liftedGraph = std::make_shared<TestableGraph>();

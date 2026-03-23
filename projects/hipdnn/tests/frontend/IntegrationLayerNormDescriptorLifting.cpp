@@ -196,7 +196,8 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
 
     EXPECT_EQ(lnNode->attributes.get_forward_phase(), NormFwdPhase::TRAINING);
     EXPECT_EQ(lnNode->attributes.get_name(), "layernorm_op");
-    EXPECT_GT(lnNode->attributes.get_normalized_dim_count(), 0);
+    // X_DIMS={2,64,32,32}, SCALE_DIMS={1,64,32,32}: 3 trailing dims are normalized
+    EXPECT_EQ(lnNode->attributes.get_normalized_dim_count(), 3);
 
     // Verify tensor references on the node
     EXPECT_EQ(lnNode->attributes.get_x()->get_uid(), ln_constants::K_LAYERNORM_TENSOR_X_UID);
@@ -368,7 +369,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormLiftWithoutFinalization)
 
     // Create backend descriptor from bytes (no handle, no finalize)
     const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
-    ASSERT_TRUE(graphDesc.valid());
+    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
 
     // Lift into a new graph
     auto liftedGraph = std::make_shared<TestableGraph>();

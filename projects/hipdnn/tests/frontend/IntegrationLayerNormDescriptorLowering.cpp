@@ -234,6 +234,8 @@ TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
     EXPECT_TRUE(layernorm->inv_variance_tensor_uid.has_value());
     EXPECT_EQ(layernorm->inv_variance_tensor_uid.value(), K_LAYERNORM_TENSOR_INV_VARIANCE_UID);
     EXPECT_EQ(layernorm->forward_phase, NormFwdPhaseSdk::TRAINING);
+    // X_DIMS={2,64,32,32}, SCALE_DIMS={1,64,32,32}: 3 trailing dims are normalized
+    EXPECT_EQ(layernorm->normalized_dim_count, 3);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
