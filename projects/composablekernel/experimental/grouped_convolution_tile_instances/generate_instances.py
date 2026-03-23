@@ -144,6 +144,7 @@ def copy_includes(instances_path):
     output_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(f"{inc_dir}/include/instance_includes.inc", instances_path)
     shutil.copy(f"{inc_dir}/include/instance_run.inc", instances_path)
+    shutil.copy(f"{inc_dir}/include/signatures.hpp", instances_path)
 
 def generate_calls_inc(instances, problem_name, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
