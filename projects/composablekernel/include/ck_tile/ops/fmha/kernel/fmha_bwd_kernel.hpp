@@ -1366,9 +1366,9 @@ struct FmhaBwdOGradDotOKernel
         const void* o_ptr;
         const void* do_ptr;
         void* d_ptr;
-        const void* lse_ptr;  // log-sum-exp from forward pass, shape [batch, nhead, seqlen_q]
+        const void* lse_ptr; // log-sum-exp from forward pass, shape [batch, nhead, seqlen_q]
         const LSEDataType* sink_ptr; // sink scores, shape [batch, nhead]; nullptr disables sink
-        LSEDataType*       d_sink_ptr; // sink gradient output, shape [nhead]; nullptr disables sink grad
+        LSEDataType* d_sink_ptr; // sink gradient output, shape [nhead]; nullptr disables sink grad
 
         float p_undrop;
 

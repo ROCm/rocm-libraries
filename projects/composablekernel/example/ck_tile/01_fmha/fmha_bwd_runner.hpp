@@ -291,8 +291,9 @@ bwd_result fmha_bwd_run(mode_enum mode,
     if(sink_grad)
     {
         std::uniform_real_distribution<float> sink_dist(30.0f, 60.0f);
-        sink_host.ForEach(
-            [&](auto& self, auto i) { self(i) = static_cast<LSEDataType>(sink_dist(random_engine)); });
+        sink_host.ForEach([&](auto& self, auto i) {
+            self(i) = static_cast<LSEDataType>(sink_dist(random_engine));
+        });
     }
     ck_tile::HostTensor<DDataType> d_host(
         std::array<ck_tile::index_t, 3>{shape_batch, nhead, shape_seqlen_q});
