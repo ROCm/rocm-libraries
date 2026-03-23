@@ -847,7 +847,7 @@ class KernelWriterAssembly(KernelWriter):
             # Need to allocate actual Vreg only for bi == 0.
             # Reuse same location for T1,...
             ri2 = 0
-          moduleVgprMacroValu_T.add(RegSet("v", "vgprValu%s_T%u_I%u"%(tc, bi,iui), "vgprValu%s_X0_I0_BASE"%tc, sAorB.startVgprCvt - sAorB.startVgprValu + ri2))
+          moduleVgprMacroValu_T.add(RegSet("v", "vgprValu%s_T%u_I%u"%(tc, bi,iui), sAorB.startVgprCvt, ri2))
           ri += sAorB.numVgprValuPerBlock
     return moduleVgprMacroValu_T
 
