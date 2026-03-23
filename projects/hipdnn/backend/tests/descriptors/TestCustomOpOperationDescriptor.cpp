@@ -94,6 +94,7 @@ protected:
     std::unique_ptr<HipdnnBackendDescriptor> _input0 = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _input1 = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _output0 = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _output1 = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _unfinalizedTensor = nullptr;
 
     void SetUp() override
@@ -102,6 +103,7 @@ protected:
         _input0 = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_0, {2, 3}, {3, 1});
         _input1 = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_1, {2, 3}, {3, 1});
         _output0 = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0, {2, 3}, {3, 1});
+        _output1 = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_1, {2, 3}, {3, 1});
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -111,6 +113,7 @@ protected:
         _input0.reset();
         _input1.reset();
         _output0.reset();
+        _output1.reset();
         _unfinalizedTensor.reset();
     }
 };
@@ -152,6 +155,16 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutCustomOpId)
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithEmptyCustomOpId)
+{
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT});
+    auto desc = getDescriptor();
+    const std::string emptyId;
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT, HIPDNN_TYPE_CHAR, 0, emptyId.c_str());
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
     setAllAttributesExcept({HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT});
@@ -189,6 +202,21 @@ TEST_F(TestCustomOpOperationDescriptor, SetOutputTensorArray)
     ASSERT_EQ(desc->getOutputDescs().size(), 1);
     ASSERT_EQ(desc->getData().output_tensor_uids.size(), 1);
     ASSERT_EQ(desc->getData().output_tensor_uids[0], K_CUSTOM_OP_OUTPUT_UID_0);
+}
+
+TEST_F(TestCustomOpOperationDescriptor, SetMultipleOutputTensorArray)
+{
+    auto desc = getDescriptor();
+    std::array<HipdnnBackendDescriptor*, 2> outputs = {_output0.get(), _output1.get()};
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       2,
+                                       static_cast<const void*>(outputs.data())));
+
+    ASSERT_EQ(desc->getOutputDescs().size(), 2);
+    ASSERT_EQ(desc->getData().output_tensor_uids.size(), 2);
+    ASSERT_EQ(desc->getData().output_tensor_uids[0], K_CUSTOM_OP_OUTPUT_UID_0);
+    ASSERT_EQ(desc->getData().output_tensor_uids[1], K_CUSTOM_OP_OUTPUT_UID_1);
 }
 
 TEST_F(TestCustomOpOperationDescriptor, SetCustomOpId)
@@ -300,6 +328,15 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeInputTensorArray)
                                        &elementCount,
                                        nullptr));
     ASSERT_EQ(elementCount, 2);
+
+    std::array<HipdnnBackendDescriptor*, 2> retrieved = {nullptr, nullptr};
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       2,
+                                       &elementCount,
+                                       static_cast<void*>(retrieved.data())));
+    ASSERT_NE(retrieved[0], nullptr);
+    ASSERT_NE(retrieved[1], nullptr);
 }
 
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
@@ -314,6 +351,14 @@ TEST_F(TestCustomOpOperationDescriptor, GetAttributeOutputTensorArray)
                                        &elementCount,
                                        nullptr));
     ASSERT_EQ(elementCount, 1);
+
+    HipdnnBackendDescriptor* retrieved = nullptr;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       static_cast<void*>(&retrieved)));
+    ASSERT_NE(retrieved, nullptr);
 }
 
 TEST_F(TestCustomOpOperationDescriptor, GetAttributeCustomOpId)
@@ -426,9 +471,9 @@ TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, K_CUSTOM_OP_INPUT_UID_0);
-    ASSERT_EQ(tensors[1]->getData().uid, K_CUSTOM_OP_INPUT_UID_1);
-    ASSERT_EQ(tensors[2]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
+    ASSERT_EQ(tensors[0].get(), _input0->asDescriptor<TensorDescriptor>().get());
+    ASSERT_EQ(tensors[1].get(), _input1->asDescriptor<TensorDescriptor>().get());
+    ASSERT_EQ(tensors[2].get(), _output0->asDescriptor<TensorDescriptor>().get());
 }
 
 TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsOrderIsInputsThenOutputs)
@@ -440,9 +485,9 @@ TEST_F(TestCustomOpOperationDescriptor, GetTensorDescriptorsOrderIsInputsThenOut
     ASSERT_EQ(tensors.size(), 3);
 
     // First two should be inputs, last should be output
-    EXPECT_EQ(tensors[0]->getData().uid, K_CUSTOM_OP_INPUT_UID_0);
-    EXPECT_EQ(tensors[1]->getData().uid, K_CUSTOM_OP_INPUT_UID_1);
-    EXPECT_EQ(tensors[2]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
+    EXPECT_EQ(tensors[0].get(), _input0->asDescriptor<TensorDescriptor>().get());
+    EXPECT_EQ(tensors[1].get(), _input1->asDescriptor<TensorDescriptor>().get());
+    EXPECT_EQ(tensors[2].get(), _output0->asDescriptor<TensorDescriptor>().get());
 }
 
 TEST_F(TestCustomOpOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -508,9 +553,9 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizePreservesTensorReferences)
 
     ASSERT_EQ(desc->getInputDescs().size(), 2);
     ASSERT_EQ(desc->getOutputDescs().size(), 1);
-    ASSERT_EQ(desc->getInputDescs()[0]->getData().uid, K_CUSTOM_OP_INPUT_UID_0);
-    ASSERT_EQ(desc->getInputDescs()[1]->getData().uid, K_CUSTOM_OP_INPUT_UID_1);
-    ASSERT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
+    ASSERT_EQ(desc->getInputDescs()[0].get(), _input0->asDescriptor<TensorDescriptor>().get());
+    ASSERT_EQ(desc->getInputDescs()[1].get(), _input1->asDescriptor<TensorDescriptor>().get());
+    ASSERT_EQ(desc->getOutputDescs()[0].get(), _output0->asDescriptor<TensorDescriptor>().get());
 }
 
 // =============================================================================
