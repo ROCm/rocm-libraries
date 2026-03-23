@@ -21,18 +21,18 @@
 # THE SOFTWARE.
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, OrderedDict, Dict
+from typing import Any, Callable, List, Optional, OrderedDict, Dict
 from kernel_tuner.file_utils import store_metadata_file, store_output_file
 import kernel_tuner
 import json
 from pathlib import Path
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
-from utils import TYPE_CONFIGS, ConfigParser
-from hip import hip
+from utils import TYPE_CONFIGS, Parser
+from hip import hip  # type: ignore (pyright doesn't detect hip-python correctly)
 import warnings
 from dataclasses import dataclass
-from utils import TYPE_CONFIGS, Parser
+import confgen.parse
 import pathlib
 
 """
@@ -84,8 +84,24 @@ Kernel Tuner documentation: https://kerneltuner.github.io/kernel_tuner/stable/co
 ROCm HIP Python Wrapper: https://rocm.docs.amd.com/projects/hip-python/en/latest/index.html
 """
 
-COMMON_KEY_TYPES = ["rocprim::int128_t", "int64_t", "int", "short", "int8_t", "double", "float", "rocprim::half"]
-COMMON_VALUE_TYPES = ["rocprim::int128_t", "int64_t", "int", "short", "int8_t"]
+COMMON_KEY_TYPES = [
+    "rocprim::int128_t",
+    "int64_t",
+    "int",
+    "short",
+    "int8_t",
+    "double",
+    "float",
+    "rocprim::half",
+]
+COMMON_VALUE_TYPES = [
+    "rocprim::int128_t",
+    "int64_t",
+    "int",
+    "short",
+    "int8_t",
+]
+
 
 @dataclass
 class TunerArgs:
@@ -109,7 +125,7 @@ class TunerArgs:
     """Directory path to store tuning results and metadata.
     """
 
-    include_default_config: bool = True
+    exclude_default_config: bool = False
     """Whether to also test default configurations.
     """
 
@@ -126,16 +142,15 @@ class TunerArgs:
             if k in self.__dict__.keys() and not v is None:
                 self.__dict__[k] = v
 
+
 class BaseTuner(ABC):
-    def __init__(
-        self,
-        args: TunerArgs
-    ):
-        """Initialize the tuner with configuration parameters.
-        """
+    def __init__(self, args: TunerArgs):
+        """Initialize the tuner with configuration parameters."""
         self.algo_full_name = args.algo_full_name
         algo_types = ["warp", "block", "device"]
-        algo_full_name_parts = args.algo_full_name.split("_")
+        algo_full_name_parts = (
+            args.algo_full_name.split("_") if args.algo_full_name is not None else []
+        )
         if algo_full_name_parts[0] in algo_types:
             self.algo_type = algo_full_name_parts[0]
             self.algo_name = "_".join(algo_full_name_parts[1:])
@@ -154,41 +169,45 @@ class BaseTuner(ABC):
             hip.hipGetDeviceProperties(self.device_properties, self.device_id)
             self.arch_name = self.device_properties.gcnArchName.decode().split(":")[0]
         else:
-            assert args.arch_name, "Simulation mode requires --arch-name to be specified"
+            assert (
+                args.arch_name
+            ), "Simulation mode requires --arch-name to be specified"
             self.arch_name = args.arch_name
-        self.include_default_config = args.include_default_config
+        self.exclude_default_config = args.exclude_default_config
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
         self.strategy = args.strategy
         self.seed = None if args.seed == -1 else args.seed
 
-        if self.include_default_config:
-            self.config_parser = ConfigParser(
-                self.algo_name, self._get_tune_params().keys()
-            )
+        if not self.exclude_default_config:
             with open(
                 f"../../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
             ) as f:
-                self.default_configs = self.config_parser.parse_header(f.read())
+                self.existing_config = confgen.parse.parse_lines(f.readlines())
         else:
-            self.config_parser = None
-            self.default_configs = None
+            self.existing_config = None
 
+    @classmethod
     @abstractmethod
-    def _get_default_args() -> TunerArgs:
+    def _get_default_args(cls) -> TunerArgs:
         """Returns the default arguments. Used to generate default values for the CLI."""
         pass
 
     @classmethod
     def cli(cls):
         defaults: TunerArgs = cls._get_default_args()
-        args = Parser.get_parser(
-            default_bytes=defaults.size,
-            default_max_feval=defaults.max_feval,
-            default_output_dir=defaults.output_dir,
-            default_strategy=defaults.strategy,
+        args = dict(
+            Parser.get_parser(
+                default_bytes=defaults.size,
+                default_max_feval=defaults.max_fevals,
+                default_output_dir=defaults.output_dir,
+                default_strategy=defaults.strategy,
+            )
+            .parse_args()
+            ._get_kwargs()
         )
-        cls(args).tune_all()
+        defaults.update_with_kwargs(**args)
+        cls(defaults).tune_all()
 
     @abstractmethod
     def _get_tune_params(self) -> OrderedDict:
@@ -199,7 +218,7 @@ class BaseTuner(ABC):
     @abstractmethod
     def _get_restrictions(
         self, key_type: str, value_type: Optional[str] = None
-    ) -> List[str]:
+    ) -> Callable[[dict], bool] | List[str]:
         """Define constraints for what parameter combinations are valid during tuning.
 
         Two options:
@@ -226,7 +245,8 @@ class BaseTuner(ABC):
 
     def _get_problem_size(self, key_type: str, value_type: Optional[str] = None):
         return self.bytes_size // (
-            TYPE_CONFIGS[key_type].size + (TYPE_CONFIGS[value_type].size if value_type else 0)
+            TYPE_CONFIGS[key_type].size
+            + (TYPE_CONFIGS[value_type].size if value_type else 0)
         )
 
     def _get_metrics(self, key_type: str, value_type: Optional[str] = None) -> Dict:
@@ -238,23 +258,72 @@ class BaseTuner(ABC):
         self, tune_kernel_args: Dict, key_type: str, value_type: Optional[str] = None
     ) -> None:
         """Runs the default configuration if enabled."""
-        if not self.include_default_config or self.simulation_mode:
+        if self.exclude_default_config or self.simulation_mode:
             return
 
-        print("Running default config")
-        default_tune_params = self.config_parser.get_default_config(
-            self.arch_name, key_type, value_type
-        )
-        if default_tune_params is None:
-            warnings.warn("No tuning parameters extracted from default config. Skipping!")
+        target_arch = self.arch_name
+        if self.arch_name is None:
+            warnings.warn(f"Could not detect current architecture!")
             return
 
-        default_args = tune_kernel_args.copy()
-        default_args.update(
-            {"tune_params": default_tune_params, "strategy": "brute_force"}
+        if self.existing_config is None:
+            return
+
+        # TODO: tuner currently does not have enough information to completely
+        # derive the full target specifier. For now just assume there is only one GPU
+        # per arch.
+        targets = [
+            t for t in self.existing_config.keys() if dict(t)["arch"] == target_arch
+        ]
+        target = None
+        if len(targets) > 0:
+            target = targets[0]
+        if len(targets) > 1:
+            warnings.warn(
+                f"More than one default config for current target {target_arch} found, picking {targets[0]}"
+            )
+        if target is None:
+            warnings.warn(
+                f"No appropiate default config for current target {target_arch}!"
+            )
+            return
+
+        arch_config = self.existing_config[target]
+
+        # Get first matching config
+        config = next(
+            (
+                c
+                for c in arch_config
+                if c["key_type"] == key_type
+                and c["value_type"] == (value_type or "empty_type")
+            ),
+            None,
+        )
+        if config is None:
+            warnings.warn(
+                f"No existing configuration found for key_type '{key_type}' and value_type '{value_type}'"
+            )
+            return
+
+        default_tune_params = {
+            k: [v] for k, v in config.items() if k not in ["key_type", "value_type"]
+        }
+
+        # Get the base tuning archs and force set the range of the tune parameters
+        # to the single-element lists 'default_tune_params'. We also change the
+        # strategy to bruteforce and clear any set strategy options.
+        tune_kernel_args = self._get_base_tune_kernel_args(key_type, value_type).copy()
+        tune_kernel_args.update(
+            {
+                "tune_params": default_tune_params,
+                "strategy": "brute_force",
+                "strategy_options": {},
+            }
         )
 
-        kernel_tuner.tune_kernel(**default_args)
+        print(f"Found existing configuration: {default_tune_params}")
+        kernel_tuner.tune_kernel(**tune_kernel_args)
 
     def tune_type(
         self,
@@ -299,18 +368,16 @@ class BaseTuner(ABC):
             loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True
         )
 
-        # We first check if a specialized template exists, e.g.
-        # 'device_merge_wrapper_template' if it doesn't exist, we 
-        # fall back to 'base_wrapper_template'.
-        template_name = f"{self.algo_full_name}_wrapper_template"
-        if not template_dir.joinpath(template_name).exists():
-            template_name = "base_wrapper_template"
-
+        template_name = f"{self.algo_full_name}.cpp.jinja2"
         template = env.get_template(template_name)
+        # The parameter values are defined using #define by kernel tuner.
+        # We only need the right symbol name, so 'config.ipt' becomes 'ipt'.
+        # In the templates, the full '{{ config.ipt }}'-syntax is preferred,
+        # since this makes the templates more consistent with confgen templates.
         context = {
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
-            "config_params": ", ".join(tune_params.keys()),
+            "config": dict(zip(tune_params.keys(), tune_params.keys())),
             "key_type": key_type,
             "value_type": value_type,
         }
@@ -360,25 +427,25 @@ class BaseTuner(ABC):
 
         return tune_kernel_args
 
-    def _get_cache_file_name(self, key_type: str, value_type: str = None):
+    def _get_cache_file_name(self, key_type: str, value_type: str | None = None):
         """Return the name of the cache file based on algo name, arch name and key value types"""
         cache_file_path = f'{self.algo_full_name}_{self.arch_name}_{key_type.replace("rocprim::", "")}'
         if value_type:
-            cache_file_path += f"_{value_type.replace("rocprim::", "")}"
+            cache_file_path += f"_{value_type.replace('rocprim::', '')}"
         cache_file_path += "_cache.json"
 
         return cache_file_path
 
-    def _get_cache_file_path(self, key_type: str, value_type: str = None):
+    def _get_cache_file_path(self, key_type: str, value_type: str | None = None):
         "Return the path of the cache file"
         return self.output_dir / self._get_cache_file_name(key_type, value_type)
 
     def _save_output(
         self,
-        cache_file: str,
+        cache_file: str | pathlib.Path,
         key_type,
         value_type,
-        results: Dict = None,
+        results: List | object | Any | None = None,
     ):
         """Save tuning results and metadata to files."""
         if self.simulation_mode:
@@ -387,10 +454,8 @@ class BaseTuner(ABC):
                 f"../simulated_output/{self.strategy}_fevals{self.max_fevals}"
             )
             cache_file.mkdir(parents=True, exist_ok=True)
-            cache_file = cache_file / self._get_cache_file_name(
-                self.algo_full_name, key_type, value_type
-            )
-            store_output_file(str(cache_file), results, self.tune_params)
+            cache_file = cache_file / self._get_cache_file_name(key_type, value_type)
+            store_output_file(str(cache_file), results, self._get_tune_params())
 
         with open(cache_file, "r") as f:
             cache_dict = json.load(f)
@@ -410,12 +475,12 @@ class BaseTuner(ABC):
                 f.write(new_content)
 
         if self.save_metadata:
-            store_metadata_file(cache_file.replace("cache", "metadata"))
+            store_metadata_file(str(cache_file).replace("cache", "metadata"))
 
     def _get_compiler_options(self) -> List[str]:
         """Returns a list with all compiler options to pass to Kernel Tuner"""
-        monorepo_dir = pathlib.Path('../../../..').resolve()
-        rocprim_dir = monorepo_dir / 'projects/rocprim'
+        monorepo_dir = pathlib.Path("../../../..").resolve()
+        rocprim_dir = monorepo_dir / "projects/rocprim"
         return [
             "-fPIC",
             "-std=c++17",

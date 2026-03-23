@@ -22,9 +22,7 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     // of terminal control characters.
     std::cout << std::flush;
 
-    {% block config %}
-    using config = rocprim::{{algo_name}}_config<{{config_params}}>;
-    {% endblock %}
+    using config = {% block config_constructor scoped required %}{% endblock -%};
 
     {% block type_definitions %}
     using key_type = {{key_type}};

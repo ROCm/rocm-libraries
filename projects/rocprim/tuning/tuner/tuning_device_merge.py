@@ -20,19 +20,19 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import List, Optional, OrderedDict
+from typing import List, Optional, OrderedDict, Callable
 import sys
 
 sys.path.append("../")
 
 from utils import TYPE_CONFIGS
-from tuning_scripts.base_tuner import BaseTuner, TunerArgs, COMMON_VALUE_TYPES, COMMON_KEY_TYPES
+from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_VALUE_TYPES, COMMON_KEY_TYPES
+
 
 class Tuner(BaseTuner):
-    def _get_default_args() -> TunerArgs:
-        return TunerArgs(
-            algo_full_name="device_merge"
-        )
+    @classmethod
+    def _get_default_args(cls) -> TunerArgs:
+        return TunerArgs(algo_full_name="device_merge")
 
     def __init__(self, args: TunerArgs):
         super().__init__(args)
@@ -47,7 +47,7 @@ class Tuner(BaseTuner):
 
     def _get_restrictions(
         self, key_type: str, value_type: Optional[str] = None
-    ) -> List[str]:
+    ) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
         size = self.bytes_size // TYPE_CONFIGS[key_type].size
         element_size = TYPE_CONFIGS[key_type].size
@@ -55,8 +55,8 @@ class Tuner(BaseTuner):
             element_size += TYPE_CONFIGS[value_type].size
 
         def validate(params):
-            block_size = params['block_size_x']
-            ipt = params['ipt']
+            block_size = params["block_size_x"]
+            ipt = params["ipt"]
 
             # Total size constraint
             if block_size * ipt > size:
@@ -75,7 +75,7 @@ class Tuner(BaseTuner):
                 return False
 
             # High ipts on gfx1030 cause HSA_STATUS_ERROR_INVALID_ISA
-            if params.get('arch_name') == 'gfx1030' and ipt > 28:
+            if params.get("arch_name") == "gfx1030" and ipt > 28:
                 return False
 
             return True
@@ -88,6 +88,7 @@ class Tuner(BaseTuner):
             self.tune_type(key_type)
             for value_type in COMMON_VALUE_TYPES:
                 self.tune_type(key_type, value_type)
+
 
 if __name__ == "__main__":
     Tuner.cli()

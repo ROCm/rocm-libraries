@@ -20,5 +20,4 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from .config_parser import ConfigParser, ConfigInfo
 from .utils import TypeInfo, TYPE_CONFIGS, Parser

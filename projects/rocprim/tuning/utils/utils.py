@@ -25,6 +25,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
+
 class Parser:
     @staticmethod
     def get_parser(
@@ -54,16 +55,10 @@ class Parser:
             help=f"Output directory for JSON files (default: {default_output_dir})",
         )
         parser.add_argument(
-            "--include-default-config",
+            "--exclude-default-config",
             action="store_true",
-            default=True,
-            help="Include default configs of previous tuning in the new results",
-        )
-        parser.add_argument(
-            "--no-include-default-config",
-            action="store_false",
-            dest="include-default-config",
-            help="Do not include default configs",
+            default=False,
+            help="Include default configs of previous tuning in the new results (default: off)",
         )
         parser.add_argument(
             "--strategy",
@@ -78,14 +73,7 @@ class Parser:
             help="Run strategy in simulation mode (you need the cache files of the full searchspace)",
         )
         parser.add_argument(
-            "--no-simulation-mode",
-            action="store_false",
-            dest="simulation-mode",
-            help="Do not run strategy in simulation mode",
-        )
-        parser.add_argument(
             "--arch-name",
-            type=str,
             required=False,
             help="Specify arch, needed when running in simulation",
         )
@@ -93,13 +81,7 @@ class Parser:
             "--save-metadata",
             action="store_true",
             default=False,
-            help="Save Kernel Tuner metadata",
-        )
-        parser.add_argument(
-            "--no-save-metadata",
-            action="store_false",
-            dest="save-metadata",
-            help="Do not save Kernel Tuner metadata",
+            help="Save Kernel Tuner metadata (default: off)",
         )
         parser.add_argument(
             "--seed",
@@ -114,7 +96,7 @@ class Parser:
 class TypeInfo:
     cpp_type: str
     size: int
-    numpy_type: np.dtype
+    numpy_type: type | np.dtype
 
 
 TYPE_CONFIGS = {

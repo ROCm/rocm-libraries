@@ -201,7 +201,6 @@ It outputs this `results.json`:
             "host_name": "host",
             "date": "2025-11-24T15:01:50+00:00"
         },
-
         "settings": {
             "size": 134217728,
             "hot": false,
