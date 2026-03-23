@@ -125,8 +125,8 @@ inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
 
     // Check for NaN: if exponent is all 1s and mantissa is non-zero, preserve NaN
     // NaN bit patterns have exponent 0xFF and non-zero mantissa in the full float
-    uint32_t exp = (bits >> 23) & 0xFF;
-    uint32_t mant = bits & 0x007FFFFF;
+    const uint32_t exp = (bits >> 23) & 0xFF;
+    const uint32_t mant = bits & 0x007FFFFF;
     if(exp == 0xFF && mant != 0)
     {
         // Preserve NaN - ensure mantissa is non-zero in bfloat16
@@ -467,8 +467,8 @@ inline bool isfinite(bfloat16_t<M> x)
 template <Bfloat16RoundingMode M>
 inline bfloat16_t<M> copysign(bfloat16_t<M> x, bfloat16_t<M> y)
 {
-    uint16_t xBits = x.data & detail::BFLOAT16_ABS_MASK;
-    uint16_t ySign = y.data & detail::BFLOAT16_SIGN_MASK;
+    const uint16_t xBits = x.data & detail::BFLOAT16_ABS_MASK;
+    const uint16_t ySign = y.data & detail::BFLOAT16_SIGN_MASK;
     return bfloat16_t<M>::from_bits(xBits | ySign);
 }
 

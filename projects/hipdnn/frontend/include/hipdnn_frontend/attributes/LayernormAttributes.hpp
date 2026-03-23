@@ -16,7 +16,6 @@
 #include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
-#include <vector>
 
 namespace hipdnn_frontend::graph
 {
@@ -27,11 +26,19 @@ namespace hipdnn_frontend::graph
  *
  * LayernormAttributes configures a layer normalization operation.
  * Unlike batch normalization which normalizes across the batch dimension,
- * layer normalization normalizes across the feature dimensions.
+ * layer normalization normalizes across the last k feature dimensions.
+ *
+ * The number of normalized dimensions (k) is determined by:
+ * 1. **From scale shape**: k is inferred from the scale tensor. Dimensions
+ *    where scale != 1 are normalized. If scale has fewer dims than X, all
+ *    scale dims are normalized dims.
+ * 2. **Default**: If scale dims are also unset, they are inferred as
+ *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
  *
  * **Tensor Shapes:**
- * - **X** (input): `(N, ...)` — batch first, then feature dims
- * - **Scale, Bias**: `(1, C, H, W)` — batch dim = 1, feature dims match input
+ * - **X** (input): `(N, D1, D2, ..., Dk)` — batch first, then feature dims
+ * - **Scale, Bias**: Full-rank `(1, D1, ..., Dk)` with batch dim = 1,
+ *   or reduced-rank `(D1, ..., Dk)` with batch dims omitted
  * - **Y** (output): Same shape as X
  * - **Mean, InvVariance**: Batch dims from input, normalized dims = 1
  *
@@ -57,6 +64,8 @@ namespace hipdnn_frontend::graph
 class LayernormAttributes : public Attributes<LayernormAttributes>
 {
 public:
+    LayernormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -197,6 +206,21 @@ public:
         return _forwardPhase;
     }
 
+    /// @cond INTERNAL
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    LayernormAttributes& set_normalized_dim_count(int64_t value)
+    {
+        _normalizedDimCount = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    int64_t get_normalized_dim_count() const
+    {
+        return _normalizedDimCount;
+    }
+    /// @endcond
+
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::LayernormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
@@ -210,6 +234,7 @@ public:
             get_bias()->get_uid(),
             get_epsilon()->get_uid(),
             get_y()->get_uid(),
+            _normalizedDimCount,
             mean ? flatbuffers::Optional<int64_t>(mean->get_uid())
                  : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
             invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
@@ -228,6 +253,7 @@ public:
         attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
         attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
         attr.set_y(tensorMap.at(fb->y_tensor_uid()));
+        attr.set_normalized_dim_count(fb->normalized_dim_count());
         attr.set_forward_phase(fromSdkType(fb->forward_phase()));
 
         if(fb->mean_tensor_uid().has_value())
@@ -243,6 +269,7 @@ public:
     }
 
 private:
+    int64_t _normalizedDimCount = 0;
     NormFwdPhase _forwardPhase = NormFwdPhase::NOT_SET;
 };
 

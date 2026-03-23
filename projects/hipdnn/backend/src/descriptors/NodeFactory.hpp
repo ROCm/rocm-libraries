@@ -3,7 +3,23 @@
 
 #pragma once
 
+// Uncomment when fromNode() is implemented in the lifting PR:
+// #include "BatchnormBackwardOperationDescriptor.hpp"
+// #include "BatchnormInferenceOperationDescriptor.hpp"
+// #include "BatchnormInferenceVarianceExtOperationDescriptor.hpp"
+// #include "BatchnormOperationDescriptor.hpp"
+// #include "BlockScaleDequantizeOperationDescriptor.hpp"
+// #include "BlockScaleQuantizeOperationDescriptor.hpp"
+// #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
+// #include "ConvolutionWrwOperationDescriptor.hpp"
+// #include "CustomOpOperationDescriptor.hpp"
+// #include "LayernormOperationDescriptor.hpp"
+// #include "MatmulOperationDescriptor.hpp"
+#include "PointwiseOperationDescriptor.hpp"
+// #include "RMSNormOperationDescriptor.hpp"
+// #include "SdpaBackwardOperationDescriptor.hpp"
+// #include "SdpaFpropOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
@@ -22,7 +38,7 @@ public:
     // based on nodeT.attributes.type. The operation descriptor handles its own
     // attribute casting internally.
     // Throws HIPDNN_STATUS_NOT_SUPPORTED for unsupported node types.
-    static std::shared_ptr<IGraphOperation> createOperationFromNode(
+    static std::shared_ptr<IBackendDescriptor> createOperationFromNode(
         const hipdnn_data_sdk::data_objects::NodeT& nodeT,
         const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
 

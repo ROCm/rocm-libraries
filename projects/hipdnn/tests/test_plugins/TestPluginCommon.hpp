@@ -30,9 +30,9 @@ struct HipdnnEnginePluginExecutionContext
 
 inline const char* apiVersionWithoutTweak()
 {
-    static std::string s_versionStr = std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MAJOR) + "."
-                                      + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MINOR) + "."
-                                      + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_PATCH);
+    static const std::string s_versionStr = std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MAJOR) + "."
+                                            + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_MINOR) + "."
+                                            + std::to_string(HIPDNN_PLUGIN_SDK_VERSION_PATCH);
     return s_versionStr.c_str();
 }
 
@@ -398,9 +398,9 @@ public:
                     "No engines available - cannot create execution context");
             }
 
-            hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                               opGraph->size);
-            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
+            const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
+                                                                                     opGraph->size);
+            const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
                 engineConfig->ptr, engineConfig->size);
 
             *executionContext = new HipdnnEnginePluginExecutionContext();

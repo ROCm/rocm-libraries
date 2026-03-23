@@ -56,7 +56,7 @@ struct GraphAndTensorMap
 
         for(auto& [uid, tensor] : tensorMap)
         {
-            hipdnnPluginDeviceBuffer_t deviceBuffer{uid, tensor->rawDeviceData()};
+            const hipdnnPluginDeviceBuffer_t deviceBuffer{uid, tensor->rawDeviceData()};
             deviceBuffers.push_back(deviceBuffer);
         }
         return deviceBuffers;
@@ -69,7 +69,7 @@ struct GraphAndTensorMap
             outputTensorMap;
 
         auto tensorAttributeMap = createGraphWrapper().getTensorMap();
-        for(int64_t uid : outputTensorUids)
+        for(const int64_t uid : outputTensorUids)
         {
             auto dataType = tensorAttributeMap[uid]->data_type();
             auto& outputTensorPtr = tensorMap[uid];
@@ -119,7 +119,7 @@ struct GraphAndTensorMap
                     throw std::runtime_error("validateTensors: Cannot validate integer tensors");
                     return false;
                 }};
-            bool passedValidation = std::visit(
+            const bool passedValidation = std::visit(
                 validatorFunc, hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
             if(!passedValidation)
             {
@@ -169,7 +169,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
     auto basePath = path;
     basePath.replace_extension();
 
-    nlohmann::json graphJson = [](const auto& path) {
+    const nlohmann::json graphJson = [](const auto& path) {
         std::ifstream graphFileStream(path);
         if(!graphFileStream)
         {

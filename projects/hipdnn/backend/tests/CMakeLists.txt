@@ -19,6 +19,7 @@ set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
 add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
@@ -31,7 +32,11 @@ add_executable(
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestBatchnormOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnorm.cpp
     descriptors/TestGraphDescriptorBatchnormInference.cpp
+    descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
+    descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
@@ -44,11 +49,13 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestGraphDescriptorLifting.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
     descriptors/TestGraphDescriptorSdpaFprop.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
@@ -64,6 +71,7 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     TestBackendLogger.cpp
+    TestGraphLogger.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestPlugin.cpp
