@@ -45,6 +45,11 @@ jobs:
           path: TheRock
           ref: 1408a826dc2c3446a0295c0ef0c71c4d92f0f4f9 # 2026-03-16 # 2026-03-18
 
+      - name: Test early failure for Teams notification
+        run: |
+          echo "This step intentionally fails to test Teams notification"
+          exit 1
+
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
