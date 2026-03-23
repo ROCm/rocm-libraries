@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "../tests/common/BatchnormCommon.hpp"
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -26,12 +26,12 @@ struct UnhappyBnDtypeCase
     const char* name;
 };
 
-inline std::vector<int64_t> makeDims()
+std::vector<int64_t> makeDims()
 {
     return {1, 4, 8, 8};
 }
 
-static Graph makeGraph(const UnhappyBnDtypeCase& tc,
+Graph makeGraph(const UnhappyBnDtypeCase& tc,
                        const TensorLayout& layout = TensorLayout::NCHW)
 {
     Graph g;
@@ -58,35 +58,68 @@ static Graph makeGraph(const UnhappyBnDtypeCase& tc,
     auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
     BatchnormInferenceAttributes bn;
-    g.batchnorm_inference(X, mean, invVar, scale, bias, bn);
+    auto Y = g.batchnorm_inference(X, mean, invVar, scale, bias, bn);
+    Y->set_output(true);
 
     return g;
 }
 
-class IntegrationGpuBatchnormUnhappyDataTypes : public ::testing::TestWithParam<UnhappyBnDtypeCase>
+class IntegrationGpuBatchnormUnsupportedDataTypes : public ::testing::TestWithParam<UnhappyBnDtypeCase>
 {
+protected:
+    hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
+    int _deviceId = 0;
+
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
+
+        auto pluginPath = std::filesystem::weakly_canonical(
+            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_stream != nullptr)
+        {
+            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+        }
+    }
 };
 
 } // namespace
 
-TEST_P(IntegrationGpuBatchnormUnhappyDataTypes, RejectsUnsupportedDataTypes)
+TEST_P(IntegrationGpuBatchnormUnsupportedDataTypes, RejectsUnsupportedDataTypes)
 {
     const auto& tc = GetParam();
     auto g = makeGraph(tc, TensorLayout::NCHW);
 
-    hipdnnHandle_t handle = nullptr;
-    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
-
-    auto result = g.build(handle);
+    auto result = g.build(_handle);
 
     EXPECT_NE(result.code, ErrorCode::OK);
     EXPECT_FALSE(result.err_msg.empty());
-    EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuBatchnormUnhappyDataTypes,
+    IntegrationGpuBatchnormUnsupportedDataTypes,
     ::testing::Values(
         UnhappyBnDtypeCase{DataType::UINT8, DataType::FLOAT, DataType::FLOAT, "Uint8IO"},
         UnhappyBnDtypeCase{DataType::FLOAT, DataType::HALF, DataType::HALF, "HalfScaleBias"},
