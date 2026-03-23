@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import concurrent.futures
 import importlib.util
+import multiprocessing
 from pathlib import Path
 
 
@@ -42,6 +44,79 @@ class BatchedGemmKernelBuilder(GemmKernelBuilder):
     def list_kernels(self):
         self._list_kernels()
 
+    def _generate_all_individual(self, num_workers=None):
+        """Generate individual kernel files for separate compilation with parallel processing"""
+        if num_workers is None:
+            num_workers = min(
+                multiprocessing.cpu_count(), 8
+            )  # Limit to avoid memory issues
+
+        tile_configs = self._get_tile_configs()
+        trait_combos = self._generate_trait_combinations()
+
+        work_items = []
+        for tile_config in tile_configs:
+            for trait_combo in trait_combos:
+                work_items.append(
+                    (
+                        tile_config,
+                        trait_combo,
+                        self.kernel_name_prefix,
+                        self.working_path,
+                        self.gpu_target,
+                        self.datatype,
+                        self.layout,
+                        self.config_json,
+                    )
+                )
+
+        print(
+            f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
+        )
+        print(f"  Tile configs: {len(tile_configs)}")
+        print(f"  Trait combinations: {len(trait_combos)}")
+        print(f"  Total kernels: {len(work_items)}")
+
+        if work_items:
+            print("  First work item example:")
+            tile_config, trait_combo = work_items[0][:2]
+            print(f"    Tile config: {tile_config}")
+            print(f"    Trait combo: {trait_combo[:3]}")
+
+        kernel_list = []
+        completed = 0
+
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=num_workers
+        ) as executor:
+            print(f"  Submitting {len(work_items)} tasks to executor...")
+            future_to_item = {
+                executor.submit(_generate_single_kernel_individual, item): item
+                for item in work_items
+            }
+            print("  All tasks submitted, waiting for completion...")
+
+            for future in concurrent.futures.as_completed(future_to_item):
+                completed += 1
+                if completed % 100 == 0 or completed == len(work_items):
+                    print(
+                        f"  Progress: {completed}/{len(work_items)} kernels generated"
+                    )
+                try:
+                    result = future.result()
+                    if result:
+                        kernel_list.append(result)
+                except Exception as exc:
+                    item = future_to_item[future]
+                    print(f"Kernel generation failed for {item}: {exc}")
+
+        kernel_list.sort(key=lambda x: x[0])
+        self._generate_cmake_individual_targets(kernel_list)
+
+        print(
+            f"Generated {len(kernel_list)} individual kernel files in {self.working_path}"
+        )
+
     def generate_single(self, kernel_name, tile_config_str, trait_combo_str):
         tile_parts = tile_config_str.split("_")
         tile_dims = tile_parts[0].split("x")
@@ -61,6 +136,10 @@ class BatchedGemmKernelBuilder(GemmKernelBuilder):
         }
 
         trait_parts = trait_combo_str.split("_")
+        if len(trait_parts) != 6:
+            raise ValueError(
+                f"Unexpected batched GEMM trait combo: {trait_combo_str}"
+            )
         trait_combo = (
             trait_parts[0],
             trait_parts[1],
@@ -68,7 +147,6 @@ class BatchedGemmKernelBuilder(GemmKernelBuilder):
             self._bool_from_str(trait_parts[3]),
             self._bool_from_str(trait_parts[4]),
             self._bool_from_str(trait_parts[5]),
-            self._bool_from_str(trait_parts[6]),
         )
 
         generated_name, _ = self._generate_kernel_instance(tile_config, trait_combo)
@@ -77,91 +155,41 @@ class BatchedGemmKernelBuilder(GemmKernelBuilder):
                 f"Kernel name mismatch: expected {kernel_name}, generated {generated_name}"
             )
 
-    def populate_kernel_header(self, kernel_name):
-        return f"""// Generated kernel instance for {kernel_name}
-#pragma once
 
-#include <stdexcept>
-#include <string>
-#include <tuple>
+def _generate_single_kernel_individual(work_item):
+    """Worker function to generate a single individual kernel file"""
+    (
+        tile_config,
+        trait_combo,
+        kernel_name_prefix,
+        working_path,
+        gpu_target,
+        datatype,
+        layout,
+        config_json,
+    ) = work_item
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/host/kernel_launch.hpp"
-#include "ck_tile/ops/gemm.hpp"
-#include "ck_tile/ops/gemm/kernel/batched_gemm_kernel.hpp"
-#include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
-#include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
-"""
+    builder = BatchedGemmKernelBuilder(
+        working_path, gpu_target, datatype, layout, config_json
+    )
 
-    def populate_launch(
-        self,
-        scheduler_type_map,
-        scheduler,
-        pipeline_impl_map,
-        pipeline,
-        epilogue,
-        k_block_per_cu,
-        persistent,
-    ):
-        del persistent
+    try:
+        kernel_name, instance_code = builder._generate_kernel_instance(
+            tile_config, trait_combo
+        )
 
-        instance_code = f"""
+        simplified_name = kernel_name
+        if simplified_name.startswith(f"{kernel_name_prefix}_"):
+            simplified_name = simplified_name[len(kernel_name_prefix) + 1 :]
 
-    // Launch function
-    static float launch(const ck_tile::BatchedGemmHostArgs& args, const ck_tile::stream_config& stream) {{
-        constexpr auto scheduler = {scheduler_type_map.get(scheduler)};
+        header_file = working_path / f"batched_gemm_single_{simplified_name}.hpp"
+        with open(header_file, "w") as f:
+            f.write(instance_code)
 
-        using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<
-            ADataType,
-            BDataType,
-            AccDataType,
-            TileShape,
-            ck_tile::TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
-                                            ALayout, BLayout, CLayout, TransposeC,
-                                            UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>,
-            scheduler>;
-
-        using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;
-"""
-
-        instance_code += self.populate_epilogue(epilogue)
-
-        instance_code += f"""
-
-        // Kernel type
-        using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-
-        // Kernel arguments
-        auto kargs = GemmKernel::MakeKernelArgs(args);
-
-        if(!GemmKernel::IsSupportedArgument(kargs)) {{
-            throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
-        }}
-
-        // Get grid and block sizes
-        const dim3 grids = GemmKernel::GridSize(args.M, args.N, args.k_batch, args.batch_count);
-        const dim3 blocks = GemmKernel::BlockSize();
-
-        if(stream.log_level_ > 0) {{
-            std::cout << "Launching kernel with args: " << GemmKernel::GetName() << '\\n'
-                      << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
-                      << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
-                      << std::endl;
-        }}
-
-        // Launch kernel
-        constexpr int kBlockPerCu = {k_block_per_cu};
-        float ave_time = ck_tile::launch_kernel(
-            stream,
-            ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-
-        return ave_time;
-    }}
-}};
-"""
-
-        return instance_code
+        return (kernel_name, trait_combo, tile_config)
+    except Exception as e:
+        print(f"Error generating individual kernel: {e}")
+        return None
 
 
 def main():
@@ -185,6 +213,14 @@ def main():
         help="Matrix layout",
     )
     parser.add_argument("--config_json", required=True, help="Configuration JSON file")
+    parser.add_argument(
+        "--num_workers", type=int, help="Number of parallel workers (default: auto)"
+    )
+    parser.add_argument(
+        "--gen_all_individual",
+        action="store_true",
+        help="Generate individual kernel files",
+    )
     parser.add_argument(
         "--gen_single", action="store_true", help="Generate a single kernel file"
     )
@@ -224,12 +260,16 @@ def main():
 
     if args.list_kernels:
         builder.list_kernels()
+    elif args.gen_all_individual:
+        builder._generate_all_individual(args.num_workers)
     elif args.gen_single:
         if not args.kernel_name or not args.tile_config or not args.trait_combo:
             parser.error("--gen_single requires --kernel_name, --tile_config, and --trait_combo")
         builder.generate_single(args.kernel_name, args.tile_config, args.trait_combo)
     else:
-        parser.error("Must specify one of: --list_kernels or --gen_single")
+        parser.error(
+            "Must specify one of: --list_kernels, --gen_all_individual, or --gen_single"
+        )
 
 
 if __name__ == "__main__":

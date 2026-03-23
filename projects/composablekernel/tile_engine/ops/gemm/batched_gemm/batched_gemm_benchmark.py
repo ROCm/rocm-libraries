@@ -47,7 +47,7 @@ class GemmBenchmark:
         }
 
         # Parse the kernel name pattern:
-        # benchmark_batched_gemm_fp16_rcr_compv4_cshuffle_intrawave_False_False_False_False_128x128x32_2x2x1_16x16x16
+        # benchmark_batched_gemm_fp16_rcr_compv4_cshuffle_intrawave_False_False_False_256x256x32_2x2x1_32x32x16
         parts = name.split("_")
 
         if len(parts) >= 8 and parts[0] == "benchmark" and parts[1] == "batched" and parts[2] == "gemm":
@@ -77,7 +77,6 @@ class GemmBenchmark:
                 "pad_m": False,
                 "pad_n": False,
                 "pad_k": False,
-                "persistent": False,
             },
         }
 
@@ -96,13 +95,12 @@ class GemmBenchmark:
                     j += 1
                 break
 
-        # Assign boolean flags if we found them
-        # Order: pad_m, pad_n, pad_k, persistent (4 flags total)
-        if len(bool_sequence) >= 4:
+        # Assign boolean flags if we found them.
+        # Batched names carry pad_m/pad_n/pad_k only.
+        if len(bool_sequence) >= 3:
             config["optimization_flags"]["pad_m"] = bool_sequence[0]
             config["optimization_flags"]["pad_n"] = bool_sequence[1]
             config["optimization_flags"]["pad_k"] = bool_sequence[2]
-            config["optimization_flags"]["persistent"] = bool_sequence[3]
 
         # Look for tile size patterns (e.g., 256x256x32_2x2x1_4x64x16)
         # The pattern is: tile_sizes_warp_config_warp_tile
