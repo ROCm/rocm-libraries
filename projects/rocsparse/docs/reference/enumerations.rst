@@ -394,21 +394,6 @@ rocsparse_itilu0_option
 
 .. doxygenenum:: rocsparse_itilu0_option
 
-rocsparse_batchtype
--------------------
-
-.. doxygenenum:: rocsparse_batchtype
-
-rocsparse_batchstorage
-----------------------
-
-.. doxygenenum:: rocsparse_batchstorage
-
-rocsparse_idvec_prop
---------------------
-
-.. doxygenenum:: rocsparse_idvec_prop
-
 rocsparse_dnvec_prop
 --------------------
 

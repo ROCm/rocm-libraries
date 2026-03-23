@@ -563,7 +563,7 @@ void testing_idvec_descr(const Arguments& arg)
             {
                 CHECK_ROCSPARSE_ERROR(rocsparse_idvec_set_prop(
                     handle, descr, prop, &set_prop_value, sizeof(set_prop_value), p_error));
-                rocsparse_indextype prop_value;
+                rocsparse_index_base prop_value;
                 CHECK_ROCSPARSE_ERROR(rocsparse_idvec_get_prop(
                     handle, descr, prop, &prop_value, sizeof(prop_value), p_error));
                 ASSERT_EQ(set_prop_value, prop_value);

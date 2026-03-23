@@ -346,4 +346,4 @@ rocsparse_status rocsparse_dnmat_set_const_data(rocsparse_handle      handle,
 }
 #endif
 
-#endif /* ROCSPARSE_AUXILIARY_H */
+#endif /* ROCSPARSE_DNMAT_DESCR_H */

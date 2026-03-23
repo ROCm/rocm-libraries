@@ -950,7 +950,7 @@ public:
                           rocsparse_index_base base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-
+	this->handle = handle;
         const rocsparse_status status = rocsparse_idvec_descr_create(
             handle, &this->descr, indextype, base, size, inc, values, values, nullptr);
         if(status != rocsparse_status_success)

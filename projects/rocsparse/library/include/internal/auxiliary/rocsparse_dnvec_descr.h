@@ -171,7 +171,7 @@ rocsparse_status rocsparse_dnvec_descr_destroy(rocsparse_handle      handle,
    *  \brief Set a property of the dense vector descriptor
    *
    *  \details
-   *  \p rocsparse_dnvec_set_prop sets a property of the dense vector descriptor.
+   *  \p rocsparse_dnvec_set_prop gets a property of the dense vector descriptor.
    *
    *  @param[in]
    *  handle  handle to the rocsparse library context queue.

@@ -91,7 +91,7 @@ struct rocsparse_dnmat_prop_t
         }
         case rocsparse_dnmat_prop_batch_dist:
         {
-            return "    rocsparse_dnmat_prop_batch_dist";
+            return "rocsparse_dnmat_prop_batch_dist";
         }
         }
         return "unknown";
@@ -283,7 +283,7 @@ struct rocsparse_idvec_prop_t
         }
         case rocsparse_idvec_prop_inc:
         {
-            return "rocsparse_idvec_prop_size_inc";
+            return "rocsparse_idvec_prop_inc";
         }
         case rocsparse_idvec_prop_batchtype:
         {
@@ -309,7 +309,7 @@ struct rocsparse_idvec_prop_t
 struct rocsparse_dnvec_prop_t
 {
     using value_t                     = rocsparse_dnvec_prop;
-    static constexpr uint32_t nvalues = 9;
+    static constexpr uint32_t nvalues = 8;
     // clang-format off
   static constexpr value_t  values[nvalues] = { rocsparse_dnvec_prop_datatype,
     rocsparse_dnvec_prop_size,
@@ -340,7 +340,7 @@ struct rocsparse_dnvec_prop_t
         }
         case rocsparse_dnvec_prop_inc:
         {
-            return "rocsparse_dnvec_prop_size_inc";
+            return "rocsparse_dnvec_prop_inc";
         }
         case rocsparse_dnvec_prop_batchtype:
         {
