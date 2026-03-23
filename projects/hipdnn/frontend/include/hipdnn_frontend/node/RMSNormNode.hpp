@@ -89,11 +89,11 @@ public:
                             "RMSNormNode forward_phase must be set to TRAINING or INFERENCE");
 
         // Validate inv_rms tensor based on forward_phase
-        // inv_rms has shape [N, 1, H, W] — one value per (batch, spatial) position
+        // Stats shape is derived from scale: where scale is non-1, stats must be 1
         if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
         {
             HIPDNN_CHECK_ERROR(detail::validateNormStatsShapeIfSet(
-                attributes.get_inv_rms(), x, "Inverse RMS tensor"));
+                attributes.get_inv_rms(), x, scale, "Inverse RMS tensor"));
         }
 
         return {ErrorCode::OK, ""};
@@ -156,11 +156,32 @@ public:
             auto invRms = attributes.get_inv_rms();
             if(invRms)
             {
-                // inv_rms shape is [N, 1, H, W] — batch and spatial from input, channel = 1
+                // Derive inv_rms dims from input and scale:
+                // Where scale has a non-1 dim, inv_rms gets 1 (normalized dimension collapses).
+                // Where scale has dim 1, inv_rms keeps the input dim.
+                // Fallback (no scale dims): all dims except batch become 1 → [N, 1, 1, 1].
                 if(invRms->get_dim().empty())
                 {
                     auto invRmsDims = x->get_dim();
-                    invRmsDims[1] = 1;
+                    auto scale = attributes.get_scale();
+                    if(scale && !scale->get_dim().empty())
+                    {
+                        const auto& scaleDims = scale->get_dim();
+                        for(size_t i = 0; i < invRmsDims.size(); ++i)
+                        {
+                            if(scaleDims[i] != 1)
+                            {
+                                invRmsDims[i] = 1;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for(size_t i = 1; i < invRmsDims.size(); ++i)
+                        {
+                            invRmsDims[i] = 1;
+                        }
+                    }
                     invRms->set_dim(invRmsDims);
                 }
 

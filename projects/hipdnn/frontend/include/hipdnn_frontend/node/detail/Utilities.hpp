@@ -314,11 +314,14 @@ inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<graph::TensorAt
     return validateChannelOnlyTensorShape(tensor, expectedChannels, fallbackName);
 }
 
-// Validates normalization statistics tensor shape (e.g., inv_rms) matches input batch and spatial
-// dims with channel=1. Expected shape: [N, 1, H, W, ...] where N, H, W come from the input tensor.
+// Validates normalization statistics tensor shape (e.g., inv_rms) against input and scale tensors.
+// Where scale has a non-1 dim (normalized axis), stats must be 1;
+// where scale has dim 1 (non-normalized axis), stats must match input.
+// For typical channel-norm with scale [1,C,1,1], this yields stats shape [N,1,H,W].
 // Only validates if tensor dimensions are already set (same pattern as validateChannelOnlyShapeIfSet)
 inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                          const std::shared_ptr<graph::TensorAttributes>& input,
+                                         const std::shared_ptr<graph::TensorAttributes>& scale,
                                          const std::string& fallbackName = "Tensor")
 {
     if(!areTensorDimensionsSet(tensor))
@@ -331,8 +334,14 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
         return {ErrorCode::ATTRIBUTE_NOT_SET, "Input tensor is not set"};
     }
 
+    if(!scale || scale->get_dim().empty())
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET, "Scale tensor dimensions are not set"};
+    }
+
     const auto& dims = tensor->get_dim();
     const auto& inputDims = input->get_dim();
+    const auto& scaleDims = scale->get_dim();
 
     HIPDNN_RETURN_IF_NE(
         dims.size(),
@@ -341,32 +350,30 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
         getTensorNameForError(tensor, fallbackName) + " must have the same rank as input, expected "
             + std::to_string(inputDims.size()) + " but got " + std::to_string(dims.size()));
 
-    // Batch dimension must match input
-    HIPDNN_RETURN_IF_NE(dims[0],
-                        inputDims[0],
-                        ErrorCode::INVALID_VALUE,
-                        getTensorNameForError(tensor, fallbackName)
-                            + " batch dimension (index 0) must match input ("
-                            + std::to_string(inputDims[0]) + "), got " + std::to_string(dims[0]));
-
-    // Channel dimension must be 1 (reduced dimension)
-    HIPDNN_RETURN_IF_NE(dims[1],
-                        1,
-                        ErrorCode::INVALID_VALUE,
-                        getTensorNameForError(tensor, fallbackName)
-                            + " channel dimension (index 1) must be 1, got "
-                            + std::to_string(dims[1]));
-
-    // Spatial dimensions must match input
-    for(size_t i = 2; i < dims.size(); ++i)
+    for(size_t i = 0; i < dims.size(); ++i)
     {
-        HIPDNN_RETURN_IF_NE(dims[i],
-                            inputDims[i],
-                            ErrorCode::INVALID_VALUE,
-                            getTensorNameForError(tensor, fallbackName)
-                                + " spatial dimension at index " + std::to_string(i)
-                                + " must match input (" + std::to_string(inputDims[i]) + "), got "
-                                + std::to_string(dims[i]));
+        if(scaleDims[i] != 1)
+        {
+            // Normalized axis: stats dim must be 1
+            HIPDNN_RETURN_IF_NE(dims[i],
+                                1,
+                                ErrorCode::INVALID_VALUE,
+                                getTensorNameForError(tensor, fallbackName) + " dimension at index "
+                                    + std::to_string(i)
+                                    + " must be 1 (normalized axis, scale is non-1), got "
+                                    + std::to_string(dims[i]));
+        }
+        else
+        {
+            // Non-normalized axis: stats dim must match input
+            HIPDNN_RETURN_IF_NE(dims[i],
+                                inputDims[i],
+                                ErrorCode::INVALID_VALUE,
+                                getTensorNameForError(tensor, fallbackName) + " dimension at index "
+                                    + std::to_string(i) + " must match input ("
+                                    + std::to_string(inputDims[i]) + "), got "
+                                    + std::to_string(dims[i]));
+        }
     }
 
     return {ErrorCode::OK, ""};
