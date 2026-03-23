@@ -65,6 +65,8 @@ namespace hipdnn_frontend::graph
 class SdpaBackwardAttributes : public Attributes<SdpaBackwardAttributes>
 {
 public:
+    SdpaBackwardAttributes() = default;
+
     // NOLINTBEGIN(readability-identifier-naming)
     enum class InputNames
     {
