@@ -139,6 +139,9 @@ namespace hiptensor
         logger.logError("hiptensorPermute", msg);
     };
 
+    // Read and environment variable and check if it's value evaluates to true or false.
+    // "ON", "on" and "1" evaluates to true, any other value or the absense of the value
+    // evaluates to false.
     inline bool checkEnvironmentVariableEnabled(const char* name)
     {
         auto var = getEnvironmentVariable(name);
