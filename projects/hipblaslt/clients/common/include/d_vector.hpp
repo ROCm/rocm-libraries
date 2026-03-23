@@ -151,20 +151,14 @@ public:
                 m_size = m_capacity = 0;
             }
         }
-        else
+        else if(hipMalloc(&d, capacity) != hipSuccess)
         {
-            // Reserve some memory for the code object file(module) loading
-            // 15MB (largest code object file size can be 6MB + 6MB for helper kernels)
-            size_t reserve_for_module = 15 * 1024 * 1024;
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
-            if(free_device_mem < (capacity + reserve_for_module) || hipMalloc(&d, capacity) != hipSuccess)
-            {
-                hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30) << " GB) as the available device memory is (" << (free_device_mem >> 30) << " GB) "
-                               << std::endl;
-                d      = nullptr;
-                m_size = m_capacity = 0;
-            }
+            hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30) << " GB) as the available device memory is (" << (free_device_mem >> 30) << " GB) "
+                           << std::endl;
+            d      = nullptr;
+            m_size = m_capacity = 0;
         }
         m_d.reset(d);
     }
