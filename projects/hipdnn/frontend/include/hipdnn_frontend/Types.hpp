@@ -458,8 +458,7 @@ inline std::pair<NormFwdPhase, Error> fromHipdnnNormFwdPhase(hipdnnNormFwdPhase_
     default:
         return {NormFwdPhase::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
-                 "Unknown hipdnnNormFwdPhase_t value: "
-                     + std::to_string(static_cast<int>(phase))}};
+                 "Unknown hipdnnNormFwdPhase_t value: " + std::to_string(static_cast<int>(phase))}};
     }
 }
 

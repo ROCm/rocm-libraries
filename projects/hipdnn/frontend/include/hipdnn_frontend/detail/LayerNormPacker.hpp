@@ -84,11 +84,12 @@ inline Error createLayernormOperation(
                                                "layernorm forward phase"));
 
     // Set normalized dim count
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT,
-                                               HIPDNN_TYPE_INT64,
-                                               attributes.get_normalized_dim_count(),
-                                               "layernorm normalized dim count"));
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrScalar(opDesc.get(),
+                                HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT,
+                                HIPDNN_TYPE_INT64,
+                                attributes.get_normalized_dim_count(),
+                                "layernorm normalized dim count"));
 
     // Set math precision (compute data type)
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),

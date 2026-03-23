@@ -3,8 +3,8 @@
 
 #include "HipdnnOperationType.h"
 #include "TestMacros.hpp"
-#include "descriptors/NodeFactory.hpp"
 #include "descriptors/LayernormOperationDescriptor.hpp"
+#include "descriptors/NodeFactory.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
@@ -38,8 +38,7 @@ protected:
         xAttrs.uid = K_LAYERNORM_TENSOR_X_UID;
         xAttrs.data_type = DataType::FLOAT;
         xAttrs.dims = {K_LAYERNORM_TENSOR_X_DIMS.begin(), K_LAYERNORM_TENSOR_X_DIMS.end()};
-        xAttrs.strides
-            = {K_LAYERNORM_TENSOR_X_STRIDES.begin(), K_LAYERNORM_TENSOR_X_STRIDES.end()};
+        xAttrs.strides = {K_LAYERNORM_TENSOR_X_STRIDES.begin(), K_LAYERNORM_TENSOR_X_STRIDES.end()};
         _tensorMap[K_LAYERNORM_TENSOR_X_UID] = TensorDescriptor::fromFlatBuffer(xAttrs);
 
         // Scale tensor
@@ -56,8 +55,7 @@ protected:
         TensorAttributesT biasAttrs;
         biasAttrs.uid = K_LAYERNORM_TENSOR_BIAS_UID;
         biasAttrs.data_type = DataType::FLOAT;
-        biasAttrs.dims
-            = {K_LAYERNORM_TENSOR_BIAS_DIMS.begin(), K_LAYERNORM_TENSOR_BIAS_DIMS.end()};
+        biasAttrs.dims = {K_LAYERNORM_TENSOR_BIAS_DIMS.begin(), K_LAYERNORM_TENSOR_BIAS_DIMS.end()};
         biasAttrs.strides
             = {K_LAYERNORM_TENSOR_BIAS_STRIDES.begin(), K_LAYERNORM_TENSOR_BIAS_STRIDES.end()};
         _tensorMap[K_LAYERNORM_TENSOR_BIAS_UID] = TensorDescriptor::fromFlatBuffer(biasAttrs);
@@ -70,24 +68,21 @@ protected:
             = {K_LAYERNORM_TENSOR_EPSILON_DIMS.begin(), K_LAYERNORM_TENSOR_EPSILON_DIMS.end()};
         epsilonAttrs.strides = {K_LAYERNORM_TENSOR_EPSILON_STRIDES.begin(),
                                 K_LAYERNORM_TENSOR_EPSILON_STRIDES.end()};
-        _tensorMap[K_LAYERNORM_TENSOR_EPSILON_UID]
-            = TensorDescriptor::fromFlatBuffer(epsilonAttrs);
+        _tensorMap[K_LAYERNORM_TENSOR_EPSILON_UID] = TensorDescriptor::fromFlatBuffer(epsilonAttrs);
 
         // Y tensor
         TensorAttributesT yAttrs;
         yAttrs.uid = K_LAYERNORM_TENSOR_Y_UID;
         yAttrs.data_type = DataType::FLOAT;
         yAttrs.dims = {K_LAYERNORM_TENSOR_Y_DIMS.begin(), K_LAYERNORM_TENSOR_Y_DIMS.end()};
-        yAttrs.strides
-            = {K_LAYERNORM_TENSOR_Y_STRIDES.begin(), K_LAYERNORM_TENSOR_Y_STRIDES.end()};
+        yAttrs.strides = {K_LAYERNORM_TENSOR_Y_STRIDES.begin(), K_LAYERNORM_TENSOR_Y_STRIDES.end()};
         _tensorMap[K_LAYERNORM_TENSOR_Y_UID] = TensorDescriptor::fromFlatBuffer(yAttrs);
 
         // Mean tensor (optional)
         TensorAttributesT meanAttrs;
         meanAttrs.uid = K_LAYERNORM_TENSOR_MEAN_UID;
         meanAttrs.data_type = DataType::FLOAT;
-        meanAttrs.dims
-            = {K_LAYERNORM_TENSOR_MEAN_DIMS.begin(), K_LAYERNORM_TENSOR_MEAN_DIMS.end()};
+        meanAttrs.dims = {K_LAYERNORM_TENSOR_MEAN_DIMS.begin(), K_LAYERNORM_TENSOR_MEAN_DIMS.end()};
         meanAttrs.strides
             = {K_LAYERNORM_TENSOR_MEAN_STRIDES.begin(), K_LAYERNORM_TENSOR_MEAN_STRIDES.end()};
         _tensorMap[K_LAYERNORM_TENSOR_MEAN_UID] = TensorDescriptor::fromFlatBuffer(meanAttrs);
