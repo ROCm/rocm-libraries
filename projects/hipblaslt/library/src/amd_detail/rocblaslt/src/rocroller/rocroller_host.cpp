@@ -426,7 +426,6 @@ rocblaslt_status
                                          std::shared_ptr<GemmKernel>& kernel)
 {
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
-    std::cout << params->toString() << std::endl;
     try
     {
         kernel = genGemmKernel(params);
