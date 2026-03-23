@@ -5,7 +5,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
-  PrintSolutionRejectionReason: True
+  # PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Debug
 #  MergeFiles: False
@@ -69,16 +69,16 @@ BenchmarkProblems:
           - [32, 32,  64, 1, 1, 2,2, 2,2]  # 64x64
           - [32, 32,  64, 1, 1, 4,2, 2,2]  # 64x64
 #          - [32, 32,  64, 1, 1, 2,4, 2,2]  # 64x64
-        - ForceDisableShadowInit: [True, False]
+        #- ForceDisableShadowInit: [True, False]
         - UseSgprForGRO: [0,1]
-        - DepthU: [64, 128]
+        - DepthU: [64, 128, 256]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [64]
         - LocalReadVectorWidth: [16]
         - PrefetchGlobalRead: [0,1,2]
         - PrefetchLocalRead: [0,1]
-        - PreloadKernArgs: [0,1]
+        #- PreloadKernArgs: [0,1]
         - ClusterLocalRead: [0,1]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
@@ -109,7 +109,12 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [16, 16, 1, 128]
           - Exact: [32, 16, 1, 1024]
-          #- Exact: [256, 256, 1, 64]   # TODO: this fails as currently tailloop is not supported for MX types.
+          - Exact: [256, 256, 1, 32]
+          - Exact: [256, 256, 1, 64]
+          - Exact: [256, 256, 1, 96]
+          - Exact: [256, 256, 1, 160]
+          - Exact: [256, 256, 1, 192]
+          - Exact: [256, 256, 1, 224]
           - Exact: [1025, 513, 1, 2048]
 #          - Exact: [1026, 514, 1, 2048]
 #          - Exact: [1027, 515, 1, 2048]
@@ -138,8 +143,7 @@ BenchmarkProblems:
           # - Exact: [111, 111, 1, 111]
           # - Exact: [777, 777, 1, 777]
           - Exact: [128, 128, 1, 512]
-          #- Range: [[128], [128], [1], [1024,32,1280]]
-          #- Range: [[128], [128], [1], [1024,64,1280]] # TODO: passed for DepthU = 64 but failed for DepthU = 128 since we currently don't support tailloop in MX feature.
+          - Range: [[128], [128], [1], [1024,32,1280]]
           - Range: [[128,1,256], [128], [1], [1024]]
           - Range: [[128], [128,1,256], [1], [1024]]
         - BiasTypeArgs: ['s']

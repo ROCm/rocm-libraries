@@ -180,6 +180,15 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 160]
           - Exact: [128, 128, 1, 192]
           - Exact: [128, 128, 1, 224]
+          # mutiple of 16 (not working for now)
+          #- Exact: [128, 128, 1, 16]
+          #- Exact: [128, 128, 1, 48]
+          #- Exact: [128, 128, 1, 80]
+          #- Exact: [128, 128, 1, 112]
+          #- Exact: [128, 128, 1, 144]
+          #- Exact: [128, 128, 1, 176]
+          #- Exact: [128, 128, 1, 208]
+          #- Exact: [128, 128, 1, 240]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]

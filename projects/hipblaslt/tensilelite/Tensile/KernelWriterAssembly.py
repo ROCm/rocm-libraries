@@ -4064,13 +4064,14 @@ class KernelWriterAssembly(KernelWriter):
             else:
               module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
           elif (idx in kernel["ProblemType"]["IndicesSummation"]):
-            if tc == "MXSA":
-              mxBlock = kernel["ProblemType"]["MXBlockA"]
-              module.add(SLShiftRightB32(dst=sgpr(stmp), src=size, shiftHex=log2(mxBlock), comment="(size/%d-1)" %mxBlock))
-              module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=0x1, comment="(size/%d-1)" %mxBlock))
-            elif tc == "MXSB":
-              mxBlock = kernel["ProblemType"]["MXBlockB"]
-              module.add(SLShiftRightB32(dst=sgpr(stmp), src=size, shiftHex=log2(mxBlock), comment="(size/%d-1)" %mxBlock))
+            if tc in ("MXSA", "MXSB"):
+              mxBlock = kernel["ProblemType"]["MXBlockA"] if tc == "MXSA" else kernel["ProblemType"]["MXBlockB"]
+              if kernel["AssertSummationElementMultiple"] % mxBlock != 0:
+                module.add(SAddU32(dst=sgpr(stmp), src0=size, src1=(mxBlock-1), comment="(size/%d-1)" %mxBlock))
+                src0 = sgpr(stmp)
+              else:
+                src0 = size
+              module.add(SLShiftRightB32(dst=sgpr(stmp), src=src0, shiftHex=log2(mxBlock), comment="(size/%d-1)" %mxBlock))
               module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=0x1, comment="(size/%d-1)" %mxBlock))
             else:
               module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
@@ -7668,7 +7669,8 @@ class KernelWriterAssembly(KernelWriter):
                     shiftK.add(VCndMaskB32(dst=mxsbStr, src0=mxsbStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
 
           # replace 0 for same thread
-          if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 8:
+          minASEM = 16 if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"] else 8
+          if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < minASEM:
             alignment = vgprPerInput if is_wmma_v2 else (2 if vgprPerInput > 1 else 1)
             abReg   = self.vgprPool.checkOutAligned(vgprPerInput, alignment, "abReg")
             if (vgprPerInput < 4 and is_mfma) or is_wmma_v2:
