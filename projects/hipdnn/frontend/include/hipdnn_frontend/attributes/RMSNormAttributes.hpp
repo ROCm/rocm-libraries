@@ -63,6 +63,8 @@ namespace hipdnn_frontend::graph
 class RMSNormAttributes : public Attributes<RMSNormAttributes>
 {
 public:
+    RMSNormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
