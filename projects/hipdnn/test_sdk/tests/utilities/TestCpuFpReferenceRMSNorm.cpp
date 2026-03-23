@@ -5,10 +5,12 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 template <typename T1, typename T2>
 struct TypePair
@@ -35,10 +37,10 @@ TYPED_TEST(CpuFpReferenceRMSNormFwdNchw, RMSNormFwdNchw)
     Tensor<typename TypeParam::First> outputTensor({1, 3, 224, 224});
     Tensor<typename TypeParam::Second> scaleTensor({1, 3});
 
-    inputTensor.fillWithValue(static_cast<typename TypeParam::First>(1.0));
+    inputTensor.fillWithValue(safeTestTypeCast<typename TypeParam::First>(1.0));
     for(int i = 0; i < 3; i++)
     {
-        scaleTensor.setHostValue(static_cast<typename TypeParam::Second>(1.0), 0, i);
+        scaleTensor.setHostValue(safeTestTypeCast<typename TypeParam::Second>(1.0), 0, i);
     }
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
@@ -59,10 +61,10 @@ TYPED_TEST(CpuFpReferenceRMSNormFwdNhwc, RMSNormFwdNhwc)
     Tensor<typename TypeParam::First> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     Tensor<typename TypeParam::Second> scaleTensor({1, 3});
 
-    inputTensor.fillWithValue(static_cast<typename TypeParam::First>(1.0));
+    inputTensor.fillWithValue(safeTestTypeCast<typename TypeParam::First>(1.0));
     for(int i = 0; i < 3; i++)
     {
-        scaleTensor.setHostValue(static_cast<typename TypeParam::Second>(1.0), 0, i);
+        scaleTensor.setHostValue(safeTestTypeCast<typename TypeParam::Second>(1.0), 0, i);
     }
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
