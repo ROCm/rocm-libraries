@@ -169,7 +169,7 @@ typedef DataType DataType_t; ///< @brief Type alias for DataType
  * S_q < S_kv, BOTTOM_RIGHT aligns the mask so that each query attends
  * to the most recent keys rather than the earliest.
  *
- * @see SdpaAttributes::set_diagonal_alignment()
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_diagonal_alignment()
  */
 enum class DiagonalAlignment
 {
@@ -185,7 +185,7 @@ typedef DiagonalAlignment DiagonalAlignment_t; ///< @brief Type alias for Diagon
  *
  * Selects how the SDPA computation is mapped to GPU kernels.
  *
- * @see SdpaAttributes::set_implementation()
+ * @see hipdnn_frontend::graph::SdpaAttributes::set_implementation()
  */
 enum class AttentionImplementation
 {
@@ -242,7 +242,8 @@ typedef NormFwdPhase NormFwdPhase_t; ///< @brief Type alias for NormFwdPhase
  * Knobs are configuration parameters for engine execution. This enum
  * indicates what type of value a particular knob expects.
  *
- * @see Knob, KnobSetting
+ * @see hipdnn_frontend::Knob
+ * @see hipdnn_frontend::KnobSetting
  */
 enum class KnobValueType
 {
@@ -684,7 +685,12 @@ inline hipdnn_frontend::AttentionImplementation
     }
 }
 
-/// @brief Convert frontend DataType to backend hipdnnDataType_t
+/**
+ * @brief Convert frontend DataType to backend hipdnnDataType_t
+ *
+ * @param type The frontend DataType value
+ * @return The corresponding hipdnnDataType_t value, or std::nullopt if not set
+ */
 inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
 {
     switch(type)
@@ -1097,6 +1103,7 @@ inline const char* to_string(const ConvolutionMode& mode)
     }
 }
 
+/// @brief Stream insertion operator for ConvolutionMode
 inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
 {
     return os << to_string(mode);
