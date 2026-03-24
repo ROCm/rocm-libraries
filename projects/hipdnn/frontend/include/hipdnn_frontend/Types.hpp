@@ -440,6 +440,29 @@ inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPh
 }
 
 /**
+ * @brief Convert backend hipdnnNormFwdPhase_t to frontend NormFwdPhase
+ *
+ * Maps backend C API normalization forward phase enum to the frontend enum type.
+ *
+ * @param phase The backend hipdnnNormFwdPhase_t value
+ * @return A pair of NormFwdPhase and Error; error is set for unknown values
+ */
+inline std::pair<NormFwdPhase, Error> fromHipdnnNormFwdPhase(hipdnnNormFwdPhase_t phase)
+{
+    switch(phase)
+    {
+    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+        return {NormFwdPhase::INFERENCE, {}};
+    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+        return {NormFwdPhase::TRAINING, {}};
+    default:
+        return {NormFwdPhase::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnNormFwdPhase_t value: " + std::to_string(static_cast<int>(phase))}};
+    }
+}
+
+/**
  * @brief Convert frontend PointwiseMode to backend hipdnnPointwiseMode_t
  *
  * Maps frontend pointwise mode enum to the backend C API enum type for use

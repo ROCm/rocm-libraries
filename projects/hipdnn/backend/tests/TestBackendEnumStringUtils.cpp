@@ -500,6 +500,9 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT),
                  "HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT");
+    EXPECT_STREQ(
+        hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT),
+        "HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT");
 
     // Block scale quantize operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT),

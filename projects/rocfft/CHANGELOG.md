@@ -40,6 +40,8 @@ Documentation for rocFFT is available at
 * Fixed callbacks on MPI transforms, when not all ranks have the same number of data bricks.
 * Fixed functional issues for multi-device, in-place real transforms.
 * Fixed functional issues for multi-dimensional, multi-device transforms involving some unit length(s).
+* Fixed functional issues for multi-device transforms involving data divisions along the slowest-varying axis (only) for some bricks but not all.
+* Fixed functional issues for multi-device transforms setting no field on input or output.
 
 ## rocFFT 1.0.36 for ROCm 7.2.0
 
