@@ -32,12 +32,14 @@ namespace miopen {
 
 #ifdef _WIN32
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <cstdio>
+
+// Windows equivalents for POSIX popen/pclose
+#define popen _popen
+#define pclose _pclose
 
 struct ProcessImpl
 {
-public:
     ProcessImpl(std::string_view cmd) : path{cmd} {}
 
     void Create(std::string_view args,
@@ -46,110 +48,53 @@ public:
                 const ProcessEnvironmentMap& additionalEnvironmentVariables)
     {
         outStream = out;
-
-        STARTUPINFOA info;
-        ZeroMemory(&info, sizeof(STARTUPINFO));
-        info.cb = sizeof(STARTUPINFO);
-
-        // Set up pipe for stdout capture if output stream is provided
-        if(outStream != nullptr)
-        {
-            SECURITY_ATTRIBUTES saAttr;
-            saAttr.nLength              = sizeof(SECURITY_ATTRIBUTES);
-            saAttr.bInheritHandle       = TRUE;
-            saAttr.lpSecurityDescriptor = nullptr;
-
-            if(CreatePipe(&hReadPipe, &hWritePipe, &saAttr, 0) == FALSE)
-                MIOPEN_THROW("CreatePipe error: " + std::to_string(GetLastError()));
-
-            // Ensure the read handle is not inherited
-            SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
-
-            info.hStdOutput = hWritePipe;
-            info.hStdError  = hWritePipe;
-            info.dwFlags |= STARTF_USESTDHANDLES;
-        }
-
-        // Build environment block for additional variables
-        std::string envBlock;
+        std::string cmd{path.string()};
         if(!additionalEnvironmentVariables.empty())
         {
-            for(const auto& [key, value] : additionalEnvironmentVariables)
+            // Windows cmd.exe syntax: "set VAR=value && command"
+            std::stringstream environmentVariables;
+            for(const auto& envVariable : additionalEnvironmentVariables)
             {
-                envBlock += key + "=" + value + '\0';
+                environmentVariables << "set " << envVariable.first << "=" << envVariable.second
+                                     << " && ";
             }
-            envBlock += '\0'; // Double null terminator
+            cmd.insert(0, environmentVariables.str());
         }
-
-        std::string cmd{path.string()};
         if(!args.empty())
             cmd += " " + std::string{args};
+        // When capturing output, redirect stderr to stdout so we capture both
+        if(out != nullptr)
+            cmd += " 2>&1";
+        if(!cwd.empty())
+            cmd.insert(0, "cd /d " + std::string{cwd} + " && ");
 
-        // Refer to
-        // CreateProcessA function (processthreadsapi.h)
-        constexpr std::size_t BUFFER_CAPACITY = 32767;
-
-        if(cmd.size() < BUFFER_CAPACITY)
-            cmd.resize(BUFFER_CAPACITY, '\0');
-
-        if(CreateProcess(path.string().c_str(),
-                         cmd.data(),
-                         nullptr,
-                         nullptr,
-                         outStream != nullptr ? TRUE : FALSE,
-                         0,
-                         envBlock.empty() ? nullptr : envBlock.data(),
-                         cwd.empty() ? nullptr : cwd.data(),
-                         &info,
-                         &processInfo) == FALSE)
-            MIOPEN_THROW("CreateProcess error: " + std::to_string(GetLastError()));
-
-        // Close the write end of the pipe (child process has it now)
-        if(hWritePipe != nullptr)
-        {
-            CloseHandle(hWritePipe);
-            hWritePipe = nullptr;
-        }
+        const auto fileMode = outStream != nullptr ? "r" : "w";
+        pipe                = popen(cmd.c_str(), fileMode);
+        if(pipe == nullptr)
+            MIOPEN_THROW("Error: popen()");
     }
 
     int Wait()
     {
-        // Read output from pipe if capturing
-        if(outStream != nullptr && hReadPipe != nullptr)
+        if(outStream != nullptr)
         {
             std::array<char, 1024> buffer{};
-            DWORD bytesRead;
 
-            while(ReadFile(hReadPipe, buffer.data(), buffer.size() - 1, &bytesRead, nullptr) &&
-                  bytesRead > 0)
+            while(feof(pipe) == 0)
             {
-                buffer[bytesRead] = '\0';
-                *outStream << buffer.data();
+                if(fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+                    *outStream << buffer.data();
             }
-            CloseHandle(hReadPipe);
-            hReadPipe = nullptr;
         }
 
-        WaitForSingleObject(processInfo.hProcess, INFINITE);
-
-        DWORD status;
-        const auto getExitCodeStatus = GetExitCodeProcess(processInfo.hProcess, &status);
-
-        CloseHandle(processInfo.hProcess);
-        CloseHandle(processInfo.hThread);
-
-        if(getExitCodeStatus == 0)
-            MIOPEN_THROW("GetExitCodeProcess error: " + std::to_string(GetLastError()));
-
+        auto status = pclose(pipe);
         return status;
     }
 
 private:
     std::ostream* outStream = nullptr;
     fs::path path;
-    PROCESS_INFORMATION processInfo{};
-    HANDLE hReadPipe  = nullptr;
-    HANDLE hWritePipe = nullptr;
+    FILE* pipe = nullptr;
 };
 
 #else
