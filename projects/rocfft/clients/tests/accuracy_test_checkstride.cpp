@@ -70,7 +70,7 @@ inline auto param_checkstride()
                 for(const auto& types :
                     generate_types(trans_type, {fft_placement_notinplace}, true))
                 {
-#ifdef WIN32
+#ifdef _WIN32
                     for(bool callback : {false})
 #else
                     for(bool callback : {true, false})

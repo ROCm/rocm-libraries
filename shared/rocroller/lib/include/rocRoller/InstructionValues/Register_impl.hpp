@@ -615,7 +615,8 @@ namespace rocRoller
         {
             AssertFatal(canUseAsOperand(),
                         "Tried to use unallocated register value!",
-                        ShowValue(this->toString()));
+                        ShowValue(this->toString()),
+                        ShowValue(this->valueCount()));
         }
 
         inline void Value::specialString(std::ostream& os) const

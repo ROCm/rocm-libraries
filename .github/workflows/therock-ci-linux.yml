@@ -43,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: faeb8f95793a8e671bf857582c992e232f3804da # 2026-03-03
+          ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20
 
       - name: Install python deps
         run: |
@@ -133,7 +133,7 @@ jobs:
 
       - name: Notify MIOpen Teams Channel on Failure
         # Channel name "MIOpen CI Reporting"
-        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && github.event_name == 'push' }}
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
         run: |
           python3 .github/scripts/notify_teams.py \
             --project miopen \
@@ -148,8 +148,7 @@ jobs:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx94X-dcgpu' }}
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
