@@ -22,6 +22,14 @@ namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
     {
+        enum class OpMode
+        {
+            Branch = 0,
+            Exec,
+            BranchAndExec,
+            Count,
+        };
+
         /*
          * Control flow graph nodes.
          * Represent operations done on the input.
@@ -134,8 +142,8 @@ namespace rocRoller
         struct ConditionalOp
         {
             Expression::ExpressionPtr condition;
-
-            std::string conditionName;
+            OpMode                    mode;
+            std::string               conditionName;
 
             std::string name() const;
             std::string toString() const;
