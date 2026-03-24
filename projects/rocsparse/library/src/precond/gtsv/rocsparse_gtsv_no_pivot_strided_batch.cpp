@@ -27,8 +27,6 @@
 
 #include "gtsv_nopivot_strided_batch_device.h"
 
-#include <vector>
-
 #define LAUNCH_GTSV_NOPIVOT_STRIDED_BATCH_PCR_POW2_STAGE1(T, block_size, stride, iter) \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
         (rocsparse::gtsv_nopivot_strided_batch_pcr_pow2_stage1_kernel<block_size>),    \
