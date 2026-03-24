@@ -3,10 +3,13 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using hipdnn_test_sdk::utilities::FrontendGraphFactory;
+using hipdnn_test_sdk::utilities::OperationType;
 
 namespace
 {
@@ -45,35 +48,12 @@ protected:
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
     }
 
-    static Graph createSimplePointwiseGraph()
-    {
-        const std::vector<int64_t> dims = {2, 3, 4, 4};
-
-        Graph graph;
-        graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
-
-        auto x = std::make_shared<TensorAttributes>();
-        x->set_name("X")
-            .set_uid(1)
-            .set_dim(dims)
-            .set_stride({dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1})
-            .set_data_type(DataType::FLOAT);
-
-        PointwiseAttributes attrs;
-        attrs.set_mode(PointwiseMode::RELU_FWD);
-
-        auto y = graph.pointwise(x, attrs);
-        y->set_name("Y").set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
-
-        return graph;
-    }
-
     hipdnnHandle_t _handle = nullptr;
 };
 
 TEST_F(IntegrationGraphSupportCheck, SupportedWithGoodPlugin)
 {
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -85,7 +65,7 @@ TEST_F(IntegrationGraphSupportCheck, NotSupportedWhenNoApplicableEngines)
         {hipdnn_tests::plugin_constants::testNoApplicableEnginesAPluginPath().c_str(),
          hipdnn_tests::plugin_constants::testNoApplicableEnginesBPluginPath().c_str()});
 
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     auto result = graph.is_supported_ext(_handle);
     EXPECT_FALSE(result.is_good()) << "Expected failure when no engines are applicable";
@@ -97,7 +77,7 @@ TEST_F(IntegrationGraphSupportCheck, SupportedWithMixedPlugins)
         {hipdnn_tests::plugin_constants::testNoApplicableEnginesAPluginPath().c_str(),
          hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()});
 
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -106,7 +86,7 @@ TEST_F(IntegrationGraphSupportCheck, SupportedWithMixedPlugins)
 TEST_F(IntegrationGraphSupportCheck, AutoBuildsGraphIfNotBuilt)
 {
     // Create graph but do NOT call validate() or build_operation_graph()
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     // is_supported_ext should auto-validate and auto-build
     auto result = graph.is_supported_ext(_handle);
@@ -115,7 +95,7 @@ TEST_F(IntegrationGraphSupportCheck, AutoBuildsGraphIfNotBuilt)
 
 TEST_F(IntegrationGraphSupportCheck, SkipsBuildIfAlreadyBuilt)
 {
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     // Explicitly validate and build first
     auto result = graph.validate();
@@ -131,7 +111,7 @@ TEST_F(IntegrationGraphSupportCheck, SkipsBuildIfAlreadyBuilt)
 
 TEST_F(IntegrationGraphSupportCheck, SupportedAfterIsSupportedDoesNotCorruptState)
 {
-    Graph graph = createSimplePointwiseGraph();
+    Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     // First call is_supported_ext
     auto result = graph.is_supported_ext(_handle);

@@ -106,19 +106,32 @@ protected:
             .set_data_type(DataType::FLOAT);
 
         auto mean = std::make_shared<TensorAttributes>();
-        mean->set_uid(2).set_name("Mean").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+        mean->set_uid(2)
+            .set_name("Mean")
+            .set_data_type(DataType::FLOAT)
+            .set_dim({1, 2, 1, 1})
+            .set_stride({2, 1, 1, 1});
 
         auto invVariance = std::make_shared<TensorAttributes>();
         invVariance->set_uid(3)
             .set_name("InvVariance")
             .set_data_type(DataType::FLOAT)
-            .set_dim({1, 2, 1, 1});
+            .set_dim({1, 2, 1, 1})
+            .set_stride({2, 1, 1, 1});
 
         auto scale = std::make_shared<TensorAttributes>();
-        scale->set_uid(4).set_name("Scale").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+        scale->set_uid(4)
+            .set_name("Scale")
+            .set_data_type(DataType::FLOAT)
+            .set_dim({1, 2, 1, 1})
+            .set_stride({2, 1, 1, 1});
 
         auto bias = std::make_shared<TensorAttributes>();
-        bias->set_uid(5).set_name("Bias").set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1});
+        bias->set_uid(5)
+            .set_name("Bias")
+            .set_data_type(DataType::FLOAT)
+            .set_dim({1, 2, 1, 1})
+            .set_stride({2, 1, 1, 1});
 
         BatchnormInferenceAttributes batchnormAttributes;
         batchnormAttributes.set_name("BatchnormNode");
@@ -6919,35 +6932,7 @@ TEST_F(TestGraph, IsSupportedReturnsTrueWhenEnginesAvailable)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-
-    graph.set_name("IsSupportedTestGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({24, 12, 4, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(2).set_name("Mean").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(3).set_name("InvVariance").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(4).set_name("Scale").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(5).set_name("Bias").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    BatchnormInferenceAttributes batchnormAttributes;
-    batchnormAttributes.set_name("BatchnormNode");
-
-    graph.batchnorm_inference(x, mean, invVariance, scale, bias, batchnormAttributes);
+    createBasicBatchnormGraph(graph);
 
     // Mock build_operation_graph
     auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
@@ -7071,35 +7056,7 @@ TEST_F(TestGraph, IsSupportedReturnsFalseWhenNoEngines)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-
-    graph.set_name("IsSupportedNoEnginesTestGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({24, 12, 4, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(2).set_name("Mean").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(3).set_name("InvVariance").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(4).set_name("Scale").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(5).set_name("Bias").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    BatchnormInferenceAttributes batchnormAttributes;
-    batchnormAttributes.set_name("BatchnormNode");
-
-    graph.batchnorm_inference(x, mean, invVariance, scale, bias, batchnormAttributes);
+    createBasicBatchnormGraph(graph);
 
     // Mock build_operation_graph
     auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
@@ -7164,35 +7121,7 @@ TEST_F(TestGraph, IsSupportedAutoBuildsGraphIfNotBuilt)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-
-    graph.set_name("IsSupportedAutoBuildTestGraph")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({24, 12, 4, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(2).set_name("Mean").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_uid(3).set_name("InvVariance").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(4).set_name("Scale").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(5).set_name("Bias").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-
-    BatchnormInferenceAttributes batchnormAttributes;
-    batchnormAttributes.set_name("BatchnormNode");
-
-    graph.batchnorm_inference(x, mean, invVariance, scale, bias, batchnormAttributes);
+    createBasicBatchnormGraph(graph);
 
     // is_supported_ext should auto-validate and auto-build the graph.
     // Mock build_operation_graph (expect it to be called)
