@@ -181,11 +181,6 @@
 /projects/rocthrust/**/.readthedocs.yaml            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocthrust/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 
-/projects/composablekernel/**/*.md                  @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-/projects/composablekernel/**/*.rst                 @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-/projects/composablekernel/**/.readthedocs.yaml     @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-/projects/composablekernel/docs/                    @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-
 /shared/tensile/**/*.md                             @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
 /shared/tensile/**/*.rst                            @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
 /shared/tensile/**/.readthedocs.yaml                @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
