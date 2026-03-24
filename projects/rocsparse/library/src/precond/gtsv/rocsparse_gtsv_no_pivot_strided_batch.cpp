@@ -462,8 +462,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
     }
 
     // If m is small we can solve the systems entirely in shared memory
-    // if(m <= 512)
-    if(m <= 1024)
+    if(m <= 512)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_small_template(
             handle, m, dl, d, du, x, batch_count, batch_stride, temp_buffer));
