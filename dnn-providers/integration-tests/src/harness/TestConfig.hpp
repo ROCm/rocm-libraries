@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <map>

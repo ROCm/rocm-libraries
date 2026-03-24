@@ -934,6 +934,8 @@ public:
     Error get_knob_lookup_for_engine(int64_t engineId,
                                      std::unordered_map<KnobType_t, Knob>& knobs) const
     {
+        knobs.clear();
+
         std::vector<Knob> knobVector;
         HIPDNN_CHECK_ERROR(get_knobs_for_engine(engineId, knobVector));
 
