@@ -9,6 +9,7 @@
 #include <string>
 
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
+#include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 
@@ -254,6 +255,16 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
     ASSERT_NE(node, nullptr);
     auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
     EXPECT_NE(convNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesBlockScaleQuantizeNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_BLOCK_SCALE_QUANTIZE, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto bsqNode = std::dynamic_pointer_cast<BlockScaleQuantizeNode>(node);
+    EXPECT_NE(bsqNode, nullptr);
 }
 
 TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
