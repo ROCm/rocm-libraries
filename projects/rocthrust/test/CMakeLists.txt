@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
