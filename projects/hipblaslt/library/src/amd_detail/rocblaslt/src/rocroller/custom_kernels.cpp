@@ -7,18 +7,19 @@
 #include <hip/hip_runtime.h>
 #include <iostream>
 
-std::shared_ptr<GemmKernel> createCustomGemmKernel(const std::string&           customKernelName,
-                                                   const KernelType&            kernelType,
-                                                   const WorkGroupTileSize&     wgt,
-                                                   const std::filesystem::path& path)
+std::filesystem::path getCoPath();
+
+std::shared_ptr<AssemblyStoreRowOrderGemm>
+    AssemblyStoreRowOrderGemm::generate(const std::string&       customKernelName,
+                                        const KernelType&        kernelType,
+                                        const WorkGroupTileSize& wgt)
 {
-    auto gemmKernel = std::make_shared<GemmKernel>();
+    auto path       = getCoPath() / "rr_custom_kernels.co";
+    auto gemmKernel = std::make_shared<AssemblyStoreRowOrderGemm>(customKernelName, path);
 
     gemmKernel->params                = std::make_shared<SolutionParameters>();
     gemmKernel->params->kernelType    = kernelType;
     gemmKernel->params->workgroupTile = wgt;
-
-    gemmKernel->module = GemmHipModuleWrapper(customKernelName, path);
 
     return gemmKernel;
 }
@@ -98,337 +99,304 @@ void preloadCustomKernels(SolutionCache& cache)
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 384, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 512, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x512E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 640, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x640E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 768, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x768E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 896, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x896E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {32, 1024, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_32x1024E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 384, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x384E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 512, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x512E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 640, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x640E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 768, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x768E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 896, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_64x896E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {64, 1024, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_64x1024E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // 96xN kernels
             params.workgroupTile    = {96, 128, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {96, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {96, 384, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x384E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {96, 512, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x512E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {96, 640, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_96x640E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // 128xN kernels
             params.workgroupTile    = {128, 128, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {128, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {128, 384, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x384E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {128, 512, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x512E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // 160xN kernels
             params.workgroupTile    = {160, 128, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_160x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {160, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_160x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {160, 384, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_160x384E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // 192xN kernels
             params.workgroupTile    = {192, 128, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {192, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // 224xN kernels
             params.workgroupTile    = {224, 128, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_224x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {224, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_224x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // 256xN kernels
             params.workgroupTile    = {256, 128, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x128E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             params.workgroupTile    = {256, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
 
             // No B pre-shuffle
             mxfp4Kernel.swizzleA    = false;
@@ -436,11 +404,10 @@ void preloadCustomKernels(SolutionCache& cache)
             cache.addKernel(
                 mxfp4Kernel,
                 params,
-                createCustomGemmKernel(
+                AssemblyStoreRowOrderGemm::generate(
                     "_ZN5aiter44f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256E",
                     mxfp4Kernel,
-                    params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    params.workgroupTile));
         }
     }
 }
@@ -539,15 +506,22 @@ struct __attribute__((packed)) F4GemmKernelArgs
     }
 };
 
-rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
-                                 const RocblasltContractionProblem& prob)
-{
-    if(!gemm->module.has_value())
-    {
-        std::cerr << "runCustomKernel failed: Module not loadable" << std::endl;
-        return rocblaslt_status_internal_error;
-    }
+// AssemblyStoreRowOrderGemm method implementations
 
+size_t AssemblyStoreRowOrderGemm::workspaceRequired(const RocblasltContractionProblem& prob)
+{
+    return 0;
+}
+
+bool AssemblyStoreRowOrderGemm::isSupportedProblem(const RocblasltContractionProblem& prob)
+{
+    return (prob.m % params->workgroupTile.m == 0 &&
+            prob.n % params->workgroupTile.n == 0 &&
+            prob.k % params->workgroupTile.k == 0);
+}
+
+rocblaslt_status AssemblyStoreRowOrderGemm::run(const RocblasltContractionProblem& prob)
+{
     if (prob.beta && *static_cast<const float*>(prob.beta) != 0)
     {
         std::cerr << "Kernel only supports when beta is 0" << std::endl;;
@@ -556,8 +530,8 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
 
     F4GemmKernelArgs args(prob);
 
-    const uint32_t tileM     = gemm->params->workgroupTile.m;
-    const uint32_t tileN     = gemm->params->workgroupTile.n;
+    const uint32_t tileM     = params->workgroupTile.m;
+    const uint32_t tileN     = params->workgroupTile.n;
     const uint32_t blockSize = 256; // Threads per workgroup
 
     // Number of tiles in each dimension
@@ -581,7 +555,7 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
                                HIP_LAUNCH_PARAM_END};
 
     hipFunction_t function;
-    if(hipError_t error = gemm->module->getHipFunction(function))
+    if(hipError_t error = module.getHipFunction(function))
     {
         std::cerr << "GemmHipModuleWrapper::getHipFunction failed: " << std::endl
                   << " error: " << hipGetErrorString(error) << std::endl;
@@ -603,7 +577,7 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
                                                    ))
     {
         std::cerr << "hipExtModuleLaunchKernel in runCustomKernel failed: "
-                  << gemm->module->getKernelName() << std::endl
+                  << module.getKernelName() << std::endl
                   << " error: " << hipGetErrorString(error) << std::endl;
         return rocblaslt_status_internal_error;
     }
