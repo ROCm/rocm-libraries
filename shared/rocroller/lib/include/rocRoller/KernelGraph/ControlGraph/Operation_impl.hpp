@@ -9,6 +9,29 @@ namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
     {
+        inline std::string toString(OpMode m)
+        {
+            switch(m)
+            {
+            case OpMode::Branch:
+                return "Branch";
+            case OpMode::Exec:
+                return "Exec";
+            case OpMode::BranchAndExec:
+                return "BranchAndExec";
+
+            case OpMode::Count:
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid OpMode");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, OpMode m)
+        {
+            return stream << toString(m);
+        }
+
         template <typename T>
         concept CHasVarTypeMember = requires(T const& op)
         {

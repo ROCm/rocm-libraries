@@ -343,59 +343,71 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ConditionalOp const& op)
             {
-                auto falseLabel = m_context->labelAllocator()->label(
-                    fmt::format("ConditionalFalse_{}_{}", op.conditionName, tag));
-                auto botLabel = m_context->labelAllocator()->label(
-                    fmt::format("ConditionalBottom_{}_{}", op.conditionName, tag));
-
-                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional");
-
-                auto expr            = m_fastArith(op.condition);
-                auto conditionResult = m_context->brancher()->resultRegister(expr);
-
-                co_yield Expression::generate(conditionResult, expr, m_context);
-                // -------------------------------------------------------------------------------
-                // TODO: remove this once we better handle data-flow across branches
+                switch(op.mode)
                 {
-                    co_yield Instruction::Wait(
-                        WaitCount::Zero(m_context->targetArchitecture(),
-                                        "REMOVEME: Wait before branching into conditional label!"));
-                }
-                // -------------------------------------------------------------------------------
-                co_yield m_context->brancher()->branchIfZero(
-                    falseLabel,
-                    conditionResult,
-                    concatenate("Condition: False, jump to ", falseLabel->toString()));
-                auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                co_yield generate(trueBody);
-                co_yield m_context->brancher()->branch(
-                    botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
+                case OpMode::Branch:
+                {
+                    auto falseLabel = m_context->labelAllocator()->label(
+                        fmt::format("ConditionalFalse_{}_{}", op.conditionName, tag));
+                    auto botLabel = m_context->labelAllocator()->label(
+                        fmt::format("ConditionalBottom_{}_{}", op.conditionName, tag));
 
-                // -------------------------------------------------------------------------------
-                // TODO: remove this once we better handle data-flow across branches
-                {
-                    co_yield Instruction::Wait(
-                        WaitCount::Zero(m_context->targetArchitecture(),
-                                        "REMOVEME: Wait before conditional label!"));
-                }
-                // -------------------------------------------------------------------------------
-                co_yield Instruction::Label(falseLabel);
-                auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
-                if(!elseBody.empty())
-                {
-                    co_yield generate(elseBody);
-                }
+                    co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                               "Lock for Conditional");
 
-                // -------------------------------------------------------------------------------
-                // TODO: remove this once we better handle data-flow across branches
-                {
-                    co_yield Instruction::Wait(
-                        WaitCount::Zero(m_context->targetArchitecture(),
-                                        "REMOVEME: Wait before conditional label!"));
+                    auto expr            = m_fastArith(op.condition);
+                    auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                    co_yield Expression::generate(conditionResult, expr, m_context);
+                    // -------------------------------------------------------------------------------
+                    // TODO: remove this once we better handle data-flow across branches
+                    {
+                        co_yield Instruction::Wait(WaitCount::Zero(
+                            m_context->targetArchitecture(),
+                            "REMOVEME: Wait before branching into conditional label!"));
+                    }
+                    // -------------------------------------------------------------------------------
+                    co_yield m_context->brancher()->branchIfZero(
+                        falseLabel,
+                        conditionResult,
+                        concatenate("Condition: False, jump to ", falseLabel->toString()));
+                    auto trueBody = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                    co_yield generate(trueBody);
+                    co_yield m_context->brancher()->branch(
+                        botLabel, concatenate("Condition: Done, jump to ", botLabel->toString()));
+
+                    // -------------------------------------------------------------------------------
+                    // TODO: remove this once we better handle data-flow across branches
+                    {
+                        co_yield Instruction::Wait(
+                            WaitCount::Zero(m_context->targetArchitecture(),
+                                            "REMOVEME: Wait before conditional label!"));
+                    }
+                    // -------------------------------------------------------------------------------
+                    co_yield Instruction::Label(falseLabel);
+                    auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                    if(!elseBody.empty())
+                    {
+                        co_yield generate(elseBody);
+                    }
+
+                    // -------------------------------------------------------------------------------
+                    // TODO: remove this once we better handle data-flow across branches
+                    {
+                        co_yield Instruction::Wait(
+                            WaitCount::Zero(m_context->targetArchitecture(),
+                                            "REMOVEME: Wait before conditional label!"));
+                    }
+                    // -------------------------------------------------------------------------------
+                    co_yield Instruction::Label(botLabel);
+                    co_yield Instruction::Unlock("Unlock Conditional");
+                    break;
                 }
-                // -------------------------------------------------------------------------------
-                co_yield Instruction::Label(botLabel);
-                co_yield Instruction::Unlock("Unlock Conditional");
+                case OpMode::Exec:
+                case OpMode::BranchAndExec:
+                default:
+                    Throw<FatalError>("Unsupported mode for ConditionalOp: ", ShowValue(op.mode));
+                }
             }
 
             Generator<Instruction> operator()(int tag, AssertOp const& op)

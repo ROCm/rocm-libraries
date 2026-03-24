@@ -27,8 +27,11 @@ namespace rocRoller
             Branch = 0,
             Exec,
             BranchAndExec,
-            Count,
+            Count
         };
+
+        std::string   toString(OpMode m);
+        std::ostream& operator<<(std::ostream& stream, OpMode m);
 
         /*
          * Control flow graph nodes.
