@@ -85,8 +85,6 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
-    EXPECT_EQ(getDataTypeEnumFromType<fp8_e8m0>(), DataType::FP8_E8M0);
-    EXPECT_EQ(getDataTypeEnumFromType<fp4_e2m1>(), DataType::FP4_E2M1);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
@@ -449,6 +447,48 @@ TEST(TestTypes, FromHipdnnPointwiseModeUnknownReturnsError)
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(mode, PointwiseMode::NOT_SET);
     EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnNormFwdPhaseValidPhases)
+{
+    using namespace hipdnn_frontend;
+
+    auto [inference, inferenceErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_PHASE_INFERENCE);
+    EXPECT_TRUE(inferenceErr.is_good());
+    EXPECT_EQ(inference, NormFwdPhase::INFERENCE);
+
+    auto [training, trainingErr] = fromHipdnnNormFwdPhase(HIPDNN_NORM_FWD_PHASE_TRAINING);
+    EXPECT_TRUE(trainingErr.is_good());
+    EXPECT_EQ(training, NormFwdPhase::TRAINING);
+}
+
+TEST(TestTypes, FromHipdnnNormFwdPhaseUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownPhase = static_cast<hipdnnNormFwdPhase_t>(9999);
+    auto [phase, err] = fromHipdnnNormFwdPhase(unknownPhase);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(phase, NormFwdPhase::NOT_SET);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnNormFwdPhaseRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto phase : {NormFwdPhase::INFERENCE, NormFwdPhase::TRAINING})
+    {
+        auto hipdnnOpt = toBackendNormFwdPhase(phase);
+        ASSERT_TRUE(hipdnnOpt.has_value())
+            << "toBackendNormFwdPhase failed for phase " << static_cast<int>(phase);
+        auto [roundTripped, err] = fromHipdnnNormFwdPhase(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnNormFwdPhase failed for phase " << static_cast<int>(phase);
+        EXPECT_EQ(roundTripped, phase)
+            << "Round-trip mismatch for phase " << static_cast<int>(phase);
+    }
 }
 
 TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)

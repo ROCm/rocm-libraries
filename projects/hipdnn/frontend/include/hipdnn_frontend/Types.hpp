@@ -55,10 +55,8 @@
 namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
-using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e5m2;
-using hipdnn_data_sdk::types::fp8_e8m0;
 using hipdnn_data_sdk::types::half;
 
 /**
@@ -309,14 +307,6 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::FP8_E5M2;
     }
-    else if constexpr(std::is_same_v<T, fp8_e8m0>)
-    {
-        return DataType::FP8_E8M0;
-    }
-    else if constexpr(std::is_same_v<T, fp4_e2m1>)
-    {
-        return DataType::FP4_E2M1;
-    }
     else
     {
         return DataType::NOT_SET;
@@ -449,6 +439,29 @@ inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPh
         return HIPDNN_NORM_FWD_PHASE_TRAINING;
     default:
         return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnNormFwdPhase_t to frontend NormFwdPhase
+ *
+ * Maps backend C API normalization forward phase enum to the frontend enum type.
+ *
+ * @param phase The backend hipdnnNormFwdPhase_t value
+ * @return A pair of NormFwdPhase and Error; error is set for unknown values
+ */
+inline std::pair<NormFwdPhase, Error> fromHipdnnNormFwdPhase(hipdnnNormFwdPhase_t phase)
+{
+    switch(phase)
+    {
+    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+        return {NormFwdPhase::INFERENCE, {}};
+    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+        return {NormFwdPhase::TRAINING, {}};
+    default:
+        return {NormFwdPhase::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnNormFwdPhase_t value: " + std::to_string(static_cast<int>(phase))}};
     }
 }
 

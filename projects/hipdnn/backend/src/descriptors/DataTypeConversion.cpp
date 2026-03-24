@@ -94,9 +94,6 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::INT8:
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
-    case DataType::FP8_E8M0:
-    case DataType::FP4_E2M1:
-    case DataType::INT4:
         return 1;
     default:
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported DataType for byte size");
