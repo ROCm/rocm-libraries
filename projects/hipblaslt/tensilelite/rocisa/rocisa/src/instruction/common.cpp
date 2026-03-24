@@ -774,7 +774,7 @@ void common_inst(nb::module_ m_common)
              [](const rocisa::SWaitCnt& self, nb::dict&) { return new rocisa::SWaitCnt(self); });
 
     nb::class_<rocisa::SWaitTensorcnt, rocisa::Instruction>(m_common, "SWaitTensorcnt")
-        .def(nb::init<int, const std::string&>(), nb::arg("tensorcnt") = -1, nb::arg("comment") = "")
+        .def(nb::init<int, const std::string&>(), nb::arg("tensorcnt") = 0, nb::arg("comment") = "")
         .def("getParams", &rocisa::SWaitTensorcnt::getParams)
         .def("__str__", &rocisa::SWaitTensorcnt::toString)
         .def("__deepcopy__", [](const rocisa::SWaitTensorcnt& self, nb::dict&) {
