@@ -343,6 +343,15 @@ bool RunKTNGeneric(ConfigType& config,
     }
 }
 
+/// @brief Type alias for CK split_k validation function
+/// Takes (kernel_id, split_k) and returns whether CK supports this combination
+using CKSplitKValidatorFunc = std::function<bool(const std::string& kernel_id, int split_k)>;
+
+/// @brief Type alias for CK validator creator function
+/// Takes a problem description and returns a CKSplitKValidatorFunc for that problem
+using CKSplitKValidatorCreatorFunc =
+    std::function<CKSplitKValidatorFunc(const miopen::conv::ProblemDescription&)>;
+
 /**
  * @brief Run AI-based heuristics to select optimal kernel configuration
  *
@@ -359,6 +368,7 @@ bool RunKTNGeneric(ConfigType& config,
  * @param is_deterministic Whether deterministic mode is enabled
  * @param fill_valid_kernels Callable to fill valid kernel IDs
  * @param ktn_runner Optional callable to run KTN heuristics for gfx90a
+ * @param ck_validator_creator Optional callable to create a CK validator for split_k validation
  *
  * @return true if AI heuristics successfully selected a kernel, false otherwise
  *
@@ -370,22 +380,32 @@ bool RunKTNGeneric(ConfigType& config,
  *     return FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(p);
  * };
  *
+ * // Optional: Create CK validator for split_k support check
+ * auto ck_validator_creator = [](const ProblemDescription& p) {
+ *     return [p](const std::string& kernel_id, int split_k) {
+ *         return IsCKSplitKSupportedGeneric<DeviceOpGBwdPtrs, CKArgs>(p, kernel_id, split_k);
+ *     };
+ * };
+ *
  * if(RunAIHeuristics(kFwdSolverConfig, state, ctx, problem,
- *                    is_deterministic, fill_kernels, ktn_runner))
+ *                    is_deterministic, fill_kernels, ktn_runner, ck_validator_creator))
  * {
  *     return; // AI heuristics succeeded
  * }
  * // Fallback to default initialization
  * ```
  */
-template <typename FillKernelsFunc, typename KTNRunnerFunc = std::nullptr_t>
+template <typename FillKernelsFunc,
+          typename KTNRunnerFunc          = std::nullptr_t,
+          typename CKValidatorCreatorFunc = std::nullptr_t>
 bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      HeuristicInitState& state,
                      const miopen::ExecutionContext& ctx,
                      const miopen::conv::ProblemDescription& problem,
                      bool is_deterministic,
                      FillKernelsFunc&& fill_valid_kernels,
-                     KTNRunnerFunc&& ktn_runner = nullptr)
+                     KTNRunnerFunc&& ktn_runner              = nullptr,
+                     CKValidatorCreatorFunc&& ck_val_creator = nullptr)
 {
     const std::string& arch = ctx.GetStream().GetDeviceName();
 
@@ -426,12 +446,30 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
             // - Checks kernel index bounds
             // - Enforces deterministic mode restrictions (split_k must be 1)
             // - Validates split_k using solver configuration rules
+            // - Uses CK's IsSupportedBySplitK when ck_validator is provided
             auto is_valid = [&](int ki, int sk) {
                 if(ki < 0 || ki >= static_cast<int>(state.valid_kernels.size()))
                     return false;
                 if(is_deterministic && solver_cfg.uses_split_k && sk != 1)
                     return false;
-                return solver_cfg.IsValidSplitK(sk);
+                if(!solver_cfg.IsValidSplitK(sk))
+                    return false;
+
+                // If CK validator creator is provided, use CK's IsSupportedBySplitK
+                if constexpr(!std::is_same_v<CKValidatorCreatorFunc, std::nullptr_t>)
+                {
+                    if(ck_val_creator)
+                    {
+                        auto ck_validator = ck_val_creator(problem);
+                        if(!ck_validator(state.valid_kernels[ki], sk))
+                        {
+                            MIOPEN_LOG_T("CK rejected kernel+split_k: " << state.valid_kernels[ki]
+                                                                        << "+" << sk);
+                            return false;
+                        }
+                    }
+                }
+                return true;
             };
 
             auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(

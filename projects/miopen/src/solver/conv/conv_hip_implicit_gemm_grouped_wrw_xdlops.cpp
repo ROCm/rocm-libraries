@@ -659,13 +659,20 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
+        auto ck_validator_creator = [](const ProblemDescription& p) {
+            return [p](const std::string& kid, int sk) {
+                return IsCKSplitKSupportedGeneric<DeviceOpGWrwPtrs, CKArgs>(p, kid, sk);
+            };
+        };
+
         if(RunAIHeuristics(kWrwSolverConfig,
                            state,
                            ctx,
                            problem,
                            is_deterministic,
                            fill_valid_kernels,
-                           ktn_runner))
+                           ktn_runner,
+                           ck_validator_creator))
         {
             return;
         }
@@ -675,12 +682,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     // Fallback to default initialization
     MIOPEN_LOG_I2("Using default initialization");
     InitValidKernels(problem);
-    if(!valid_kernels.empty())
-    {
-        index     = 0;
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
-    }
+    state.SetResult(0, 1, kWrwSolverConfig.uses_split_k);
 
     if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
         DefaultKernelFromList(ctx);

@@ -73,7 +73,7 @@ constexpr SolverHeuristicConfig kBwdSolverConfig = {
     /* solver_name                 */ "ConvHipImplicitGemmGroupBwdXdlops",
     /* solver_name_ktn             */ "ConvHipIgemmGroupXdlops",
     /* spatial_dims                */ 2,
-    /* uses_split_k                */ false,
+    /* uses_split_k                */ true,
     /* split_k_min                 */ 1,
     /* split_k_max                 */ 128,
     /* supports_split_k_autodeduce */ false,
@@ -611,13 +611,20 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
             return RunKTNGeneric(*this, c, p);
         };
 
+        auto ck_validator_creator = [](const ProblemDescription& p) {
+            return [p](const std::string& kid, int sk) {
+                return IsCKSplitKSupportedGeneric<conv::DeviceOpGBwdPtrs, CKArgs>(p, kid, sk);
+            };
+        };
+
         if(RunAIHeuristics(kBwdSolverConfig,
                            state,
                            ctx,
                            problem,
                            is_deterministic,
                            fill_valid_kernels,
-                           ktn_runner))
+                           ktn_runner,
+                           ck_validator_creator))
         {
             return;
         }

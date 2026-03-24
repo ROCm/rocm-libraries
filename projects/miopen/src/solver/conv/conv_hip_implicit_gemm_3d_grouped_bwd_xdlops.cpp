@@ -233,8 +233,10 @@ struct CKArgs
                     ConstData_t w,
                     ConstData_t out,
                     float alpha,
-                    float beta) const
+                    float beta,
+                    int split_k = 1) const
     {
+        (void)split_k; // split_k not currently used for 3D Bwd, reserved for future
         using DeviceP = std::remove_pointer_t<decltype(conv_ptr.get())>;
         if constexpr(std::is_same_v<DeviceP, DeviceOpGBwdBilinear<DataType, ComputeType>>)
         {
@@ -345,8 +347,27 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
-        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
+    }
+
+    template <typename ConvPtr>
+    bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
+    {
+        // 3D Bwd currently doesn't use split_k, but we provide the interface
+        // for consistency with 2D solvers and future extensibility
+        (void)split_k;
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
+        return conv_ptr->IsSupportedArgument(arg_ptr.get());
+    }
+
+    template <typename ConvPtr>
+    std::size_t GetCKSplitkWorkspaceSize(const ConvPtr& conv_ptr, int split_k) const
+    {
+        // 3D Bwd currently doesn't use split_k, return 0 workspace
+        (void)split_k;
+        (void)conv_ptr;
+        return 0;
     }
 
     int G;
