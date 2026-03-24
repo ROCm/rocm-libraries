@@ -1082,6 +1082,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         return miopenStatusSuccess;
     }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
     std::vector<Solution> find_results = [&]() {
         auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
@@ -1147,6 +1149,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         }
         return find_results;
     }();
+#pragma clang diagnostic pop
 
     for(const auto& result : find_results)
     {
