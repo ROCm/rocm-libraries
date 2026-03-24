@@ -38,10 +38,10 @@ inline auto to<data_objects::ConvolutionWrwAttributes>(flatbuffers::FlatBufferBu
     auto& outputs = entry["outputs"];
     auto& params = entry["parameters"];
 
-    std::vector<int64_t> prePadding = params.at("pre_padding").get<std::vector<int64_t>>();
-    std::vector<int64_t> postPadding = params.at("post_padding").get<std::vector<int64_t>>();
-    std::vector<int64_t> stride = params.at("stride").get<std::vector<int64_t>>();
-    std::vector<int64_t> dilation = params.at("dilation").get<std::vector<int64_t>>();
+    const std::vector<int64_t> prePadding = params.at("pre_padding").get<std::vector<int64_t>>();
+    const std::vector<int64_t> postPadding = params.at("post_padding").get<std::vector<int64_t>>();
+    const std::vector<int64_t> stride = params.at("stride").get<std::vector<int64_t>>();
+    const std::vector<int64_t> dilation = params.at("dilation").get<std::vector<int64_t>>();
 
     return data_objects::CreateConvolutionWrwAttributesDirect(
         builder,

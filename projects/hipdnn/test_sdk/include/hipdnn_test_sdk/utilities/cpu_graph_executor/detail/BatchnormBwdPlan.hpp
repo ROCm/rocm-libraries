@@ -182,8 +182,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), ScaleBiasDataTypeEnum);
 
-        bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
-        bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
+        const bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
+        const bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
         if(hasMean != hasInvVariance)
         {
             return false;
@@ -217,8 +217,8 @@ public:
         const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
         const hipdnn_data_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
 
-        bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
-        bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
+        const bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
+        const bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
         if(hasMean && hasInvVariance)
         {
             meanAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());

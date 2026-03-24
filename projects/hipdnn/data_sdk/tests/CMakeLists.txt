@@ -24,8 +24,12 @@ add_executable(
     types/TestBfloat16.cpp
     types/TestCrossTypeConversion.cpp
     types/TestForwardingFunctions.cpp
+    types/TestFp4E2M1.cpp
+    types/TestFp6E2M3.cpp
+    types/TestFp6E3M2.cpp
     types/TestFp8E4M3.cpp
     types/TestFp8E5M2.cpp
+    types/TestFp8E8M0.cpp
     types/TestHalf.cpp
     types/TestPortableTypes.cpp
     types/TestUserDefinedLiterals.cpp
@@ -49,7 +53,7 @@ add_executable(
     utilities/TestVisitor.cpp
 )
 
-target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
 target_link_libraries(
     hipdnn_data_sdk_tests

@@ -36,27 +36,6 @@
 #include <omp.h>
 #include <vector>
 
-template <typename T>
-T initialize_nan_or_zero(bool is_nan, T zero_val)
-{
-    if(is_nan)
-    {
-        if constexpr(is_std_complex_v<T>)
-        {
-            using RealT = typename T::value_type;
-            return T(static_cast<RealT>(hipblaslt_nan_rng()), static_cast<RealT>(0.0));
-        }
-        else
-        {
-            return static_cast<T>(hipblaslt_nan_rng());
-        }
-    }
-    else
-    {
-        return zero_val;
-    }
-}
-
 enum class ABC_dims
 {
     A,
@@ -141,14 +120,6 @@ inline void hipblaslt_init(void*       A,
     case HIP_R_64F:
         hipblaslt_init<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_C_32F:
-        hipblaslt_init<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
-        break;
     case HIP_R_16F:
         hipblaslt_init<hipblasLtHalf>(
             static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
@@ -213,14 +184,6 @@ inline void hipblaslt_init_small(void*       A,
     case HIP_R_64F:
         hipblaslt_init_small<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_C_32F:
-        hipblaslt_init_small<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_small<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
-        break;
     case HIP_R_16F:
         hipblaslt_init_small<hipblasLtHalf>(
             static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
@@ -245,26 +208,7 @@ inline void hipblaslt_init_sin(
             size_t offset      = j * lda + i_batch * stride;
             size_t offsetValue = j * M + i_batch * M * N;
             for(size_t i = 0; i < M; ++i)
-            {
-                // Real part uses sin()
-                double val = std::sin(static_cast<double>(i + offsetValue));
-
-                if constexpr(is_std_complex_v<T>)
-                {
-                    using RealT = typename T::value_type;
-
-                    // Imaginary part uses cos() to be distinct and non-zero.
-                    // This ensures (a+bi)*(c+di) computes full complex arithmetic.
-                    double val_imag = std::cos(static_cast<double>(i + offsetValue));
-
-                    A[i + offset] = T(static_cast<RealT>(val), static_cast<RealT>(val_imag));
-                }
-                else
-                {
-                    // Real/Custom Case: Direct cast of the real value
-                    A[i + offset] = static_cast<T>(val);
-                }
-            }
+                A[i + offset] = static_cast<T>(sin(double(i + offsetValue))); //force cast to double
         }
 }
 
@@ -283,14 +227,6 @@ inline void hipblaslt_init_sin(void*       A,
         break;
     case HIP_R_64F:
         hipblaslt_init_sin<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_sin<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_sin<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_sin<hipblasLtHalf>(
@@ -384,14 +320,6 @@ inline void hipblaslt_init_alternating_sign(void*       A,
         hipblaslt_init_alternating_sign<double>(
             static_cast<double*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_C_32F:
-        hipblaslt_init_alternating_sign<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_alternating_sign<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
-        break;
     case HIP_R_16F:
         hipblaslt_init_alternating_sign<hipblasLtHalf>(
             static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
@@ -479,14 +407,6 @@ inline void hipblaslt_init_hpl_alternating_sign(void*       A,
         hipblaslt_init_hpl_alternating_sign<double>(
             static_cast<double*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_C_32F:
-        hipblaslt_init_hpl_alternating_sign<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_hpl_alternating_sign<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
-        break;
     case HIP_R_16F:
         hipblaslt_init_hpl_alternating_sign<hipblasLtHalf>(
             static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
@@ -568,14 +488,6 @@ inline void hipblaslt_init_cos(void*       A,
         break;
     case HIP_R_64F:
         hipblaslt_init_cos<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_cos<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_cos<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_cos<hipblasLtHalf>(
@@ -664,14 +576,6 @@ inline void hipblaslt_init_hpl(void*       A,
     case HIP_R_64F:
         hipblaslt_init_hpl<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_C_32F:
-        hipblaslt_init_hpl<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_hpl<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
-        break;
     case HIP_R_16F:
         hipblaslt_init_hpl<hipblasLtHalf>(
             static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
@@ -729,14 +633,14 @@ template <typename T>
 inline void hipblaslt_init_nan(T* A, size_t N)
 {
     for(size_t i = 0; i < N; ++i)
-        A[i] = initialize_nan_or_zero<T>(true, T{});
+        A[i] = T(hipblaslt_nan_rng());
 }
 
 template <typename T>
 inline void hipblaslt_init_nan(T* A, size_t start_offset, size_t end_offset)
 {
     for(size_t i = start_offset; i < end_offset; ++i)
-        A[i] = initialize_nan_or_zero<T>(true, T{});
+        A[i] = T(hipblaslt_nan_rng());
 }
 
 inline void hipblaslt_init_nan(void* A, size_t N, hipDataType type)
@@ -748,12 +652,6 @@ inline void hipblaslt_init_nan(void* A, size_t N, hipDataType type)
         break;
     case HIP_R_64F:
         hipblaslt_init_nan<double>(static_cast<double*>(A), N);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_nan<std::complex<float>>(static_cast<std::complex<float>*>(A), N);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_nan<std::complex<double>>(static_cast<std::complex<double>*>(A), N);
         break;
     case HIP_R_16F:
         hipblaslt_init_nan<hipblasLtHalf>(static_cast<hipblasLtHalf*>(A), N);
@@ -808,14 +706,6 @@ inline void hipblaslt_init_nan(void* A, size_t start_offset, size_t end_offset, 
     case HIP_R_64F:
         hipblaslt_init_nan<double>(static_cast<double*>(A), start_offset, end_offset);
         break;
-    case HIP_C_32F:
-        hipblaslt_init_nan<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), start_offset, end_offset);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_nan<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), start_offset, end_offset);
-        break;
     case HIP_R_16F:
         hipblaslt_init_nan<hipblasLtHalf>(static_cast<hipblasLtHalf*>(A), start_offset, end_offset);
         break;
@@ -865,15 +755,12 @@ template <typename T>
 inline void hipblaslt_init_nan_tri(
     bool upper, T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    T zero_val = static_cast<T>(0);
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
             {
-                bool is_nan_region = upper ? (j >= i) : (j <= i);
-
-                T val = initialize_nan_or_zero<T>(is_nan_region, zero_val);
-
+                T val = upper ? (j >= i ? T(hipblaslt_nan_rng()) : static_cast<T>(0))
+                              : (j <= i ? T(hipblaslt_nan_rng()) : static_cast<T>(0));
                 A[i + j * lda + i_batch * stride] = val;
             }
 }
@@ -894,14 +781,6 @@ inline void hipblaslt_init_nan_tri(bool        upper,
         break;
     case HIP_R_64F:
         hipblaslt_init_nan_tri(upper, static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_nan_tri<std::complex<float>>(
-            upper, static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_nan_tri<std::complex<double>>(
-            upper, static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_nan_tri(
@@ -951,7 +830,7 @@ inline void hipblaslt_init_nan(
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = initialize_nan_or_zero<T>(true, T{});
+                A[i + j * lda + i_batch * stride] = T(hipblaslt_nan_rng());
 }
 
 inline void hipblaslt_init_nan(void*       A,
@@ -969,14 +848,6 @@ inline void hipblaslt_init_nan(void*       A,
         break;
     case HIP_R_64F:
         hipblaslt_init_nan<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_nan<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_nan<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_nan<hipblasLtHalf>(
@@ -1026,14 +897,14 @@ template <typename T>
 inline void hipblaslt_init_inf(T* A, size_t N)
 {
     for(size_t i = 0; i < N; ++i)
-        A[i] = initialize_nan_or_zero<T>(true, T(0.0));
+        A[i] = static_cast<T>(hipblaslt_inf_rng());
 }
 
 template <typename T>
 inline void hipblaslt_init_inf(T* A, size_t start_offset, size_t end_offset)
 {
     for(size_t i = start_offset; i < end_offset; ++i)
-        A[i] = initialize_nan_or_zero<T>(true, T(0.0));
+        A[i] = static_cast<T>(hipblaslt_inf_rng());
 }
 
 inline void hipblaslt_init_inf(void* A, size_t N, hipDataType type)
@@ -1045,12 +916,6 @@ inline void hipblaslt_init_inf(void* A, size_t N, hipDataType type)
         break;
     case HIP_R_64F:
         hipblaslt_init_inf<double>(static_cast<double*>(A), N);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_inf<std::complex<float>>(static_cast<std::complex<float>*>(A), N);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_inf<std::complex<double>>(static_cast<std::complex<double>*>(A), N);
         break;
     case HIP_R_16F:
         hipblaslt_init_inf<hipblasLtHalf>(static_cast<hipblasLtHalf*>(A), N);
@@ -1093,7 +958,7 @@ inline void hipblaslt_init_inf(
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = initialize_nan_or_zero<T>(true, T(0.0));
+                A[i + j * lda + i_batch * stride] = T(hipblaslt_inf_rng());
 }
 
 inline void hipblaslt_init_inf(void* A, size_t start_offset, size_t end_offset, hipDataType type)
@@ -1105,14 +970,6 @@ inline void hipblaslt_init_inf(void* A, size_t start_offset, size_t end_offset, 
         break;
     case HIP_R_64F:
         hipblaslt_init_inf<double>(static_cast<double*>(A), start_offset, end_offset);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_inf<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), start_offset, end_offset);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_inf<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), start_offset, end_offset);
         break;
     case HIP_R_16F:
         hipblaslt_init_inf<hipblasLtHalf>(static_cast<hipblasLtHalf*>(A), start_offset, end_offset);
@@ -1165,14 +1022,6 @@ inline void hipblaslt_init_inf(void*       A,
         break;
     case HIP_R_64F:
         hipblaslt_init_inf<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_inf<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_inf<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_inf<hipblasLtHalf>(
@@ -1261,14 +1110,6 @@ inline void hipblaslt_init_zero(void*       A,
     case HIP_R_64F:
         hipblaslt_init_zero<double>(static_cast<double*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_C_32F:
-        hipblaslt_init_zero<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_zero<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
-        break;
     case HIP_R_16F:
         hipblaslt_init_zero<hipblasLtHalf>(
             static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
@@ -1319,14 +1160,6 @@ inline void hipblaslt_init_zero(void* A, size_t start_offset, size_t end_offset,
         break;
     case HIP_R_64F:
         hipblaslt_init_zero<double>(static_cast<double*>(A), start_offset, end_offset);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_zero<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), start_offset, end_offset);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_zero<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), start_offset, end_offset);
         break;
     case HIP_R_16F:
         hipblaslt_init_zero<hipblasLtHalf>(
@@ -1405,14 +1238,6 @@ inline void hipblaslt_init_alt_impl_big(void*       A,
     case HIP_R_64F:
         hipblaslt_init_alt_impl_big<double>(
             static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_alt_impl_big<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_alt_impl_big<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_alt_impl_big<hipblasLtHalf>(
@@ -1495,14 +1320,6 @@ inline void hipblaslt_init_alt_impl_small(void*       A,
     case HIP_R_64F:
         hipblaslt_init_alt_impl_small<double>(
             static_cast<double*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_32F:
-        hipblaslt_init_alt_impl_small<std::complex<float>>(
-            static_cast<std::complex<float>*>(A), M, N, lda, stride, batch_count);
-        break;
-    case HIP_C_64F:
-        hipblaslt_init_alt_impl_small<std::complex<double>>(
-            static_cast<std::complex<double>*>(A), M, N, lda, stride, batch_count);
         break;
     case HIP_R_16F:
         hipblaslt_init_alt_impl_small<hipblasLtHalf>(

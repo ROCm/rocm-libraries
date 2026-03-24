@@ -21,8 +21,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNode)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -36,8 +36,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeMissingX)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -51,8 +51,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeMissingY)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -66,8 +66,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeMissingScale)
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -82,8 +82,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeNotSet)
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -101,8 +101,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeZero)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(0);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -120,8 +120,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeNegative)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(-1);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -142,8 +142,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeYShapeMismatch)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -164,8 +164,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeYRankMismatch)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -184,8 +184,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeYDimsNotSetPassesValidation)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -201,8 +201,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeXDimsNotSetSkipsDimChecks)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(32);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -221,8 +221,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisNegative)
     attrs.set_block_size(32);
     attrs.set_axis(-1);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -241,8 +241,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisExceedsRank)
     attrs.set_block_size(32);
     attrs.set_axis(4); // rank is 4, so axis=4 is out of bounds
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -261,8 +261,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisValid)
     attrs.set_block_size(32);
     attrs.set_axis(1);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -279,8 +279,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisWithoutXDimsSkipsCheck)
     attrs.set_block_size(32);
     attrs.set_axis(100); // Would be invalid if dims were set
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -300,8 +300,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeDimNotDivisibleByBlockSize)
     attrs.set_block_size(30); // 64 is not divisible by 30
     attrs.set_axis(1);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -320,8 +320,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeDefaultAxisDivisibility)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(8); // 32 % 8 == 0
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
@@ -340,8 +340,8 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeDefaultAxisNotDivisible)
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_block_size(7); // 32 % 7 != 0
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
@@ -365,7 +365,7 @@ TEST(TestBlockScaleQuantizeNode, InferPropertiesNode)
     auto outputTensor = attrs.get_y();
     outputTensor->set_uid(2).set_name("OutputTensor");
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -380,7 +380,7 @@ TEST(TestBlockScaleQuantizeNode, InferPropertiesNodeMissingX)
     BlockScaleQuantizeAttributes attrs;
     attrs.set_y(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
     BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -392,7 +392,20 @@ TEST(TestBlockScaleQuantizeNode, InferPropertiesNodeMissingY)
     BlockScaleQuantizeAttributes attrs;
     attrs.set_x(std::make_shared<TensorAttributes>());
 
-    GraphAttributes graphAttributes;
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesNodeMissingScale)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_x(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttributes;
     BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
@@ -430,8 +443,8 @@ TEST(TestBlockScaleQuantizeNode, PackNode)
         .set_stride({2, 1, 1, 1});
     attrs.set_scale(scaleTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -476,8 +489,8 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithTranspose)
     scaleTensor->set_uid(3).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     attrs.set_scale(scaleTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -510,8 +523,8 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithoutBlockSizeThrows)
     scaleTensor->set_uid(3).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     attrs.set_scale(scaleTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     EXPECT_THROW(node.pack_node(builder), std::bad_optional_access);
@@ -536,8 +549,8 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithoutAxis)
     scaleTensor->set_uid(3).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     attrs.set_scale(scaleTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     flatbuffers::FlatBufferBuilder builder;
     auto offset = node.pack_node(builder);
@@ -551,6 +564,272 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithoutAxis)
     EXPECT_EQ(packedAttributes->block_size(), 32);
     EXPECT_FALSE(packedAttributes->axis().has_value());
     EXPECT_EQ(packedAttributes->transpose(), false);
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesTransposedYStridesWithAxis)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(1);
+    attrs.set_transpose(true);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{2, 64, 32, 32}));
+    // Derivation: sort indices by X strides ascending → [3,2,1,0], rotate axis=1 to front
+    // → [1,0,3,2], inverse permutation gives strideOrder=[1,0,3,2], so dim 1 gets stride 1.
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{64, 1, 4096, 128}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesTransposedScaleStridesWithAxis)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(1);
+    attrs.set_transpose(true);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3).set_name("Scale");
+    attrs.set_scale(scaleTensor);
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(scaleTensor->get_dim(), (std::vector<int64_t>{2, 2, 32, 32}));
+    EXPECT_EQ(scaleTensor->get_stride(), (std::vector<int64_t>{2, 1, 128, 4}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesTransposedDefaultAxis)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    // No axis set
+    attrs.set_transpose(true);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3).set_name("Scale");
+    attrs.set_scale(scaleTensor);
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    // Without axis, transpose produces same stride ordering as X
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{65536, 1024, 32, 1}));
+    // Scale dims: last dim divided by block_size
+    EXPECT_EQ(scaleTensor->get_dim(), (std::vector<int64_t>{2, 64, 32, 1}));
+    EXPECT_EQ(scaleTensor->get_stride(), (std::vector<int64_t>{2048, 32, 1, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesTransposedNhwcInput)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(3);
+    attrs.set_transpose(true);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1, 2048, 64}); // NHWC layout
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{2, 64, 32, 32}));
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{1024, 2048, 32, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesTransposePreservesExistingStrides)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(1);
+    attrs.set_transpose(true);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2)
+        .set_name("Y")
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1}); // User-set strides
+    attrs.set_y(yTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    // Existing strides should not be overwritten
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesNonTransposeScaleStrides)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(1);
+    // transpose is false by default
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3).set_name("Scale");
+    attrs.set_scale(scaleTensor);
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    // Non-transpose: Y gets X strides, scale gets stride order from extractStrideOrder
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{65536, 1024, 32, 1}));
+    EXPECT_EQ(scaleTensor->get_dim(), (std::vector<int64_t>{2, 2, 32, 32}));
+    EXPECT_EQ(scaleTensor->get_stride(), (std::vector<int64_t>{2048, 1024, 32, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesYStridesFallbackNoXStrides)
+{
+    // When X has dims but no strides, Y strides fall back to generateStrides(y->get_dim())
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32}); // No strides set
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{2, 64, 32, 32}));
+    // Default generateStrides produces row-major strides
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesScaleStridesFallbackNoXStrides)
+{
+    // When X has dims but no strides, scale strides fall back to generateStrides(scale->get_dim())
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(1);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32}); // No strides set
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3).set_name("Scale");
+    attrs.set_scale(scaleTensor);
+
+    const GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    // Scale dims inferred: axis=1 → dim[1]/32 = 64/32 = 2
+    EXPECT_EQ(scaleTensor->get_dim(), (std::vector<int64_t>{2, 2, 32, 32}));
+    // Default generateStrides produces row-major strides
+    EXPECT_EQ(scaleTensor->get_stride(), (std::vector<int64_t>{2048, 1024, 32, 1}));
 }
 
 TEST(TestBlockScaleQuantizeNode, GatherHipdnnTensors)
@@ -569,8 +848,8 @@ TEST(TestBlockScaleQuantizeNode, GatherHipdnnTensors)
     scaleTensor->set_uid(3).set_name("Scale");
     attrs.set_scale(scaleTensor);
 
-    GraphAttributes graphAttributes;
-    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+    const GraphAttributes graphAttributes;
+    const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -580,4 +859,11 @@ TEST(TestBlockScaleQuantizeNode, GatherHipdnnTensors)
     EXPECT_TRUE(allTensors.find(scaleTensor) != allTensors.end());
 
     EXPECT_EQ(allTensors.size(), 3);
+}
+
+TEST(TestBlockScaleQuantizeNode, GetNodeTypeReturnsBlockScaleQuantize)
+{
+    const GraphAttributes graphAttrs;
+    const BlockScaleQuantizeNode node(BlockScaleQuantizeAttributes{}, graphAttrs);
+    EXPECT_EQ(node.getNodeType(), NodeType::BLOCK_SCALE_QUANTIZE);
 }

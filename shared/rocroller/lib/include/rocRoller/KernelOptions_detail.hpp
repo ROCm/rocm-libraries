@@ -93,6 +93,11 @@ namespace rocRoller
          */
         std::optional<int> maxConcurrentControlOps;
 
+        /**
+         * Choose the LDS Memory observer to use for scheduling.
+         *
+         * Affects cycle count predictions for LDS instructions.
+         */
         DSObserverType dsObserver = DSObserverType::DSMEMObserver;
 
         /**

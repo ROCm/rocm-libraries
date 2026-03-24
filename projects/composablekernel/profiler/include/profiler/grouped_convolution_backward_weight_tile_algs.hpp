@@ -73,7 +73,7 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
 
 template <auto SIGNATURE>
 std::tuple<double, double>
-get_rtol_atol(const int num_accums, const int num_accums_split_k, const float max_accumulated_value)
+get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulated_value)
 {
     using WeiDataType =
         std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
@@ -84,6 +84,8 @@ get_rtol_atol(const int num_accums, const int num_accums_split_k, const float ma
     using ComputeType = WeiDataType;
     using AccDataType = float;
 
+    // Assign middle value of the range for auto deduce
+    const int num_accums_split_k = k_batch > 0 ? k_batch : 64;
     auto rtol = ck_tile::get_relative_threshold<ComputeType, WeiDataType, AccDataType>(
         num_accums / num_accums_split_k);
     auto atol = ck_tile::get_absolute_threshold<ComputeType, WeiDataType, AccDataType>(
@@ -112,7 +114,8 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                                            const ckt::Outputs<SIGNATURE>& outputs,
                                            const ck_tile::stream_config& s_conf)
 {
-    float best_avg_time = std::numeric_limits<float>::max();
+    bool dummy_run_executed = false;
+    float best_avg_time     = std::numeric_limits<float>::max();
     std::string best_op_name, op_name;
     int best_split_k;
     bool is_supported;
@@ -150,14 +153,24 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
     auto run_alg = [&](auto&& run_alg_func) {
         for(auto& k_batch : split_k_values)
         {
-            std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
+            ckt::Args<SIGNATURE> args_k_batch = args;
+            args_k_batch.k_batch              = k_batch;
+            if((s_conf.time_kernel_ || s_conf.flush_cache_) && !dummy_run_executed)
+            {
+                // Run first instance twice when profiling to stabilize timing
+                std::tie(is_supported, avg_time, op_name) =
+                    run_alg_func(args_k_batch, inputs, outputs, s_conf);
+                dummy_run_executed = true;
+            }
+            std::tie(is_supported, avg_time, op_name) =
+                run_alg_func(args_k_batch, inputs, outputs, s_conf);
             if(is_supported)
             {
                 ckt::ValidationReport report;
                 auto&& [rtol, atol] =
                     get_rtol_atol<SIGNATURE>(num_accums, k_batch, max_accumulated_value);
                 ckt::Outputs<SIGNATURE>::reflect(
-                    args,
+                    args_k_batch,
                     [&](std::string_view name,
                         const auto& desc,
                         void* ckt::Outputs<SIGNATURE>::*ptr) {
@@ -165,11 +178,11 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                     });
 
                 const bool valid = report.get_errors().empty();
+                best_avg_time    = std::min(best_avg_time, avg_time);
+                best_op_name     = best_avg_time < avg_time ? best_op_name : op_name;
+                best_split_k     = best_avg_time < avg_time ? best_split_k : k_batch;
                 if(valid)
                 {
-                    best_avg_time = std::min(best_avg_time, avg_time);
-                    best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-                    best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
                     std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms," << " "
                               << op_name << ", SplitK " << k_batch << std::endl;
                 }
@@ -182,7 +195,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                                   << " Is all zero:" << error.is_all_zero()
                                   << " max err: " << error.max_error << std::endl;
                         // Check with cpu verification to get a values
-                        run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                        run_cpu_validation<SIGNATURE>(args_k_batch, outputs, reference.get());
                     }
                     all_instances_valid = false;
                 }
