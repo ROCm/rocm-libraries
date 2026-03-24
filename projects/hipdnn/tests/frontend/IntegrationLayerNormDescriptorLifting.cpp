@@ -150,6 +150,7 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
     ASSERT_EQ(tensorMap.size(), 7u);
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_X_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_name(), "X");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_X_DIMS));
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_stride(),
@@ -157,22 +158,26 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_X_UID]->get_data_type(), DataType::FLOAT);
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_SCALE_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_name(), "SCALE");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_DIMS));
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_SCALE_UID]->get_stride(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_SCALE_STRIDES));
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_BIAS_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_BIAS_UID]->get_name(), "BIAS");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_BIAS_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_DIMS));
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_BIAS_UID]->get_stride(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID]->get_name(), "EPSILON");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_EPSILON_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_EPSILON_DIMS));
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_Y_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_name(), "Y");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_Y_DIMS));
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_stride(),
@@ -180,10 +185,13 @@ TEST_F(IntegrationLayerNormDescriptorLifting, LayernormTrainingRoundTripViaCApi)
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_MEAN_UID]->get_name(), "MEAN");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_MEAN_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_MEAN_DIMS));
 
     ASSERT_NE(tensorMap.count(ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID]->get_name(),
+              "INV_VARIANCE");
     EXPECT_EQ(tensorMap[ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_UID]->get_dim(),
               toVec(ln_constants::K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS));
 

@@ -342,7 +342,7 @@ std::shared_ptr<LayernormOperationDescriptor> LayernormOperationDescriptor::from
                               "LayernormOperationDescriptor::fromNode: InvVariance");
     }
 
-    desc->HipdnnBackendDescriptorImpl<LayernormOperationDescriptor>::finalize();
+    desc->finalize();
     return desc;
 }
 

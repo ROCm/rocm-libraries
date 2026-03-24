@@ -219,6 +219,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(node->name, "layernorm_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);
 
     auto* layernorm = node->attributes.AsLayernormAttributes();
@@ -461,6 +462,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, InferenceModeOmitsMeanAndInvVaria
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(node->name, "layernorm_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);
 
     auto* layernorm = node->attributes.AsLayernormAttributes();
