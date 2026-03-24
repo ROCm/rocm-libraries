@@ -1,4 +1,3 @@
-<!-- Workflow structure reference: https://github.github.com/gh-aw/reference/workflow-structure/#file-organization -->
 ---
 on:
   schedule:
@@ -7,6 +6,12 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
+checkout:
+  fetch-depth: 0
+  sparse-checkout: |
+    .github
+    .agents
+    projects/hipblaslt
 tools:
   bash: ["python", "python3", "gh", "git"]
 engine:
@@ -15,6 +20,9 @@ engine:
 safe-outputs:
   create-pull-request:
 ---
+<!-- Workflow structure reference: https://github.github.com/gh-aw/reference/workflow-structure/#file-organization -->
+
+# Hipblaslt Documentation Agent
 
 # 1. Role
 
