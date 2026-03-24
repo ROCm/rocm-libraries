@@ -97,10 +97,9 @@ set(__clang_cxx_compile_options
     -Wno-unused-parameter
     -Wmissing-noreturn)
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
     list(APPEND __clang_cxx_compile_options
-        -Wno-switch-default
-        -Wno-nontrivial-memcall)
+        -Wno-lifetime-safety-intra-tu-suggestions)
 endif()
 
 if(WIN32)
