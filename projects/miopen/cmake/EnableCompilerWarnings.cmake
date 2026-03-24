@@ -96,6 +96,7 @@ set(__clang_cxx_compile_options
     -Wno-deprecated-builtins
     -Wno-unused-parameter
     -Wmissing-noreturn
+    -Wno-nrvo
     -Wno-switch-default
     -Wno-unique-object-duplication)
 
