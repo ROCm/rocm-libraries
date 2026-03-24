@@ -650,7 +650,7 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["CUCount"] = data[2]["CUCount"]
     else:
         rv["ArchitectureName"] = data[2]
-        rv["CUCount"] = getCUCount()
+        rv["CUCount"] = None
 
     rv["DeviceNames"] = data[3]
     rv["ProblemType"] = data[4]
