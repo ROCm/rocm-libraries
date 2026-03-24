@@ -29,6 +29,7 @@ add_executable(
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationGraphLifting.cpp
+    IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
