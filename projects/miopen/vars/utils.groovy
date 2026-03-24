@@ -42,7 +42,7 @@ def cmake_build(Map conf=[:]){
 
     def build_fin = conf.get("build_fin", "OFF")
 
-    setup_args = setup_args + " -DCMAKE_PREFIX_PATH=${prefixpath} "
+    def setup_args = " -DMIOPEN_GPU_SYNC=Off " + conf.get("setup_flags","") + " -DCMAKE_PREFIX_PATH=${prefixpath} "
 
     //cmake_env can overwrite default CXX variables.
     def cmake_envs = "CXX=${compiler} CXXFLAGS='-Werror' " + conf.get("cmake_ex_env","")
