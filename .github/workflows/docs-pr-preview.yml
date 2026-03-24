@@ -32,62 +32,17 @@ jobs:
       (github.event.comment.author_association == 'MEMBER' ||
       github.event.comment.author_association == 'OWNER')
     steps:
-      - name: Generate a token
-        id: generate-token
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
-      - name: Checkout config files only
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
-          token: ${{ steps.generate-token.outputs.token }}
-
-      - name: Set up Python
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        with:
-          python-version: '3.10'
-
-      - name: Install python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pydantic requests
-
-      - name: Set up Git user
-        run: |
-          git config user.name "assistant-librarian[bot]"
-          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
-
-      - name: Detect changed subtrees from PR
-        id: detect
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-        run: |
-          python .github/scripts/pr_detect_changed_subtrees.py \
-            --repo "${{ github.repository }}" \
-            --pr "${{ github.event.issue.number }}" \
-            --config ".github/repos-config.json" \
-            --require-auto-push
-
       - name: Extract first project
         id: extract
         run: |
-          project=$(echo "${{ steps.detect.outputs.subtrees }}" | head -n1)
-          echo "project=$project" >> $GITHUB_OUTPUT
-          echo "project_name=$(echo "$project" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
+          echo "project=libs/rocblas" >> $GITHUB_OUTPUT
+          echo "project_name=rocblas" >> $GITHUB_OUTPUT
 
       - name: Get PR branch
         if: steps.extract.outputs.project
         id: pr
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
-          echo "branch=$(echo $PR_DATA | jq -r .head.ref)" >> $GITHUB_OUTPUT
+          echo "branch=users/alexxu12/test-preview" >> $GITHUB_OUTPUT
 
       - name: Derive RTD slugs and verify project exists
         if: steps.extract.outputs.project
@@ -122,7 +77,7 @@ jobs:
           curl -f -s -X PATCH \
             -H "Authorization: Token $RTD_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"active": true}' \
+            -d '{"active": true, "hidden": true, "privacy_level": "private"}' \
             "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
 
       - name: Trigger RTD build for PR branch
