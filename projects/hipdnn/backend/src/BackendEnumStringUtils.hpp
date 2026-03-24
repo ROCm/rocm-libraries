@@ -79,6 +79,16 @@ inline const char* hipdnnGetDataTypeString(hipdnnDataType_t type)
         return "HIPDNN_DATA_FP8_E4M3";
     case HIPDNN_DATA_FP8_E5M2:
         return "HIPDNN_DATA_FP8_E5M2";
+    case HIPDNN_DATA_FP8_E8M0:
+        return "HIPDNN_DATA_FP8_E8M0";
+    case HIPDNN_DATA_FP4_E2M1:
+        return "HIPDNN_DATA_FP4_E2M1";
+    case HIPDNN_DATA_INT4:
+        return "HIPDNN_DATA_INT4";
+    case HIPDNN_DATA_FP6_E2M3:
+        return "HIPDNN_DATA_FP6_E2M3";
+    case HIPDNN_DATA_FP6_E3M2:
+        return "HIPDNN_DATA_FP6_E3M2";
     default:
         return "HIPDNN_DATA_UNKNOWN";
     }
