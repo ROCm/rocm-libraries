@@ -23,7 +23,7 @@ class TestFp8E4M3 : public ::testing::Test
 {
 protected:
     // FP8 E4M3 has limited precision, use larger tolerance
-    static constexpr float K_TOLERANCE = 0.2f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.2f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -95,6 +95,9 @@ TEST_F(TestFp8E4M3, NumericLimitsSpecificValues)
     const fp8_e4m3 eps = std::numeric_limits<fp8_e4m3>::epsilon();
     auto epsFloat = static_cast<float>(eps);
     EXPECT_EQ(epsFloat, 0.125f);
+
+    // E4M3 round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp8_e4m3>::round_error()), 0.5f);
 }
 
 // ============================================================================

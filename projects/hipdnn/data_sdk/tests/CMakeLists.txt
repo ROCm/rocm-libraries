@@ -25,6 +25,8 @@ add_executable(
     types/TestCrossTypeConversion.cpp
     types/TestForwardingFunctions.cpp
     types/TestFp4E2M1.cpp
+    types/TestFp6E2M3.cpp
+    types/TestFp6E3M2.cpp
     types/TestFp8E4M3.cpp
     types/TestFp8E5M2.cpp
     types/TestFp8E8M0.cpp

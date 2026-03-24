@@ -26,7 +26,7 @@ TEST(TestFp4E2M1, RoundTripAllValues)
 {
     // clang-format off
     std::vector<float> const exactValues = {0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
-                                      -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
+                                           -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
     // clang-format on
 
     for(const float val : exactValues)
@@ -40,6 +40,8 @@ TEST(TestFp4E2M1, RoundTripAllValues)
 // Rounding Tests
 // ============================================================================
 
+namespace
+{
 struct RoundingTestCase
 {
     float input;
@@ -50,6 +52,7 @@ struct RoundingTestCase
         return os << tc.input << " -> " << tc.expected;
     }
 };
+} // namespace
 
 class TestFp4E2M1Rounding : public ::testing::TestWithParam<RoundingTestCase>
 {
@@ -62,34 +65,38 @@ TEST_P(TestFp4E2M1Rounding, Rounding)
     EXPECT_EQ(static_cast<float>(val), expected);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    MidpointRounding,
-    TestFp4E2M1Rounding,
-    ::testing::Values(RoundingTestCase{0.25f, 0.0f}, // Midpoint rounds to even (0)
-                      RoundingTestCase{0.75f, 1.0f}, // Midpoint rounds to even (1)
-                      RoundingTestCase{1.25f, 1.0f}, // Midpoint rounds to even (1)
-                      RoundingTestCase{2.5f, 2.0f}, // Midpoint rounds to even (2)
-                      RoundingTestCase{5.0f, 4.0f})); // Midpoint rounds to even (4)
+INSTANTIATE_TEST_SUITE_P(MidpointRounding,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(RoundingTestCase{0.25f, 0.0f},
+                                           RoundingTestCase{0.75f, 1.0f},
+                                           RoundingTestCase{1.25f, 1.0f},
+                                           RoundingTestCase{2.5f, 2.0f},
+                                           RoundingTestCase{5.0f, 4.0f}));
 
-INSTANTIATE_TEST_SUITE_P(
-    SubnormalRounding,
-    TestFp4E2M1Rounding,
-    ::testing::Values(RoundingTestCase{0.3f, 0.5f}, // Rounds up to subnormal
-                      RoundingTestCase{0.4f, 0.5f}, // Rounds up to subnormal
-                      RoundingTestCase{0.24f, 0.0f}, // Underflows to zero
-                      RoundingTestCase{0.6f, 0.5f}, // Rounds down to subnormal
-                      RoundingTestCase{-0.3f, -0.5f}, // Negative rounds to subnormal
-                      RoundingTestCase{-0.4f, -0.5f})); // Negative rounds to subnormal
+INSTANTIATE_TEST_SUITE_P(SubnormalRounding,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(RoundingTestCase{0.3f, 0.5f},
+                                           RoundingTestCase{0.4f, 0.5f},
+                                           RoundingTestCase{0.24f, 0.0f},
+                                           RoundingTestCase{0.6f, 0.5f},
+                                           RoundingTestCase{-0.3f, -0.5f},
+                                           RoundingTestCase{-0.4f, -0.5f}));
 
-INSTANTIATE_TEST_SUITE_P(
-    BoundaryRounding,
-    TestFp4E2M1Rounding,
-    ::testing::Values(RoundingTestCase{5.5f, 6.0f}, // Rounds up to max
-                      RoundingTestCase{5.1f, 6.0f}, // Rounds up (closer to 6.0 than 4.0)
-                      RoundingTestCase{3.5f, 4.0f}, // Midpoint between values
-                      RoundingTestCase{2.25f, 2.0f}, // Quarter-step rounds down
-                      RoundingTestCase{2.75f, 3.0f}, // Three-quarter-step rounds up
-                      RoundingTestCase{-5.5f, -6.0f})); // Negative rounds to lowest
+INSTANTIATE_TEST_SUITE_P(BoundaryRounding,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(RoundingTestCase{5.5f, 6.0f},
+                                           RoundingTestCase{5.1f, 6.0f},
+                                           RoundingTestCase{3.5f, 4.0f},
+                                           RoundingTestCase{2.25f, 2.0f},
+                                           RoundingTestCase{2.75f, 3.0f},
+                                           RoundingTestCase{-5.5f, -6.0f}));
+
+INSTANTIATE_TEST_SUITE_P(RoundingOverflow,
+                         TestFp4E2M1Rounding,
+                         ::testing::Values(
+                             // Mantissa overflow from rounding causes exponent increment
+                             RoundingTestCase{1.75f, 2.0f}, // e=1 to e=2: mant overflow 1->0, exp++
+                             RoundingTestCase{-1.75f, -2.0f})); // Negative: e=1 to e=2
 
 // ============================================================================
 // Saturation Tests
@@ -195,6 +202,7 @@ TEST(TestFp4E2M1, NumericLimitsSpecificValues)
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::min()), 1.0f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::lowest()), -6.0f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::epsilon()), 0.5f);
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::round_error()), 0.5f);
     EXPECT_EQ(static_cast<float>(std::numeric_limits<fp4_e2m1>::denorm_min()), 0.5f);
 }
 

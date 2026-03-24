@@ -23,7 +23,7 @@ using namespace hipdnn_data_sdk::types;
 class TestBfloat16 : public ::testing::Test
 {
 protected:
-    static constexpr float K_TOLERANCE = 0.01f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.01f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -216,6 +216,9 @@ TEST_F(TestBfloat16, NumericLimitsSpecificValues)
     auto epsFloat = static_cast<float>(eps);
     EXPECT_TRUE(nearEqual(epsFloat, 0.0078125f, 0.0001f));
     EXPECT_EQ(eps.data, 0x3C00);
+
+    // bfloat16 round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<bfloat16>::round_error()), 0.5f);
 }
 
 // ============================================================================
