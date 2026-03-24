@@ -351,6 +351,20 @@ private:
     // Are available SDPA templates applicable?
     FUSILLI_CHECK_ERROR(SdpaImport::validateTemplate(hipDnnSdpaAttr));
 
+    // mma_core_mode requests a specific accumulator precision. Our MLIR path
+    // accumulates in the query element type, so reject if the requested mode
+    // doesn't match. UNSET (the default) is always fine.
+    auto mmaCoreMode = hipDnnSdpaAttr->mma_core_mode();
+    if (mmaCoreMode != hipdnn_data_sdk::data_objects::DataType::UNSET) {
+      auto qDataType = opGraphWrapper.getTensorMap()
+                           .at(hipDnnSdpaAttr->q_tensor_uid())
+                           ->data_type();
+      if (mmaCoreMode != qDataType)
+        return fusilli::error(
+            fusilli::ErrorCode::NotImplemented,
+            "SDPA mma_core_mode must match query tensor dtype.");
+    }
+
     bool hasAttnMask = hipDnnSdpaAttr->attn_mask_tensor_uid().has_value();
     bool isCausal = hipDnnSdpaAttr->causal_mask();
 
