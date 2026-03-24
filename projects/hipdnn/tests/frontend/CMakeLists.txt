@@ -19,6 +19,7 @@ add_executable(
     IntegrationBlockScaleQuantize.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
+    IntegrationConvFpropDescriptorLifting.cpp
     IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
@@ -32,6 +33,7 @@ add_executable(
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
