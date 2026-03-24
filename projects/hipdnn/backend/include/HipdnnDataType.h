@@ -25,4 +25,6 @@ typedef enum
     HIPDNN_DATA_FP8_E8M0 = 9, ///< 8-bit floating point (E8M0)
     HIPDNN_DATA_FP4_E2M1 = 10, ///< 4-bit floating point (E2M1)
     HIPDNN_DATA_INT4 = 11, ///< 4-bit signed integer
+    HIPDNN_DATA_FP6_E2M3 = 12, ///< 6-bit floating point (E2M3)
+    HIPDNN_DATA_FP6_E3M2 = 13, ///< 6-bit floating point (E3M2)
 } hipdnnDataType_t;

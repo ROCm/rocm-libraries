@@ -21,6 +21,8 @@ TEST(TestTypes, ToSdkTypeDataTypes)
     EXPECT_EQ(toSdkType(DataType::FP8_E8M0), hipdnn_data_sdk::data_objects::DataType::FP8_E8M0);
     EXPECT_EQ(toSdkType(DataType::FP4_E2M1), hipdnn_data_sdk::data_objects::DataType::FP4_E2M1);
     EXPECT_EQ(toSdkType(DataType::INT4), hipdnn_data_sdk::data_objects::DataType::INT4);
+    EXPECT_EQ(toSdkType(DataType::FP6_E2M3), hipdnn_data_sdk::data_objects::DataType::FP6_E2M3);
+    EXPECT_EQ(toSdkType(DataType::FP6_E3M2), hipdnn_data_sdk::data_objects::DataType::FP6_E3M2);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
@@ -40,6 +42,8 @@ TEST(TestTypes, FromSdkTypeDataTypes)
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E8M0), DataType::FP8_E8M0);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP4_E2M1), DataType::FP4_E2M1);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT4), DataType::INT4);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E2M3), DataType::FP6_E2M3);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP6_E3M2), DataType::FP6_E3M2);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
@@ -106,6 +110,8 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::FP8_E8M0), "fp8_e8m0");
     EXPECT_STREQ(to_string(DataType::FP4_E2M1), "fp4_e2m1");
     EXPECT_STREQ(to_string(DataType::INT4), "int4");
+    EXPECT_STREQ(to_string(DataType::FP6_E2M3), "fp6_e2m3");
+    EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -161,6 +167,14 @@ TEST(TestTypes, DataTypeStreamOperator)
 
     oss << DataType::INT4;
     EXPECT_EQ(oss.str(), "int4");
+    oss.str("");
+
+    oss << DataType::FP6_E2M3;
+    EXPECT_EQ(oss.str(), "fp6_e2m3");
+    oss.str("");
+
+    oss << DataType::FP6_E3M2;
+    EXPECT_EQ(oss.str(), "fp6_e3m2");
     oss.str("");
 
     oss << DataType::NOT_SET;
@@ -270,6 +284,8 @@ TEST(TestTypes, ToHipdnnDataType)
     EXPECT_EQ(toHipdnnDataType(DataType::FP8_E8M0), HIPDNN_DATA_FP8_E8M0);
     EXPECT_EQ(toHipdnnDataType(DataType::FP4_E2M1), HIPDNN_DATA_FP4_E2M1);
     EXPECT_EQ(toHipdnnDataType(DataType::INT4), HIPDNN_DATA_INT4);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
     EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }
 
@@ -296,6 +312,8 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
     check(HIPDNN_DATA_FP8_E8M0, DataType::FP8_E8M0);
     check(HIPDNN_DATA_FP4_E2M1, DataType::FP4_E2M1);
     check(HIPDNN_DATA_INT4, DataType::INT4);
+    check(HIPDNN_DATA_FP6_E2M3, DataType::FP6_E2M3);
+    check(HIPDNN_DATA_FP6_E3M2, DataType::FP6_E3M2);
 }
 
 TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
@@ -325,7 +343,9 @@ TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
                    DataType::FP8_E5M2,
                    DataType::FP8_E8M0,
                    DataType::FP4_E2M1,
-                   DataType::INT4})
+                   DataType::INT4,
+                   DataType::FP6_E2M3,
+                   DataType::FP6_E3M2})
     {
         auto hipdnnOpt = toHipdnnDataType(dt);
         ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);

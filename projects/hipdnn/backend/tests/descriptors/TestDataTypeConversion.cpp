@@ -99,11 +99,33 @@ TEST(TestDataTypeConversion, FromSdkDataTypeInt4)
     ASSERT_EQ(fromSdkDataType(DataType::INT4), HIPDNN_DATA_INT4);
 }
 
+TEST(TestDataTypeConversion, ToSdkDataTypeFp6E2M3)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_FP6_E2M3), DataType::FP6_E2M3);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeFp6E2M3)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::FP6_E2M3), HIPDNN_DATA_FP6_E2M3);
+}
+
+TEST(TestDataTypeConversion, ToSdkDataTypeFp6E3M2)
+{
+    ASSERT_EQ(toSdkDataType(HIPDNN_DATA_FP6_E3M2), DataType::FP6_E3M2);
+}
+
+TEST(TestDataTypeConversion, FromSdkDataTypeFp6E3M2)
+{
+    ASSERT_EQ(fromSdkDataType(DataType::FP6_E3M2), HIPDNN_DATA_FP6_E3M2);
+}
+
 TEST(TestDataTypeConversion, GetDataTypeByteSizeThrowsForLowPrecisionTypes)
 {
     ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP8_E8M0), HIPDNN_STATUS_BAD_PARAM);
     ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP4_E2M1), HIPDNN_STATUS_BAD_PARAM);
     ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::INT4), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP6_E2M3), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(getDataTypeByteSize(DataType::FP6_E3M2), HIPDNN_STATUS_BAD_PARAM);
 }
 
 // =============================================================================
