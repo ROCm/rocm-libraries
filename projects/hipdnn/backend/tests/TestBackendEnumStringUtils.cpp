@@ -79,6 +79,10 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
                      HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT),
                  "HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT");
 
+    EXPECT_STREQ(
+        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT),
+        "HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT");
+
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
                  "UNKNOWN_TYPE");
@@ -571,6 +575,18 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT),
                  "HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_MATH_PREC_EXT");
+
+    // Custom op operation attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT),
+                 "HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT),
+                 "HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT),
+                 "HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT),
+                 "HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT),
+                 "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT");
 
     // Operation extension attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_NAME_EXT),
