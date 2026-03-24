@@ -8,5 +8,4 @@
 hipDNN backend limits C API
 ***************************
 
-.. doxygenfile:: HipdnnBackendLimits.h 
-
+.. doxygenfile:: HipdnnBackendLimits.h

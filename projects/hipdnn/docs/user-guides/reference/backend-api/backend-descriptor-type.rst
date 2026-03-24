@@ -8,6 +8,4 @@
 hipDNN backend descriptor type C API
 ************************************
 
-.. doxygenfile:: HipdnnBackendDescriptorType.h 
-
-
+.. doxygenfile:: HipdnnBackendDescriptorType.h

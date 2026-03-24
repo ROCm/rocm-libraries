@@ -15,12 +15,12 @@ Operation support
 
 The hipBLASLt provider plugin supports standalone Matmul (GEMM, general matrix multiplication) operations with these features and constraints:
 
-- Input and output data types: 
+- Input and output data types:
 
-  - ``FP32``: Single-precision floating point (32-bit) 
-  - ``FP16``: Half-precision floating point (16-bit) 
+  - ``FP32``: Single-precision floating point (32-bit)
+  - ``FP16``: Half-precision floating point (16-bit)
   - ``BFP16``: Brain floating point (16-bit).
-  
+
 - Compute data type: ``FP32``.
 - Transposed inputs: Supported.
 - Batched matmuls: Only equal batch sizes are supported, along with broadcasting when one input has a single batch (batch=1).

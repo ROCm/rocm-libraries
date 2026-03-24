@@ -8,6 +8,4 @@
 hipDNN backend callback types C API
 ***********************************
 
-.. doxygenfile:: HipdnnBackendCallbackTypes.h 
-
-
+.. doxygenfile:: HipdnnBackendCallbackTypes.h

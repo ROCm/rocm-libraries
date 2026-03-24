@@ -8,6 +8,4 @@
 hipDNN backend FlatBuffer data C API
 ************************************
 
-.. doxygenfile:: HipdnnBackendFlatbufferData.h 
-
-
+.. doxygenfile:: HipdnnBackendFlatbufferData.h

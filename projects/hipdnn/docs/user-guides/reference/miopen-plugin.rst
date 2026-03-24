@@ -9,8 +9,8 @@ MIOpen provider operation support
 *********************************
 
 The MIOpen provider adds a number of MIOpen operations to hipDNN.
-`MIOpen <https://rocm.docs.amd.com/projects/MIOpen/en/latest/index.html>`_ is an AMD ROCm deep-learning primitives library for GPUs. 
-It implements fusion to optimize memory bandwidth and GPU launch overheads. 
+`MIOpen <https://rocm.docs.amd.com/projects/MIOpen/en/latest/index.html>`_ is an AMD ROCm deep-learning primitives library for GPUs.
+It implements fusion to optimize memory bandwidth and GPU launch overheads.
 It also implements different algorithms to optimize convolutions for different filter and input sizes.
 
 .. _operation-support:
@@ -41,12 +41,12 @@ This table lists all operations supported in hipDNN:
      - Datatypes
      - Layouts
      - Notes
-   * - Batchnorm Inference with Variance 
+   * - Batchnorm Inference with Variance
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Spatial mode only¹
-   * - Batchnorm Inference + DRelu + Backward 
-     - ``FP16``, ``BFP16``, ``FP32`` 
+   * - Batchnorm Inference + DRelu + Backward
+     - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Fused graph³
    * - Batchnorm Training
@@ -57,11 +57,11 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Fused graph³ ⁴
-   * - Batchnorm Backward 
+   * - Batchnorm Backward
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Spatial mode only¹
-   * - Convolution Dgrad 
+   * - Convolution Dgrad
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Cross-correlation only²
@@ -69,11 +69,11 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Cross-correlation only²
-   * - Convolution Forward + (Bias) + Activation⁵ 
+   * - Convolution Forward + (Bias) + Activation⁵
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Fused graph²³
-   * - Convolution Wgrad 
+   * - Convolution Wgrad
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Cross-correlation only²
@@ -127,7 +127,7 @@ Operation notes
 - ¹ **Batchnorm Operations**: Only spatial batchnorm mode is supported. Spatial mode computes statistics over the batch (N) and spatial dimensions (H, W, or D, H, W) for each channel.
 - ² **Convolution Operations**: Only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
 - ³ **Fused Operations**: Fused graph patterns combine multiple operations.
-  
+
   - **Batchnorm Inference + DReLU + Backward**: Combines batchnorm inference, activation backward (DReLU), and batchnorm backward.
   - **Batchnorm Training + Activation**: Combines batchnorm training with forward activation.
   - **Convolution Forward + (Bias) + Activation**: Combines convolution forward, optional bias addition, and forward activation.
@@ -145,7 +145,7 @@ The MIOpen provider plugin supports :ref:`knobs` that control kernel selection, 
 The MIOpen provider plugin supports two types of knobs:
 
 - **Global Knobs**: Standard knobs available for all engines (namespace: ``global.*``)
-- **Custom Knobs**: Operation-specific knobs provided dynamically based on the graph (there are no custom knobs yet) 
+- **Custom Knobs**: Operation-specific knobs provided dynamically based on the graph (there are no custom knobs yet)
 .. Is custom knob support not operational yet?
 
 This table lists all configuration knobs supported by the MIOpen Provider plugin:
@@ -272,4 +272,3 @@ Code sample
   std::vector<KnobSetting> settings;
   settings.emplace_back("global.workspace_size_limit", 32LL * 1024 * 1024);
   graph.create_execution_plan_ext(engineId, settings);
-

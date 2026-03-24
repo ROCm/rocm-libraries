@@ -8,6 +8,4 @@
 hipDNN backend heuristic type C API
 ***********************************
 
-.. doxygenfile:: HipdnnBackendHeuristicType.h 
-
-
+.. doxygenfile:: HipdnnBackendHeuristicType.h

@@ -9,5 +9,3 @@ hipDNN backend C API
 ********************
 
 .. doxygenfile:: hipdnn_backend.h
-
-

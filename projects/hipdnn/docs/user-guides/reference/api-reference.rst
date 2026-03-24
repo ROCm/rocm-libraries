@@ -13,12 +13,12 @@ Topics
 
 - :ref:`frontend-api`
 
-  - :ref:`frontend-graph` 
-  - :ref:`frontend-utilities` 
-  - :ref:`frontend-types` 
-  - :ref:`frontend-handle` 
-  - :ref:`frontend-logging` 
-  - :ref:`frontend-error` 
+  - :ref:`frontend-graph`
+  - :ref:`frontend-utilities`
+  - :ref:`frontend-types`
+  - :ref:`frontend-handle`
+  - :ref:`frontend-logging`
+  - :ref:`frontend-error`
 
 - :ref:`backend-api`
 

@@ -9,4 +9,3 @@ hipDNN frontend types C++ API
 *****************************
 
 .. doxygenfile:: Types.hpp
-

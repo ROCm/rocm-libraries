@@ -9,4 +9,3 @@ hipDNN frontend C++ API
 ***********************
 
 .. doxygenfile:: hipdnn_frontend.hpp
-
