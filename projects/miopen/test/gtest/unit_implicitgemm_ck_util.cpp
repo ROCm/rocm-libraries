@@ -254,7 +254,7 @@ static std::vector<SplitKGenericTestCase> GetSplitKGenericTestCases()
 /**
  * @brief Parameterized test fixture for IsCKSplitKSupportedGeneric
  */
-class SplitKGenericTest : public ::testing::TestWithParam<SplitKGenericTestCase>
+class CPU_SplitKGenericTest_NONE : public ::testing::TestWithParam<SplitKGenericTestCase>
 {
 protected:
     void SetUp() override
@@ -272,7 +272,7 @@ protected:
     }
 };
 
-TEST_P(SplitKGenericTest, ValidatesSplitKSupport)
+TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto testCase = GetParam();
@@ -297,12 +297,14 @@ TEST_P(SplitKGenericTest, ValidatesSplitKSupport)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, SplitKGenericTest, testing::ValuesIn(GetSplitKGenericTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         CPU_SplitKGenericTest_NONE,
+                         testing::ValuesIn(GetSplitKGenericTestCases()));
 
 /**
  * @brief Direct unit tests for edge cases and specific scenarios
  */
-class SplitKGenericDirectTest : public ::testing::Test
+class CPU_SplitKGenericDirectTest_NONE : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -318,7 +320,7 @@ protected:
     }
 };
 
-TEST_F(SplitKGenericDirectTest, EmptyKernelIdReturnsNotSupported)
+TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     StubbedDeviceOps::deviceOps.push_back("SomeKernel");
@@ -334,7 +336,7 @@ TEST_F(SplitKGenericDirectTest, EmptyKernelIdReturnsNotSupported)
 #endif
 }
 
-TEST_F(SplitKGenericDirectTest, ZeroSplitKValueHandledCorrectly)
+TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId = "TestKernel";
@@ -353,7 +355,7 @@ TEST_F(SplitKGenericDirectTest, ZeroSplitKValueHandledCorrectly)
 #endif
 }
 
-TEST_F(SplitKGenericDirectTest, NegativeSplitKValueHandledCorrectly)
+TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId = "TestKernel";
@@ -371,7 +373,7 @@ TEST_F(SplitKGenericDirectTest, NegativeSplitKValueHandledCorrectly)
 #endif
 }
 
-TEST_F(SplitKGenericDirectTest, MultipleKernelsWithDifferentSplitKSupport)
+TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSupport)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernel1 = "KernelA";
