@@ -166,9 +166,6 @@ namespace rocRoller
                     subDimY.stride = tileSizeX * tileSizeY;
                 }
 
-                subDimX.size = subDimX.size / tileSizeX;
-                subDimY.size = subDimY.size / tileSizeY;
-
                 graph.coordinates.setElement(sdimX, subDimX);
                 graph.coordinates.setElement(sdimY, subDimY);
             }
