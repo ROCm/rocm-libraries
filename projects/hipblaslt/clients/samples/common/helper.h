@@ -52,45 +52,6 @@
     }
 #endif
 
-void init(hipblaslt_f4x2* packedData, size_t size)
-{
-    for(size_t idx = 0; idx < size / packedData->packed_size; idx++)
-    {
-        float x         = rand() % 7 - 3;
-        float y         = rand() % 7 - 3;
-        packedData[idx] = hipblaslt_f4x2(x, y);
-    }
-}
-
-void init(hipblaslt_f6x16* packedData, size_t size)
-{
-    using type                 = hipblaslt_f6x16;
-    float r[type::packed_size] = {0};
-    for(size_t idx = 0; idx < size / type::packed_size; idx++)
-    {
-        for(size_t i = 0; i < type::packed_size; i++)
-        {
-            r[i] = static_cast<float>(rand() % 15 - 7);
-        }
-        packedData[idx] = hipblaslt_f6x16(r[0],
-                                          r[1],
-                                          r[2],
-                                          r[3],
-                                          r[4],
-                                          r[5],
-                                          r[6],
-                                          r[7],
-                                          r[8],
-                                          r[9],
-                                          r[10],
-                                          r[11],
-                                          r[12],
-                                          r[13],
-                                          r[14],
-                                          r[15]);
-    }
-}
-
 template <typename InTypeA,
           typename InTypeB,
           typename OutType,
@@ -157,20 +118,6 @@ struct Runner
 
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-        if constexpr(
-            std::is_same_v<
-                InTypeA,
-                hipblaslt_f4x2> || std::is_same_v<InTypeA, hipblaslt_f6x16> || std::is_same_v<InTypeA, hipblaslt_bf6x16>)
-        {
-            init(static_cast<InTypeA*>(a), m * k * batch_count);
-        }
-        if constexpr(
-            std::is_same_v<
-                InTypeB,
-                hipblaslt_f4x2> || std::is_same_v<InTypeB, hipblaslt_f6x16> || std::is_same_v<InTypeB, hipblaslt_bf6x16>)
-        {
-            init(static_cast<InTypeB*>(b), n * k * batch_count);
-        }
         for(int i = 0; i < m * n * batch_count; i++)
             ((OutType*)c)[i] = static_cast<OutType>((rand() % 7) - 3);
         for(int i = 0; i < m * batch_count; ++i)

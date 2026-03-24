@@ -47,6 +47,16 @@ void simpleGemmF4(hipblasLtHandle_t  handle,
                   int64_t            max_workspace_size,
                   hipStream_t        stream);
 
+static void init(hipblaslt_f4x2* packedData, size_t size)
+{
+    for(size_t idx = 0; idx < size / packedData->packed_size; idx++)
+    {
+        float x         = rand() % 7 - 3;
+        float y         = rand() % 7 - 3;
+        packedData[idx] = hipblaslt_f4x2(x, y);
+    }
+}
+
 void UnpackData(float* unpackedData, const hipblaslt_f4x2* packedData, size_t size)
 {
     for(size_t idx = 0; idx < size / 2; idx++)
@@ -112,6 +122,8 @@ int main()
         1.f,
         0.f,
         32 * 1024 * 1024 /*max_workspace_size_in_bytes*/);
+    init(static_cast<hipblaslt_f4x2*>(runner.a), runner.m * runner.k * runner.batch_count);
+    init(static_cast<hipblaslt_f4x2*>(runner.b), runner.n * runner.k * runner.batch_count);
 
     std::vector<float> cpuR(runner.m * runner.n, 0.f);
     std::vector<float> cpuA(runner.m * runner.k, 0.f);
