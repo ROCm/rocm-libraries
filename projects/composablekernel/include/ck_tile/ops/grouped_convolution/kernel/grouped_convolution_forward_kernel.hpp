@@ -509,10 +509,13 @@ struct GroupedConvolutionForwardKernel
     static constexpr auto I1 = number<1>();
     static constexpr auto I2 = number<2>();
     static constexpr auto I3 = number<3>();
+    static constexpr auto I5 = number<5>();
 
     static_assert(GemmPipeline::kPadM && GemmPipeline::kPadN && GemmPipeline::kPadK,
                   "Not supported!");
-    static_assert(std::is_same_v<GemmALayout, tensor_layout::gemm::RowMajor>, "Not supported!");
+    static_assert(std::is_same_v<GemmALayout, tensor_layout::gemm::RowMajor> ||
+                      GroupedConvTraitsType_::NumGroupsToMerge > 1,
+                  "Not supported!");
     static_assert(std::is_same_v<GemmBLayout, tensor_layout::gemm::ColumnMajor>, "Not supported!");
     static_assert(std::is_same_v<GemmCLayout, tensor_layout::gemm::RowMajor>, "Not supported!");
     static_assert(GroupedConvTraitsType_::ExplicitGemm == false ||
@@ -744,14 +747,37 @@ struct GroupedConvolutionForwardKernel
         if constexpr(std::is_same_v<InLayout, ctc::NWGC> || std::is_same_v<InLayout, ctc::NHWGC> ||
                      std::is_same_v<InLayout, ctc::NDHWGC>)
         {
-            // Check access per C
-            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0)
+            // Check access for A tensor
+            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
+               GroupedConvTraitsType_::NumGroupsToMerge == 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
                     CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
                 }
                 return false;
+            }
+            else if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+            {
+                if(ConvC != 1)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
+                                      "vector reads on group dimension!");
+                    }
+                    return false;
+                }
+
+                const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+                if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                    }
+                    return false;
+                }
             }
         }
         else
@@ -794,12 +820,30 @@ struct GroupedConvolutionForwardKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
             {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                // Try to read over G
+                if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
                 {
-                    CK_TILE_ERROR(
-                        "Conv K is not a multiple of vector store size for output image!");
+                    const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
+                       ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
+                    {
+                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                        {
+                            CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge to allow "
+                                          "writing over G dimension");
+                        }
+                        return false;
+                    }
                 }
-                return false;
+                else
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR(
+                            "ConvK is not a multiple of vector store size for output image!");
+                    }
+                    return false;
+                }
             }
         }
         else
@@ -813,6 +857,18 @@ struct GroupedConvolutionForwardKernel
 
         if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
         {
+            // currently group merging works only for C == 1 due to tensor transformation
+            // limitations
+            if(ConvC != 1)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
+                                  "vector reads on group dimension!");
+                }
+                return false;
+            }
+
             const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
             if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
             {
@@ -831,20 +887,51 @@ struct GroupedConvolutionForwardKernel
     CK_TILE_DEVICE static auto
     MakeABlockWindow(const InDataType* a_ptr, const ADescType& a_desc, const index_t block_idx_m)
     {
-        // Step 1: Create tensor view
-        const auto& a_tensor_view = make_tensor_view<address_space_enum::global>(a_ptr, a_desc);
+        if constexpr(GroupedConvTraitsType_::NumGroupsToMerge == 1)
+        {
+            // Access by K
+            // Step 1: Create tensor view
+            const auto& a_tensor_view = make_tensor_view<address_space_enum::global>(a_ptr, a_desc);
 
-        // Step 2: Create padded view
-        const auto& a_pad_view = pad_tensor_view(
-            a_tensor_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::KPerBlock>{}),
-            sequence<true, true>{});
+            // Step 2: Create padded view
+            const auto& a_pad_view =
+                pad_tensor_view(a_tensor_view,
+                                make_tuple(number<TilePartitioner::MPerBlock>{},
+                                           number<TilePartitioner::KPerBlock>{}),
+                                sequence<true, true>{});
 
-        // Step 3: Create tile window
-        return make_tile_window(
-            a_pad_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::KPerBlock>{}),
-            {block_idx_m, 0});
+            // Step 3: Create tile window
+            return make_tile_window(a_pad_view,
+                                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                                               number<TilePartitioner::KPerBlock>{}),
+                                    {block_idx_m, 0});
+        }
+        else
+        {
+            // Access by M
+            const auto a_desc_reversed = transform_tensor_descriptor(
+                a_desc,
+                make_tuple(make_pass_through_transform(a_desc.get_length(I0)),
+                           make_pass_through_transform(a_desc.get_length(I1))),
+                make_tuple(sequence<0>{}, sequence<1>{}),
+                make_tuple(sequence<1>{}, sequence<0>{}));
+            // Step 1: Create tensor view
+            const auto& a_tensor_view =
+                make_tensor_view<address_space_enum::global>(a_ptr, a_desc_reversed);
+
+            // Step 2: Create padded view
+            const auto& a_pad_view =
+                pad_tensor_view(a_tensor_view,
+                                make_tuple(number<TilePartitioner::KPerBlock>{},
+                                           number<TilePartitioner::MPerBlock>{}),
+                                sequence<true, true>{});
+
+            // Step 3: Create tile window
+            return make_tile_window(a_pad_view,
+                                    make_tuple(number<TilePartitioner::KPerBlock>{},
+                                               number<TilePartitioner::MPerBlock>{}),
+                                    {0, block_idx_m});
+        }
     }
 
     template <typename BDescType>

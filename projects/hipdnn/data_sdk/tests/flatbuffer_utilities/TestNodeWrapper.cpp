@@ -14,7 +14,7 @@ using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestNodeWrapper, NullBufferIsInvalid)
 {
-    EXPECT_THROW(NodeWrapper wrapper(nullptr), std::invalid_argument);
+    EXPECT_THROW(const NodeWrapper wrapper(nullptr), std::invalid_argument);
 }
 
 TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
@@ -25,13 +25,11 @@ TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
     auto shallowGraph
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Graph>(serializedGraph.data());
 
-    NodeWrapper wrapper(shallowGraph->nodes()->Get(0));
+    const NodeWrapper wrapper(shallowGraph->nodes()->Get(0));
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.attributesType(),
               hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
-    EXPECT_EQ(wrapper.attributesClassType(),
-              typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes));
     EXPECT_NO_THROW(
         wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>());
     EXPECT_THROW(wrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>(),

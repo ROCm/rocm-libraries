@@ -21,7 +21,7 @@
 #ifndef ROCFFT_SUBPROCESS_H
 #define ROCFFT_SUBPROCESS_H
 
-#ifdef WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
@@ -37,7 +37,7 @@
 // simple RAII wrapper around file handles
 struct file_handle_wrapper
 {
-#ifdef WIN32
+#ifdef _WIN32
     typedef HANDLE                    file_handle_type;
     static constexpr file_handle_type FILE_HANDLE_INVALID = 0;
 #else
@@ -63,7 +63,7 @@ struct file_handle_wrapper
     {
         if(fd == FILE_HANDLE_INVALID)
             return;
-#ifdef WIN32
+#ifdef _WIN32
         CloseHandle(fd);
 #else
         ::close(fd);
@@ -92,7 +92,7 @@ static std::vector<char> execute_subprocess(const std::string&              exe,
     bool                subprocess_failed = false;
     static const size_t READ_CHUNK_SIZE   = 1024;
 
-#ifdef WIN32
+#ifdef _WIN32
     file_handle_wrapper child_stdin_read;
     file_handle_wrapper child_stdin_write;
     file_handle_wrapper child_stdout_read;

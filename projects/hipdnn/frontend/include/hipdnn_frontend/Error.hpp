@@ -12,8 +12,9 @@
 
 #pragma once
 
-#include "Types.hpp"
+#include <ostream>
 #include <string>
+#include <vector>
 
 /**
  * @brief Check an Error return value and propagate if an error occurred
@@ -25,7 +26,7 @@
 #define HIPDNN_CHECK_ERROR(x) \
     do                        \
     {                         \
-        auto err = x;         \
+        const auto err = x;   \
         if(err.is_bad())      \
         {                     \
             return err;       \
@@ -49,10 +50,19 @@ enum class ErrorCode
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline std::string to_string(ErrorCode code)
 {
-    static std::vector<std::string> s_errorCodes{
-        "OK", "INVALID_VALUE", "HIPDNN_BACKEND_ERROR", "ATTRIBUTE_NOT_SET"};
-
-    return s_errorCodes[static_cast<size_t>(code)];
+    switch(code)
+    {
+    case ErrorCode::OK:
+        return "OK";
+    case ErrorCode::INVALID_VALUE:
+        return "INVALID_VALUE";
+    case ErrorCode::HIPDNN_BACKEND_ERROR:
+        return "HIPDNN_BACKEND_ERROR";
+    case ErrorCode::ATTRIBUTE_NOT_SET:
+        return "ATTRIBUTE_NOT_SET";
+    default:
+        return "UNKNOWN_ERROR";
+    }
 }
 
 inline std::ostream& operator<<(std::ostream& os, const ErrorCode& error)
@@ -165,13 +175,13 @@ inline std::ostream& operator<<(std::ostream& os, const Error& error)
     return os << "{" << error.code << ", " << error.get_message() << "}";
 }
 
-typedef Error error_object; ///< @brief Type alias for Error (cuDNN compatibility)
+typedef Error error_object; ///< @brief Type alias for Error (compatibility)
 typedef Error error_t; ///< @brief Type alias for Error
 
 #define HIPDNN_RETURN_IF_NE(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x != y)                                       \
+        if((x) != (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -180,7 +190,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_EQ(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x == y)                                       \
+        if((x) == (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -207,7 +217,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_NULL(x, error_status, message) \
     do                                                  \
     {                                                   \
-        if(x == nullptr)                                \
+        if((x) == nullptr)                              \
         {                                               \
             return {error_status, message};             \
         }                                               \
@@ -216,7 +226,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_LT(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x < y)                                        \
+        if((x) < (y))                                    \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -225,7 +235,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_GE(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x >= y)                                       \
+        if((x) >= (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -234,7 +244,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_LE(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x <= y)                                       \
+        if((x) <= (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \

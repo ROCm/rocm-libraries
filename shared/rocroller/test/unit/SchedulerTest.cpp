@@ -201,7 +201,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(LogLevel::Debug), "FooLabel:\n\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), "FooLabel:\n");
         }
 
         {

@@ -6,20 +6,45 @@ find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
 add_executable(
-    public_hipdnn_frontend_tests
+    hipdnn_public_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLowering.cpp
+    IntegrationBatchnormDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
+    IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleDequantizeDescriptorLowering.cpp
+    IntegrationBlockScaleQuantize.cpp
+    IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
+    IntegrationConvFpropDescriptorLifting.cpp
+    IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
+    IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationGraphLifting.cpp
+    IntegrationLayerNormDescriptorLifting.cpp
+    IntegrationLayerNormDescriptorLowering.cpp
+    IntegrationLayernormForward.cpp
+    IntegrationMatmul.cpp
+    IntegrationMatmulDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLifting.cpp
+    IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRMSNormDescriptorLowering.cpp
+    IntegrationRMSNormForward.cpp
+    IntegrationSetPluginPathsExt.cpp
+    IntegrationSdpaFpropDescriptorLowering.cpp
 )
 
-target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
-    public_hipdnn_frontend_tests
+    hipdnn_public_frontend_tests
     GTest::gtest
     GTest::gtest_main
     Threads::Threads
@@ -28,10 +53,10 @@ target_link_libraries(
     hip::host
 )
 
-target_include_directories(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
+target_include_directories(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
 
 target_compile_definitions(
-    public_hipdnn_frontend_tests
+    hipdnn_public_frontend_tests
     PRIVATE TEST_GOOD_PLUGIN_NAME="${TEST_GOOD_PLUGIN_NAME}"
             TEST_EXECUTE_FAILS_PLUGIN_NAME="${TEST_EXECUTE_FAILS_PLUGIN_NAME}"
             TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
@@ -47,8 +72,9 @@ target_compile_definitions(
 
 # Ensure test plugins are built before tests
 add_dependencies(
-    public_hipdnn_frontend_tests
+    hipdnn_public_frontend_tests
     test_good_plugin
+    test_good_default_plugin
     test_execute_fails_plugin
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin
@@ -59,5 +85,5 @@ add_dependencies(
     test_knob_constraint_validation_plugin
 )
 
-clang_tidy_check(public_hipdnn_frontend_tests)
-add_integration_test_target(public_hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+clang_tidy_check(hipdnn_public_frontend_tests)
+add_integration_test_target(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})

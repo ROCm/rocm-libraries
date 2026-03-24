@@ -69,6 +69,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        int deviceId = 0;
+        ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
     }
 
     void TearDown() override
@@ -81,10 +85,6 @@ protected:
 
     static hipdnnHandle_t createHandle()
     {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-        int deviceId = 0;
-        EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
-
         // Load both plugins once for all tests
         const std::array<const char*, 2> paths
             = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str(),
@@ -132,7 +132,7 @@ protected:
 
         _handle = createHandle();
 
-        std::vector<int64_t> dims = {1, 3, 4, 4};
+        const std::vector<int64_t> dims = {1, 3, 4, 4};
         SimpleTensorBundle<float> tensorBundle(dims);
 
         auto graph = createSimplePointwiseGraph("EngineFilteringTest", dims);

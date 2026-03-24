@@ -46,7 +46,7 @@ void EnginePluginResourceManager::setPluginPaths(
     const std::vector<std::filesystem::path>& pluginPaths,
     hipdnnPluginLoadingMode_ext_t loadingMode)
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    const std::lock_guard<std::mutex> lock(pluginMutex);
 
     auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
     if(pluginConfig.paths == newPathsSet && pluginConfig.mode == loadingMode)
@@ -77,7 +77,7 @@ void EnginePluginResourceManager::setPluginPaths(
 
 std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    const std::lock_guard<std::mutex> lock(pluginMutex);
     return pluginConfig.paths;
 }
 
@@ -139,7 +139,7 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
 
 void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode)
 {
-    std::lock_guard<std::mutex> lock(pluginMutex);
+    const std::lock_guard<std::mutex> lock(pluginMutex);
 
     switch(mode)
     {
@@ -213,25 +213,20 @@ void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
 {
+    const std::lock_guard<std::mutex> lock(pluginMutex);
+
     auto pm = pmPtr.lock();
 
     if(!pm)
     {
-        std::lock_guard<std::mutex> lock(pluginMutex);
+        pm = std::make_shared<EnginePluginManager>();
+        pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
+        pmPtr = pm;
 
-        pm = pmPtr.lock();
-
-        if(!pm)
+        // In lazy mode, keep the plugin manager alive by storing in persistent pointer
+        if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
         {
-            pm = std::make_shared<EnginePluginManager>();
-            pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
-            pmPtr = pm;
-
-            // In lazy mode, keep the plugin manager alive by storing in persistent pointer
-            if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
-            {
-                persistentPmPtr = pm;
-            }
+            persistentPmPtr = pm;
         }
     }
 

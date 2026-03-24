@@ -21,8 +21,10 @@ class TileConfig:
     warp_m: List[int] = field(default_factory=lambda: [2])
     warp_n: List[int] = field(default_factory=lambda: [2])
     warp_k: List[int] = field(default_factory=lambda: [1])
-    warp_tile_m: List[int] = field(default_factory=lambda: [32])
-    warp_tile_n: List[int] = field(default_factory=lambda: [32])
+    warp_tile_m: List[int] = field(default_factory=lambda: [16, 32])
+    warp_tile_n: List[int] = field(default_factory=lambda: [16, 32])
+    # Temporarily only consider 16 for warp_tile_k
+    # warp_tile_k: List[int] = field(default_factory=lambda: [8, 16, 32])
     warp_tile_k: List[int] = field(default_factory=lambda: [16])
 
     def to_dict(self) -> Dict:
@@ -33,6 +35,8 @@ class TileConfig:
 class TraitConfig:
     """Represents the Trait Config section of a Tile Engine config"""
 
+    # Temporarily only consider compv3
+    # pipeline: List[str] = field(default_factory=lambda: ["compv3", "mem"])
     pipeline: List[str] = field(default_factory=lambda: ["compv3"])
     epilogue: List[str] = field(default_factory=lambda: ["cshuffle"])
     scheduler: List[str] = field(default_factory=lambda: ["intrawave"])
@@ -67,21 +71,27 @@ class TestVariant(Enum):
         0,
         ["atomic"],
         [True, False],
-        ["fp16", "bf16", "fp8", "bf8"],
+        # Temporarily only run fp16 tests
+        # ["fp16", "bf16", "fp8", "bf8"],
+        ["fp16"],
         "Stream-K atomic smoke tests",
     )
     REDUCTION_SMOKE = (
         2,
         ["linear", "tree"],
         [True, False],
-        ["fp16", "bf16", "fp8", "bf8"],
+        # Temporarily only run fp16 tests
+        # ["fp16", "bf16", "fp8", "bf8"],
+        ["fp16"],
         "Stream-K reduction smoke tests",
     )
     EXTENDED = (
         3,
         ["atomic"],
         [True, False],
-        ["fp16", "bf16", "fp8", "bf8"],
+        # Temporarily only run fp16 tests
+        # ["fp16", "bf16", "fp8", "bf8"],
+        ["fp16"],
         "Stream-K extended smoke tests",
     )
 

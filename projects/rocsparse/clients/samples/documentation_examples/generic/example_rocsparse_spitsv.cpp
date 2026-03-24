@@ -179,6 +179,7 @@ int main()
     HIP_CHECK(hipFree(dcsr_val));
     HIP_CHECK(hipFree(dx));
     HIP_CHECK(hipFree(dy));
+    HIP_CHECK(hipFree(temp_buffer));
 
     return 0;
 }

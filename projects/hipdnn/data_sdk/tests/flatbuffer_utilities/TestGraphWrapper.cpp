@@ -14,7 +14,7 @@ using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestGraphWrapper, NullBufferIsInvalid)
 {
-    GraphWrapper wrapper(nullptr, 0);
+    const GraphWrapper wrapper(nullptr, 0);
     EXPECT_FALSE(wrapper.isValid());
     EXPECT_THROW(wrapper.getGraph(), std::invalid_argument);
 }
@@ -24,7 +24,7 @@ TEST(TestGraphWrapper, NonGraphBufferIsInvalid)
     auto builder = hipdnn_test_sdk::utilities::createValidEngineDetails(123);
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
     EXPECT_FALSE(wrapper.isValid());
 }
@@ -34,7 +34,7 @@ TEST(TestGraphWrapper, ValidGraphReturnsCorrectNodeCountForEmptyGraph)
     flatbuffers::FlatBufferBuilder builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.nodeCount(), 0);
@@ -46,7 +46,7 @@ TEST(TestGraphWrapper, ValidGraphReturnsCorrectNodeCount)
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.nodeCount(), 1);
@@ -58,7 +58,7 @@ TEST(TestGraphWrapper, HasSupportedTypesReturnsTrueIfAllSupported)
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
     std::set<hipdnn_data_sdk::data_objects::NodeAttributes> supported
         = {hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes};
@@ -74,7 +74,7 @@ TEST(TestGraphWrapper, HasSupportedTypesReturnsFalseIfAnyUnsupported)
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
 
     std::set<hipdnn_data_sdk::data_objects::NodeAttributes> supported
         = {hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes};
@@ -89,7 +89,7 @@ TEST(TestGraphWrapper, GetTensorMapEmptyGraph)
     flatbuffers::FlatBufferBuilder builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
     ASSERT_TRUE(wrapper.isValid());
 
     const auto& tensorMap = wrapper.getTensorMap();
@@ -99,10 +99,10 @@ TEST(TestGraphWrapper, GetTensorMapEmptyGraph)
 TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
 
-    std::vector<int64_t> strides = {1, 1, 1, 1};
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> strides = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
@@ -120,7 +120,7 @@ TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
     builder.Finish(graph);
 
     auto serializedGraph = builder.Release();
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
     ASSERT_TRUE(wrapper.isValid());
 
     const auto& tensorMap = wrapper.getTensorMap();
@@ -137,7 +137,7 @@ TEST(TestGraphWrapper, GetNodeWrapper)
         = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     auto serializedGraph = builder.Release();
 
-    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    const GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
     ASSERT_TRUE(wrapper.isValid());
     ASSERT_EQ(wrapper.nodeCount(), 1);
 

@@ -67,9 +67,9 @@ public:
         const auto& wDims = w.dims();
         const auto& yDims = y.dims();
 
-        int64_t nBatch = xDims[0];
-        int64_t nInputChannels = xDims[1];
-        int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
+        const int64_t nBatch = xDims[0];
+        const int64_t nInputChannels = xDims[1];
+        const int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
         int64_t channelsPerGroup = wDims[1]; // C
 
         int64_t nSpatialDims = static_cast<int64_t>(xDims.size()) - 2;
@@ -78,8 +78,8 @@ public:
         std::vector<int64_t> ySpatialDims(yDims.begin() + 2, yDims.end());
 
         // Calculate groups from x/w channel relationship
-        int64_t nGroups = nInputChannels / channelsPerGroup;
-        int64_t yChannelsPerGroup = totalOutputChannels / nGroups;
+        const int64_t nGroups = nInputChannels / channelsPerGroup;
+        const int64_t yChannelsPerGroup = totalOutputChannels / nGroups;
 
         // This lambda computes a single element of the y tensor
         auto convolutionFunc = [&](const std::vector<int64_t>& indices) {
@@ -91,11 +91,11 @@ public:
             std::vector<int64_t> ySpatialIndices(indices.begin() + 3, indices.end());
 
             auto accumulator = static_cast<ComputeDataType>(0.0f);
-            int64_t baseInputChannel = gIdx * channelsPerGroup;
+            const int64_t baseInputChannel = gIdx * channelsPerGroup;
 
             for(int64_t c = 0; c < channelsPerGroup; ++c)
             {
-                int64_t xChannel = baseInputChannel + c;
+                const int64_t xChannel = baseInputChannel + c;
 
                 // Iterate kernel spatial positions
                 hipdnn_data_sdk::utilities::iterateAlongDimensions(
@@ -136,7 +136,7 @@ public:
                             // Weight dims: [yChannels,
                             // xChannels/groupCount, ...] Thus, we index via flattened y channel index and
                             // group-offset x channel index (c).
-                            int64_t wIdx = (gIdx * yChannelsPerGroup) + kIdx;
+                            const int64_t wIdx = (gIdx * yChannelsPerGroup) + kIdx;
                             auto wFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                                 wIdx, c, kernelSpatialIndices);
 
@@ -150,7 +150,7 @@ public:
                     });
             }
 
-            int64_t yChannel = (gIdx * yChannelsPerGroup) + kIdx;
+            const int64_t yChannel = (gIdx * yChannelsPerGroup) + kIdx;
             auto yFullIndices
                 = hipdnn_data_sdk::utilities::buildTensorIndices(nIdx, yChannel, ySpatialIndices);
 
@@ -196,8 +196,8 @@ public:
         const auto& wDims = w.dims();
         const auto& yDims = gradY.dims();
 
-        int64_t nBatch = xDims[0];
-        int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
+        const int64_t nBatch = xDims[0];
+        const int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
         int64_t channelsPerGroup = wDims[1]; // C
 
         int64_t nSpatialDims = static_cast<int64_t>(xDims.size()) - 2;
@@ -206,9 +206,9 @@ public:
         std::vector<int64_t> ySpatialDims(yDims.begin() + 2, yDims.end());
 
         // Calculate groups from x/w channel relationship
-        int64_t nInputChannels = xDims[1];
-        int64_t nGroups = nInputChannels / channelsPerGroup; // G
-        int64_t yChannelsPerGroup = totalOutputChannels / nGroups; // K
+        const int64_t nInputChannels = xDims[1];
+        const int64_t nGroups = nInputChannels / channelsPerGroup; // G
+        const int64_t yChannelsPerGroup = totalOutputChannels / nGroups; // K
 
         // This lambda computes a single element of the x gradient tensor (dx)
         auto convolutionFunc = [&](const std::vector<int64_t>& indices) {
@@ -231,8 +231,8 @@ public:
                     for(int64_t dim = 0; dim < nSpatialDims; ++dim)
                     {
                         auto dimIdx = static_cast<size_t>(dim);
-                        int64_t tmp = xSpatialIndices[dimIdx] + prePadding[dimIdx]
-                                      - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
+                        const int64_t tmp = xSpatialIndices[dimIdx] + prePadding[dimIdx]
+                                            - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
 
                         // Check if the current x position could have contributed to an y element. If the
                         // remainder is non-zero, this combination is not aligned with the stride, so it's not a valid
@@ -284,7 +284,7 @@ public:
                     }
                 });
 
-            int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
+            const int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
             auto gradInputFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                 nIdx, xChannelIdx, xSpatialIndices);
 
@@ -336,13 +336,13 @@ public:
         std::vector<int64_t> kernelSpatialDims(wDims.begin() + 2, wDims.end());
         std::vector<int64_t> ySpatialDims(yDims.begin() + 2, yDims.end());
 
-        int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
+        const int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
         int64_t channelsPerGroup = wDims[1]; // C
 
         // Calculate groups from x/w channel relationship
-        int64_t nInputChannels = xDims[1];
-        int64_t nGroups = nInputChannels / channelsPerGroup; // G
-        int64_t yChannelsPerGroup = totalOutputChannels / nGroups; // K
+        const int64_t nInputChannels = xDims[1];
+        const int64_t nGroups = nInputChannels / channelsPerGroup; // G
+        const int64_t yChannelsPerGroup = totalOutputChannels / nGroups; // K
 
         auto convolutionFunc = [&](const std::vector<int64_t>& indices) {
             auto gIdx = indices[0];
@@ -366,9 +366,9 @@ public:
                     {
                         auto dimIdx = static_cast<size_t>(dim);
 
-                        int64_t tmp = (ySpatialIndices[dimIdx] * strides[dimIdx])
-                                      + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
-                                      - prePadding[dimIdx];
+                        const int64_t tmp = (ySpatialIndices[dimIdx] * strides[dimIdx])
+                                            + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
+                                            - prePadding[dimIdx];
 
                         xSpatialIndices[dimIdx] = tmp;
 
@@ -460,7 +460,7 @@ private:
                 "Input, y, and w tensors must have the same number of dimensions");
         }
 
-        int64_t nSpatialDims = static_cast<int64_t>(x.dims().size()) - 2;
+        const int64_t nSpatialDims = static_cast<int64_t>(x.dims().size()) - 2;
 
         if(strides.size() != static_cast<size_t>(nSpatialDims))
         {
@@ -519,12 +519,12 @@ private:
 
             // Validate that y dimensions are correct given the padding
             // Some of this validation could probably be consolidated into the sdk and removed from frontend nodes
-            int64_t xDim = xDims[idx + 2];
-            int64_t kernelDim = wDims[idx + 2];
-            int64_t yDim = yDims[idx + 2];
+            const int64_t xDim = xDims[idx + 2];
+            const int64_t kernelDim = wDims[idx + 2];
+            const int64_t yDim = yDims[idx + 2];
 
-            int64_t kernelSize = (dilations[idx] * (kernelDim - 1)) + 1;
-            int64_t expectedOutputDim
+            const int64_t kernelSize = (dilations[idx] * (kernelDim - 1)) + 1;
+            const int64_t expectedOutputDim
                 = ((xDim + prePadding[idx] + postPadding[idx] - kernelSize) / strides[idx]) + 1;
 
             if(expectedOutputDim != yDim)

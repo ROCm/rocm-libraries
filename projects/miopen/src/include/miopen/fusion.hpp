@@ -78,7 +78,7 @@ struct MIOPEN_INTERNALS_EXPORT BiasFusionOpDescriptor : FusionOpDescriptor
     TensorDescriptor base_desc;
 };
 
-struct MIOPEN_INTERNALS_EXPORT TensorScaleAddOpDescriptor : public FusionOpDescriptor
+struct TensorScaleAddOpDescriptor : public FusionOpDescriptor
 {
     TensorScaleAddOpDescriptor(const TensorDescriptor& desc) : tensor_desc(desc) {}
     miopenStatus_t GetOutputDesc(TensorDescriptor& output_desc) const override;
@@ -103,7 +103,7 @@ struct MIOPEN_INTERNALS_EXPORT ActivFwdFusionOpDescriptor : FusionOpDescriptor
     miopenActivationMode_t activMode;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ActivBwdFusionOpDescriptor : FusionOpDescriptor
+struct ActivBwdFusionOpDescriptor : FusionOpDescriptor
 {
     ActivBwdFusionOpDescriptor(miopenActivationMode_t mode) : activMode(mode) {}
     miopenStatus_t GetOutputDesc(TensorDescriptor& output_desc) const override;
@@ -219,7 +219,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvForwardOpDescriptor : FusionOpDescriptor
         : base_desc(conv_descriptor),
           filter_desc(filter_descriptor),
           kernel_info_valid(false),
-          conv_compiler_options("") {};
+          conv_compiler_options(""){};
     miopenStatus_t GetOutputDesc(TensorDescriptor& output_desc) const override;
     miopenStatus_t SetArgs(OperatorArgs& args, const void* alpha, const void* beta, ConstData_t w);
     // miopenStatus_t SetArgs(OperatorArgs& args, float alpha, float beta, ConstData_t w);

@@ -22,24 +22,17 @@ do
 done
 setup_rocm_compilers_hash_file() {
     mkdir -p "$COMPILERS_HASH_DIR"
-    HIPCC_MD5="$(md5sum "${ROCM_PATH}/bin/hipcc")"
-    pushd "${ROCM_PATH}/amdgcn/bitcode"
-        DEVICELIBS_BITCODES_MD5="$(find . -type f -exec md5sum {} \; | sort | md5sum)"
-    popd
-    HIPCC_HASH_VALUE="${HIPCC_MD5%% *}"
-    DEVICELIBS_BITCODES_HASH_VALUE="${DEVICELIBS_BITCODES_MD5%% *}"
     # MD5 checksums of clang and clang-offload-bundler cannot be used since they will keep changing
     # if the ROCM_PATH changes, ie; for every mainline build.
     # This is because ROCM_PATH gets encoded into the clang/clang-offload-bundler binaries as part
     # of RPATH.
-    # The versions themselves contain the commit hash of the compiler repo at the time of building.
-    # Hence, this should be a viable alternative to using the binary checksum itself.
+    # Note: Since compiler version strings include the commit hash, they vary with each build of TheRock.
+    # Exclude the commit hash to prevent unnecessary cache invalidation.
+    # Omit hipcc and bitcode hashing for now; hipcc is unused, and bitcode hashing can be restored if needed
     CLANG_VERSION="$("${ROCM_PATH}/llvm/bin/clang" --version | head -n 1)"
     CLANG_OFFLOAD_BUNDLER_VERSION="$("${ROCM_PATH}/llvm/bin/clang-offload-bundler" --version | head -n 1)"
-    printf '%s: %s\n' 'clang version' "${CLANG_VERSION}" | tee -a "$SCCACHE_EXTRAFILES"
-    printf '%s: %s\n' 'clang-offload-bundler version' "${CLANG_OFFLOAD_BUNDLER_VERSION}" | tee -a "$SCCACHE_EXTRAFILES"
-    printf '%s: %s\n' 'hipcc md5sum' "${HIPCC_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
-    printf '%s: %s\n' 'devicelibs bitcode md5sum' "${DEVICELIBS_BITCODES_HASH_VALUE}" | tee -a "$SCCACHE_EXTRAFILES"
+    printf '%s: %s\n' 'clang version' "${CLANG_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
+    printf '%s: %s\n' 'clang-offload-bundler version' "${CLANG_OFFLOAD_BUNDLER_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
     echo "sccache-wrapper: compilers hash file set up at ${SCCACHE_EXTRAFILES}"
     cat "$SCCACHE_EXTRAFILES"
 }
