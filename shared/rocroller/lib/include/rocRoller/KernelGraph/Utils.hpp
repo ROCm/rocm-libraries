@@ -590,6 +590,15 @@ namespace rocRoller
          * load path), whether to rewrite outer SubDimension strides/sizes before adding
          * CTs. Default true; callers that duplicate an existing pre-tiled graph (e.g.
          * swizzle scale) should pass false.
+         *
+         * Note that when pretiling is enabled:
+         *
+         * - The client/user creates a 2D tensor (with the usual strides etc).
+         * - LowerFromCommand creates 4 SubDimension nodes; but does
+         *   not update the strides of the first two dimensions.
+         * - When `updatePreTiledSubDimStrides` is true, the first two
+         *   SubDimensions are update and made consistent with a 4D
+         *   tensor.
          */
         std::tuple<int, int, int, int>
             addLoadMacroTileCT(KernelGraph&                     graph,
