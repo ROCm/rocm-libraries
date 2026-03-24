@@ -365,8 +365,9 @@ auto make_distribution(U min, V max)
 {
     if constexpr(rocprim::is_floating_point<T>::value)
     {
-        using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value
-                                                       || std::is_same<rocprim::bfloat16, T>::value,
+        using dis_type = typename std::conditional<std::is_same_v<rocprim::half, T>
+                                                       || std::is_same_v<rocprim::bfloat16, T>
+                                                       || std::is_same_v<__hip_bfloat16, T>,
                                                    float,
                                                    T>::type;
         return std::uniform_real_distribution<dis_type>(static_cast<dis_type>(min),
