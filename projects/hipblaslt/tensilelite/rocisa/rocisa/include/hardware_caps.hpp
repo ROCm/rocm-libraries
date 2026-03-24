@@ -218,11 +218,6 @@ inline std::map<std::string, int>
 
     rv["HasAdd_PC_i64"] = false;
 
-    rv["HasWMMA_f8f6f4"] = tryAssembler(isaVersion,
-                                        assemblerPath,
-                                        "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[16:31], v[16:31], v[0:7]",
-                                        isDebug);
-
     rv["HasSWMMAC"] = tryAssembler(isaVersion, 
                                   assemblerPath, 
                                   "v_swmmac_f32_16x16x32_f16 v[0:3], v[32:33], v[36:39], v[44]", isDebug)
