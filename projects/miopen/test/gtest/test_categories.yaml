@@ -244,8 +244,6 @@ test_categories:
     description: "Complete test suite - (target: hours+)"
     test_patterns: *positive_patterns
 
-    exclude:
-
     test_files:
       # All test files in the suite
       - "*.cpp"
