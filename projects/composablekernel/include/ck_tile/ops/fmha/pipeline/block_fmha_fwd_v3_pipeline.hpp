@@ -479,9 +479,11 @@ struct BlockFmhaFwdV3Pipeline
         statically_indexed_array<sp_compute_type, 2> sp;
 
         decltype(gemm_1.MakeCBlockTile()) o_acc;
-        constexpr index_t fmha_alu_D_reg_cnt = 6; // threshold to decide how many fmha_alu_D_upd()
-                                                  // instructions should we move to fmha_alu1()
-        static_assert(fmha_alu_D_reg_cnt <= o_acc.thread_buf_.size());
+        constexpr index_t fmha_alu_D_reg_cnt =
+            6; // Threshold for determining how many fmha_alu_D_upd() unpacked
+               // instructions to relocate to fmha_alu1().
+        static_assert(fmha_alu_D_reg_cnt % 2 == 0 &&
+                      fmha_alu_D_reg_cnt <= o_acc.thread_buf_.size());
 
         decltype(block_tile_reduce<SMPLComputeDataType>(
             sp(number<0>{}).sp_compute, sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
@@ -785,7 +787,14 @@ struct BlockFmhaFwdV3Pipeline
             }
         };
 
-        auto fmha_alu_D_upd = [&] {
+        // Number of o_acc registers rescaled with unpacked (scalar) v_mul_f32 before the
+        // scheduler, so the compiler can interleave them with MFMA tail slots.  The remaining
+        // registers are rescaled with packed v_pk_mul_f32 (asm volatile, invisible to the
+        // scheduler) after the scheduler.  Set to 0 to use packed multiply for all registers
+        // beyond fmha_alu_D_reg_cnt; increase to feed the scheduler more visible VALU work.
+        constexpr index_t num_unpack_insts = 0;
+        fp32x2_t pk_o_acc_scale;
+        auto fmha_alu_D_upd_unpack = [&] {
             o_acc_scale = [&] {
                 if constexpr(kHasLogitsSoftCap)
                 {
@@ -797,28 +806,20 @@ struct BlockFmhaFwdV3Pipeline
                 }
             }();
 
-            fp32x2_t pk_o_acc_scale;
+            static_assert(num_unpack_insts % 2 == 0 &&
+                          (fmha_alu_D_reg_cnt + num_unpack_insts) <= o_acc.thread_buf_.size());
+            static_for<fmha_alu_D_reg_cnt, fmha_alu_D_reg_cnt + num_unpack_insts, 1>{}(
+                [&](auto idx) { o_acc.thread_buf_[idx] *= o_acc_scale; });
             pk_o_acc_scale.x = o_acc_scale;
             pk_o_acc_scale.y = o_acc_scale;
+        };
 
-            static_assert((o_acc.thread_buf_.size() - fmha_alu_D_reg_cnt) % 2 == 0);
-#if CK_TILE_DISABLE_PACKED_FP32
-            static_assert(fmha_alu_D_reg_cnt + 2 <= o_acc.thread_buf_.size());
-            static_for<fmha_alu_D_reg_cnt, fmha_alu_D_reg_cnt + 2, 1>{}(
-                [&](auto idx) { o_acc.thread_buf_[idx] *= o_acc_scale; });
-#endif
-
-            constexpr auto issued_D_reg_cnt =
-#if CK_TILE_DISABLE_PACKED_FP32
-                fmha_alu_D_reg_cnt + 2
-#else
-                fmha_alu_D_reg_cnt
-#endif
-                ;
+        auto fmha_alu_D_upd_pack = [&] {
+            constexpr index_t issued_unpack_insts = fmha_alu_D_reg_cnt + num_unpack_insts;
             /// NOTICE: Use inline asm v_pk_mul_f32 to reduce latency. The fmha_alu_D_upd() call
             /// should be placed at the end of a phase.
-            // update partial o_acc after [issued_D_reg_cnt]
-            static_for<issued_D_reg_cnt, o_acc.thread_buf_.size(), 2>{}([&](auto idx) {
+            // update partial o_acc after [issued_unpack_insts]
+            static_for<issued_unpack_insts, o_acc.thread_buf_.size(), 2>{}([&](auto idx) {
                 fp32x2_t input;
                 input.x = o_acc.thread_buf_[idx];
                 input.y = o_acc.thread_buf_[idx + 1];
@@ -828,6 +829,11 @@ struct BlockFmhaFwdV3Pipeline
                 o_acc.thread_buf_[idx]     = output.x;
                 o_acc.thread_buf_[idx + 1] = output.y;
             });
+        };
+
+        auto fmha_alu_D_upd = [&] {
+            fmha_alu_D_upd_unpack();
+            fmha_alu_D_upd_pack();
         };
 
         auto fmha_mask = [&](auto sp_reg_idx) {
@@ -936,10 +942,10 @@ struct BlockFmhaFwdV3Pipeline
                     asm volatile("s_nop 0");
                     __builtin_amdgcn_sched_barrier(0);
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
-
+                    fmha_alu_D_upd_unpack();
                     Scheduler::schedule(cl_p, number<2>{});
                     __builtin_amdgcn_sched_barrier(0);
-                    fmha_alu_D_upd();
+                    fmha_alu_D_upd_pack();
 
                     __builtin_amdgcn_sched_barrier(0);
                     // phase3
@@ -1015,10 +1021,10 @@ struct BlockFmhaFwdV3Pipeline
                     asm volatile("s_nop 1");
                     __builtin_amdgcn_sched_barrier(0);
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
-
+                    fmha_alu_D_upd_unpack();
                     Scheduler::schedule(cl_p, number<3>{});
                     __builtin_amdgcn_sched_barrier(0);
-                    fmha_alu_D_upd();
+                    fmha_alu_D_upd_pack();
                 }
                 return result;
             };
