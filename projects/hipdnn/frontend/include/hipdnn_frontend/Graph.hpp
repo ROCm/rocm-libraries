@@ -1135,10 +1135,7 @@ public:
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
             engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true));
 
-        std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
-        std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(
-            detail::getEngineConfigs(engineConfigs, engineIds, engineHeuristicDesc.get(), false));
+        HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
 
         return {ErrorCode::OK, ""};
     }
