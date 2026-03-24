@@ -1116,7 +1116,7 @@ class GlobalWriteBatchWriter:
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=sgpr("ScaleD", 2), comment="result *= ScaleD"))
+              activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=sgpr("ScaleD", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="result *= ScaleD"))
           else:
             assert 0, "Unsupported scaleD type"
 
