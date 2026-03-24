@@ -24,6 +24,7 @@
 #include "rocfft/rocfft.h"
 
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,13 @@ enum class io_data_label
     INPUT,
     OUTPUT
 };
+
+/**
+  * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa. 
+  * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT` 
+  * nor `io_data_label::OUTPUT`.
+  */
+io_data_label other(io_data_label io);
 
 /**
  * @return An `std::string` of value "input" (resp. "output") if `io` is
@@ -60,7 +68,7 @@ std::string to_str(io_data_label io);
 struct data_layout_t
 {
     /**
-     * @brief Construct a new `data_layout_t` object with explicit member values.
+     * @brief Constructs a new `data_layout_t` object with explicit member values.
      * 
      * @param[in] lower lower bounds along all axes of the logical index range
      * (lower bounds are included).
@@ -94,6 +102,40 @@ struct data_layout_t
                   const std::vector<size_t>& strides,
                   size_t                     batch_rank = 1,
                   bool                       is_partial = true);
+
+    /**
+     * @brief Constructs a new `data_layout_t` object capturing a full range of logical
+     * indices with one batch axis.
+     * 
+     * @param[in] lengths spans of the logical index range along all length axes.
+     * @param[in] strides in-buffer strides associated with all length axes.
+     * @param[in] batch span of the logical index range along its batch axis.
+     * @param[in] distance in-buffer stride associated with the batch axis.
+     * 
+     * @throw An `std::invalid_argument` is thrown if `lengths` or `strides`
+     * are empty or have different sizes.
+     */
+    static data_layout_t full_layout(const std::vector<size_t>& lengths,
+                                     const std::vector<size_t>& strides,
+                                     size_t                     batch,
+                                     size_t                     distance);
+
+    /**
+     * @brief Constructs a new `data_layout_t` object capturing a full range of logical
+     * indices with one batch axis, and default in-buffer strides (enforcing in-buffer
+     * contiguity for the innermost length axis).
+     * 
+     * @param[in] lengths spans of the logical index range along all length axes.
+     * @param[in] batch span of the logical index range along its batch axis.
+     * @param[in] real_case_with_padding flag setting the in-buffer stride of the
+     * layout's first non-contiguous axis to the value that is required in real
+     * domain for real, in-place Discrete Fourier Transforms.
+     * 
+     * @throw An `std::invalid_argument` is thrown if `lengths` is empty.
+     */
+    static data_layout_t default_full_layout(const std::vector<size_t>& lengths,
+                                             size_t                     batch,
+                                             bool real_case_with_padding = false);
 
     /**
      * @return The number of length axes.
@@ -251,6 +293,10 @@ struct data_layout_t
      * @return `true` if this data layout is dimensionally consistent with `other` 
      */
     bool is_dimensionally_consistent_with(const data_layout_t& other) const;
+    /**
+     * @return `true` if any length axis covers a partial range.
+     */
+    bool has_some_partial_length_axis() const;
 
     /**
      * @brief Reports the order of length axis indices if sorting them by increasing
@@ -264,6 +310,40 @@ struct data_layout_t
      * if `i` < `j` (excluding `i == 0` and `j == 0` if `pin_innermost_axis` is true)
      */
     std::vector<size_t> length_axes_by_increasing_strides(bool pin_innermost_axis) const;
+
+    /**
+     * @brief Verifies whether this object's layout is consistent as input
+     * (resp. output) for specific types of in-place Discrete Fourier Transforms
+     * along its full lengths axes and, if so, returns the corresponding output
+     * (resp. input) layout.
+     * 
+     * @param[in] other_io I/O label for the data layout to be returned. Explicitly,
+     * the calling object's layout is considered an input (resp. output) layout
+     * if the argument value is `io_data_label::OUTPUT` (resp. `io_data_label::INPUT`)
+     * @param[in] fft_type intended type of (in-place) Fourier Transform
+     * @param[in] other_innermost_length_is_odd flag indicating whether the
+     * logical span of the innermost length axis in the corresponding layout is
+     * odd (if `true`) or not (if `false`). This is ignored (and can be safely
+     * omitted in calls) *unless* the data layout to be returned corresponds to
+     * the input of a real forward transform or the output of a real inverse
+     * transform.
+     * 
+     * @return An `std::optional<data_layout_t>` object which has a value set
+     * iff a corresponding layout for in-place operation does actually exist.
+     * 
+     * @note This function does not verify if either layout is self-aliasing and
+     * ignores offsets as `data_layout_t` objects do not capture them.
+     * 
+     * @throw An `std::logic_error` is thrown if the current object is an empty
+     * layout or involves some partial length axes. An `std::invalid_argument` is
+     * thrown if `fft_type` is not an expected value or if `other_io` is not an
+     * expected value.
+     * 
+     */
+    std::optional<data_layout_t> get_other_inplace_layout_for(io_data_label         other_io,
+                                                              rocfft_transform_type fft_type,
+                                                              bool other_innermost_length_is_odd
+                                                              = false) const;
 
     //-------------------------------------------------------------------------
     //                        DEFAULT COPIES AND MOVES
@@ -336,7 +416,7 @@ private:
     size_t slowest_varying_axis() const;
 
     /**
-     * @brief Empty all layout axes.
+     * @brief Empties all layout axes.
      */
     void clear();
 
@@ -353,7 +433,7 @@ private:
     void reorder_length_axes(const std::vector<size_t>& len_axis_order);
 
     /**
-     * @brief Reset the object's state to capture a full range of logical
+     * @brief Resets the object's state to capture a full range of logical
      * indices with either prescribed or default strides and/or distance.
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
