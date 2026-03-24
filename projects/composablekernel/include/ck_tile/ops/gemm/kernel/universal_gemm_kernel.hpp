@@ -275,7 +275,9 @@ struct UniversalGemmKernel
     }
 
     CK_TILE_HOST static constexpr auto GridSize(index_t M, index_t N, index_t KBatch)
-    { return dim3(TilePartitioner::GridSize(M, N), 1, KBatch); }
+    {
+        return dim3(TilePartitioner::GridSize(M, N), 1, KBatch);
+    }
 
     /**
      * @brief Calculate grid size that maximizes hardware utilization for persistent kernels.
@@ -326,7 +328,9 @@ struct UniversalGemmKernel
     }
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
-    { return max(GemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize()); }
+    {
+        return max(GemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
+    }
 
     struct SplitKBatchOffset
     {
@@ -1163,8 +1167,8 @@ struct UniversalGemmKernel
         }
     }
 
-    CK_TILE_DEVICE static auto GetTileCoordinates(const KernelArgs& kargs)
-        -> tuple<index_t, index_t>
+    CK_TILE_DEVICE static auto
+    GetTileCoordinates(const KernelArgs& kargs) -> tuple<index_t, index_t>
     {
         index_t iM, iN;
 
