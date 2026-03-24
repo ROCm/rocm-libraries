@@ -425,7 +425,7 @@ namespace rocisa
             return std::make_shared<MXMFMAInstruction>(*this);
         }
 
-        std::string typeConvert(InstType iType) const
+        std::string typeConvert() const
         {
             constexpr size_t f4_t = 32;
             return ((variant[0] < f4_t) && (variant[1] < f4_t)) ? "f8f6f4" : "f4";
@@ -442,7 +442,7 @@ namespace rocisa
                                      + "x" + std::to_string(variant[1])
                                      + "x" + std::to_string(variant[2]);
             std::string blkStr = (block == 16) ? "16" : "";
-            return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert(instType);
+            return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert();
         }
 
         std::string getArgStr() const
