@@ -65,7 +65,7 @@ struct rocfft_execution_info_internal
     // enough, use that.  If the user specified one that's not big
     // enough, throw invalid work buffer exception.  Otherwise
     // allocate one.
-    void ensure_work_buffer_size(const std::vector<size_t> sizes_bytes_per_device);
+    void ensure_work_buffer_size(const std::vector<size_t>& sizes_bytes_per_device);
     // Get the work buffer for the specified device.
     const gpubuf& get_work_buffer(int device) const;
 

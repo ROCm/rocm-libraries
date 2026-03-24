@@ -49,7 +49,7 @@ rocfft_execution_info_internal::rocfft_execution_info_internal(
 }
 
 void rocfft_execution_info_internal::ensure_work_buffer_size(
-    const std::vector<size_t> sizes_bytes_per_device)
+    const std::vector<size_t>& sizes_bytes_per_device)
 {
     // assert that all our vectors are the same length
     if(execWorkBuffers.size() != sizes_bytes_per_device.size()
