@@ -29,6 +29,7 @@
 #include <miopen/miopen.h>
 
 #include "gtest_common.hpp"
+#include "gtest_conv_desc_guard.hpp"
 #include "test_parameter_name_generator.hpp"
 
 namespace {
@@ -66,7 +67,7 @@ struct FusionAuxTest : public testing::TestWithParam<TestCase>
     {
         miopen::TensorDescriptor inputTensor;
         miopen::TensorDescriptor convFilter;
-        miopenConvolutionDescriptor_t convDesc{};
+        ConvDescGuard convDesc;
         miopenFusionOpDescriptor_t convoOp{};
         const auto& [inputs, conv_filter, conv_desc] = RawTestCase{GetParam()};
 
@@ -84,9 +85,6 @@ struct FusionAuxTest : public testing::TestWithParam<TestCase>
                                              conv_filter[2], // kernel size
                                              conv_filter[3]);
 
-        EXPECT_EQ(status, miopenStatusSuccess);
-
-        status = miopenCreateConvolutionDescriptor(&convDesc);
         EXPECT_EQ(status, miopenStatusSuccess);
 
         status = miopenInitConvolutionDescriptor(convDesc,
