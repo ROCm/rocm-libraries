@@ -58,8 +58,6 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         graphapi_rng.cpp
         graphapi_tensor.cpp
         graphapi_variant_pack.cpp
-        log_test.cpp
-        log_test_neg.cpp
         mha_find20.cpp
         w_supertensor.cpp)
 endif()
