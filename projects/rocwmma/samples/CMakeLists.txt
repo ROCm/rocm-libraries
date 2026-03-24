@@ -87,3 +87,8 @@ add_rocwmma_sample(simple_dgemv ${CMAKE_CURRENT_SOURCE_DIR}/simple_dgemv.cpp)
 add_rocwmma_sample(simple_dlrm ${CMAKE_CURRENT_SOURCE_DIR}/simple_dlrm.cpp)
 add_rocwmma_sample(hipRTC_gemm ${CMAKE_CURRENT_SOURCE_DIR}/hipRTC_gemm.cpp)
 add_rocwmma_sample(perf_i8gemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_i8gemm.cpp)
+
+# Community samples (optional)
+if(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  add_subdirectory(community)
+endif()

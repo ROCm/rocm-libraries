@@ -166,6 +166,7 @@ TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
     EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
     EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
     EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+    EXPECT_EQ(convNode->attributes.get_name(), "conv_fprop_op");
 }
 
 // Verifies that tensors are accessible by UID on the reconstructed graph,
