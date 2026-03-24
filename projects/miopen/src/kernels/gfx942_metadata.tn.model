@@ -1,5 +1,5 @@
 {
-    "generated_on": "25 Feb 2026, 09:34:02",
+    "generated_on": "23 Mar 2026, 13:23:53",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -12,7 +12,7 @@
     ],
     "note": "Data merged from sessions: [2]",
     "num_inputs": 21,
-    "num_solvers": 21,
+    "num_solvers": 19,
     "num_outputs": 24,
     "encodings": {
         "in_layout": {
@@ -44,21 +44,19 @@
             "ConvBinWinogradRxSf2x3": 3,
             "ConvBinWinogradRxSf2x3g1": 4,
             "ConvBinWinogradRxSf3x2": 5,
-            "ConvHipImplicitGemmBwdXdlops": 6,
-            "ConvHipImplicitGemmFwdXdlops": 7,
-            "ConvHipImplicitGemmGroupBwdXdlops": 8,
-            "ConvHipImplicitGemmGroupFwdXdlops": 9,
-            "ConvHipImplicitGemmGroupWrwXdlops": 10,
-            "ConvWinoRageRxS<2-3>": 11,
-            "GemmBwd1x1_stride1": 12,
-            "GemmBwd1x1_stride2": 13,
-            "GemmBwdRest": 14,
-            "GemmFwd1x1_0_1": 15,
-            "GemmFwd1x1_0_2": 16,
-            "GemmFwdRest": 17,
-            "GemmWrw1x1_stride1": 18,
-            "GemmWrwUniversal": 19,
-            "fft": 20
+            "ConvHipImplicitGemmGroupBwdXdlops": 6,
+            "ConvHipImplicitGemmGroupFwdXdlops": 7,
+            "ConvHipImplicitGemmGroupWrwXdlops": 8,
+            "ConvWinoRageRxS<2-3>": 9,
+            "GemmBwd1x1_stride1": 10,
+            "GemmBwd1x1_stride2": 11,
+            "GemmBwdRest": 12,
+            "GemmFwd1x1_0_1": 13,
+            "GemmFwd1x1_0_2": 14,
+            "GemmFwdRest": 15,
+            "GemmWrw1x1_stride1": 16,
+            "GemmWrwUniversal": 17,
+            "fft": 18
         }
     },
     "conv_params_used_as_features": [
