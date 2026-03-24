@@ -1290,19 +1290,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
               packINtemsMXSB[j].append(packMXSBItems.pop(0))
 
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          if not self.states.asmCaps["HasSWMMAC_gfx1250"]: # gfx942, gfx950
-            for j in range(self.states.numReadsIterCoalescedMetadata):
-              for n in range(ceil(instPerPackM)):
-                if packMItems:
-                    packINtemsM[j].append(packMItems.pop(0))
-                else:
-                  break
-          else:
-            # FIXME: gfx1250
-            # for j in range(self.states.numReadsIterCoalescedMetadata):
+          for j in range(self.states.numReadsIterCoalescedMetadata):
             for n in range(ceil(instPerPackM)):
               if packMItems:
-                packINtemsM[0].append(packMItems.pop(0))
+                packINtemsM[j].append(packMItems.pop(0))
               else:
                 break
 
@@ -1347,21 +1338,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   else:
                     break
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-            if not self.states.asmCaps["HasSWMMAC_gfx1250"]: # gfx942, gfx950
-              while packMItems:
-                for j in range(self.states.numReadsIterCoalescedMetadata):
-                  for n in range(ceil(instPerPackM)):
-                    if packMItems:
-                      packINtemsM[j].append(packMItems.pop(0))
-                    else:
-                      break
-            else:
-              # FIXME: gfx1250
-              while packMItems:
-                # for j in range(self.states.numReadsIterCoalescedMetadata):
+            while packMItems:
+              for j in range(self.states.numReadsIterCoalescedMetadata):
                 for n in range(ceil(instPerPackM)):
                   if packMItems:
-                    packINtemsM[0].append(packMItems.pop(0))
+                    packINtemsM[j].append(packMItems.pop(0))
                   else:
                     break
           while packMXSBItems or packBItems:
