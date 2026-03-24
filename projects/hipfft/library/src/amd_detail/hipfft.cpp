@@ -284,8 +284,8 @@ public:
 
     hipDataType spaceType() const
         {
-        if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            if(!isinitialized)
+                throw std::runtime_error("hipfftIOType not intialized");
             
             if(is_complex_to_complex())
             {
@@ -304,10 +304,10 @@ public:
             }
         }
 
-        hipDataType freqType() const
+    hipDataType freqType() const
         {
-        if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            if(!isinitialized)
+                throw std::runtime_error("hipfftIOType not intialized");
             
             if(is_complex_to_complex())
             {
@@ -613,7 +613,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
     if(plan->singleProcMultiDevice)
     {
-        // tODO: make sure we don't have a communicator.
+        // TODO: make sure we don't have a communicator.
         
         std::vector<size_t> batches = {plan->batch};
         std::vector<size_t> batchlengths = batches;
@@ -1836,6 +1836,10 @@ try
     if(!desc)
         return HIPFFT_INVALID_VALUE;
 
+    // Only in-place multi-gpu transforms are currently implemented.
+    if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_OUTPUT)
+        return HIPFFT_NOT_IMPLEMENTED;
+    
     auto lib_desc = std::make_unique<hipLibXtDesc>();
     std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
 
@@ -2153,7 +2157,6 @@ try
     }
     case HIPFFT_COPY_DEVICE_TO_DEVICE:
     {
-        // TODO: implement
         return HIPFFT_NOT_IMPLEMENTED;
     }
     case HIPFFT_COPY_UNDEFINED:
