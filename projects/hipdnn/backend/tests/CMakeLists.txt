@@ -59,6 +59,7 @@ add_executable(
     descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestSdpaBpropOperationDescriptor.cpp
+    descriptors/TestSdpaBpropOperationFromNode.cpp
     descriptors/TestSdpaFpropOperationDescriptor.cpp
     descriptors/TestGraphDescriptorSdpaBprop.cpp
     descriptors/TestDescriptorAttributeUtils.cpp

@@ -202,27 +202,44 @@ namespace hipdnn_frontend::detail
         attributes.set_dbias(dbiasTensor);
     }
 
-    // Boolean scalars
-    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
-                                          HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT,
-                                          attributes.alibi_mask,
-                                          false,
-                                          "SDPA bprop alibi_mask"));
-    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
-                                          HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT,
-                                          attributes.padding_mask,
-                                          false,
-                                          "SDPA bprop padding_mask"));
-    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
-                                          HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT,
-                                          attributes.causal_mask,
-                                          false,
-                                          "SDPA bprop causal_mask"));
-    HIPDNN_CHECK_ERROR(unpackOptionalBool(opDesc,
-                                          HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT,
-                                          attributes.causal_mask_bottom_right,
-                                          false,
-                                          "SDPA bprop causal_mask_bottom_right"));
+    // Boolean scalars — plain bool members, so unpack into optional and apply default
+    {
+        std::optional<bool> opt;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_SDPA_BPROP_ALIBI_MASK_EXT,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           opt,
+                                                           "SDPA bprop alibi_mask"));
+        attributes.alibi_mask = opt.value_or(false);
+    }
+    {
+        std::optional<bool> opt;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_SDPA_BPROP_PADDING_MASK_EXT,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           opt,
+                                                           "SDPA bprop padding_mask"));
+        attributes.padding_mask = opt.value_or(false);
+    }
+    {
+        std::optional<bool> opt;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_EXT,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           opt,
+                                                           "SDPA bprop causal_mask"));
+        attributes.causal_mask = opt.value_or(false);
+    }
+    {
+        std::optional<bool> opt;
+        HIPDNN_CHECK_ERROR(
+            getDescriptorAttrOptionalScalar(opDesc,
+                                            HIPDNN_ATTR_SDPA_BPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            opt,
+                                            "SDPA bprop causal_mask_bottom_right"));
+        attributes.causal_mask_bottom_right = opt.value_or(false);
+    }
 
     // Optional float scalars
     HIPDNN_CHECK_ERROR(

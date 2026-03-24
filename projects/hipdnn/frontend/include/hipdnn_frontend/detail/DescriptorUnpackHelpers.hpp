@@ -430,23 +430,4 @@ template <typename T>
     return {};
 }
 
-/// Unpacks an optional boolean scalar from an operation descriptor.
-/// If not supported, sets value to the default and returns success.
-[[nodiscard]] inline Error unpackOptionalBool(hipdnnBackendDescriptor_t opDesc,
-                                              hipdnnBackendAttributeName_t attrName,
-                                              bool& value,
-                                              bool defaultValue,
-                                              const std::string& errorContext)
-{
-    int64_t count = 0;
-    auto status = hipdnnBackend()->backendGetAttribute(
-        opDesc, attrName, HIPDNN_TYPE_BOOLEAN, 0, &count, nullptr);
-    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
-    {
-        value = defaultValue;
-        return {};
-    }
-    return getDescriptorAttrScalar(opDesc, attrName, HIPDNN_TYPE_BOOLEAN, value, errorContext);
-}
-
 } // namespace hipdnn_frontend::detail

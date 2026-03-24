@@ -63,8 +63,8 @@ constexpr int64_t K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID = 108;
 constexpr int64_t K_SDPA_BPROP_TENSOR_DBIAS_UID = 109;
 
 // Scalar tensor (volume == 1) for scale/seed/offset
-constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_SCALAR_DIMS = {1, 1, 1, 1};
-constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_SCALAR_STRIDES = {1, 1, 1, 1};
+constexpr std::array<int64_t, 1> K_SDPA_BPROP_TENSOR_SCALAR_DIMS = {1};
+constexpr std::array<int64_t, 1> K_SDPA_BPROP_TENSOR_SCALAR_STRIDES = {1};
 
 // Attention mask: [batch=2, num_heads=4, seq_q=128, seq_kv=128]
 constexpr std::array<int64_t, 4> K_SDPA_BPROP_TENSOR_ATTN_MASK_DIMS = {2, 4, 128, 128};

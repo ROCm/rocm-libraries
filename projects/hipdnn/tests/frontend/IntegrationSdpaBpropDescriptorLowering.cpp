@@ -346,16 +346,12 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
     seqLenKv->set_stride(toVec(K_SDPA_BPROP_TENSOR_SEQ_LEN_STRIDES));
 
     auto seed = std::make_shared<TensorAttributes>();
-    seed->set_uid(K_SDPA_BPROP_TENSOR_SEED_UID).set_name("SEED").set_data_type(DataType::FLOAT);
-    seed->set_dim(toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
-    seed->set_stride(toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
+    seed->set_uid(K_SDPA_BPROP_TENSOR_SEED_UID).set_name("SEED");
+    seed->set_value(int32_t{42});
 
     auto offset = std::make_shared<TensorAttributes>();
-    offset->set_uid(K_SDPA_BPROP_TENSOR_OFFSET_UID)
-        .set_name("OFFSET")
-        .set_data_type(DataType::FLOAT);
-    offset->set_dim(toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
-    offset->set_stride(toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
+    offset->set_uid(K_SDPA_BPROP_TENSOR_OFFSET_UID).set_name("OFFSET");
+    offset->set_value(int32_t{0});
 
     auto dropoutMask = std::make_shared<TensorAttributes>();
     dropoutMask->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_UID)
@@ -365,18 +361,13 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
     dropoutMask->set_stride(toVec(K_SDPA_BPROP_TENSOR_DROPOUT_MASK_STRIDES));
 
     auto dropoutScale = std::make_shared<TensorAttributes>();
-    dropoutScale->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID)
-        .set_name("DROPOUT_SCALE")
-        .set_data_type(DataType::FLOAT);
-    dropoutScale->set_dim(toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
-    dropoutScale->set_stride(toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
+    dropoutScale->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
+    dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
     auto dropoutScaleInv = std::make_shared<TensorAttributes>();
     dropoutScaleInv->set_uid(K_SDPA_BPROP_TENSOR_DROPOUT_SCALE_INV_UID)
-        .set_name("DROPOUT_SCALE_INV")
-        .set_data_type(DataType::FLOAT);
-    dropoutScaleInv->set_dim(toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
-    dropoutScaleInv->set_stride(toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
+        .set_name("DROPOUT_SCALE_INV");
+    dropoutScaleInv->set_value(1.0f - 0.1f);
 
     // -- Optional output tensor: dBias (must be set on attrs before graph call) --
     auto dbias = std::make_shared<TensorAttributes>();
@@ -458,6 +449,7 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DK_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DV_UID), 0u);
     // Optional tensors (all present when all optionals are set)
+    ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SCALE_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_ATTN_MASK_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID), 0u);
@@ -469,7 +461,10 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DBIAS_UID), 0u);
 
     // -- Verify optional tensor properties --
-    // (scale is pass-by-value — verified via scale_tensor_uid below)
+    auto* scaleT = tensorMap[K_SDPA_BPROP_TENSOR_SCALE_UID];
+    EXPECT_EQ(scaleT->name, "SCALE");
+    EXPECT_EQ(scaleT->dims, toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
+    EXPECT_EQ(scaleT->strides, toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
 
     auto* attnMaskT = tensorMap[K_SDPA_BPROP_TENSOR_ATTN_MASK_UID];
     EXPECT_EQ(attnMaskT->name, "ATTN_MASK");
@@ -491,13 +486,13 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
 
     auto* seedT = tensorMap[K_SDPA_BPROP_TENSOR_SEED_UID];
     EXPECT_EQ(seedT->name, "SEED");
-    EXPECT_EQ(seedT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(seedT->data_type, DataTypeSdk::INT32);
     EXPECT_EQ(seedT->dims, toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
     EXPECT_EQ(seedT->strides, toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
 
     auto* offsetT = tensorMap[K_SDPA_BPROP_TENSOR_OFFSET_UID];
     EXPECT_EQ(offsetT->name, "OFFSET");
-    EXPECT_EQ(offsetT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(offsetT->data_type, DataTypeSdk::INT32);
     EXPECT_EQ(offsetT->dims, toVec(K_SDPA_BPROP_TENSOR_SCALAR_DIMS));
     EXPECT_EQ(offsetT->strides, toVec(K_SDPA_BPROP_TENSOR_SCALAR_STRIDES));
 
