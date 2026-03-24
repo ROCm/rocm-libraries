@@ -71,6 +71,19 @@ void getString(const std::string& source,
                void* arrayOfElements,
                const char* errorPrefix);
 
+void setByteArray(std::vector<uint8_t>& target,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t elementCount,
+                  const void* arrayOfElements,
+                  const char* errorPrefix);
+
+void getByteArray(const std::vector<uint8_t>& source,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t requestedElementCount,
+                  int64_t* elementCount,
+                  void* arrayOfElements,
+                  const char* errorPrefix);
+
 template <typename T>
 void setScalarVector(std::vector<T>& target,
                      hipdnnBackendAttributeType_t expectedType,
