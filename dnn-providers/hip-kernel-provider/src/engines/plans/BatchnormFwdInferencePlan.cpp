@@ -153,8 +153,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     auto inCstride = static_cast<unsigned int>(h * w);
 
-    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
-    bool isLayoutNhwc = (xStrides->Get(1) == 1);
+    bool isLayoutNhwc = hip_kernel_utils::isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
     auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride);
