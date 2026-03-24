@@ -1,0 +1,37 @@
+/**
+ * CSS workaround for Doxygen missing image references
+ *
+ * This file overrides CSS variables that reference non-existent images
+ * in the auto-generated doxygen.css file which makes the dead link checker
+ * happy.
+ */
+
+html {
+    /* Fix search images (not generated when SEARCHENGINE=NO) */
+    --search-magnification-image: none;
+    --search-magnification-select-image: none;
+    --nav-gradient-active-image-parent: none;
+
+    /* Fix fold/collapse images with incorrect relative paths (not generated when HTML_DYNAMIC_SECTIONS=NO) */
+    --fold-minus-image-relpath: none;
+    --fold-plus-image-relpath: none;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme=light]) {
+        --search-magnification-image: none;
+        --search-magnification-select-image: none;
+        --nav-gradient-active-image-parent: none;
+        --fold-minus-image-relpath: none;
+        --fold-plus-image-relpath: none;
+    }
+}
+
+html[data-theme=dark] {
+    --search-magnification-image: none;
+    --search-magnification-select-image: none;
+    --nav-gradient-active-image-parent: none;
+    --fold-minus-image-relpath: none;
+    --fold-plus-image-relpath: none;
+}
