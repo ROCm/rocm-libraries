@@ -66,13 +66,15 @@ add_executable(
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
     utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp
+    utilities/TestGpuFpReferenceConvolution.cpp
     TestVersion.cpp
 )
 
 target_compile_options(hipdnn_test_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
-    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk hip::host
+    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hipdnn_plugin_sdk hipdnn_gpu_ref
+    hip::host
 )
 
 clang_tidy_check(hipdnn_test_sdk_tests)
