@@ -124,6 +124,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
     std::vector<fft_params> all_params;
 
     auto distribute_params = [=, &all_params](const std::vector<fft_params>& params) {
+        static std::ranlux24_base gen(random_seed);
         for(auto& p : params)
         {
             // start with all-ones in grids
@@ -131,7 +132,6 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
             std::vector<unsigned int>          output_grid(p.length.size() + 1, 1);
             int                                start_global_dev_id_input  = 0;
             int                                start_global_dev_id_output = 0;
-            static std::ranlux24_base          gen(random_seed);
             std::uniform_int_distribution<int> dev_rng(0, total_num_devices);
 
             auto p_dist = p;
@@ -529,7 +529,7 @@ std::vector<fft_params> param_generator_some_continuous_brick()
 
     const size_t     total_num_devices  = mp_ranks * gpusperrank;
     constexpr size_t min_slow_axis_ncut = 2;
-    // need at least min_slow_axis_ncut +1 devices
+    // need at least min_slow_axis_ncut + 1 devices
     if(total_num_devices < min_slow_axis_ncut + 1)
         return {};
 
@@ -557,6 +557,7 @@ std::vector<fft_params> param_generator_some_continuous_brick()
         ret.insert(ret.begin(), dist);
         return ret;
     };
+    static std::ranlux24_base gen(random_seed);
 
     const size_t slowest_axis_ncut = std::max(min_slow_axis_ncut, total_num_devices / 2);
     for(auto p = params.begin(); p != params.end();)
@@ -619,7 +620,6 @@ std::vector<fft_params> param_generator_some_continuous_brick()
                 bricks.emplace_back(brick);
             }
             // randomly pick one of the bricks created so far as one that we won't divide anymore
-            static std::ranlux24_base             gen(random_seed);
             std::uniform_int_distribution<size_t> dev_rng(0, slowest_axis_ncut - 1);
             const auto                            const_brick_idx = dev_rng(gen);
             while(bricks.size() < total_num_devices)
@@ -666,7 +666,7 @@ std::vector<fft_params> param_generator_some_continuous_brick()
             p = params.erase(p);
             continue;
         }
-        // assign ranks and devices, cycle through ranks first for make sure
+        // assign ranks and devices, cycle through ranks first to make sure
         // all processes have something to do
         for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
         {

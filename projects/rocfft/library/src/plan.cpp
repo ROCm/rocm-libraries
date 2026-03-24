@@ -764,7 +764,7 @@ NodeMetaData
         // Single-device plan can always operate out-of-place, but that may trigger
         // undesirable additional costs such as extra temporary buffer required for
         // output results (and/or unfriendly gather/scatter extra steps in case of
-        // real transforms). If possible (and allowed) or likely preferrable,
+        // real transforms). If possible (and allowed) or likely preferable,
         // in-place operations are used instead.
         for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
         {
@@ -838,7 +838,7 @@ NodeMetaData
         // Input and output data are distributed or none of them are directly accessible
         // from the current location. Temporary buffers on current device are used for input
         // and output of the execution plan. In-place default layout operations are
-        // used to minimizing the library's memory footprint.
+        // used to minimize the library's memory footprint.
         root_plan.placement    = rocfft_placement_inplace;
         root_plan_input_layout = data_layout_t::default_full_layout(
             desc.input_layout.lengths(),
@@ -1162,12 +1162,28 @@ rocfft_status
             throw std::runtime_error("Inconsistent full data range detected for an " + to_str(io)
                                      + " field");
         }
-        if(io_fields.empty() && comm_type != rocfft_comm_none)
+        if(io_fields.empty())
         {
-            // This would warrant a dedicated error code. For now, throw an std::runtime_error so
-            // that ROCFFT_LAYER reports something insightful
-            throw std::runtime_error(
-                "Multi-process transforms require both input and output fields to be specified");
+            if(comm_type != rocfft_comm_none)
+            {
+                // This would warrant a dedicated error code. For now, throw an std::runtime_error so
+                // that ROCFFT_LAYER reports something insightful
+                throw std::runtime_error("Multi-process transforms require both input and output "
+                                         "fields to be specified");
+            }
+            else
+            {
+                // Single-proc: users may not set a field with a single brick in case of
+                // undistributed input/output data. Internally, it may be convenient to
+                // assimilate such usage to a lone-brick field usage: the internally-created
+                // single_dev_ifield and/or single_dev_ofield serve that purpose.
+                auto& single_dev_io_field
+                    = io == io_data_label::INPUT ? single_dev_ifield : single_dev_ofield;
+                single_dev_io_field = std::make_optional<rocfft_field_t>();
+                single_dev_io_field->bricks.reserve(1);
+                single_dev_io_field->bricks.emplace_back(expected_full_range,
+                                                         get_current_location());
+            }
         }
         if(std::any_of(io_fields.begin(), io_fields.end(), [](auto& field) {
                return !field.has_valid_tessellation();
@@ -1692,6 +1708,27 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
     }
 }
 
+const rocfft_field_t& rocfft_plan_description_t::get_field_for(io_data_label io,
+                                                               size_t        field_idx) const
+{
+    if(io != io_data_label::INPUT && io != io_data_label::OUTPUT)
+        throw std::invalid_argument("Invalid io value given to " + ROCFFT_CURRENT_FUNCTION);
+    const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+    if(field_idx >= std::max(io_fields.size(), (size_t)1))
+        throw std::invalid_argument("Invalid field index value given to "
+                                    + ROCFFT_CURRENT_FUNCTION);
+    if(!io_fields.empty())
+        return io_fields[field_idx];
+    // no field was actually set by the user, i.e., I/O data is undistributed and on the
+    // current device (implicitly)
+    const auto& single_dev_io_field
+        = io == io_data_label::INPUT ? single_dev_ifield : single_dev_ofield;
+    if(!single_dev_io_field)
+        throw std::logic_error("Incomplete/unfinalized plan description encountered by "
+                               + ROCFFT_CURRENT_FUNCTION);
+    return *single_dev_io_field;
+}
+
 std::vector<size_t>
     rocfft_plan_t::CreateInputGatheringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
                                                      const rocfft_location_t&   exec_plan_location,
@@ -1709,7 +1746,7 @@ std::vector<size_t>
         return gather_plan_items;
     }
 
-    const auto& input_bricks    = desc.inFields[0].bricks;
+    const auto& input_bricks    = desc.get_field_for(io_data_label::INPUT).bricks;
     const auto  local_comm_rank = desc.get_local_comm_rank();
     const auto  input_buffers   = GatherUserBuffers(BufferPtr::user_input, input_bricks);
     const auto  input_elem_size = element_size(precision, desc.inArrayType);
@@ -1861,7 +1898,7 @@ std::vector<size_t>
         return scatter_plan_items;
     }
 
-    const auto& output_bricks    = desc.outFields[0].bricks;
+    const auto& output_bricks    = desc.get_field_for(io_data_label::OUTPUT).bricks;
     const auto  local_comm_rank  = desc.get_local_comm_rank();
     const auto  output_buffers   = GatherUserBuffers(BufferPtr::user_output, output_bricks);
     const auto  output_elem_size = element_size(precision, desc.outArrayType);
@@ -1897,8 +1934,8 @@ std::vector<size_t>
     {
         // At least one of the outputs cannot be copied directly from the execution plan's
         // output buffer. A temporary buffer is used to pack the successive output chunks
-        // contiguously. These (contiguous) chunks are then scattered and unpacked into their
-        // the respective destinations.
+        // contiguously. These (contiguous) chunks are then scattered and unpacked into
+        // their respective destinations.
         const data_layout_t packed_layout = data_layout_t::default_full_layout(
             single_dev_output_layout.lengths(), single_dev_output_layout.batch());
         TempBufferLease packing_temp_buffer(tempBuffers,

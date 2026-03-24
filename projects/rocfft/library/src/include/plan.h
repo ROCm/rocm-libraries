@@ -25,6 +25,7 @@
 #include <complex>
 #include <cstring>
 #include <list>
+#include <optional>
 #include <vector>
 
 #include "../../../shared/array_predicate.h"
@@ -81,6 +82,12 @@ struct rocfft_brick_t
                    const std::vector<size_t>& brick_stride,
                    const rocfft_location_t&   location)
         : layout(field_lower, field_upper, brick_stride)
+        , location(location)
+    {
+    }
+    rocfft_brick_t(const data_layout_t& brick_layout,
+                   const rocfft_location_t&   location)
+        : layout(brick_layout)
         , location(location)
     {
     }
@@ -236,6 +243,17 @@ struct rocfft_plan_description_t
     std::optional<rocfft_location_t> expected_undistributed_location_for(io_data_label io) const;
 
     /**
+     * @param[in] io input (resp. output) fields are considered for argument value
+     * `io_data_label::INPUT` (resp. `io_data_label::OUTPUT`).
+     * @param[in] field_idx index of the desired field.
+     * @return A constant reference to the requested input (resp. output) field.
+     * 
+     * @throw An `std::invalid_argument` exception is thrown if `io` is not an
+     * expected value, or if `field_idx` is out of bounds.
+     */
+    const rocfft_field_t& get_field_for(io_data_label io, size_t field_idx = 0) const;
+
+    /**
      * @return `true` if the description is consistent with single-device
      * operations on the current location.
      */
@@ -289,6 +307,10 @@ private:
     rocfft_status allgather_brick_params_lus_mpi(rocfft_field_t& field,
                                                  const size_t    global_brick_length);
 #endif
+    // I/O fields may not be set explicitly for single-device plan's input/output on
+    // current device, yet it may be convenient to capture such cases via a lone-brick
+    // field representation, internally (simplifying and unifying logic).
+    std::optional<rocfft_field_t> single_dev_ifield, single_dev_ofield;
 };
 
 struct rocfft_plan_t
@@ -343,7 +365,7 @@ struct rocfft_plan_t
     std::vector<size_t> get_user_facing_lengths() const;
     /**
      * @brief Creates a plan execution item capable of tackling the plan's task
-     * via a single-device execution (the current-locaton device, implicitly). If
+     * via a single-device execution (the current-location device, implicitly). If
      * the plan was not configured for single-device executions, the required
      * input-gathering and output-scattering execution items are also created.
      */
@@ -382,7 +404,9 @@ private:
     /**
      * @brief Creates the plan items required to gather the input data buffer(s) of a
      * multi-device transform into the input buffer of the (single-device) execution
-     * plan (observing the input data layout set for that execution plan).
+     * plan (observing the input data layout set for that execution plan). If the input
+     * data is undistributed and can be read directly by the (single-device) execution
+     * plan, no input-gathering plan items are created.
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
      * @param[in] exec_plan_location location of the single-device execution plan.
@@ -400,7 +424,9 @@ private:
     /**
      * @brief Creates the plan items required to scatter the output buffer of the (single-device)
      * execution plan (observing the output data layout set for that execution plan) into the
-     * output data buffer(s) of a multi-device transform.
+     * output data buffer(s) of a multi-device transform. If the output data is undistributed
+     * and can be written directly by the (single-device) execution plan, no output-scattering
+     * plan items are created.
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
      * @param[in] exec_plan_location location of the single-device execution plan.
@@ -552,7 +578,7 @@ private:
      * parameterizes an execution plan configured to
      * 
      * - read (resp. write) directly from (resp. into) the user's input (resp. output)
-     *   data buffer, if that data is undistribued and expected on the given location at
+     *   data buffer, if that data is undistributed and expected on the given location at
      *   execution. If not, default packed layouts for in-place operations are set on
      *   input and output (possibly requiring temporary, leased I/O);
      * 
