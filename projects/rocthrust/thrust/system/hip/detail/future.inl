@@ -698,7 +698,7 @@ public:
     thrust::hip_rocprim::throw_on_error(hipGetDevice(&device_));
   }
 
-  THRUST_HOST virtual ~unique_eager_event()
+  THRUST_HOST ~unique_eager_event()
   {
     // FIXME: If we could asynchronously handle destruction of keep alives, we
     // could avoid doing this.
