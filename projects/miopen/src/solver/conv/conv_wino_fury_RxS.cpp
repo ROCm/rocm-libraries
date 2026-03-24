@@ -542,7 +542,7 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernel.l_wk.push_back(1);
     kernel.l_wk.push_back(1);
 
-    kernel.g_wk.push_back(wg_size * n_groups);
+    kernel.g_wk.push_back(wg_size * n_groups * args.G);
     kernel.g_wk.push_back(1);
     kernel.g_wk.push_back(1);
 
@@ -559,6 +559,8 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     auto flags = WinoShaderFlagsV2::F_NKCHR_STRIDES | WinoShaderFlagsV2::F_TENSOR_OFFSETS |
                  WinoShaderFlagsV2::F_USE_ACTIVATION_MODE |
                  WinoShaderFlagsV2::F_USE_EXTENDED_FLAGS_64;
+    if(args.G != 1)
+        flags |= WinoShaderFlagsV2::F_GROUPED_CONVOLUTION;
     if(problem.IsDirectionBackwardData())
         flags |= WinoShaderFlagsV2::F_REVERSE_R | WinoShaderFlagsV2::F_REVERSE_S;
     if(do_bias)
