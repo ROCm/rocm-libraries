@@ -475,7 +475,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
   skip_hardware: gfx1151
-  device_memory_gb: 14
+  device_memory_gb: 47
 
 - name: spsm_csr
   category: quick
