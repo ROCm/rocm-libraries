@@ -1980,7 +1980,7 @@ namespace rocisa
             setInst("ds_load_tr16_b128");
         }
 
-        DSLoadB128TrB16(const DSLoadB64TrB16& other)
+        DSLoadB128TrB16(const DSLoadB128TrB16& other)
             : DSLoadInstruction(other)
         {
         }
@@ -2004,7 +2004,7 @@ namespace rocisa
             setInst("ds_load_tr8_b64");
         }
 
-        DSLoadB64TrB8(const DSLoadB64TrB16& other)
+        DSLoadB64TrB8(const DSLoadB64TrB8& other)
             : DSLoadInstruction(other)
         {
         }
