@@ -122,11 +122,12 @@ struct DepthwiseConvFwdInvoker
     }
 
     template <typename InDataType, typename WeiDataType, typename AccDataType, typename OutDataType>
-    static InvokerResult run_all_instances(const ck_tile::DepthwiseConvFwdHostArgs& args,
-                                           const ck_tile::stream_config& s,
-                                           const VerificationInfo<OutDataType>& verify_info,
-                                           const std::size_t flop,
-                                           const std::size_t num_byte)
+    static DepthwiseInvokerResult
+    run_all_instances(const ck_tile::DepthwiseConvFwdHostArgs& args,
+                      const ck_tile::stream_config& s,
+                      const VerificationInfo<OutDataType>& verify_info,
+                      const std::size_t flop,
+                      const std::size_t num_byte)
     {
         float best_time = std::numeric_limits<float>::max();
         std::string best_config;

@@ -13,18 +13,18 @@ int run_depthwise_conv_fwd_example_prec(ck_tile::ArgParser& arg_parser)
     const int n_repeat                 = arg_parser.get_int("repeat");
     const ck_tile::index_t init_method = arg_parser.get_int("init");
 
-    const ck_tile::index_t G          = arg_parser.get_int("G");
-    const ck_tile::index_t N          = arg_parser.get_int("N");
-    const ck_tile::index_t H          = arg_parser.get_int("H");
-    const ck_tile::index_t W          = arg_parser.get_int("W");
-    const ck_tile::index_t Y          = arg_parser.get_int("Y");
-    const ck_tile::index_t X          = arg_parser.get_int("X");
+    const ck_tile::index_t G          = arg_parser.get_int("g");
+    const ck_tile::index_t N          = arg_parser.get_int("n");
+    const ck_tile::index_t H          = arg_parser.get_int("h");
+    const ck_tile::index_t W          = arg_parser.get_int("w");
+    const ck_tile::index_t Y          = arg_parser.get_int("y");
+    const ck_tile::index_t X          = arg_parser.get_int("x");
     const ck_tile::index_t stride_h   = arg_parser.get_int("stride_h");
     const ck_tile::index_t stride_w   = arg_parser.get_int("stride_w");
     const ck_tile::index_t dilation_h = arg_parser.get_int("dilation_h");
     const ck_tile::index_t dilation_w = arg_parser.get_int("dilation_w");
-    const ck_tile::index_t pad_h      = arg_parser.get_int("pad_h");
-    const ck_tile::index_t pad_w      = arg_parser.get_int("pad_w");
+    const ck_tile::index_t pad_h      = arg_parser.get_int("lpad_h");
+    const ck_tile::index_t pad_w      = arg_parser.get_int("lpad_w");
 
     constexpr ck_tile::index_t C = 1;
     constexpr ck_tile::index_t K = 1;
@@ -56,18 +56,18 @@ int run_depthwise_conv_fwd_example_prec(ck_tile::ArgParser& arg_parser)
     else
         prec_str = "fp32";
 
-    // TODO: derive strides from tensor descriptor; widen stride type to long_index_t
-    // Strides for GNCHW layout: {g, n, c, h, w}
-    const std::array<ck_tile::index_t, 5> in_strides  = {C * H * W, G * C * H * W, 1, W * C, C};
-    const std::array<ck_tile::index_t, 5> wei_strides = {C * Y * X, G * C * Y * X, 1, X, 1};
+    // TODO: derive strides from tensor descriptor instead of manual computation
+    // Physical memory layout: NGCHW (N outermost, W innermost)
+    const std::array<ck_tile::index_t, 5> in_strides  = {C * H * W, G * C * H * W, H * W, W, 1};
+    const std::array<ck_tile::index_t, 5> wei_strides = {C * Y * X, G * C * Y * X, Y * X, X, 1};
     const std::array<ck_tile::index_t, 5> out_strides = {
-        K * Ho * Wo, G * K * Ho * Wo, 1, Wo * K, K};
+        K * Ho * Wo, G * K * Ho * Wo, Ho * Wo, Wo, 1};
 
-    std::cout << "./bin/tile_example_depthwise_conv_fwd" << " -G=" << G << " -N=" << N
-              << " -H=" << H << " -W=" << W << " -Y=" << Y << " -X=" << X
+    std::cout << "./bin/tile_example_grouped_conv_fwd" << " -g=" << G << " -n=" << N << " -c=1 -k=1"
+              << " -h=" << H << " -w=" << W << " -y=" << Y << " -x=" << X
               << " -stride_h=" << stride_h << " -stride_w=" << stride_w
               << " -dilation_h=" << dilation_h << " -dilation_w=" << dilation_w
-              << " -pad_h=" << pad_h << " -pad_w=" << pad_w << " -prec=" << prec_str
+              << " -lpad_h=" << pad_h << " -lpad_w=" << pad_w << " -prec=" << prec_str
               << " -v=" << verbosity << std::endl;
 
     if(do_verification)

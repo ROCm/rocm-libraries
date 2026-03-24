@@ -4,7 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/depthwise_conv/kernel/depthwise_conv_fwd_traits.hpp"
+#include "ck_tile/ops/grouped_convolution/kernel/depthwise_conv_fwd_traits.hpp"
 namespace ck_tile {
 
 // TODO: replace with ck_tile-level inner_product once available

@@ -7,7 +7,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "ck_tile/ops/depthwise_conv.hpp"
+#include "ck_tile/ops/grouped_convolution.hpp"
 
 template <typename OutDataType>
 struct VerificationInfo
@@ -36,7 +36,7 @@ struct KernelRunResult
     float gb_per_sec = 0.0f;
 };
 
-using InvokerResult = std::tuple<float, std::string, VerifyStatus, ck_tile::index_t>;
+using DepthwiseInvokerResult = std::tuple<float, std::string, VerifyStatus, ck_tile::index_t>;
 
 // TODO: replace with ck_tile::check_err when only best instance is verified
 template <typename OutDataType>
@@ -170,36 +170,4 @@ void depthwise_conv_fwd_cpu_reference(const InDataType* p_in,
             }
         }
     }
-}
-
-auto create_args(int argc, char* argv[])
-{
-    ck_tile::ArgParser arg_parser;
-    arg_parser.insert("G", "128", "number of groups (channels for depthwise)")
-        .insert("N", "64", "batch size")
-
-        .insert("H", "56", "input height")
-        .insert("W", "56", "input width")
-
-        .insert("Y", "3", "filter height")
-        .insert("X", "3", "filter width")
-
-        .insert("stride_h", "1", "stride height")
-        .insert("stride_w", "1", "stride width")
-
-        .insert("dilation_h", "1", "dilation height")
-        .insert("dilation_w", "1", "dilation width")
-
-        .insert("pad_h", "1", "padding height")
-        .insert("pad_w", "1", "padding width")
-
-        // TODO: add bf16/int8 data type support
-        .insert("prec", "fp16", "data type. fp16/fp32")
-        .insert("v", "1", "0: no verify, 1: verify, 2: verbose")
-        .insert("warmup", "50", "number of iterations before benchmark the kernel")
-        .insert("repeat", "100", "number of iterations to benchmark the kernel")
-        .insert("init", "0", "0:random, 1:integer random, 2:constant(1)");
-
-    const bool result = arg_parser.parse(argc, argv);
-    return std::make_tuple(result, arg_parser);
 }

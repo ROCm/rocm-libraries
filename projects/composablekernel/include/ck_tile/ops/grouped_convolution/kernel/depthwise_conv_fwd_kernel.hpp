@@ -6,7 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/host/convolution_parameter.hpp"
-#include "ck_tile/ops/depthwise_conv/kernel/depthwise_conv_fwd_traits.hpp"
+#include "ck_tile/ops/grouped_convolution/kernel/depthwise_conv_fwd_traits.hpp"
 
 namespace ck_tile {
 
@@ -36,10 +36,10 @@ struct DepthwiseConvFwdHostArgs : public conv::ConvParam
     const void* p_wei;
     void* p_out;
 
-    // Tensor strides, indexed by dimension — In: GNCHW, Wei: GKCYX, Out: GNKHW
-    std::array<index_t, 5> in_strides;  // [g_stride, n_stride, c_stride, h_stride, w_stride]
-    std::array<index_t, 5> wei_strides; // [g_stride, k_stride, c_stride, y_stride, x_stride]
-    std::array<index_t, 5> out_strides; // [g_stride, n_stride, k_stride, h_stride, w_stride]
+    // Stride-parametric: any layout with w_stride==1 (NGCHW, GNCHW, etc.).
+    std::array<index_t, 5> in_strides;  // [g, n, c, h, w]
+    std::array<index_t, 5> wei_strides; // [g, k, c, y, x]
+    std::array<index_t, 5> out_strides; // [g, n, k, h, w]
 };
 
 /// @brief Device-side kernel arguments for depthwise convolution.
@@ -87,7 +87,18 @@ struct DepthwiseConvFwdKernel
     using WeiDataType = typename Traits::WeiDataType;
     using AccDataType = typename Traits::AccDataType;
     using OutDataType = typename Traits::OutDataType;
-    using KernelArgs  = DepthwiseConvFwdKernelArgs<Traits>;
+
+    using KernelArgs = DepthwiseConvFwdKernelArgs<Traits>;
+
+    // Stride array dimension indices; TODO: derive from NDimSpatial for 1D/3D
+    static constexpr index_t kDimG = 0;
+    static constexpr index_t kDimN = 1;
+    static constexpr index_t kDimC = 2;
+    static constexpr index_t kDimH = 3;
+    static constexpr index_t kDimW = 4;
+
+    static constexpr index_t kSpatialH = 0;
+    static constexpr index_t kSpatialW = 1;
 
     static constexpr index_t kBlockSize  = Traits::BlockSize;
     static constexpr index_t TileOutH    = Traits::TileOutH;
@@ -115,7 +126,7 @@ struct DepthwiseConvFwdKernel
 
     CK_TILE_HOST static constexpr auto BlockSize() { return dim3(kBlockSize); }
 
-    // Grid layout: grid.x = G, grid.y = ceil(N / NBatch)
+    // grid.x = G, grid.y = ceil(N / NBatch)
     CK_TILE_HOST static auto GridSize(index_t G, index_t N)
     {
         const index_t num_batch_groups = integer_divide_ceil(N, NBatch);
@@ -132,25 +143,24 @@ struct DepthwiseConvFwdKernel
 
         kargs.G  = static_cast<index_t>(args.G_);
         kargs.N  = static_cast<index_t>(args.N_);
-        kargs.Hi = static_cast<index_t>(args.input_spatial_lengths_[0]);
-        kargs.Wi = static_cast<index_t>(args.input_spatial_lengths_[1]);
-        kargs.Ho = static_cast<index_t>(args.output_spatial_lengths_[0]);
-        kargs.Wo = static_cast<index_t>(args.output_spatial_lengths_[1]);
+        kargs.Hi = static_cast<index_t>(args.input_spatial_lengths_[kSpatialH]);
+        kargs.Wi = static_cast<index_t>(args.input_spatial_lengths_[kSpatialW]);
+        kargs.Ho = static_cast<index_t>(args.output_spatial_lengths_[kSpatialH]);
+        kargs.Wo = static_cast<index_t>(args.output_spatial_lengths_[kSpatialW]);
 
-        // Strides [2] (c_stride / k_stride) skipped: C=K=1 for depthwise
-        kargs.in_g_stride = args.in_strides[0];
-        kargs.in_n_stride = args.in_strides[1];
-        kargs.in_h_stride = args.in_strides[3];
-        kargs.in_w_stride = args.in_strides[4];
+        kargs.in_g_stride = args.in_strides[kDimG];
+        kargs.in_n_stride = args.in_strides[kDimN];
+        kargs.in_h_stride = args.in_strides[kDimH];
+        kargs.in_w_stride = args.in_strides[kDimW];
 
-        kargs.wei_g_stride = args.wei_strides[0];
-        kargs.wei_y_stride = args.wei_strides[3];
-        kargs.wei_x_stride = args.wei_strides[4];
+        kargs.wei_g_stride = args.wei_strides[kDimG];
+        kargs.wei_y_stride = args.wei_strides[kDimH];
+        kargs.wei_x_stride = args.wei_strides[kDimW];
 
-        kargs.out_g_stride = args.out_strides[0];
-        kargs.out_n_stride = args.out_strides[1];
-        kargs.out_h_stride = args.out_strides[3];
-        kargs.out_w_stride = args.out_strides[4];
+        kargs.out_g_stride = args.out_strides[kDimG];
+        kargs.out_n_stride = args.out_strides[kDimN];
+        kargs.out_h_stride = args.out_strides[kDimH];
+        kargs.out_w_stride = args.out_strides[kDimW];
 
         return kargs;
     }
@@ -180,9 +190,13 @@ struct DepthwiseConvFwdKernel
             return false;
         }
 
-        // FIXME: 3 known crash cases (G=192/N=1024, G=2048/N=32). Root cause fix in
-        // WriteDataToLds may affect a large number of other cases; bypass for now.
-        if((args.G_ == 192 && args.N_ == 1024) || (args.G_ == 2048 && args.N_ == 32))
+        // FIXME: known crash cases due to WriteDataToLds boundary issue
+        static constexpr index_t kCrashBypassG1 = 192;
+        static constexpr index_t kCrashBypassN1 = 1024;
+        static constexpr index_t kCrashBypassG2 = 2048;
+        static constexpr index_t kCrashBypassN2 = 32;
+        if((args.G_ == kCrashBypassG1 && args.N_ == kCrashBypassN1) ||
+           (args.G_ == kCrashBypassG2 && args.N_ == kCrashBypassN2))
         {
             return false;
         }
@@ -190,30 +204,29 @@ struct DepthwiseConvFwdKernel
         {
             return false;
         }
-        if(static_cast<index_t>(args.filter_spatial_lengths_[0]) != Traits::FilterH ||
-           static_cast<index_t>(args.filter_spatial_lengths_[1]) != Traits::FilterW)
+        if(static_cast<index_t>(args.filter_spatial_lengths_[kSpatialH]) != Traits::FilterH ||
+           static_cast<index_t>(args.filter_spatial_lengths_[kSpatialW]) != Traits::FilterW)
         {
             return false;
         }
-        if(static_cast<index_t>(args.conv_filter_strides_[0]) != Traits::StrideH ||
-           static_cast<index_t>(args.conv_filter_strides_[1]) != Traits::StrideW)
+        if(static_cast<index_t>(args.conv_filter_strides_[kSpatialH]) != Traits::StrideH ||
+           static_cast<index_t>(args.conv_filter_strides_[kSpatialW]) != Traits::StrideW)
         {
             return false;
         }
-        if(static_cast<index_t>(args.conv_filter_dilations_[0]) != Traits::DilationH ||
-           static_cast<index_t>(args.conv_filter_dilations_[1]) != Traits::DilationW)
+        if(static_cast<index_t>(args.conv_filter_dilations_[kSpatialH]) != Traits::DilationH ||
+           static_cast<index_t>(args.conv_filter_dilations_[kSpatialW]) != Traits::DilationW)
         {
             return false;
         }
-        if(static_cast<index_t>(args.input_left_pads_[0]) != Traits::PadH ||
-           static_cast<index_t>(args.input_left_pads_[1]) != Traits::PadW)
+        if(static_cast<index_t>(args.input_left_pads_[kSpatialH]) != Traits::PadH ||
+           static_cast<index_t>(args.input_left_pads_[kSpatialW]) != Traits::PadW)
         {
             return false;
         }
-        // TODO: support asymmetric padding (left_pad != right_pad). Currently assumes
-        // symmetric padding; LdsTileH/W is computed as TileIn + 2*Pad.
-        if(static_cast<index_t>(args.input_right_pads_[0]) != Traits::PadH ||
-           static_cast<index_t>(args.input_right_pads_[1]) != Traits::PadW)
+        // TODO: support asymmetric padding
+        if(static_cast<index_t>(args.input_right_pads_[kSpatialH]) != Traits::PadH ||
+           static_cast<index_t>(args.input_right_pads_[kSpatialW]) != Traits::PadW)
         {
             return false;
         }
@@ -225,18 +238,18 @@ struct DepthwiseConvFwdKernel
         // TilePerWave > 1 requires entire spatial output fits in one tile
         if constexpr(Traits::TilePerWave != 1)
         {
-            if(static_cast<index_t>(args.output_spatial_lengths_[0]) > Traits::TileOutH ||
-               static_cast<index_t>(args.output_spatial_lengths_[1]) > Traits::TileOutW)
+            if(static_cast<index_t>(args.output_spatial_lengths_[kSpatialH]) > Traits::TileOutH ||
+               static_cast<index_t>(args.output_spatial_lengths_[kSpatialW]) > Traits::TileOutW)
             {
                 return false;
             }
         }
-        if(args.out_strides[4] != 1)
+        if(args.out_strides[kDimW] != 1)
         {
             return false;
         }
-        if(args.input_spatial_lengths_[0] < args.filter_spatial_lengths_[0] ||
-           args.input_spatial_lengths_[1] < args.filter_spatial_lengths_[1])
+        if(args.input_spatial_lengths_[kSpatialH] < args.filter_spatial_lengths_[kSpatialH] ||
+           args.input_spatial_lengths_[kSpatialW] < args.filter_spatial_lengths_[kSpatialW])
         {
             return false;
         }

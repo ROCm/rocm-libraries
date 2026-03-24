@@ -27,6 +27,8 @@
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_fwd_gpu.hpp"
 #include "ck/library/utility/gpu_verification.hpp"
 
+#include "profiler/profile_depthwise_conv_fwd_impl.hpp"
+
 namespace ck {
 namespace profiler {
 
@@ -164,7 +166,7 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
         DeviceOp>::GetInstances();
 
-    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
+    index_t total_instances = static_cast<index_t>(op_ptrs.size());
 
     // Create host tensors
     Tensor<InDataType> input(in_g_n_c_wis_desc);
@@ -475,6 +477,83 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
 
         run_impl(op_ptr, argument_ptr);
     }
+
+    // Depthwise conv instances: C=K=1, 2D, fp16/fp32 only, w_stride==1
+    if constexpr(NDimSpatial == 2)
+    {
+        constexpr bool is_supported_dtype =
+            std::is_same_v<InDataType, ck::half_t> || std::is_same_v<InDataType, float>;
+
+        if constexpr(is_supported_dtype)
+        {
+            if(conv_param.C_ == 1 && conv_param.K_ == 1 &&
+               a_g_n_c_wis_strides[NDimSpatial + 2] == 1)
+            {
+                ck_tile::conv::ConvParam dw_param{
+                    2,
+                    conv_param.G_,
+                    conv_param.N_,
+                    conv_param.K_,
+                    conv_param.C_,
+                    {conv_param.filter_spatial_lengths_[0], conv_param.filter_spatial_lengths_[1]},
+                    {conv_param.input_spatial_lengths_[0], conv_param.input_spatial_lengths_[1]},
+                    {conv_param.conv_filter_strides_[0], conv_param.conv_filter_strides_[1]},
+                    {conv_param.conv_filter_dilations_[0], conv_param.conv_filter_dilations_[1]},
+                    {conv_param.input_left_pads_[0], conv_param.input_left_pads_[1]},
+                    {conv_param.input_right_pads_[0], conv_param.input_right_pads_[1]}};
+
+                std::array<ck_tile::index_t, 5> dw_in_strides{};
+                std::array<ck_tile::index_t, 5> dw_wei_strides{};
+                std::array<ck_tile::index_t, 5> dw_out_strides{};
+                for(int i = 0; i < 5; ++i)
+                {
+                    dw_in_strides[i]  = static_cast<ck_tile::index_t>(a_g_n_c_wis_strides[i]);
+                    dw_wei_strides[i] = static_cast<ck_tile::index_t>(b_g_k_c_xs_strides[i]);
+                    dw_out_strides[i] = static_cast<ck_tile::index_t>(e_g_n_k_wos_strides[i]);
+                }
+
+                ck_tile::DepthwiseConvFwdHostArgs dw_args(dw_param,
+                                                          in_device_buf.GetDeviceBuffer(),
+                                                          wei_device_buf.GetDeviceBuffer(),
+                                                          out_device_buf.GetDeviceBuffer(),
+                                                          dw_in_strides,
+                                                          dw_wei_strides,
+                                                          dw_out_strides);
+
+                ck_tile::stream_config dw_stream{nullptr, time_kernel, 0, 5, 50, true};
+
+                std::size_t flop      = conv_param.GetFlops();
+                std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
+
+                depthwise_detail::VerificationInfo<OutDataType> dw_verify{
+                    false, nullptr, nullptr, nullptr, 0};
+
+                auto [dw_time, dw_config, dw_vstatus, dw_idx, dw_valid, dw_total] =
+                    depthwise_detail::
+                        run_all_instances<InDataType, WeiDataType, float, OutDataType>(
+                            dw_args, dw_stream, dw_verify, flop, num_btype);
+
+                total_instances += dw_total;
+                valid_instances += dw_valid;
+                num_kernel += dw_total;
+
+                if(dw_idx >= 0)
+                {
+                    float dw_tflops     = static_cast<float>(flop) / 1.E9 / dw_time;
+                    float dw_gb_per_sec = static_cast<float>(num_btype) / 1.E6 / dw_time;
+                    if(dw_tflops > best_tflops)
+                    {
+                        best_op_name    = dw_config;
+                        best_avg_time   = dw_time;
+                        best_tflops     = dw_tflops;
+                        best_gb_per_sec = dw_gb_per_sec;
+                    }
+                }
+            }
+        }
+    }
+
+    std::cout << "ckProfiler found " << total_instances << " instances" << std::endl;
 
     if(list_instances)
     {
