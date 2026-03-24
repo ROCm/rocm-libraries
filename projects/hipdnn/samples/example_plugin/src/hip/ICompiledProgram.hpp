@@ -20,7 +20,8 @@ class ICompiledProgram
 public:
     virtual ~ICompiledProgram() = default;
 
-    virtual std::unique_ptr<IRunnableKernel> getKernel(const std::string& kernelName) const = 0;
+    virtual std::unique_ptr<IRunnableKernel>
+        getRunnableKernel(const std::string& kernelFunctionName) const = 0;
 };
 
 } // namespace example_plugin

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "HipProgram.hpp"
 #include "IRunnableKernel.hpp"
 
 #include <hip/hip_runtime_api.h>
@@ -16,10 +15,10 @@ namespace example_plugin
 ///
 /// Stores grid/block dimensions and launches the kernel via
 /// hipModuleLaunchKernel().
-class HipKernel : public IRunnableKernel
+class HipRunnableKernel : public IRunnableKernel
 {
 public:
-    HipKernel(const HipProgram& program, const std::string& kernelName);
+    HipRunnableKernel(hipFunction_t function, const std::string& kernelName);
 
     void setBlockSize(unsigned int x, unsigned int y, unsigned int z) override;
     void setGridSize(unsigned int x, unsigned int y, unsigned int z) override;

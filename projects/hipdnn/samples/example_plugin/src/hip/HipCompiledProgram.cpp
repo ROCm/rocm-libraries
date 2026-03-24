@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "HipProgram.hpp"
+#include "HipCompiledProgram.hpp"
 
+#include "HipRunnableKernel.hpp"
 #include "HipUtils.hpp"
 #include "kernel_includes.hpp"
 #include "kernel_sources.hpp"
@@ -15,8 +16,8 @@
 namespace example_plugin
 {
 
-HipProgram::HipProgram(const std::string& kernelFileName,
-                       const std::vector<std::string>& compilerOptions)
+HipCompiledProgram::HipCompiledProgram(const std::string& kernelFileName,
+                                       const std::vector<std::string>& compilerOptions)
 {
     HIPDNN_PLUGIN_LOG_INFO("Compiling kernel: " << kernelFileName);
 
@@ -84,7 +85,7 @@ HipProgram::HipProgram(const std::string& kernelFileName,
     HIPDNN_PLUGIN_LOG_INFO("Kernel compiled and loaded: " << kernelFileName);
 }
 
-HipProgram::~HipProgram()
+HipCompiledProgram::~HipCompiledProgram()
 {
     if(_module != nullptr)
     {
@@ -96,11 +97,12 @@ HipProgram::~HipProgram()
     }
 }
 
-hipFunction_t HipProgram::getKernel(const std::string& kernelName) const
+std::unique_ptr<IRunnableKernel>
+    HipCompiledProgram::getRunnableKernel(const std::string& kernelFunctionName) const
 {
     hipFunction_t function = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&function, _module, kernelName.c_str()));
-    return function;
+    HIP_CHECK(hipModuleGetFunction(&function, _module, kernelFunctionName.c_str()));
+    return std::make_unique<HipRunnableKernel>(function, kernelFunctionName);
 }
 
 } // namespace example_plugin

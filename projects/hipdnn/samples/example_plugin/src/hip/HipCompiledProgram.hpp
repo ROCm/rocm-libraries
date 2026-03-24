@@ -3,34 +3,46 @@
 
 #pragma once
 
-#include "HipKernel.hpp"
-#include "HipProgram.hpp"
 #include "ICompiledProgram.hpp"
+
+#include <hip/hip_runtime_api.h>
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace example_plugin
 {
 
-/// Concrete ICompiledProgram wrapping a HipProgram.
+/// Concrete ICompiledProgram that compiles kernels via HIPRTC.
 ///
-/// Extracts kernel functions from the loaded HIP module by name.
+/// Compiles embedded kernel source at runtime using hiprtcCompileProgram(),
+/// extracts the compiled binary, and loads it as a HIP module. The module
+/// remains loaded until the HipCompiledProgram is destroyed. Kernel functions can
+/// be extracted by name via the ICompiledProgram interface.
 class HipCompiledProgram : public ICompiledProgram
 {
 public:
-    explicit HipCompiledProgram(std::shared_ptr<HipProgram> program)
-        : _program(std::move(program))
-    {
-    }
+    /// Compile the specified kernel source file with the given compiler options.
+    /// @param kernelFileName The filename key used to look up the embedded source
+    /// @param compilerOptions HIPRTC compiler options (e.g., "--offload-arch=gfx90a")
+    HipCompiledProgram(const std::string& kernelFileName,
+                       const std::vector<std::string>& compilerOptions);
 
-    std::unique_ptr<IRunnableKernel> getKernel(const std::string& kernelName) const override
-    {
-        return std::make_unique<HipKernel>(*_program, kernelName);
-    }
+    ~HipCompiledProgram() override;
+
+    HipCompiledProgram(const HipCompiledProgram&) = delete;
+    HipCompiledProgram& operator=(const HipCompiledProgram&) = delete;
+    HipCompiledProgram(HipCompiledProgram&&) = default;
+    HipCompiledProgram& operator=(HipCompiledProgram&&) = default;
+
+    /// Get a runnable kernel from the loaded module (ICompiledProgram interface).
+    /// @param kernelFunctionName The name of the kernel function (must match extern "C" name)
+    std::unique_ptr<IRunnableKernel>
+        getRunnableKernel(const std::string& kernelFunctionName) const override;
 
 private:
-    std::shared_ptr<HipProgram> _program;
+    hipModule_t _module = nullptr;
 };
 
 } // namespace example_plugin

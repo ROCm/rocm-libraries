@@ -80,7 +80,7 @@ protected:
         EXPECT_CALL(mockCompiler, compile("ConvForwardNaive.cpp", _))
             .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
 
-        EXPECT_CALL(*rawCompiledProgram, getKernel("conv_forward_naive_kernel"))
+        EXPECT_CALL(*rawCompiledProgram, getRunnableKernel("conv_forward_naive_kernel"))
             .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
         hipDeviceProp_t props = {};
@@ -143,7 +143,7 @@ TEST_F(ConvFwdPlanTest, Compile_CallsCompilerWithCorrectArchitecture)
                 compile("ConvForwardNaive.cpp", std::vector<std::string>{"--offload-arch=gfx90a"}))
         .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
 
-    EXPECT_CALL(*rawProgram, getKernel("conv_forward_naive_kernel"))
+    EXPECT_CALL(*rawProgram, getRunnableKernel("conv_forward_naive_kernel"))
         .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
     hipDeviceProp_t props = {};

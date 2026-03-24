@@ -34,7 +34,7 @@ void ReluPlan::compile(const IKernelCompiler& kernelCompiler,
     HIPDNN_PLUGIN_LOG_INFO("Compiling ReluPlan for architecture: " << archName);
 
     _compiledProgram = kernelCompiler.compile("ReluForward.cpp", {"--offload-arch=" + archName});
-    _kernel = _compiledProgram->getKernel("relu_forward_kernel");
+    _kernel = _compiledProgram->getRunnableKernel("relu_forward_kernel");
 }
 
 size_t ReluPlan::getWorkspaceSize(const ExamplePluginHandle& /*handle*/) const

@@ -113,7 +113,7 @@ TEST_F(ReluPlanBuilderTest, BuildPlan_SetsPlanOnContext)
 
     EXPECT_CALL(mockCompiler, compile("ReluForward.cpp", _))
         .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
-    EXPECT_CALL(*rawProgram, getKernel("relu_forward_kernel"))
+    EXPECT_CALL(*rawProgram, getRunnableKernel("relu_forward_kernel"))
         .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
     ExamplePluginContext context;

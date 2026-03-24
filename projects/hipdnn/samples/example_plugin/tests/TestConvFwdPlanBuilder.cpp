@@ -115,7 +115,7 @@ TEST_F(ConvFwdPlanBuilderTest, BuildPlan_SetsPlanOnContext)
 
     EXPECT_CALL(mockCompiler, compile("ConvForwardNaive.cpp", _))
         .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
-    EXPECT_CALL(*rawProgram, getKernel("conv_forward_naive_kernel"))
+    EXPECT_CALL(*rawProgram, getRunnableKernel("conv_forward_naive_kernel"))
         .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
     ExamplePluginContext context;

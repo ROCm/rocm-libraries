@@ -34,7 +34,7 @@ void ConvFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     _compiledProgram
         = kernelCompiler.compile("ConvForwardNaive.cpp", {"--offload-arch=" + archName});
-    _kernel = _compiledProgram->getKernel("conv_forward_naive_kernel");
+    _kernel = _compiledProgram->getRunnableKernel("conv_forward_naive_kernel");
 }
 
 size_t ConvFwdPlan::getWorkspaceSize(const ExamplePluginHandle& /*handle*/) const

@@ -17,8 +17,8 @@ add_library(
     engines/plans/ReluPlan.cpp
     engines/plans/ConvFwdPlanBuilder.cpp
     engines/plans/ConvFwdPlan.cpp
-    hip/HipProgram.cpp
-    hip/HipKernel.cpp
+    hip/HipCompiledProgram.cpp
+    hip/HipRunnableKernel.cpp
     ${KERNEL_GENERATED_SOURCES}
 )
 

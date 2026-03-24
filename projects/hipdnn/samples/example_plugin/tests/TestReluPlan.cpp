@@ -52,7 +52,7 @@ protected:
         EXPECT_CALL(mockCompiler, compile("ReluForward.cpp", _))
             .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
 
-        EXPECT_CALL(*rawCompiledProgram, getKernel("relu_forward_kernel"))
+        EXPECT_CALL(*rawCompiledProgram, getRunnableKernel("relu_forward_kernel"))
             .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
         // Create device properties with test architecture
@@ -87,7 +87,7 @@ TEST_F(ReluPlanTest, Compile_CallsCompilerWithCorrectArchitecture)
                 compile("ReluForward.cpp", std::vector<std::string>{"--offload-arch=gfx90a"}))
         .WillOnce(Return(testing::ByMove(std::move(compiledProgram))));
 
-    EXPECT_CALL(*rawProgram, getKernel("relu_forward_kernel"))
+    EXPECT_CALL(*rawProgram, getRunnableKernel("relu_forward_kernel"))
         .WillOnce(Return(testing::ByMove(std::move(kernel))));
 
     hipDeviceProp_t props = {};

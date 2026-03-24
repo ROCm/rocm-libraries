@@ -4,7 +4,6 @@
 #pragma once
 
 #include "HipCompiledProgram.hpp"
-#include "HipProgram.hpp"
 #include "IKernelCompiler.hpp"
 
 #include <memory>
@@ -16,8 +15,8 @@ namespace example_plugin
 
 /// Concrete IKernelCompiler that compiles kernels using HIPRTC.
 ///
-/// Creates a HipProgram (which handles HIPRTC compilation and module loading)
-/// and wraps it in a HipCompiledProgram.
+/// Creates a HipCompiledProgram which handles HIPRTC compilation, module loading,
+/// and kernel extraction.
 class HipKernelCompiler : public IKernelCompiler
 {
 public:
@@ -25,8 +24,7 @@ public:
         compile(const std::string& kernelFileName,
                 const std::vector<std::string>& options) const override
     {
-        auto program = std::make_shared<HipProgram>(kernelFileName, options);
-        return std::make_unique<HipCompiledProgram>(std::move(program));
+        return std::make_unique<HipCompiledProgram>(kernelFileName, options);
     }
 };
 

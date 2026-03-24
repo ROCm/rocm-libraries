@@ -14,8 +14,8 @@ class MockCompiledProgram : public ICompiledProgram
 {
 public:
     MOCK_METHOD(std::unique_ptr<IRunnableKernel>,
-                getKernel,
-                (const std::string& kernelName),
+                getRunnableKernel,
+                (const std::string& kernelFunctionName),
                 (const, override));
 };
 

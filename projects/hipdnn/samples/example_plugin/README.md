@@ -60,14 +60,13 @@ example_plugin/
 │   ├── CurrentDevicePropertyProvider.hpp  # IDevicePropertyProvider implementation
 │   ├── hip/                             # HIPRTC infrastructure (DI interfaces + impls)
 │   │   ├── IKernelCompiler.hpp          # Interface: compile(filename, options)
-│   │   ├── ICompiledProgram.hpp         # Interface: getKernel(name)
+│   │   ├── ICompiledProgram.hpp         # Interface: getRunnableKernel(name)
 │   │   ├── IRunnableKernel.hpp          # Interface: launch(stream, args...)
 │   │   ├── IDevicePropertyProvider.hpp  # Interface: getDeviceProperties()
 │   │   ├── HipUtils.hpp                # HIP_CHECK and HIPRTC_CHECK error macros
 │   │   ├── HipKernelCompiler.hpp        # Concrete IKernelCompiler (HIPRTC)
-│   │   ├── HipCompiledProgram.hpp       # Concrete ICompiledProgram (hipModule)
-│   │   ├── HipProgram.hpp/cpp           # hiprtc compilation + module loading
-│   │   └── HipKernel.hpp/cpp            # Concrete IRunnableKernel (hipFunction_t)
+│   │   ├── HipCompiledProgram.hpp/cpp   # Concrete ICompiledProgram (HIPRTC compilation + module)
+│   │   └── HipRunnableKernel.hpp/cpp    # Concrete IRunnableKernel (hipFunction_t)
 │   └── engines/
 │       ├── ExamplePluginEngine.hpp/cpp  # Engine: owns PlanBuilders, delegates isApplicable
 │       ├── ExamplePluginUtils.hpp       # Utility: UID-to-buffer lookup
@@ -250,7 +249,7 @@ HipKernelCompiler::compile(filename, options)
   → hipModuleLoadData() loads binary as HIP module
         │
         ▼
-HipCompiledProgram::getKernel(kernelName)
+HipCompiledProgram::getRunnableKernel(kernelFunctionName)
   → hipModuleGetFunction() extracts kernel function
         │
         ▼
@@ -267,7 +266,7 @@ enabling unit tests to run without GPU hardware:
 |---|---|---|
 | `IKernelCompiler` | `HipKernelCompiler` | `MockKernelCompiler` |
 | `ICompiledProgram` | `HipCompiledProgram` | `MockCompiledProgram` |
-| `IRunnableKernel` | `HipKernel` | `MockRunnableKernel` |
+| `IRunnableKernel` | `HipRunnableKernel` | `MockRunnableKernel` |
 | `IDevicePropertyProvider` | `CurrentDevicePropertyProvider` | `MockDevicePropertyProvider` |
 
 The Container creates the production implementations at construction time and
