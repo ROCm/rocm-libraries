@@ -44,7 +44,10 @@ struct is_std_array<std::array<T, N>> : std::true_type
 };
 
 
-// FIXME: docs
+/**
+ * @brief calculates the default strides for a given Discrete Fourier transform (observing row-major
+ * convention by default), lower/upper bounds version.
+ */
 template <typename C, std::enable_if_t<std::is_integral_v<typename C::value_type>, bool> = true>
 static C default_strides(fft_transform_type                        dft_type,
                          fft_result_placement                      placement,
