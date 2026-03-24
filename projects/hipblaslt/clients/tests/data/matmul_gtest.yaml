@@ -2320,7 +2320,7 @@ Tests:
   requested_solution_num: 10
   gpu_arch: '950'
 
-- name: matmul_mx_large_k_small_m_m
+- name: matmul_mx_large_k_small_m_n
   category: nightly
   function:
     matmul:
