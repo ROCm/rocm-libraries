@@ -77,8 +77,8 @@ static raceemulator::Emulator makeEmulator(const std::string &asmText) {
   static std::vector<int> data(4, 0);
   int *ptr = data.data();
   emulator.addKernarg(0, &ptr);
-  emulator.enableRaceChecks(true);
-  emulator.enableCompleteEmulation(false);
+  emulator.setRaceChecks(true);
+  emulator.setCompleteEmulation(false);
   return emulator;
 }
 

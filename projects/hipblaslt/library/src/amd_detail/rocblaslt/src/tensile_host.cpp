@@ -338,8 +338,8 @@ namespace
 
             const int wavesPerWorkGroup = gridConfig.getWavesPerWorkgroup();
 
-            emulator.enableRaceChecks(true);
-            emulator.enableCompleteEmulation(false);
+            emulator.setRaceChecks(true);
+            emulator.setCompleteEmulation(false);
             emulator.run({0, 0, 0}, {64*wavesPerWorkGroup, 1, 1});
 
             std::cout << "[DirectAssembly] Race emulator completed: SUCCESS" << std::endl;
