@@ -28,11 +28,13 @@
 
 #include <memory>
 
+#include <hiptensor/hiptensor.h>
+
 namespace hiptensor
 {
 
     template <typename T>
-    class LazySingleton
+    class HIPTENSOR_EXPORT LazySingleton
     {
     public:
         static inline std::unique_ptr<T> const& instance()
@@ -43,4 +45,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

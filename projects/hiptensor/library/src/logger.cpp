@@ -24,14 +24,12 @@
  *
  *******************************************************************************/
 
-#include "include/logger.hpp"
-
 #include <stdio.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
 
 #include <mutex>
+
+#include "include/logger.hpp"
+#include "include/platform.hpp"
 
 namespace hiptensor
 {
@@ -80,7 +78,7 @@ namespace hiptensor
                 fclose(mWriteStream);
                 mOwnsStream = false;
             }
-            mWriteStream = fopen(fileName, "w");
+            mWriteStream = safeFopen(fileName, "w");
             if(mWriteStream == nullptr)
             {
                 // Revert back to stdout
@@ -222,16 +220,9 @@ namespace hiptensor
         // Beware thread concurrency.
         static char buff[32];
 
-        time_t     t;
-        struct tm* tInfo;
-
-        // Retrieve the time information
+        time_t t;
         time(&t);
-        tInfo = localtime(&t);
-
-        // Format the timestamp string
-        // YYYY-MM-DD HH:MM:SS
-        strftime(buff, 32, "%F %T", tInfo);
+        safeLocaltime(buff, sizeof(buff), &t);
         return buff;
     }
 
@@ -262,8 +253,7 @@ namespace hiptensor
     /* static */
     int32_t Logger::appPid()
     {
-        // App PID won't generally change
-        static int pid = getpid();
+        static int pid = getProcessId();
         return pid;
     }
 

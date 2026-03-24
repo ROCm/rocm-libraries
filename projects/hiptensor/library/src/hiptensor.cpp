@@ -79,17 +79,16 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
-    const char* plan_cache_disable = std::getenv("HIPTENSOR_DISABLE_PLAN_CACHE");
-    if(plan_cache_disable == nullptr || strcmp(plan_cache_disable, "ON") != 0)
+    if (hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
     {
-        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
-        (*handle)->setPlanCache(planCache);
-        snprintf(msg, sizeof(msg), "Plan Cache is %s", "enabled.");
+        snprintf(msg, sizeof(msg), "Plan Cache is disabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "Plan Cache is %s", "disabled.");
+        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
+        (*handle)->setPlanCache(planCache);
+        snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 

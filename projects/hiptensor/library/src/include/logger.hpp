@@ -26,13 +26,15 @@
 
 #pragma once
 
-#include "singleton.hpp"
-
+#include <cstdio>
 #include <mutex>
+
+#include "platform.hpp"
+#include "singleton.hpp"
 
 namespace hiptensor
 {
-    class Logger : public LazySingleton<Logger>
+    class HIPTENSOR_EXPORT Logger : public LazySingleton<Logger>
     {
     private:
         using Callback_t = void (*)(int32_t logLevel, const char* funcName, const char* msg);

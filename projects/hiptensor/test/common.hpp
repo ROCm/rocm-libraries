@@ -26,8 +26,13 @@
 
 #pragma once
 
+#include <filesystem>
+#include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <hiptensor/hiptensor.h>
 
 #include <hiptensor/internal/hiptensor_utility.hpp>
 
@@ -59,5 +64,60 @@ namespace hiptensor
             CHECK_HIP_ERROR(hipFree(ptr));
         }
     };
+
+    namespace test
+    {
+        // Cross-platform safe temporary filename generator
+        inline std::string generateTempFilename(const std::string& prefix = "hiptensor_test_")
+        {
+            std::random_device              rd;
+            std::mt19937                    gen(rd());
+            std::uniform_int_distribution<> dis(100000, 999999);
+
+            std::filesystem::path temp_dir    = std::filesystem::temp_directory_path();
+            constexpr int         maxAttempts = 10;
+            for(int i = 0; i < maxAttempts; i++)
+            {
+                std::filesystem::path candidate
+                    = temp_dir / (prefix + std::to_string(dis(gen)) + ".tmp");
+                if(!std::filesystem::exists(candidate))
+                {
+                    return candidate.string();
+                }
+            }
+            throw std::runtime_error("Failed to generate a unique temporary filename after "
+                                     + std::to_string(maxAttempts) + " attempts");
+        }
+
+        // Cross-platform safe file open for test code (does not depend on the library's internal symbol)
+        inline FILE* safeFopen(const char* filename, const char* mode)
+        {
+#ifdef _WIN32
+            FILE* file = nullptr;
+            if(fopen_s(&file, filename, mode) == 0)
+                return file;
+            return nullptr;
+#else
+            return fopen(filename, mode);
+#endif
+        }
+
+        // Redirect logger output to the null device to silence it during tests
+        inline void silenceLogger()
+        {
+#ifdef _WIN32
+            const char* nullDevice = "NUL";
+#else
+            const char* nullDevice = "/dev/null";
+#endif
+            if(hiptensorLoggerOpenFile(nullDevice) != HIPTENSOR_STATUS_SUCCESS)
+            {
+                throw std::runtime_error(
+                    std::string("Failed to silence hiptensor logger: could not open ")
+                    + nullDevice);
+            }
+        }
+
+    } // namespace test
 
 } // namespace hiptensor

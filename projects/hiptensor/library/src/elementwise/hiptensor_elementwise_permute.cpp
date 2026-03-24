@@ -130,11 +130,11 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
         solutions       = instances->query({alphaF},
                                      descA->mLengths,
-                                     {descA->mType},
-                                     {descB->mType},
-                                     {{modeA, modeA + descA->mLengths.size()}},
-                                     {{modeB, modeB + descB->mLengths.size()}},
-                                     {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB},
+                                           {descA->mType},
+                                           {descB->mType},
+                                           {{modeA, modeA + descA->mLengths.size()}},
+                                           {{modeB, modeB + descB->mLengths.size()}},
+                                           {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB},
                                      hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
     }
 
@@ -189,7 +189,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
                 // log perf metrics (not name/id)
                 snprintf(msg,
                          sizeof(msg),
-                         "KernelId: %lu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
+                         "KernelId: %zu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
                          metrics.mKernelUid,
                          metrics.mKernelName.c_str(),
                          metrics.mAvgTimeMs,

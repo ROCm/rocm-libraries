@@ -26,25 +26,51 @@
 
 #pragma once
 
-#include <hip/library_types.h>
-#include <vector>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <optional>
+#include <string>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <hiptensor/hiptensor.h>
 
-HIPTENSOR_EXPORT hiptensorStatus_t
-    hiptensorReductionReference(const void*                       alpha,
-                                const void*                       A,
-                                const hiptensorTensorDescriptor_t descA,
-                                const int32_t                     modeA[],
-                                const hiptensorOperator_t         opA,
-                                const void*                       beta,
-                                const void*                       C,
-                                const hiptensorTensorDescriptor_t descC,
-                                const int32_t                     modeC[],
-                                const hiptensorOperator_t         opC,
-                                void*                             D,
-                                const hiptensorTensorDescriptor_t descD,
-                                const int32_t                     modeD[],
-                                hiptensorOperator_t               opReduce,
-                                hiptensorComputeDescriptor_t      typeCompute,
-                                hipStream_t                       stream);
+// Cross-platform safe file open (definition in platform.cpp; not exported from DLL)
+FILE* safeFopen(const char* filename, const char* mode);
+
+// Cross-platform safe environment variable access
+inline std::optional<std::string> getEnvironmentVariable(const char* name)
+{
+#ifdef _WIN32
+    char   buffer[256];
+    size_t required_size = 0;
+    if(getenv_s(&required_size, buffer, sizeof(buffer), name) != 0
+       || required_size == 0 || required_size > sizeof(buffer))
+    {
+        return std::nullopt;
+    }
+    return std::string(buffer);
+#else
+    const char* val = std::getenv(name);
+    return val ? std::optional<std::string>{val} : std::nullopt;
+#endif
+}
+
+// Cross-platform safe localtime: fills buff with a formatted timestamp, or "TIMESTAMP-ERROR" on failure
+void safeLocaltime(char* buff, size_t buffSize, const time_t* t);
+
+// Cross-platform process ID
+inline int getProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
