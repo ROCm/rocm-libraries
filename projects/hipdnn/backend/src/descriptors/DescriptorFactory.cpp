@@ -12,6 +12,7 @@
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
+#include "CustomOpOperationDescriptor.hpp"
 #include "EngineConfigDescriptor.hpp"
 #include "EngineDescriptor.hpp"
 #include "EngineHeuristicDescriptor.hpp"
@@ -112,6 +113,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BlockScaleDequantizeOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<CustomOpOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
