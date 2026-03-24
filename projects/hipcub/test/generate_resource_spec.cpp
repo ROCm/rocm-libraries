@@ -89,7 +89,7 @@ int main(int argc, char* argv[])
 	names_to_ids["gpus"] = {};
 
 	// Populate the map
-    for (unsigned int dev_id = 0; dev_id < dev_count; ++dev_id)
+    for(unsigned int dev_id = 0; dev_id < static_cast<unsigned int>(dev_count); ++dev_id)
     {
         hipDeviceProp_t dev_prop;
         HIP_CHECK(hipGetDeviceProperties(&dev_prop, dev_id));
@@ -115,9 +115,9 @@ int main(int argc, char* argv[])
 
 	// Add one object for each gfxID.
 	// Each gfxID-keyed object will contain an array of device IDs.
-	int key_index = 0;
-	for (auto& name_it : names_to_ids)
-	{
+	unsigned int key_index = 0;
+    for(auto& name_it : names_to_ids)
+    {
 		out_file << "      \"" << name_it.first << "\": [" << std::endl;
 
 		// The gfxIDs (names) are already sorted by the map, but the
@@ -126,9 +126,9 @@ int main(int argc, char* argv[])
 		// to have a consistent output on each run so that the resource
 		// spec file stays the same.
 		std::sort(name_it.second.begin(), name_it.second.end());
-		int id_index = 0;
-		for (const auto& id_it : name_it.second)
-		{
+		unsigned int id_index = 0;
+        for(const auto& id_it : name_it.second)
+        {
 			out_file << "        {" << std::endl;
 			// Note: ctest expects ids to be specified as a string (quoted), not an integer.
 			out_file << "          \"id\": \"" << id_it << "\"" << std::endl;
