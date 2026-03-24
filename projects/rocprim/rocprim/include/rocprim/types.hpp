@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 
 #include <type_traits>
 
+#include <hip/hip_bf16.h>
+#include <hip/hip_bfloat16.h>
 #include <hip/hip_vector_types.h>
 
 // Meta configuration for rocPRIM
