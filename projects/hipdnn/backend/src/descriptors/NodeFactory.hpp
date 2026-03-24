@@ -17,7 +17,7 @@
 #include "LayernormOperationDescriptor.hpp"
 // #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
-// #include "RMSNormOperationDescriptor.hpp"
+#include "RMSNormOperationDescriptor.hpp"
 // #include "SdpaBackwardOperationDescriptor.hpp"
 // #include "SdpaFpropOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
