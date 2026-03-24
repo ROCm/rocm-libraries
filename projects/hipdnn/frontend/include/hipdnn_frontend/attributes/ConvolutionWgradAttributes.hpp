@@ -41,6 +41,8 @@ namespace hipdnn_frontend::graph
 class ConvWgradAttributes : public Attributes<ConvWgradAttributes>
 {
 public:
+    ConvWgradAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {
@@ -64,7 +66,7 @@ public:
     std::vector<int64_t> post_padding; ///< Padding after convolution (per spatial dim)
     std::vector<int64_t> stride; ///< Stride (per spatial dim)
     std::vector<int64_t> dilation; ///< Dilation (per spatial dim)
-    /// Convolution mode (CROSS_CORRELATION or CONVOLUTION)
+    /// Convolution mode (default: CROSS_CORRELATION)
     ConvolutionMode math_mode = ConvolutionMode::CROSS_CORRELATION;
     // NOLINTEND(readability-identifier-naming)
 
@@ -125,10 +127,10 @@ public:
      * @return Reference to this for method chaining
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    ConvWgradAttributes& set_padding(std::vector<int64_t> padding)
+    ConvWgradAttributes& set_padding(const std::vector<int64_t>& padding)
     {
         set_pre_padding(padding);
-        set_post_padding(std::move(padding));
+        set_post_padding(padding);
         return *this;
     }
 

@@ -284,4 +284,4 @@ hipdnnEnginePluginExecuteOpGraph(handle, context, workspace, buffers, num_buffer
 See [Plugin Development](./PluginDevelopment.md) for advanced information on developing and using plugins.
 
 ### Reference Implementation: CPU Graph Executor
-The CPU Graph Executor is a reference graph execution implementation build for graph verification and testing. See the [CPU Graph Executor Design Document](./CpuGraphExecutorDesign.md) for more details.
+The CPU Graph Executor is a reference graph execution implementation build for graph verification and testing. See the [CPU Graph Executor Design Document](./rfcs/0001_CpuGraphExecutorDesign.md) for more details.

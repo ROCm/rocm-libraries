@@ -104,6 +104,9 @@ namespace TensileLite
             std::vector<std::string>        m_loadedModuleNames;
             std::unordered_set<std::string> m_loadedCOFiles;
 
+            // Record for module reload
+            std::string m_lazyLoadArchitecture;
+
             friend std::ostream& operator<<(std::ostream& stream, SolutionAdapter const& adapter);
         };
 
