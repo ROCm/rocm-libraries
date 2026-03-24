@@ -2484,6 +2484,18 @@ public:
 
         const auto total_bricks = product(brick_count_along.begin(), brick_count_along.end());
 
+        if(total_bricks == 1 && mp_lib == fft_mp_lib_none && num_ranks == 1
+           && start_global_dev_idx == 0)
+        {
+            // Specifying a unique field with a lone brick on the current device may
+            // be omitted in favor of plan's data layout parameters: test that by not
+            // using a lone-brick field sometimes, in such cases.
+            const auto stable_hash_str
+                = token() + (io == fft_io::fft_io_in ? "_input_field" : "_output_field");
+            if(std::hash<std::string>()(stable_hash_str) % 2 == 1)
+                return;
+        }
+
         struct length_division
         {
             size_t min_length;

@@ -29,9 +29,9 @@ class TestLayernormFpropPlan : public ::testing::Test
 TEST_F(TestLayernormFpropPlan, ExecutePlan)
 {
     auto tolerance = layernorm::getTolerance<float>();
-    std::vector<int64_t> const dims = {6, 3, 32, 32};
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 3;
-    unsigned int const seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
@@ -40,7 +40,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -55,7 +55,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
                                 *tensorMap.at(attributes.bias_tensor_uid()),
                                 normalizedDimCount);
 
-    std::unordered_map<int64_t, void*> const variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.getTensor(attributes.x_tensor_uid()).rawHostData());
@@ -87,7 +87,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
 TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 {
     auto tolerance = layernorm::getTolerance<float>();
-    std::vector<int64_t> const dims = {6, 3, 32, 32};
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 2;
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
@@ -138,7 +138,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
     fpropPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));
@@ -147,9 +147,9 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
 TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
 {
     auto tolerance = layernorm::getTolerance<float>();
-    std::vector<int64_t> const dims = {6, 3, 32, 32};
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
     const int64_t normalizedDimCount = 3;
-    unsigned int const seed = getGlobalTestSeed();
+    const unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
@@ -159,7 +159,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
                                           TensorLayout::NHWC,
                                           true);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     LayernormFpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     LayernormFpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
@@ -188,7 +188,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
                                 meanAttr,
                                 invVarianceAttr);
 
-    std::unordered_map<int64_t, void*> const variantPack = planTensorBundle.toHostVariantPack();
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.getTensor(attributes.x_tensor_uid()).rawHostData());
@@ -234,7 +234,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
     LayernormFpropPlan<float, float, float, float, float> fpropPlan(std::move(params));
     fpropPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> const cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
                                         planTensorBundle.getTensor(attributes.y_tensor_uid())));
@@ -256,7 +256,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
 
 TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
 {
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
@@ -266,17 +266,18 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    LayernormFpropPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT> const patient;
+    const LayernormFpropPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool const result
+    const bool result
         = dynamic_cast<LayernormFpropPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -284,7 +285,7 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
 
 TEST(TestLayernormFpropPlanBuilder, IsApplicable)
 {
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
@@ -294,22 +295,24 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
                                           normalizedDimCount,
                                           TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    LayernormFpropPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT> const floatPlanBuilder;
+    const LayernormFpropPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    LayernormFpropPlanBuilder<DataType::FLOAT,
-                              DataType::HALF,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT> const badTypesPlanBuilder;
+    const LayernormFpropPlanBuilder<DataType::FLOAT,
+                                    DataType::HALF,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
@@ -320,7 +323,7 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
 
 TEST(TestLayernormFpropPlanBuilder, PlanConstructionTrainingPhase)
 {
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
@@ -331,17 +334,18 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstructionTrainingPhase)
                                           TensorLayout::NHWC,
                                           true);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    LayernormFpropPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT> const patient;
+    const LayernormFpropPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool const result
+    const bool result
         = dynamic_cast<LayernormFpropPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
@@ -349,7 +353,7 @@ TEST(TestLayernormFpropPlanBuilder, PlanConstructionTrainingPhase)
 
 TEST(TestLayernormFpropPlanBuilder, IsApplicableTrainingPhase)
 {
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
                                           DataType::FLOAT,
@@ -360,22 +364,24 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicableTrainingPhase)
                                           TensorLayout::NHWC,
                                           true);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper const graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    LayernormFpropPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::FLOAT> const floatPlanBuilder;
+    const LayernormFpropPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    LayernormFpropPlanBuilder<DataType::FLOAT,
-                              DataType::FLOAT,
-                              DataType::HALF,
-                              DataType::FLOAT,
-                              DataType::FLOAT> const badMeanTypePlanBuilder;
+    const LayernormFpropPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::HALF,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        badMeanTypePlanBuilder;
     EXPECT_FALSE(
         badMeanTypePlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 }

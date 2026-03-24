@@ -24,6 +24,7 @@ add_library(
     descriptors/BackendDescriptor.cpp
     descriptors/BlockScaleDequantizeOperationDescriptor.cpp
     descriptors/BlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/CustomOpOperationDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
     descriptors/ConvolutionWrwOperationDescriptor.cpp
@@ -35,6 +36,7 @@ add_library(
     descriptors/EngineHeuristicDescriptor.cpp
     descriptors/ExecutionPlanDescriptor.cpp
     descriptors/GraphDescriptor.cpp
+    descriptors/KnobDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
     descriptors/LayernormOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp

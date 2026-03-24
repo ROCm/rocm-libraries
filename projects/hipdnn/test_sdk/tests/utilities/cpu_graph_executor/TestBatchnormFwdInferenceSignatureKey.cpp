@@ -18,61 +18,61 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestBatchnormFwdInferenceSignatureKey, EqualityOperator)
 {
-    BatchnormFwdInferenceSignatureKey const key1{
+    const BatchnormFwdInferenceSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key2{
+    const BatchnormFwdInferenceSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    BatchnormFwdInferenceSignatureKey const key3{
+    const BatchnormFwdInferenceSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    BatchnormFwdInferenceSignatureKey const key4{
+    const BatchnormFwdInferenceSignatureKey key4{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_TRUE(key3 == key4);
 
-    BatchnormFwdInferenceSignatureKey const key5{
+    const BatchnormFwdInferenceSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key6{
+    const BatchnormFwdInferenceSignatureKey key6{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key5 == key6);
 
-    BatchnormFwdInferenceSignatureKey const key7{
+    const BatchnormFwdInferenceSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key8{
+    const BatchnormFwdInferenceSignatureKey key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    BatchnormFwdInferenceSignatureKey const key9{
+    const BatchnormFwdInferenceSignatureKey key9{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key10{
+    const BatchnormFwdInferenceSignatureKey key10{
         DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
 
-    BatchnormFwdInferenceSignatureKey const key11{
+    const BatchnormFwdInferenceSignatureKey key11{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key12{
+    const BatchnormFwdInferenceSignatureKey key12{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key11 == key12);
 }
 
 TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
 {
-    BatchnormFwdInferenceSignatureKey const key1{
+    const BatchnormFwdInferenceSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key2{
+    const BatchnormFwdInferenceSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    BatchnormFwdInferenceSignatureKey const key3{
+    const BatchnormFwdInferenceSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    BatchnormFwdInferenceSignatureKey const key4{
+    const BatchnormFwdInferenceSignatureKey key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key5{
+    const BatchnormFwdInferenceSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key6{
+    const BatchnormFwdInferenceSignatureKey key6{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey const key7{
+    const BatchnormFwdInferenceSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
@@ -88,9 +88,9 @@ TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
 
 TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
 {
-    BatchnormFwdInferenceSignatureKey const original{
+    const BatchnormFwdInferenceSignatureKey original{
         DataType::FLOAT, DataType::HALF, DataType::DOUBLE, DataType::FLOAT, DataType::BFLOAT16};
-    BatchnormFwdInferenceSignatureKey const copied{original};
+    const BatchnormFwdInferenceSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
@@ -102,9 +102,9 @@ TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
 
 TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
 {
-    BatchnormFwdInferenceSignatureKey const expectedKey{
+    const BatchnormFwdInferenceSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> const dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
@@ -115,7 +115,7 @@ TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());
 
-    BatchnormFwdInferenceSignatureKey const keyFromNode(graphWrap.getNode(0),
+    const BatchnormFwdInferenceSignatureKey keyFromNode(graphWrap.getNode(0),
                                                         graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);

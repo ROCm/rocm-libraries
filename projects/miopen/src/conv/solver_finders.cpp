@@ -47,6 +47,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
 
 namespace miopen {
 
@@ -63,10 +64,11 @@ protected:
     }
 
     bool IsEnabled(const ExecutionContext& /*ctx*/,
-                   const ProblemDescription& /*problem*/,
+                   const ProblemDescription& problem,
                    const ConvFindParameters& parameters) const override
     {
-        return !parameters.use_winograd_only && !env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
+        return (!parameters.use_winograd_only &&
+                !IsAlgorithmDisabled(miopenConvolutionAlgoDirect, problem));
     }
 
     std::vector<solver::ConvSolution> FindImpl(const ExecutionContext& ctx,
@@ -440,7 +442,37 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
 namespace conv {
 
-bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
+namespace detail {
+/// Determine if problem size exceeds threshold for Direct solver.
+///
+/// The result tensor is used to estimate problem size.
+/// The maximum size is determined by MIOPEN_CONV_DIRECT_MAX_SIZE environment variable.
+///
+/// @param problem The convolution problem description.
+bool IsDirectProblemTooLarge(const ProblemDescription& problem)
+{
+    const unsigned long long max_size = env::value(MIOPEN_CONV_DIRECT_MAX_SIZE);
+    // 0 means no limit
+    if(max_size == 0)
+        return false;
+
+    // For FWD/BWD: 'out' is the result (swapped in BWD)
+    // For WRW: 'weights' is the result (out is dy, not dw)
+    const size_t problem_size = problem.IsDirectionBackwardWrW()
+                                    ? problem.GetWeights().GetElementSize()
+                                    : problem.GetOut().GetElementSize();
+
+    // Problem size is within limit
+    if(problem_size <= max_size)
+        return false;
+
+    MIOPEN_LOG_I2("DirectSolverFinder disabled for problem size "
+                  << problem_size << " > " << max_size << " (MIOPEN_CONV_DIRECT_MAX_SIZE)");
+    return true;
+}
+} // namespace detail
+
+bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& problem)
 {
     switch(algo)
     { // clang-format off
@@ -449,7 +481,7 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
         return env::disabled(MIOPEN_DEBUG_CONV_GEMM);
 #endif
     case miopenConvolutionAlgoDirect:
-        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
+        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT) || detail::IsDirectProblemTooLarge(problem);
     case miopenConvolutionAlgoFFT:
         return env::disabled(MIOPEN_DEBUG_CONV_FFT);
     case miopenConvolutionAlgoWinograd:
