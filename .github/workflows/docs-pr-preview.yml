@@ -122,7 +122,7 @@ jobs:
           curl -f -s -X PATCH \
             -H "Authorization: Token $RTD_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"active": true}' \
+            -d '{"active": true, "hidden": true, "privacy_level": "private"}' \
             "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
 
       - name: Trigger RTD build for PR branch
