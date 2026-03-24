@@ -641,7 +641,7 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
 
-        const int iter   = static_cast<int>(rocsparse::log2(WF_SIZE / 2));
+        const int iter   = rocsparse::log2_pow2<WF_SIZE / 2>::value;
         int       stride = 1;
 
         const int b_col = NUM_RHS * (BLOCKSIZE / WF_SIZE) * bid + NUM_RHS * wid;
@@ -752,14 +752,14 @@ namespace rocsparse
                                          const T* __restrict__ du,
                                          T* __restrict__ B)
     {
-        const int tid = threadIdx.x;
-        const int bid = blockIdx.x;
+        const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
 
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
 
-        const int iter_BLOCKSIZE = static_cast<int>(log2(BLOCKSIZE / 2));
-        const int iter_WF_SIZE   = static_cast<int>(log2(WF_SIZE / 2));
+        const int iter_BLOCKSIZE = rocsparse::log2_pow2<BLOCKSIZE / 2>::value;
+        const int iter_WF_SIZE   = rocsparse::log2_pow2<WF_SIZE / 2>::value;
         const int iter           = iter_BLOCKSIZE - iter_WF_SIZE;
 
         int stride = 1;
@@ -952,8 +952,8 @@ namespace rocsparse
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
 
-        const int tot_iter = static_cast<rocsparse_int>(rocsparse::log2((2 * BLOCKSIZE) / 2));
-        const int pcr_iter = static_cast<rocsparse_int>(rocsparse::log2(PCR_SIZE / 2));
+        const int tot_iter = rocsparse::log2_pow2<(2 * BLOCKSIZE) / 2>::value;
+        const int pcr_iter = rocsparse::log2_pow2<PCR_SIZE / 2>::value;
         const int cr_iter  = tot_iter - pcr_iter;
 
         int stride         = 1;

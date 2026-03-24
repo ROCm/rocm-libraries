@@ -189,7 +189,6 @@ namespace rocsparse
 
             for(int rhs = 0; rhs < NUM_RHS; rhs++)
             {
-                // if(gid < m && (NUM_RHS * hipBlockIdx_y + rhs) < n)
                 if((NUM_RHS * hipBlockIdx_y + rhs) < n)
                 {
                     B_spike[num_spikes * (NUM_RHS * hipBlockIdx_y + rhs) + row]
@@ -316,7 +315,7 @@ namespace rocsparse
     {
         const int tid = hipThreadIdx_x;
         const int gid = hipBlockIdx_x * BLOCKSIZE + tid;
-        const int N   = hipGridDim_x; // same as num_spikes
+        const int N   = hipGridDim_x;
 
         if(gid >= m)
             return;
