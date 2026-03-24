@@ -1,32 +1,40 @@
 # Race Emulator
 
-A CPU-side emulator for AMD GPU assembly that detects race conditions.
+A CPU-only emulator for AMD GPU assembly that detects race conditions.
 It is currently used by hipBLASLt to validate GEMM kernel assembly.
 
 ## Motivation
 
-A race occurs when the value read from a register, local memory (LDS),
-or global memory, is ambiguous. When this happens, the behaviour of a
-GPU program is undefined, and non-deterministic. Races can be difficult
-to avoid, particularly in complex direct-to-assembly code generation
-systems that attempt to squeeze out optimal performance. Races can lie
-dormant through many iterations of a program, only to be triggered when
-the GPU enters a specific state, which makes them difficult to debug.
+AMD does not currently have a GPU emulator for public ISAs. A
+long-term goal should be to unify this project with existing closed
+source emulators, and to ensure that emulation of all public ISAs
+is open source. This project fills an immediate gap: providing race
+condition detection for AMD GPU assembly in use today.
 
-The race-emulator developer tool serves as an early detection system for
-races, and aims to provide useful diagnostics that a developer can use
-to find and eliminate them. It is currently aimed at developers working
-directly with AMD GPU assembly, although it can be integrated into any
-stack that can emit AMD GPU assembly. Diagnostics are at the assembly
-level, and there are example diagnostics shown below.
+Race conditions in GPU assembly are difficult to avoid, particularly
+in direct-to-assembly code generation systems. They can lie dormant
+through many iterations of a program, only to surface under specific
+hardware scheduling states, producing non-deterministic results that
+are difficult to reproduce and debug. The race-emulator serves as an
+early detection system, providing diagnostics at the assembly level
+that a developer can use to find and eliminate races.
 
-The approach taken here, CPU-side emulation, is one of several possible
-approaches. See the [Alternative approaches](#alternative-approaches)
-section for a discussion of some of the others. In the long-term, the
-race detection tooling offered by AMD will likely draw from multiple
-approaches, and this project's scope will evolve accordingly. Feedback
-and suggestions are very welcome. Links to other efforts should be
-listed here.
+The approach taken here, CPU-side emulation, is one of several
+possible approaches. See the
+[Alternative approaches](#alternative-approaches) section for a
+discussion of some of the others. In the long-term, the race
+detection tooling offered by AMD will likely draw from multiple
+approaches, and this project's scope will evolve accordingly.
+Feedback and suggestions are very welcome.
+
+## What is a race condition?
+
+A race occurs when the value read from a register, local memory
+(LDS), or global memory is ambiguous due to unsynchronized access.
+When this happens, the behaviour of a GPU program is undefined. On
+AMD GPUs, correct use of `s_waitcnt` (to wait for a wave's own memory
+operations to complete) and `s_barrier` (to synchronize waves
+within a workgroup) is required to avoid races.
 
 ## Goals
 
@@ -60,10 +68,8 @@ examples are:
 ## Current status
 
 The majority of the effort so far has gone into emulating instructions.
-The emulator supports gfx942 (MI300X) and gfx1151 (Strix).
-The number of supported instruction mnemonics can be obtained via
-`raceemulator::getInstructions().size()`. With this set of instructions,
-the emulator has numerically validated runs of
+The emulator supports gfx942 (MI300X) and gfx1151 (Strix), and has
+numerically validated runs of
 
 - hipBLASLt/TensileLite GEMM kernels (f32, bf16, f16)
 - an IREE-generated GEMM kernel (f32)
@@ -75,7 +81,6 @@ necessary for detecting race conditions, but it provides useful proof
 that all instructions are correctly emulated. The project also has unit
 tests for all the instructions it emulates, individually. Below we
 present two simple examples of races that are currently detectable.
-There are more in the test directory.
 
 ### Case 1: Single thread
 
@@ -200,11 +205,11 @@ implemented.
 The emulator performs numerically validated emulation (f16/bf16
 arithmetic is promoted to f32) while tracking all memory events and
 detecting race conditions in both LDS and vector registers.
-A 128×128×8192 f16 single-workgroup GEMM kernel
-(TensileLite, gfx1151)
-completes in approximately 0.1 seconds on a single CPU thread,
-including all race checking. Since workgroups are independent,
-multi-workgroup kernels parallelize naturally across CPU threads.
+A 128×128×8192 f16 single-workgroup GEMM kernel (TensileLite)
+completes full numerical emulation in approximately 0.1 seconds on
+a single CPU thread, including all race checking. Since workgroups
+are independent, multi-workgroup kernels parallelize naturally across
+CPU threads.
 
 Each assembly line is compiled into a C++ lambda on first encounter
 and cached, so loop bodies avoid reparsing on subsequent iterations.
@@ -263,8 +268,8 @@ is used).
 ## Integration status
 
 race-emulator is integrated into rocm-libraries in two places. Both
-require `HIPBLASLT_ENABLE_RACE_EMULATOR` to be enabled, which is the
-default when building from the monorepo (see
+require the cmake option `HIPBLASLT_ENABLE_RACE_EMULATOR` to be enabled,
+which is the default when building from the monorepo (see
 [Enabling race-emulator in hipblaslt](#enabling-race-emulator-in-hipblaslt)).
 
 1. **tensilelite-client**: Race checking can be enabled in Tensile YAML
