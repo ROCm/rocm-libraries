@@ -150,6 +150,54 @@ void getString(const std::string& source,
     }
 }
 
+void setByteArray(std::vector<uint8_t>& target,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t elementCount,
+                  const void* arrayOfElements,
+                  const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_CHAR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_LT(elementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": elementCount is negative");
+    auto ptr = static_cast<const uint8_t*>(arrayOfElements);
+    target.assign(ptr, ptr + static_cast<size_t>(elementCount));
+}
+
+void getByteArray(const std::vector<uint8_t>& source,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t requestedElementCount,
+                  int64_t* elementCount,
+                  void* arrayOfElements,
+                  const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_CHAR, attributeType, errorPrefix);
+
+    auto count = static_cast<int64_t>(source.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    auto copyCount = std::min(requestedElementCount, count);
+    if(elementCount != nullptr)
+    {
+        *elementCount = copyCount;
+    }
+    std::memcpy(arrayOfElements, source.data(), static_cast<size_t>(copyCount));
+}
+
 void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,

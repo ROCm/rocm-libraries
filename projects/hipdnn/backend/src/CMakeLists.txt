@@ -24,6 +24,7 @@ add_library(
     descriptors/BackendDescriptor.cpp
     descriptors/BlockScaleDequantizeOperationDescriptor.cpp
     descriptors/BlockScaleQuantizeOperationDescriptor.cpp
+    descriptors/CustomOpOperationDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
     descriptors/ConvolutionWrwOperationDescriptor.cpp

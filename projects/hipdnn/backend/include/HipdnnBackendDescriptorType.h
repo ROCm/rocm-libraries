@@ -260,4 +260,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT = 28,
 
+    /**
+     * @brief Custom operation descriptor
+     *
+     * Represents an opaque custom (plugin-provided) operation with
+     * variable-length input/output tensor arrays, a plugin identifier
+     * string, and an opaque byte payload interpreted by the plugin.
+     */
+    HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT = 29,
+
 } hipdnnBackendDescriptorType_t;

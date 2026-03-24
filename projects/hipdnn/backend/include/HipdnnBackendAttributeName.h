@@ -52,6 +52,7 @@
  * - 2800-2899: Block scale quantize operation attributes
  * - 2807-2899: Block scale dequantize operation attributes
  * - 2900-2913: Batchnorm training forward operation attributes
+ * - 3000-3099: Custom op operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -939,6 +940,29 @@ typedef enum
 
     /** @brief Peer statistics tensor array for multi-GPU batchnorm training forward */
     HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT = 2913,
+
+    /** @} */
+
+    /**
+     * @name Custom Op Operation Attributes (3000-3099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CUSTOM_OP_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor array for custom op */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT = 3000,
+
+    /** @brief Output tensor array for custom op */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT = 3001,
+
+    /** @brief Plugin identifier string for custom op (e.g. "example.rope") */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_ID_EXT = 3002,
+
+    /** @brief Opaque byte payload for custom op */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT = 3003,
+
+    /** @brief Compute data type for custom op */
+    HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT = 3004,
 
     /** @} */
 
