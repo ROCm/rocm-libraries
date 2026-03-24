@@ -26,11 +26,19 @@ inline Error {{ op.frontend.packer_function }}(
 
     // Create tensor descriptors (if needed) and set them on the operation
 {% for tf in op.tensor_fields %}
+{% if tf.required %}
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
                                              attributes.{{ tf.frontend_getter }},
                                              tensorDescs,
                                              "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+{% else %}
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                             {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                                             attributes.{{ tf.frontend_getter }},
+                                             tensorDescs,
+                                             "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+{% endif %}
 {% endfor %}
 
     // Set {{ op.packer_params_label }} parameters

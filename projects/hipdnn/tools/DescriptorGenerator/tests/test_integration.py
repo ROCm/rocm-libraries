@@ -983,3 +983,250 @@ class TestRenderTemplate:
             generator._render_mode_template(
                 "nonexistent_mode_template.j2", convolution_fwd_config, df
             )
+
+
+# ---------------------------------------------------------------------------
+# Optional tensor and shared utility template output verification
+# ---------------------------------------------------------------------------
+
+
+class TestOptionalTensorTemplateOutput:
+    """Verify template changes for optional tensor support and shared utilities."""
+
+    # --- Packer tests ---
+
+    def test_packer_optional_tensors_use_optional_ref(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Packer uses ensureAndSetOptionalTensorRef for optional tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert "ensureAndSetOptionalTensorRef" in content
+
+    def test_packer_required_tensors_use_required_ref(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Packer uses ensureAndSetTensorRef (not Optional) for required tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        )
+        content = packer_path.read_text()
+        # Find lines with ensureAndSetTensorRef that are NOT ensureAndSetOptionalTensorRef
+        lines = content.split("\n")
+        has_required_ref = any(
+            "ensureAndSetTensorRef" in line
+            and "ensureAndSetOptionalTensorRef" not in line
+            for line in lines
+        )
+        assert (
+            has_required_ref
+        ), "Expected ensureAndSetTensorRef for required tensors (in_0, out_0)"
+
+    def test_packer_all_required_no_optional_ref(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Config with all required tensors does NOT contain ensureAndSetOptionalTensorRef."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        packer_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        )
+        content = packer_path.read_text()
+        assert "ensureAndSetOptionalTensorRef" not in content
+
+    # --- Descriptor setAttribute tests ---
+
+    def test_descriptor_set_optional_tensor(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setOptionalTensorDescriptor for optional tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setOptionalTensorDescriptor" in content
+
+    def test_descriptor_set_required_tensor(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setTensorDescriptor (not Optional) for required tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        lines = content.split("\n")
+        has_required_set = any(
+            "setTensorDescriptor" in line
+            and "setOptionalTensorDescriptor" not in line
+            and "setTensorDescriptorArray" not in line
+            for line in lines
+        )
+        assert (
+            has_required_set
+        ), "Expected setTensorDescriptor for required tensors (in_0, out_0)"
+
+    # --- Descriptor getAttribute tests ---
+
+    def test_descriptor_get_optional_tensor(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses getOptionalTensorDescriptor for optional tensors."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "getOptionalTensorDescriptor" in content
+
+    # --- getTensorDescriptors() tests ---
+
+    def test_descriptor_get_tensors_guards_optional(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """getTensorDescriptors() guards optional tensors with null checks."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "if(_in1Desc)" in content
+
+    # --- toString() tests ---
+
+    def test_descriptor_to_string_optional_uid(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """toString() uses nullopt pattern for optional tensor UIDs."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "nullopt" in content
+
+    def test_descriptor_to_string_optional_scalar(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """toString() uses nullopt pattern for optional scalar fields."""
+        config = pointwise_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        # Pointwise has optional scalars like relu_lower_clip
+        # The toString should have both the nullopt pattern and std::to_string for them
+        # Count occurrences of the optional scalar pattern
+        optional_scalar_count = content.count("? std::to_string(*_data.")
+        # Pointwise has 7 optional scalar fields (relu_lower_clip, relu_upper_clip,
+        # relu_lower_clip_slope, swish_beta, elu_alpha, softplus_beta, axis)
+        assert (
+            optional_scalar_count >= 1
+        ), "Expected at least one optional scalar with nullopt pattern in toString()"
+
+    # --- Vector field (setScalarVector / getScalarVector) tests ---
+
+    def test_descriptor_vectors_use_scalar_vector(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setScalarVector<int64_t> and getScalarVector<int64_t>."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setScalarVector<int64_t>" in content
+        assert "getScalarVector<int64_t>" in content
+
+    def test_descriptor_vectors_no_int64_vector(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Descriptor.cpp does NOT contain setInt64Vector or getInt64Vector."""
+        config = convolution_fwd_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setInt64Vector" not in content
+        assert "getInt64Vector" not in content
+
+    # --- Tensor array shared utility tests ---
+
+    def test_descriptor_tensor_array_uses_shared_utils(
+        self, batchnorm_config, generator, tmp_path
+    ):
+        """Descriptor.cpp uses setTensorDescriptorArray and getTensorDescriptorArray."""
+        config = batchnorm_config
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        cpp_path = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        )
+        content = cpp_path.read_text()
+        assert "setTensorDescriptorArray" in content
+        assert "getTensorDescriptorArray" in content
