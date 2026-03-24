@@ -206,7 +206,7 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
     hipError_t hip_err;
 
     // Synchronize to ensure prior work is complete
-    hip_err = stream != nullptr ? hipStreamSynchronize(stream) : hipDeviceSynchronize();
+    hip_err = hipStreamSynchronize(stream);
     if(hip_err != hipSuccess)
         return hip_err;
 
@@ -216,7 +216,7 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
             hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost, stream);
         if(hip_err != hipSuccess)
             return hip_err;
-        return stream != nullptr ? hipStreamSynchronize(stream) : hipDeviceSynchronize();
+        return hipStreamSynchronize(stream);
     }
 
     for(size_t j = 0; j < batch * col; j++)
