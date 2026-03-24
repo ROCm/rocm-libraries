@@ -66,19 +66,20 @@ jobs:
         shell: powershell
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
-      - name: Checkout rocm-libraries repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Checkout TheRock repository
+      - name: Checkout Repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          path: TheRock
           ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
 
       - name: Run setup test environment workflow
         timeout-minutes: 15
-        uses: './TheRock/.github/actions/setup_test_environment'
+        uses: './.github/actions/setup_test_environment'
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
@@ -90,7 +91,7 @@ jobs:
       - name: Driver / GPU sanity check
         timeout-minutes: 3
         run: |
-          python ./TheRock/build_tools/print_driver_gpu_info.py
+          python ./build_tools/print_driver_gpu_info.py
 
       - name: Test early failure for Teams notification
         if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') }}
@@ -115,7 +116,7 @@ jobs:
         # Channel name "MIOpen CI Reporting"
         if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
         run: |
-          python3 .github/scripts/notify_teams.py \
+          python3 rocm-libraries/.github/scripts/notify_teams.py \
             --project miopen \
             --failure-stage test \
             --log-path ./test_logs/test_output.log \
@@ -130,4 +131,4 @@ jobs:
         if: ${{ always() && runner.os == 'Windows' }}
         timeout-minutes: 5
         shell: powershell
-        run: . '${{ github.workspace }}\TheRock\build_tools\github_actions\cleanup_processes.ps1'
+        run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
