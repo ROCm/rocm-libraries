@@ -6,10 +6,12 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 // ---------------------------------------------------------------------------
 // TypePair helper for TYPED_TEST
@@ -414,11 +416,11 @@ TYPED_TEST(CpuFpReferenceSdpaFwd, BasicFwd)
     Tensor<InT> v({1, 2, 4, 8});
     Tensor<InT> o({1, 2, 4, 8});
 
-    q.fillWithValue(static_cast<InT>(0.1f));
-    k.fillWithValue(static_cast<InT>(0.1f));
+    q.fillWithValue(safeTestTypeCast<InT>(0.1f));
+    k.fillWithValue(safeTestTypeCast<InT>(0.1f));
 
     const float vVal = 0.5f;
-    v.fillWithValue(static_cast<InT>(vVal));
+    v.fillWithValue(safeTestTypeCast<InT>(vVal));
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 

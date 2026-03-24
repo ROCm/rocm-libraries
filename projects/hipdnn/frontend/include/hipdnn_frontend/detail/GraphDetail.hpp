@@ -37,7 +37,7 @@ inline Error
 
     // Get only top hit if preferred engine id isn't set.
     // Otherwise get all available engine configs to search for preferred id.
-    int64_t const requiredCount = getAll ? availableEngineCount : 1;
+    const int64_t requiredCount = getAll ? availableEngineCount : 1;
     std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
     for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
     {
@@ -88,7 +88,7 @@ inline Error
             "Failed to get engine from engine configuration descriptor.");
 
         // Clean-up engineDesc once we no longer need it within this scope.
-        ScopedHipdnnBackendDescriptor const scopedEngineDesc(engineDesc);
+        const ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             hipdnnBackend()->backendGetAttribute(engineDesc,

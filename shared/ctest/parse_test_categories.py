@@ -97,6 +97,10 @@ def main():
         execution_settings = config.get("execution_settings", {})
         timeouts = execution_settings.get("category_timeouts", {})
         timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
+        env_dict = execution_settings.get("environment", {}) or {}
+        env_string = (
+            ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
+        )
         exclude_gpu_config = config.get("exclude_gpu", {})
 
         # Detect OS
@@ -173,6 +177,8 @@ def main():
             )
             print(f"  LABELS {label_string}")
             print(f"  TIMEOUT {timeout}")
+            if env_string:
+                print(f'  ENVIRONMENT "{env_string}"')
             print(")")
             print()
 
@@ -182,8 +188,9 @@ def main():
                     install_file_handle.write(
                         f'add_test({target_name}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string})\n'
                     )
+                    env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                     install_file_handle.write(
-                        f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                        f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
                     )
                     install_file_handle.flush()
                 except OSError as e:
@@ -243,7 +250,11 @@ def main():
                 if gpu_arch_matches(gpu_arch, config_arch):
                     patterns = gpu_config.get("test_patterns", [])
                     if patterns:
-                        all_applicable_patterns.extend(patterns)
+                        for p in patterns:
+                            if isinstance(p, list):
+                                all_applicable_patterns.extend(p)
+                            else:
+                                all_applicable_patterns.append(p)
 
                     # Collect applicable categories from this config
                     gpu_labels = gpu_config.get("labels", [])
@@ -303,6 +314,8 @@ def main():
                 )
                 print(f"  LABELS {label_string}")
                 print(f"  TIMEOUT {timeout}")
+                if env_string:
+                    print(f'  ENVIRONMENT "{env_string}"')
                 print(")")
                 print()
 
@@ -312,8 +325,9 @@ def main():
                         install_file_handle.write(
                             f'add_test({target_name}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string})\n'
                         )
+                        env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                         install_file_handle.write(
-                            f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                            f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:
