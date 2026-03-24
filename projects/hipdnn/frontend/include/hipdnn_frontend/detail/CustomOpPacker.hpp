@@ -45,13 +45,11 @@ inline Error
     // Set opaque data payload
     if(!attributes.get_data().empty())
     {
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(opDesc.get(),
-                                                 HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT,
-                                                 HIPDNN_TYPE_CHAR,
-                                                 static_cast<int64_t>(attributes.get_data().size()),
-                                                 attributes.get_data().data()),
-            "Failed to set custom op data");
+        HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
+                                                HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT,
+                                                HIPDNN_TYPE_CHAR,
+                                                attributes.get_data(),
+                                                "custom op data"));
     }
 
     // Set compute data type

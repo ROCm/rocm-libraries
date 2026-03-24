@@ -6,6 +6,8 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
 namespace hipdnn_backend
 {
 
@@ -178,27 +180,12 @@ hipdnnBackendDescriptorType_t CustomOpOperationDescriptor::getStaticType()
 
 std::string CustomOpOperationDescriptor::toString() const
 {
+    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "CustomOpOperationDescriptor: {";
     str += "custom_op_id=" + _data.custom_op_id;
-    str += ", inputs=[";
-    for(size_t i = 0; i < _data.input_tensor_uids.size(); ++i)
-    {
-        if(i > 0)
-        {
-            str += ", ";
-        }
-        str += std::to_string(_data.input_tensor_uids[i]);
-    }
-    str += "], outputs=[";
-    for(size_t i = 0; i < _data.output_tensor_uids.size(); ++i)
-    {
-        if(i > 0)
-        {
-            str += ", ";
-        }
-        str += std::to_string(_data.output_tensor_uids[i]);
-    }
-    str += "], data_size=" + std::to_string(_data.data.size());
+    str += ", inputs=" + vecToString(_data.input_tensor_uids);
+    str += ", outputs=" + vecToString(_data.output_tensor_uids);
+    str += ", data_size=" + std::to_string(_data.data.size());
     str += ", compute_data_type=";
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
