@@ -264,8 +264,6 @@ namespace rocRoller
 
                 if(subTile)
                 {
-                    auto const strideDataType = DataType::UInt32;
-
                     auto tileSizes = subTile->tileDimensions();
                     auto tileStrides
                         = std::vector<uint32_t>{1, static_cast<uint32_t>(tileSizes[0])};
