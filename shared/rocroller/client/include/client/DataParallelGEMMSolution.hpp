@@ -74,6 +74,11 @@ namespace rocRoller
                     auto pretileA = not solutionParams.types.pretileA.empty();
                     if(pretileA)
                     {
+                        AssertFatal(solutionParams.types.transA
+                                        == Client::GEMMClient::TransposeType::T,
+                                    "Pretiling A is only supported when A is TransposeType::T.",
+                                    ShowValue(solutionParams.types.transA));
+
                         AssertFatal(solutionParams.types.pretileA.size() == 2,
                                     "pretileA must have size 2 (MxK tile dimensions).",
                                     ShowValue(solutionParams.types.pretileA.size()));
@@ -92,6 +97,11 @@ namespace rocRoller
                     auto pretileB = not solutionParams.types.pretileB.empty();
                     if(pretileB)
                     {
+                        AssertFatal(solutionParams.types.transB
+                                        == Client::GEMMClient::TransposeType::N,
+                                    "Pretiling B is only supported when B is TransposeType::N.",
+                                    ShowValue(solutionParams.types.transB));
+
                         AssertFatal(solutionParams.types.pretileB.size() == 2,
                                     "pretileB must have size 2 (KxN tile dimensions).",
                                     ShowValue(solutionParams.types.pretileB.size()));
