@@ -96,12 +96,12 @@ set(__clang_cxx_compile_options
     -Wno-deprecated-builtins
     -Wno-unused-parameter
     -Wmissing-noreturn
-    -Wno-nrvo
     -Wno-switch-default
     -Wno-unique-object-duplication)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
     list(APPEND __clang_cxx_compile_options
+        -Wno-lifetime-safety-strict
         -Wno-lifetime-safety-intra-tu-suggestions
         -Wno-lifetime-safety-cross-tu-suggestions)
 endif()
