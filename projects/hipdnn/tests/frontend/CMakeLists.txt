@@ -15,6 +15,7 @@ add_executable(
     IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleDequantizeDescriptorLifting.cpp
     IntegrationBlockScaleDequantizeDescriptorLowering.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
