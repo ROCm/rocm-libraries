@@ -85,8 +85,7 @@ struct rocfft_brick_t
         , location(location)
     {
     }
-    rocfft_brick_t(const data_layout_t& brick_layout,
-                   const rocfft_location_t&   location)
+    rocfft_brick_t(const data_layout_t& brick_layout, const rocfft_location_t& location)
         : layout(brick_layout)
         , location(location)
     {
