@@ -609,6 +609,11 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
 
     Tensor<double> x({2, 6, 4});
     Tensor<double> y({2, 6, 4});
+    // scale shape {4} matches the last 1 dimension (d_model) of x, which is the
+    // normalized dimension selected by normalizedDimCount=1 below. This means
+    // LayerNorm computes mean/variance independently for each (batch, seq_pos)
+    // pair over the 4 d_model features — exactly why PAD positions at different
+    // sequence positions cannot affect real token outputs.
     Tensor<double> scale({4});
     Tensor<double> bias({4});
     Tensor<double> mean({2, 6});
@@ -656,10 +661,10 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    double epsilon = 1e-5;
+    const double epsilon = 1e-5;
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, epsilon, 1, &mean, &rstd);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     // Key assertion: "The" appears at (0,0) and (1,0) with identical input
     // [0.8, 0.2, 0.5, 0.1]. Despite different padding patterns in their batches
@@ -668,8 +673,8 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropPadPositionsDoNotAffectRealTokens)
     //
     // "The": mean = (0.8+0.2+0.5+0.1)/4 = 0.4
     //        var  = (0.16+0.04+0.01+0.09)/4 = 0.075
-    double theMean = 0.4;
-    double theRstd = 1.0 / std::sqrt(0.075 + epsilon);
+    const double theMean = 0.4;
+    const double theRstd = 1.0 / std::sqrt(0.075 + epsilon);
 
     EXPECT_NEAR(mean.getHostValue(0, 0), theMean, tolerance);
     EXPECT_NEAR(rstd.getHostValue(0, 0), theRstd, tolerance);
