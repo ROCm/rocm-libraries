@@ -3,14 +3,17 @@
 
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
+#include "descriptors/LayernormOperationDescriptor.hpp"
 #include "descriptors/NodeFactory.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/constants/LayernormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <memory>
@@ -96,6 +99,52 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeConvFwd)
     EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
     EXPECT_EQ(desc->getData().w_tensor_uid, K_TENSOR_W_UID);
     EXPECT_EQ(desc->getData().y_tensor_uid, K_TENSOR_Y_UID);
+}
+
+TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
+{
+    // Build a minimal layernorm tensor map
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> lnTensorMap;
+    auto makeTensor = [](int64_t uid) {
+        TensorAttributesT attrs;
+        attrs.uid = uid;
+        attrs.data_type = DataType::FLOAT;
+        attrs.dims = {2, 64, 32, 32};
+        attrs.strides = {65536, 1024, 32, 1};
+        return TensorDescriptor::fromFlatBuffer(attrs);
+    };
+    lnTensorMap[K_LAYERNORM_TENSOR_X_UID] = makeTensor(K_LAYERNORM_TENSOR_X_UID);
+    lnTensorMap[K_LAYERNORM_TENSOR_SCALE_UID] = makeTensor(K_LAYERNORM_TENSOR_SCALE_UID);
+    lnTensorMap[K_LAYERNORM_TENSOR_BIAS_UID] = makeTensor(K_LAYERNORM_TENSOR_BIAS_UID);
+    lnTensorMap[K_LAYERNORM_TENSOR_EPSILON_UID] = makeTensor(K_LAYERNORM_TENSOR_EPSILON_UID);
+    lnTensorMap[K_LAYERNORM_TENSOR_Y_UID] = makeTensor(K_LAYERNORM_TENSOR_Y_UID);
+
+    LayernormAttributesT lnAttrs;
+    lnAttrs.x_tensor_uid = K_LAYERNORM_TENSOR_X_UID;
+    lnAttrs.scale_tensor_uid = K_LAYERNORM_TENSOR_SCALE_UID;
+    lnAttrs.bias_tensor_uid = K_LAYERNORM_TENSOR_BIAS_UID;
+    lnAttrs.epsilon_tensor_uid = K_LAYERNORM_TENSOR_EPSILON_UID;
+    lnAttrs.y_tensor_uid = K_LAYERNORM_TENSOR_Y_UID;
+    lnAttrs.normalized_dim_count = 3;
+    lnAttrs.forward_phase = NormFwdPhase::TRAINING;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(lnAttrs);
+
+    auto graphOp = NodeFactory::createOperationFromNode(node, lnTensorMap);
+    ASSERT_NE(graphOp, nullptr);
+
+    auto* op = graphOp->asGraphOperation();
+    ASSERT_NE(op, nullptr);
+    auto rebuiltNode = op->buildNode();
+    ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::LayernormAttributes);
+
+    auto desc = std::static_pointer_cast<LayernormOperationDescriptor>(graphOp);
+    ASSERT_TRUE(desc->isFinalized());
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_LAYERNORM_TENSOR_X_UID);
+    EXPECT_EQ(desc->getData().normalized_dim_count, 3);
+    EXPECT_EQ(desc->getData().forward_phase, NormFwdPhase::TRAINING);
 }
 
 TEST_F(TestNodeFactory, CreateOperationFromNodeUnsupportedType)

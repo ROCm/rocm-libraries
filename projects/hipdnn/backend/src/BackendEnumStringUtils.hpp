@@ -630,6 +630,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT";
     case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
         return "HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT";
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT:
+        return "HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT";
 
     // Block scale quantize operation attributes
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT:

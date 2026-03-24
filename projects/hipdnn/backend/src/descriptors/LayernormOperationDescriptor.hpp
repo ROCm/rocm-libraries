@@ -6,7 +6,9 @@
 #include "BackendDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -75,6 +77,13 @@ public:
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
 
+    // Creates a finalized LayernormOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to LayernormAttributesT internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
+    static std::shared_ptr<LayernormOperationDescriptor>
+        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
+
     static hipdnnBackendDescriptorType_t getStaticType();
 
     std::string toString() const override;
@@ -94,6 +103,8 @@ private:
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
+
+    std::string _name;
 };
 
 } // namespace hipdnn_backend

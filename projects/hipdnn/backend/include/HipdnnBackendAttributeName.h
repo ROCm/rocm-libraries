@@ -832,6 +832,9 @@ typedef enum
 
     /** @brief Math precision (compute data type) for layernorm */
     HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2708,
+
+    /** @brief Number of normalized dimensions for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_NORMALIZED_DIM_COUNT_EXT = 2709,
     /** @} */
 
     /**
