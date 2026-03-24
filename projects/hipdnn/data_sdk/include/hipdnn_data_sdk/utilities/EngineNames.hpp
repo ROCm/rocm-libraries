@@ -105,20 +105,27 @@ struct EngineRegistrar
 {
     EngineRegistrar(std::string_view name)
     {
-        detail::getMutableEngineNames().insert(name);
         auto id = engineNameToId(name);
-        detail::getMutableEngineIdToNameMap()[id] = name;
 
-        // Check for collisions
-        for(const auto& [existingId, existingName] : getEngineIdToNameMap())
+        // Check for duplicate registration or hash collision BEFORE inserting
+        auto& idToNameMap = detail::getMutableEngineIdToNameMap();
+        auto it = idToNameMap.find(id);
+        if(it != idToNameMap.end())
         {
-            if(existingId == id && existingName != name)
+            if(it->second == name)
             {
-                throw std::runtime_error("Engine name collision detected! '"
-                                         + std::string(existingName) + "' and '" + std::string(name)
-                                         + "' both hash to ID: " + formatEngineIdHex(id));
+                throw std::runtime_error("Duplicate engine registration detected! '"
+                                         + std::string(name) + "' is already registered with ID: "
+                                         + formatEngineIdHex(id));
             }
+
+            throw std::runtime_error("Engine name collision detected! '" + std::string(it->second)
+                                     + "' and '" + std::string(name)
+                                     + "' both hash to ID: " + formatEngineIdHex(id));
         }
+
+        detail::getMutableEngineNames().insert(name);
+        idToNameMap[id] = name;
     }
 };
 
