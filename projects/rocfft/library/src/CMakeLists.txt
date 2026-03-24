@@ -232,6 +232,7 @@ add_custom_command(
 set( rocfft_source
   auxiliary.cpp
   data_layout.cpp
+  exec_info.cpp
   plan.cpp
   transform.cpp
   repo.cpp

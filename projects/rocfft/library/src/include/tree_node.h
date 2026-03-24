@@ -1081,7 +1081,7 @@ struct MultiPlanItem
     virtual void ExecuteAsync(const rocfft_plan                       plan,
                               void*                                   in_buffer[],
                               void*                                   out_buffer[],
-                              rocfft_execution_info                   info,
+                              const rocfft_execution_info_internal&   info,
                               size_t                                  multiPlanIdx,
                               const std::map<int, device_callback_t>& callbacks)
         = 0;
@@ -1094,9 +1094,9 @@ struct MultiPlanItem
 
     // Get work buffer requirements for this item.  Only ExecPlans
     // should need this, as data movement shouldn't need temp buffers.
-    virtual size_t WorkBufBytes(size_t base_type_size) const
+    virtual void WorkBufBytesPerDevice(size_t               base_type_size,
+                                       std::vector<size_t>& workBufBytes) const
     {
-        return 0;
     }
 
     // Print a description of this item to the plan log
@@ -1174,11 +1174,11 @@ struct CommPointToPoint : public MultiPlanItem
         }
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1272,11 +1272,11 @@ struct CommScatter : public MultiPlanItem
         ops.emplace_back(std::move(op));
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1377,11 +1377,11 @@ struct CommGather : public MultiPlanItem
         ops.emplace_back(std::move(op));
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1477,11 +1477,11 @@ struct CommAllToAll : public MultiPlanItem
     CommStatus  comm_status = COMM_SUCCESS;
     std::string error_message;
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
 
     void Wait() override;
@@ -1558,7 +1558,7 @@ struct ExecPlan : public MultiPlanItem
     void ExecuteAsync(const rocfft_plan                       plan,
                       void*                                   in_buffer[],
                       void*                                   out_buffer[],
-                      rocfft_execution_info                   info,
+                      const rocfft_execution_info_internal&   info,
                       size_t                                  multiPlanIdx,
                       const std::map<int, device_callback_t>& callbacks) override;
 
@@ -1615,11 +1615,13 @@ struct ExecPlan : public MultiPlanItem
     // OB_IN refers to iStride, OB_OUT refers to oStride
     std::map<OperatingBuffer, bool> isUnitStride;
 
-    size_t WorkBufBytes(size_t base_type_size) const override
+    void WorkBufBytesPerDevice(size_t               base_type_size,
+                               std::vector<size_t>& workBufBytes) const override
     {
         // base type is the size of one real, work buf counts in
         // complex numbers
-        return workBufSize * 2 * base_type_size;
+        workBufBytes[location.device]
+            = std::max(workBufSize * 2 * base_type_size, workBufBytes[location.device]);
     }
 
     // for callbacks, work out which nodes of the plan are loading data
@@ -1634,6 +1636,12 @@ struct ExecPlan : public MultiPlanItem
     bool ExecutesOnRank(int comm_rank) const override
     {
         return location.comm_rank == comm_rank;
+    }
+
+    // accessor for plan-local stream
+    hipStream_t get_local_stream() const
+    {
+        return stream;
     }
 
 private:

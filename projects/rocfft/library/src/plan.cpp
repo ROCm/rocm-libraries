@@ -207,19 +207,21 @@ void rocfft_plan_t::AddAntecedent(size_t itemIdx, size_t antecedentIdx)
         antecedents.push_back(antecedentIdx);
 }
 
-size_t rocfft_plan_t::WorkBufBytes() const
+std::vector<size_t> rocfft_plan_t::WorkBufBytesPerDevice() const
 {
-    auto base_type_size = real_type_size(precision);
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess)
+        throw std::runtime_error("failed to get device count");
+    std::vector<size_t> workBufBytes(deviceCount);
 
-    // Something wants to know how much work buffer to allocate, but
-    // our plan could span multiple ranks and devices.  For now, just
-    // get the largest work buf size of any item in the
-    // multi-rank/device plan.
-    size_t workBufBytes = 0;
+    const auto base_type_size = real_type_size(precision);
+
     for(const auto& i : multiPlan)
     {
-        if(i)
-            workBufBytes = std::max(workBufBytes, i->WorkBufBytes(base_type_size));
+        if(!i)
+            continue;
+        if(i->ExecutesOnLocalRank())
+            i->WorkBufBytesPerDevice(base_type_size, workBufBytes);
     }
     return workBufBytes;
 }
@@ -3705,7 +3707,14 @@ try
     if(!plan)
         return rocfft_status_failure;
 
-    *size_in_bytes = plan->WorkBufBytes();
+    if(!size_in_bytes)
+        return rocfft_status_invalid_arg_value;
+
+    auto sizes_per_device = plan->WorkBufBytesPerDevice();
+    int  currentDevice    = hipInvalidDeviceId;
+    if(hipGetDevice(&currentDevice) != hipSuccess)
+        return rocfft_status_failure;
+    *size_in_bytes = sizes_per_device[currentDevice];
     log_trace(__func__, "plan", plan, "size_in_bytes ptr", size_in_bytes, "val", *size_in_bytes);
     return rocfft_status_success;
 }
