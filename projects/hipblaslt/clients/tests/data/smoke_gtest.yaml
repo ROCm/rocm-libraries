@@ -153,7 +153,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_f8_bf8_dst_bf16_gfx12_smoke
   category: smoke
@@ -169,7 +169,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_real_1b_dst_f8_SCDInt1_gfx12_smoke
   category: smoke
@@ -187,7 +187,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_real_1b_dst_f8_SCDNotInt_gfx12_smoke
   category: smoke
@@ -205,7 +205,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_one_integer_precisions_i8_gfx12_smoke
   category: smoke
