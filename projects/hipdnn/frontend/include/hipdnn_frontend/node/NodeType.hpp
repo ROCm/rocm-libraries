@@ -27,7 +27,8 @@ enum class NodeType
     SDPA_BPROP = 13,
     BLOCK_SCALE_QUANTIZE = 14,
     BLOCK_SCALE_DEQUANTIZE = 15,
-    CUSTOM_OP = 16
+    CUSTOM_OP = 16,
+    REDUCTION = 17
 };
 
 } // namespace hipdnn_frontend::graph

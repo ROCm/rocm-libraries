@@ -37,6 +37,7 @@
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -134,6 +135,27 @@ enum class PointwiseMode
     TANH_FWD = 47, ///< Tanh forward pass
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
+
+/**
+ * @enum ReductionMode
+ * @brief Specifies the reduction operation to perform
+ *
+ * Matches the cudnn-frontend ReductionMode_t enumeration for API compatibility.
+ */
+enum class ReductionMode
+{
+    NOT_SET = 0, ///< Reduction mode not specified
+    ADD = 1, ///< Sum reduction
+    MUL = 2, ///< Product reduction
+    MIN = 3, ///< Minimum reduction
+    MAX = 4, ///< Maximum reduction
+    AMAX = 5, ///< Absolute maximum reduction
+    AVG = 6, ///< Average reduction
+    NORM1 = 7, ///< L1 norm reduction
+    NORM2 = 8, ///< L2 norm reduction
+    MUL_NO_ZEROS = 9, ///< Product reduction excluding zeros
+};
+typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
 
 /**
  * @enum DataType
@@ -1321,6 +1343,63 @@ inline hipdnn_frontend::NormFwdPhase
         return hipdnn_frontend::NormFwdPhase::TRAINING;
     default:
         return hipdnn_frontend::NormFwdPhase::NOT_SET;
+    }
+}
+
+/// @brief Convert frontend ReductionMode to SDK ReductionMode
+inline hipdnn_data_sdk::data_objects::ReductionMode toSdkType(const ReductionMode& type)
+{
+    switch(type)
+    {
+    case ReductionMode::ADD:
+        return hipdnn_data_sdk::data_objects::ReductionMode::ADD;
+    case ReductionMode::MUL:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MUL;
+    case ReductionMode::MIN:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP;
+    case ReductionMode::MAX:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP;
+    case ReductionMode::AMAX:
+        return hipdnn_data_sdk::data_objects::ReductionMode::AMAX;
+    case ReductionMode::AVG:
+        return hipdnn_data_sdk::data_objects::ReductionMode::AVG;
+    case ReductionMode::NORM1:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NORM1;
+    case ReductionMode::NORM2:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NORM2;
+    case ReductionMode::MUL_NO_ZEROS:
+        return hipdnn_data_sdk::data_objects::ReductionMode::MUL_NO_ZEROS;
+    default:
+        return hipdnn_data_sdk::data_objects::ReductionMode::NOT_SET;
+    }
+}
+
+/// @brief Convert SDK ReductionMode to frontend ReductionMode
+inline hipdnn_frontend::ReductionMode
+    fromSdkType(const hipdnn_data_sdk::data_objects::ReductionMode& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+        return hipdnn_frontend::ReductionMode::ADD;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MUL:
+        return hipdnn_frontend::ReductionMode::MUL;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+        return hipdnn_frontend::ReductionMode::MIN;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+        return hipdnn_frontend::ReductionMode::MAX;
+    case hipdnn_data_sdk::data_objects::ReductionMode::AMAX:
+        return hipdnn_frontend::ReductionMode::AMAX;
+    case hipdnn_data_sdk::data_objects::ReductionMode::AVG:
+        return hipdnn_frontend::ReductionMode::AVG;
+    case hipdnn_data_sdk::data_objects::ReductionMode::NORM1:
+        return hipdnn_frontend::ReductionMode::NORM1;
+    case hipdnn_data_sdk::data_objects::ReductionMode::NORM2:
+        return hipdnn_frontend::ReductionMode::NORM2;
+    case hipdnn_data_sdk::data_objects::ReductionMode::MUL_NO_ZEROS:
+        return hipdnn_frontend::ReductionMode::MUL_NO_ZEROS;
+    default:
+        return hipdnn_frontend::ReductionMode::NOT_SET;
     }
 }
 

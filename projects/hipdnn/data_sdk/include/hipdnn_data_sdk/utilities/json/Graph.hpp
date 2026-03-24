@@ -21,6 +21,7 @@
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/RMSNormBackwardAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/ReductionAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/SdpaBackwardAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
@@ -47,6 +48,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::BlockScaleDequantizeAttributes, "BlockScaleDequantizeAttributes"},
      {NodeAttributes::BlockScaleQuantizeAttributes, "BlockScaleQuantizeAttributes"},
      {NodeAttributes::CustomOpAttributes, "CustomOpAttributes"},
+     {NodeAttributes::ReductionAttributes, "ReductionAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -111,6 +113,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::CustomOpAttributes:
         nodeJson = *node.attributes_as_CustomOpAttributes();
+        break;
+    case data_objects::NodeAttributes::ReductionAttributes:
+        nodeJson = *node.attributes_as_ReductionAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -186,6 +191,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::BlockScaleQuantizeAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::CustomOpAttributes:
             return to<data_objects::CustomOpAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::ReductionAttributes:
+            return to<data_objects::ReductionAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error(
                 "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "

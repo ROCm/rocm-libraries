@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -2228,6 +2229,50 @@ inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
         hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes,
         customOpAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> inDims = {4, 8};
+    const std::vector<int64_t> inStrides = {8, 1};
+    const std::vector<int64_t> outDims = {1, 8};
+    const std::vector<int64_t> outStrides = {8, 1};
+
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "input", hipdnn_data_sdk::data_objects::DataType::FLOAT, &inStrides, &inDims));
+    tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "output",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &outStrides,
+        &outDims));
+
+    auto reductionAttr = hipdnn_data_sdk::data_objects::CreateReductionAttributes(
+        builder, hipdnn_data_sdk::data_objects::ReductionMode::ADD, 1, 2);
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "reduction",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes,
+        reductionAttr.Union()));
 
     auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
         builder,

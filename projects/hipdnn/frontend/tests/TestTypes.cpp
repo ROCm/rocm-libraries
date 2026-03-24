@@ -394,6 +394,75 @@ TEST(TestTypes, FromHipdnnConvModeRoundTrip)
     }
 }
 
+TEST(TestTypes, ToSdkTypeReductionMode)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
+
+    EXPECT_EQ(toSdkType(ReductionMode::NOT_SET), sdk::NOT_SET);
+    EXPECT_EQ(toSdkType(ReductionMode::ADD), sdk::ADD);
+    EXPECT_EQ(toSdkType(ReductionMode::MUL), sdk::MUL);
+    EXPECT_EQ(toSdkType(ReductionMode::MIN), sdk::MIN_OP);
+    EXPECT_EQ(toSdkType(ReductionMode::MAX), sdk::MAX_OP);
+    EXPECT_EQ(toSdkType(ReductionMode::AMAX), sdk::AMAX);
+    EXPECT_EQ(toSdkType(ReductionMode::AVG), sdk::AVG);
+    EXPECT_EQ(toSdkType(ReductionMode::NORM1), sdk::NORM1);
+    EXPECT_EQ(toSdkType(ReductionMode::NORM2), sdk::NORM2);
+    EXPECT_EQ(toSdkType(ReductionMode::MUL_NO_ZEROS), sdk::MUL_NO_ZEROS);
+}
+
+TEST(TestTypes, FromSdkTypeReductionMode)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
+
+    EXPECT_EQ(fromSdkType(sdk::NOT_SET), ReductionMode::NOT_SET);
+    EXPECT_EQ(fromSdkType(sdk::ADD), ReductionMode::ADD);
+    EXPECT_EQ(fromSdkType(sdk::MUL), ReductionMode::MUL);
+    EXPECT_EQ(fromSdkType(sdk::MIN_OP), ReductionMode::MIN);
+    EXPECT_EQ(fromSdkType(sdk::MAX_OP), ReductionMode::MAX);
+    EXPECT_EQ(fromSdkType(sdk::AMAX), ReductionMode::AMAX);
+    EXPECT_EQ(fromSdkType(sdk::AVG), ReductionMode::AVG);
+    EXPECT_EQ(fromSdkType(sdk::NORM1), ReductionMode::NORM1);
+    EXPECT_EQ(fromSdkType(sdk::NORM2), ReductionMode::NORM2);
+    EXPECT_EQ(fromSdkType(sdk::MUL_NO_ZEROS), ReductionMode::MUL_NO_ZEROS);
+}
+
+TEST(TestTypes, ReductionModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    const std::vector<ReductionMode> modes = {ReductionMode::NOT_SET,
+                                              ReductionMode::ADD,
+                                              ReductionMode::MUL,
+                                              ReductionMode::MIN,
+                                              ReductionMode::MAX,
+                                              ReductionMode::AMAX,
+                                              ReductionMode::AVG,
+                                              ReductionMode::NORM1,
+                                              ReductionMode::NORM2,
+                                              ReductionMode::MUL_NO_ZEROS};
+
+    for(auto mode : modes)
+    {
+        EXPECT_EQ(fromSdkType(toSdkType(mode)), mode)
+            << "Round-trip failed for ReductionMode " << static_cast<int>(mode);
+    }
+}
+
+TEST(TestTypes, ReductionModeMinMaxSdkNameMapping)
+{
+    using namespace hipdnn_frontend;
+    using sdk = hipdnn_data_sdk::data_objects::ReductionMode;
+
+    // MIN and MAX are renamed to MIN_OP and MAX_OP in the SDK schema due to
+    // flatc reserved identifier conflicts (matched to PointwiseMode convention).
+    EXPECT_EQ(toSdkType(ReductionMode::MIN), sdk::MIN_OP);
+    EXPECT_EQ(toSdkType(ReductionMode::MAX), sdk::MAX_OP);
+    EXPECT_EQ(fromSdkType(sdk::MIN_OP), ReductionMode::MIN);
+    EXPECT_EQ(fromSdkType(sdk::MAX_OP), ReductionMode::MAX);
+}
+
 TEST(TestTypes, FromHipdnnPointwiseModeAllValidModes)
 {
     using namespace hipdnn_frontend;
