@@ -15,6 +15,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/detail/LayerNormPacker.hpp>
+#include <hipdnn_frontend/detail/LayerNormUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -37,6 +38,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(layernormAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        LayernormAttributes lnAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackLayernormOperation(opDesc, tensorMap, lnAttr));
+        attributes = std::move(lnAttr);
+        return {};
     }
 
     Error pre_validate_node() const override
