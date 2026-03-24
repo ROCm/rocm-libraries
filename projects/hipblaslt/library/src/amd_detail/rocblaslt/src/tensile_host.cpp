@@ -1668,31 +1668,57 @@ namespace
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
-        if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+        switch(prob.scaleAType)
+        {
+        case RocblasltContractionProblem::ScalingFormat::None:
+        case RocblasltContractionProblem::ScalingFormat::Scalar:
+        case RocblasltContractionProblem::ScalingFormat::Vector:
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3)
-            tensileProblem.setMXScaleA(rocisa::DataType::Float8, 16);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 16);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             tensileProblem.setMXScaleA(rocisa::DataType::Float8, 32);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+            tensileProblem.setMXScaleA(rocisa::DataType::Float8, 16);
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             tensileProblem.setMXScaleA(rocisa::DataType::E5M3, 32);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             tensileProblem.setMXScaleA(rocisa::DataType::E5M3, 16);
+            break;
+        }
 
-        if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+        switch(prob.scaleBType)
+        {
+        case RocblasltContractionProblem::ScalingFormat::None:
+        case RocblasltContractionProblem::ScalingFormat::Scalar:
+        case RocblasltContractionProblem::ScalingFormat::Vector:
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3)
-            tensileProblem.setMXScaleB(rocisa::DataType::Float8, 16);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 16);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             tensileProblem.setMXScaleB(rocisa::DataType::Float8, 32);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+            tensileProblem.setMXScaleB(rocisa::DataType::Float8, 16);
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             tensileProblem.setMXScaleB(rocisa::DataType::E5M3, 32);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             tensileProblem.setMXScaleB(rocisa::DataType::E5M3, 16);
+            break;
+        }
 
         if (prob.scaleA == nullptr && prob.scaleB == nullptr)
             tensileProblem.setUseScaleAB("");
@@ -1874,31 +1900,57 @@ namespace
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
-        if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+        switch(prob.scaleAType)
+        {
+        case RocblasltContractionProblem::ScalingFormat::None:
+        case RocblasltContractionProblem::ScalingFormat::Scalar:
+        case RocblasltContractionProblem::ScalingFormat::Vector:
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3)
-            tensileProblem.setMXScaleA(rocisa::DataType::Float8, 16);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 16);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             tensileProblem.setMXScaleA(rocisa::DataType::Float8, 32);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+            tensileProblem.setMXScaleA(rocisa::DataType::Float8, 16);
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             tensileProblem.setMXScaleA(rocisa::DataType::E5M3, 32);
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             tensileProblem.setMXScaleA(rocisa::DataType::E5M3, 16);
+            break;
+        }
 
-        if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+        switch(prob.scaleBType)
+        {
+        case RocblasltContractionProblem::ScalingFormat::None:
+        case RocblasltContractionProblem::ScalingFormat::Scalar:
+        case RocblasltContractionProblem::ScalingFormat::Vector:
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3)
-            tensileProblem.setMXScaleB(rocisa::DataType::Float8, 16);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 16);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             tensileProblem.setMXScaleB(rocisa::DataType::Float8, 32);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+            tensileProblem.setMXScaleB(rocisa::DataType::Float8, 16);
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             tensileProblem.setMXScaleB(rocisa::DataType::E5M3, 32);
-        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3)
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             tensileProblem.setMXScaleB(rocisa::DataType::E5M3, 16);
+            break;
+        }
 
         if (prob.scaleA == nullptr && prob.scaleB == nullptr)
             tensileProblem.setUseScaleAB("");
