@@ -174,7 +174,12 @@ namespace rocRoller::KernelGraph
             auto [coords, path] = findAllRequiredCoordinates(node, m_graph);
 
             for(auto coord : path)
+            {
                 incorporate(node, m_tracer.trace(coord, true));
+                // Also trace sizes, since WaveTileNumber/MacroTileNumber store
+                // their count expressions in the size member, not stride.
+                incorporate(node, m_tracer.trace(coord, false));
+            }
         }
 
         void operator()(int node, CIsAnyOf<CG::LoadVGPR, CG::StoreVGPR> auto const& op)
