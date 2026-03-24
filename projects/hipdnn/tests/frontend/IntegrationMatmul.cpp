@@ -208,7 +208,7 @@ protected:
         result = graph->get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK);
         ASSERT_GE(workspaceSize, 0);
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto vp = createVariantPack(tensors, bundle);
 

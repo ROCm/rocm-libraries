@@ -36,15 +36,7 @@ inline void to_json(nlohmann::json& blockScaleJson, const BlockScaleDequantizeAt
     auto& outputs = blockScaleJson[keys::OUTPUTS] = {};
     outputs[keys::Y_TENSOR_UID] = bsd.y_tensor_uid();
 
-    if(bsd.block_size() != nullptr && !bsd.block_size()->empty())
-    {
-        auto& blockSizeArray = blockScaleJson[keys::BLOCK_SIZE] = nlohmann::json::array();
-        for(auto val : *bsd.block_size())
-        {
-            blockSizeArray.push_back(val);
-        }
-    }
-
+    blockScaleJson[keys::BLOCK_SIZE] = bsd.block_size();
     blockScaleJson[keys::IS_NEGATIVE_SCALE] = bsd.is_negative_scale();
 }
 

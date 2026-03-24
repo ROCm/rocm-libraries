@@ -38,7 +38,7 @@ TEST(TestTensorValueAttributes, SetGetClearFloat)
 TEST(TestTensorValueAttributes, ConstructorValues)
 {
     constexpr float TEST_VALUE = 42.0f;
-    hipdnn_frontend::graph::TensorAttributes tensor(TEST_VALUE);
+    const hipdnn_frontend::graph::TensorAttributes tensor(TEST_VALUE);
 
     auto opt = tensor.get_pass_by_value<float>();
     ASSERT_TRUE(opt.has_value());
@@ -80,8 +80,8 @@ TEST(TestTensorValueAttributes, PackUnpackFloatValue)
     EXPECT_EQ(unpacked->name, "value_tensor");
     EXPECT_EQ(unpacked->data_type, DataType::FLOAT);
 
-    std::vector<int64_t> expectedStrides = {1};
-    std::vector<int64_t> expectedDims = {1};
+    const std::vector<int64_t> expectedStrides = {1};
+    const std::vector<int64_t> expectedDims = {1};
     EXPECT_EQ(unpacked->strides, expectedStrides);
     EXPECT_EQ(unpacked->dims, expectedDims);
 

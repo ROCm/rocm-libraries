@@ -239,8 +239,8 @@ protected:
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
         // X: [2, 64, 32, 32], Scale: [2, 2, 32, 32] (block_size=32 on channel dim)
-        std::vector<int64_t> xDims = {2, 64, 32, 32};
-        std::vector<int64_t> scaleDims = {2, 2, 32, 32};
+        const std::vector<int64_t> xDims = {2, 64, 32, 32};
+        const std::vector<int64_t> scaleDims = {2, 2, 32, 32};
         SimpleBlockScaleQuantizeTensorBundle tensorBundle(xDims, scaleDims);
 
         auto [graph, tensors] = createBlockScaleQuantizeTestGraph(

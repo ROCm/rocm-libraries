@@ -2,39 +2,34 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelContainer.hpp"
+#include "CurrentDevicePropertyProvider.hpp"
+#include "engines/HipKernelEngine.hpp"
+#include "engines/plans/BatchnormPlanBuilder.hpp"
+#include "hip/HipKernelCompiler.hpp"
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider
 {
 
-// ============================================================================
-// Engine Registration
-// ============================================================================
-// Use HIPDNN_REGISTER_ENGINE to register engine names here when adding engines.
-// This will:
-// 1. Create _NAME and _ID constants for the engine
-// 2. Detect hash collisions with other registered engines
-//
-// Example:
-// HIPDNN_REGISTER_ENGINE(HIP_KERNEL_ENGINE, "HIP_KERNEL_ENGINE")
-// ============================================================================
+using namespace hipdnn_data_sdk::utilities;
 
 const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        // ====================================================================
-        // Engines will be added here as plan builders are implemented
-        // ====================================================================
-        // Example:
-        // {HIP_KERNEL_ENGINE_ID, []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<
-        //     HipKernelHandle, HipKernelSettings, HipKernelContext>> {
-        //     auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
-        //     engine->addPlanBuilder(std::make_unique<SomePlanBuilder>());
-        //     return engine;
-        // }}
-        // ====================================================================
-    };
+        // HIP_KERNEL_ENGINE
+        {HIP_KERNEL_ENGINE_ID,
+         [](const IKernelCompiler& kernelCompiler,
+            const IDevicePropertyProvider& devicePropertyProvider)
+             -> std::unique_ptr<
+                 hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
+             auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
+             engine->addPlanBuilder(
+                 std::make_unique<BatchnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
+             return engine;
+         }}};
 
     return s_engineDefinitions;
 }
@@ -63,6 +58,8 @@ uint32_t
 }
 
 HipKernelContainer::HipKernelContainer()
+    : _devicePropertyProvider(std::make_unique<CurrentDevicePropertyProvider>())
+    , _kernelCompiler(std::make_unique<HipKernelCompiler>())
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
 
@@ -71,7 +68,8 @@ HipKernelContainer::HipKernelContainer()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        _engineManager->addEngine(engineDefinition.createEngine());
+        _engineManager->addEngine(
+            engineDefinition.createEngine(*_kernelCompiler, *_devicePropertyProvider));
     }
 }
 
