@@ -47,6 +47,19 @@ void simpleGemmF6(hipblasLtHandle_t  handle,
                   int64_t            max_workspace_size,
                   hipStream_t        stream);
 
+static void init(hipblaslt_f6x16* packedData, size_t size)
+{
+    using type                 = hipblaslt_f6x16;
+    float r[type::packed_size] = {0};
+    for(size_t idx = 0; idx < size / type::packed_size; idx++)
+    {
+        for(size_t i = 0; i < type::packed_size; i++)
+            r[i] = static_cast<float>(rand() % 15 - 7);
+        packedData[idx] = hipblaslt_f6x16(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
+                                          r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]);
+    }
+}
+
 void UnpackData(float* unpackedData, const hipblaslt_f6x16* packedData, size_t size)
 {
     for(size_t idx = 0; idx < size / packedData->packed_size; idx++)
@@ -112,6 +125,8 @@ int main()
         1.f,
         0.f,
         32 * 1024 * 1024 /*max_workspace_size_in_bytes*/);
+    init(static_cast<hipblaslt_f6x16*>(runner.a), runner.m * runner.k * runner.batch_count);
+    init(static_cast<hipblaslt_f6x16*>(runner.b), runner.n * runner.k * runner.batch_count);
 
     std::vector<float> cpuR(runner.m * runner.n, 0.f);
     std::vector<float> cpuA(runner.m * runner.k, 0.f);
