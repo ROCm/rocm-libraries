@@ -29,12 +29,6 @@ if(MIOPEN_BACKEND_OPENCL)
   list(APPEND SKIP_TESTS dumpTensorTest.cpp)
 endif()
 
-if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-    add_definitions(-DCK_EXPERIMENTAL_BUILDER)
-else()
-    list(APPEND SKIP_TESTS ck_builder_xdl.cpp ck_builder_shared.cpp)
-endif()
-
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
 if(THEROCK_SANITIZER STREQUAL "ASAN")
@@ -119,11 +113,6 @@ function(add_gtest TEST_NAME TEST_CPP)
   target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
-  endif()
-
-  if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-    find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
-    target_link_libraries(${TEST_NAME} ck_builder composable_kernel::device_conv_operations)
   endif()
 
   if(MIOPEN_TEST_DISCRETE)

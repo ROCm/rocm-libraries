@@ -8,10 +8,12 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
 // ============================================================================
 // Hand-computed golden reference tests
@@ -610,9 +612,9 @@ TYPED_TEST(CpuFpReferenceLayernormFpropTyped, FpropRunsWithoutError)
     Tensor<ScaleType> mean({2, 8});
     Tensor<ScaleType> rstd({2, 8});
 
-    x.fillWithValue(static_cast<XType>(1.0));
-    scale.fillWithValue(static_cast<ScaleType>(1.0));
-    bias.fillWithValue(static_cast<ScaleType>(0.0));
+    x.fillWithValue(safeTestTypeCast<XType>(1.0));
+    scale.fillWithValue(safeTestTypeCast<ScaleType>(1.0));
+    bias.fillWithValue(safeTestTypeCast<ScaleType>(0.0));
 
     // Should not throw
     CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 1, &mean, &rstd);
