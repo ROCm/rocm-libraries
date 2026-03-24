@@ -4,9 +4,11 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaBpropNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaBpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -476,6 +478,138 @@ TEST_F(IntegrationSdpaBpropLifting, SdpaBpropWithAllOptionalAttributesViaCApi)
 
     // Diagonal alignment
     EXPECT_EQ(attrs.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+}
+
+// Builds an SDPA backward graph without explicit tensor UIDs, then verifies
+// auto-assigned UIDs are unique and correctly referenced after a round-trip.
+TEST_F(IntegrationSdpaBpropLifting, AutoAssignedUidsPreservedInRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("AutoUidSdpaBpropGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Create tensors WITHOUT explicit UIDs
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_name("Q").set_data_type(DataType::FLOAT);
+    q->set_dim(toVec(K_SDPA_BPROP_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_name("K").set_data_type(DataType::FLOAT);
+    k->set_dim(toVec(K_SDPA_BPROP_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_K_STRIDES));
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_name("V").set_data_type(DataType::FLOAT);
+    v->set_dim(toVec(K_SDPA_BPROP_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_V_STRIDES));
+
+    auto o = std::make_shared<TensorAttributes>();
+    o->set_name("O").set_data_type(DataType::FLOAT);
+    o->set_dim(toVec(K_SDPA_BPROP_TENSOR_O_DIMS)).set_stride(toVec(K_SDPA_BPROP_TENSOR_O_STRIDES));
+
+    auto dO = std::make_shared<TensorAttributes>();
+    dO->set_name("dO").set_data_type(DataType::FLOAT);
+    dO->set_dim(toVec(K_SDPA_BPROP_TENSOR_DO_DIMS))
+        .set_stride(toVec(K_SDPA_BPROP_TENSOR_DO_STRIDES));
+
+    auto stats = std::make_shared<TensorAttributes>();
+    stats->set_name("Stats").set_data_type(DataType::FLOAT);
+    stats->set_dim(toVec(K_SDPA_BPROP_TENSOR_STATS_DIMS))
+        .set_stride(toVec(K_SDPA_BPROP_TENSOR_STATS_STRIDES));
+
+    SdpaBackwardAttributes sdpaAttrs;
+
+    auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, stats, std::move(sdpaAttrs));
+    dq->set_output(true);
+    dk->set_output(true);
+    dv->set_output(true);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // All 9 auto-assigned UIDs should be unique
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 9u) << "Expected 9 tensors with auto-assigned UIDs";
+
+    std::unordered_set<int64_t> uids;
+    for(const auto& [uid, tensor] : tensorMap)
+    {
+        uids.insert(uid);
+    }
+    EXPECT_EQ(uids.size(), 9u) << "Auto-assigned tensor UIDs are not unique";
+
+    // Verify the node references resolve to tensors in the map
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
+    ASSERT_NE(sdpaNode, nullptr);
+
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_q()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_k()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_v()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_o()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_do()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_stats()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_dq()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_dk()->get_uid()), 0u);
+    EXPECT_NE(uids.count(sdpaNode->attributes.get_dv()->get_uid()), 0u);
+}
+
+// Builds an SDPA backward graph, serializes to binary, creates a backend descriptor
+// from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
+// the reconstructed graph matches the original.
+TEST_F(IntegrationSdpaBpropLifting, SdpaBpropLiftWithoutFinalization)
+{
+    auto originalGraph = buildSdpaBpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to binary via the frontend
+    auto data = originalGraph->toBinary();
+    ASSERT_FALSE(data.empty());
+
+    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
+    const detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
+    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
+
+    // Lift into a new graph via fromBackendDescriptor
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify the lifted graph has 1 SDPA backward operation node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* sdpaNode = dynamic_cast<SdpaBpropNode*>(subNodes[0].get());
+    ASSERT_NE(sdpaNode, nullptr) << "Expected a SdpaBpropNode";
+
+    // Verify tensor dims survive the serialization round-trip
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 9u);
+    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_Q_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_Q_UID]->get_stride(),
+              toVec(K_SDPA_BPROP_TENSOR_Q_STRIDES));
+    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_K_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_K_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DQ_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DQ_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DK_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DK_DIMS));
+    EXPECT_EQ(tensorMap[K_SDPA_BPROP_TENSOR_DV_UID]->get_dim(), toVec(K_SDPA_BPROP_TENSOR_DV_DIMS));
 }
 
 } // namespace

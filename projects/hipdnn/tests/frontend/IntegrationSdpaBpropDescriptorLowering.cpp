@@ -437,8 +437,7 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
     hipdnn_data_sdk::data_objects::GraphT graphT;
     hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
 
-    // 9 required + 9 optional pointer tensors + 1 optional output (dBias) = 19
-    // (scale is pass-by-value and embedded in the node, not in the tensor list)
+    // 9 required + 10 optional input/output tensors (including scale) = 19
     ASSERT_EQ(graphT.tensors.size(), 19u);
 
     std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
@@ -458,7 +457,7 @@ TEST_F(IntegrationSdpaBpropDescriptorLowering, SdpaBpropWithAllOptionalTensorsAn
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DQ_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DK_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_DV_UID), 0u);
-    // Optional (scale is pass-by-value, not in the tensor list)
+    // Optional tensors (all present when all optionals are set)
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_ATTN_MASK_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEQ_LEN_Q_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BPROP_TENSOR_SEQ_LEN_KV_UID), 0u);

@@ -6,6 +6,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -623,22 +624,16 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     tensors.push_back(_dkDesc);
     tensors.push_back(_dvDesc);
     // Optional tensors - only include if set
-    auto addIfSet = [&](const std::shared_ptr<TensorDescriptor>& desc) {
-        if(desc)
-        {
-            tensors.push_back(desc);
-        }
-    };
-    addIfSet(_scaleDesc);
-    addIfSet(_attnMaskDesc);
-    addIfSet(_seqLenQDesc);
-    addIfSet(_seqLenKvDesc);
-    addIfSet(_seedDesc);
-    addIfSet(_offsetDesc);
-    addIfSet(_dropoutMaskDesc);
-    addIfSet(_dropoutScaleDesc);
-    addIfSet(_dropoutScaleInvDesc);
-    addIfSet(_dbiasDesc);
+    addIfSet(tensors, _scaleDesc);
+    addIfSet(tensors, _attnMaskDesc);
+    addIfSet(tensors, _seqLenQDesc);
+    addIfSet(tensors, _seqLenKvDesc);
+    addIfSet(tensors, _seedDesc);
+    addIfSet(tensors, _offsetDesc);
+    addIfSet(tensors, _dropoutMaskDesc);
+    addIfSet(tensors, _dropoutScaleDesc);
+    addIfSet(tensors, _dropoutScaleInvDesc);
+    addIfSet(tensors, _dbiasDesc);
     return tensors;
 }
 
@@ -687,27 +682,16 @@ std::shared_ptr<SdpaBpropOperationDescriptor> SdpaBpropOperationDescriptor::from
         tensorMap, attrs->dv_tensor_uid, "SdpaBpropOperationDescriptor::fromNode: dV");
 
     // Optional tensors
-    auto findOptional
-        = [&tensorMap](
-              const flatbuffers::Optional<int64_t>& uid) -> std::shared_ptr<TensorDescriptor> {
-        if(!uid.has_value())
-        {
-            return nullptr;
-        }
-        auto it = tensorMap.find(uid.value());
-        return (it != tensorMap.end()) ? it->second : nullptr;
-    };
-
-    desc->_scaleDesc = findOptional(attrs->scale_tensor_uid);
-    desc->_attnMaskDesc = findOptional(attrs->attn_mask_tensor_uid);
-    desc->_seqLenQDesc = findOptional(attrs->seq_len_q_tensor_uid);
-    desc->_seqLenKvDesc = findOptional(attrs->seq_len_kv_tensor_uid);
-    desc->_seedDesc = findOptional(attrs->seed_tensor_uid);
-    desc->_offsetDesc = findOptional(attrs->offset_tensor_uid);
-    desc->_dropoutMaskDesc = findOptional(attrs->dropout_mask_tensor_uid);
-    desc->_dropoutScaleDesc = findOptional(attrs->dropout_scale_tensor_uid);
-    desc->_dropoutScaleInvDesc = findOptional(attrs->dropout_scale_inv_tensor_uid);
-    desc->_dbiasDesc = findOptional(attrs->dbias_tensor_uid);
+    desc->_scaleDesc = findOptionalTensor(tensorMap, attrs->scale_tensor_uid);
+    desc->_attnMaskDesc = findOptionalTensor(tensorMap, attrs->attn_mask_tensor_uid);
+    desc->_seqLenQDesc = findOptionalTensor(tensorMap, attrs->seq_len_q_tensor_uid);
+    desc->_seqLenKvDesc = findOptionalTensor(tensorMap, attrs->seq_len_kv_tensor_uid);
+    desc->_seedDesc = findOptionalTensor(tensorMap, attrs->seed_tensor_uid);
+    desc->_offsetDesc = findOptionalTensor(tensorMap, attrs->offset_tensor_uid);
+    desc->_dropoutMaskDesc = findOptionalTensor(tensorMap, attrs->dropout_mask_tensor_uid);
+    desc->_dropoutScaleDesc = findOptionalTensor(tensorMap, attrs->dropout_scale_tensor_uid);
+    desc->_dropoutScaleInvDesc = findOptionalTensor(tensorMap, attrs->dropout_scale_inv_tensor_uid);
+    desc->_dbiasDesc = findOptionalTensor(tensorMap, attrs->dbias_tensor_uid);
 
     desc->finalize();
     return desc;
@@ -731,22 +715,16 @@ std::string SdpaBpropOperationDescriptor::toString() const
     str += ", dq_uid=" + std::to_string(_data.dq_tensor_uid);
     str += ", dk_uid=" + std::to_string(_data.dk_tensor_uid);
     str += ", dv_uid=" + std::to_string(_data.dv_tensor_uid);
-    auto optInt64Str = [](const ::flatbuffers::Optional<int64_t>& opt) -> std::string {
-        return opt.has_value() ? std::to_string(*opt) : "null";
-    };
-    auto optFloatStr = [](const ::flatbuffers::Optional<float>& opt) -> std::string {
-        return opt.has_value() ? std::to_string(*opt) : "null";
-    };
-    str += ", scale_uid=" + optInt64Str(_data.scale_tensor_uid);
-    str += ", attn_mask_uid=" + optInt64Str(_data.attn_mask_tensor_uid);
-    str += ", seq_len_q_uid=" + optInt64Str(_data.seq_len_q_tensor_uid);
-    str += ", seq_len_kv_uid=" + optInt64Str(_data.seq_len_kv_tensor_uid);
-    str += ", seed_uid=" + optInt64Str(_data.seed_tensor_uid);
-    str += ", offset_uid=" + optInt64Str(_data.offset_tensor_uid);
-    str += ", dropout_mask_uid=" + optInt64Str(_data.dropout_mask_tensor_uid);
-    str += ", dropout_scale_uid=" + optInt64Str(_data.dropout_scale_tensor_uid);
-    str += ", dropout_scale_inv_uid=" + optInt64Str(_data.dropout_scale_inv_tensor_uid);
-    str += ", dbias_uid=" + optInt64Str(_data.dbias_tensor_uid);
+    str += ", scale_uid=" + optionalToString(_data.scale_tensor_uid);
+    str += ", attn_mask_uid=" + optionalToString(_data.attn_mask_tensor_uid);
+    str += ", seq_len_q_uid=" + optionalToString(_data.seq_len_q_tensor_uid);
+    str += ", seq_len_kv_uid=" + optionalToString(_data.seq_len_kv_tensor_uid);
+    str += ", seed_uid=" + optionalToString(_data.seed_tensor_uid);
+    str += ", offset_uid=" + optionalToString(_data.offset_tensor_uid);
+    str += ", dropout_mask_uid=" + optionalToString(_data.dropout_mask_tensor_uid);
+    str += ", dropout_scale_uid=" + optionalToString(_data.dropout_scale_tensor_uid);
+    str += ", dropout_scale_inv_uid=" + optionalToString(_data.dropout_scale_inv_tensor_uid);
+    str += ", dbias_uid=" + optionalToString(_data.dbias_tensor_uid);
     str += ", alibi_mask=";
     str += _data.alibi_mask ? "true" : "false";
     str += ", padding_mask=";
@@ -755,10 +733,10 @@ std::string SdpaBpropOperationDescriptor::toString() const
     str += _data.causal_mask ? "true" : "false";
     str += ", causal_mask_bottom_right=";
     str += _data.causal_mask_bottom_right ? "true" : "false";
-    str += ", dropout_probability=" + optFloatStr(_data.dropout_probability);
-    str += ", attn_scale_value=" + optFloatStr(_data.attn_scale_value);
-    str += ", left_bound=" + optInt64Str(_data.left_bound);
-    str += ", right_bound=" + optInt64Str(_data.right_bound);
+    str += ", dropout_probability=" + optionalToString(_data.dropout_probability);
+    str += ", attn_scale_value=" + optionalToString(_data.attn_scale_value);
+    str += ", left_bound=" + optionalToString(_data.left_bound);
+    str += ", right_bound=" + optionalToString(_data.right_bound);
     str += ", diagonal_alignment=" + std::to_string(static_cast<int>(_data.diagonal_alignment));
     str += ", compute_data_type=";
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
